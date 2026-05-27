@@ -14,60 +14,60 @@
   "dir": "ltr",
   "icons": [
     {
-      "src": "/icons/icon-72.png",
+      "src": "/icons/agx-icon-72-v3.png",
       "sizes": "72x72",
       "type": "image/png"
     },
     {
-      "src": "/icons/icon-96.png",
+      "src": "/icons/agx-icon-96-v3.png",
       "sizes": "96x96",
       "type": "image/png"
     },
     {
-      "src": "/icons/icon-128.png",
+      "src": "/icons/agx-icon-128-v3.png",
       "sizes": "128x128",
       "type": "image/png"
     },
     {
-      "src": "/icons/icon-144.png",
+      "src": "/icons/agx-icon-144-v3.png",
       "sizes": "144x144",
       "type": "image/png"
     },
     {
-      "src": "/icons/icon-152.png",
+      "src": "/icons/agx-icon-152-v3.png",
       "sizes": "152x152",
       "type": "image/png"
     },
     {
-      "src": "/icons/icon-180.png",
+      "src": "/icons/agx-icon-180-v3.png",
       "sizes": "180x180",
       "type": "image/png"
     },
     {
-      "src": "/icons/icon-192.png",
+      "src": "/icons/agx-icon-192-v3.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-384.png",
+      "src": "/icons/agx-icon-384-v3.png",
       "sizes": "384x384",
       "type": "image/png"
     },
     {
-      "src": "/icons/icon-512.png",
+      "src": "/icons/agx-icon-512-v3.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icons/maskable-192.png",
+      "src": "/icons/agx-maskable-192-v3.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "maskable"
     },
     {
-      "src": "/icons/maskable-512.png",
+      "src": "/icons/agx-maskable-512-v3.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
@@ -81,7 +81,7 @@
       "url": "/#gis",
       "icons": [
         {
-          "src": "/icons/icon-192.png",
+          "src": "/icons/agx-icon-192-v3.png",
           "sizes": "192x192"
         }
       ]
@@ -93,7 +93,7 @@
       "url": "/#contacto",
       "icons": [
         {
-          "src": "/icons/icon-192.png",
+          "src": "/icons/agx-icon-192-v3.png",
           "sizes": "192x192"
         }
       ]

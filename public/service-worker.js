@@ -1,13 +1,16 @@
-const CACHE_VERSION = 'agrogenomax-pwa-v2';
+const CACHE_VERSION = 'agrogenomax-pwa-v3';
 const APP_SHELL = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
   '/agrogenomax-brand.jpeg',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png',
-  '/icons/maskable-192.png',
-  '/icons/maskable-512.png'
+  '/icons/agx-favicon-32-v3.png',
+  '/icons/agx-favicon-48-v3.png',
+  '/icons/agx-icon-180-v3.png',
+  '/icons/agx-icon-192-v3.png',
+  '/icons/agx-icon-512-v3.png',
+  '/icons/agx-maskable-192-v3.png',
+  '/icons/agx-maskable-512-v3.png'
 ];
 
 self.addEventListener('install', (event) => {
