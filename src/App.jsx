@@ -10,6 +10,7 @@ import {
   Cloud,
   ChevronRight,
   CircleDot,
+  Download,
   Dna,
   FileCheck2,
   Fingerprint,
@@ -29,7 +30,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 
 const GisMap = lazy(() => import('./components/GisMap.jsx'));
 
@@ -285,8 +286,60 @@ function Header() {
         >
           Solicitar demo <ArrowRight className="h-4 w-4" />
         </a>
+        <InstallPwaButton />
       </nav>
     </header>
+  );
+}
+
+function InstallPwaButton() {
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [isInstalled, setIsInstalled] = useState(false);
+
+  useEffect(() => {
+    const standalone =
+      window.matchMedia('(display-mode: standalone)').matches ||
+      window.navigator.standalone === true;
+
+    setIsInstalled(standalone);
+
+    const handleBeforeInstallPrompt = (event) => {
+      event.preventDefault();
+      setInstallPrompt(event);
+    };
+
+    const handleInstalled = () => {
+      setInstallPrompt(null);
+      setIsInstalled(true);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleInstalled);
+    };
+  }, []);
+
+  const handleInstall = async () => {
+    if (!installPrompt) return;
+
+    installPrompt.prompt();
+    await installPrompt.userChoice;
+    setInstallPrompt(null);
+  };
+
+  if (isInstalled || !installPrompt) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={handleInstall}
+      className="hidden items-center gap-2 rounded-full border border-neon/35 bg-neon/[0.08] px-5 py-2 text-sm font-semibold text-neon shadow-neon transition hover:border-aqua/60 hover:text-aqua md:inline-flex"
+    >
+      Instalar app <Download className="h-4 w-4" />
+    </button>
   );
 }
 
