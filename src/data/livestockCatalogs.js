@@ -1,0 +1,121 @@
+export const exploitationTypes = [
+  'Carne',
+  'Leche',
+  'Doble proposito',
+  'Cria',
+  'Levante',
+  'Ceba',
+  'Genetica',
+  'Transferencia embrionaria',
+];
+
+export const infrastructureOptions = [
+  'Corrales',
+  'Bretes',
+  'Bascula',
+  'Sala ordeno',
+  'Tanque frio',
+  'Energia',
+  'Agua',
+  'Cercas electricas',
+  'Sistema silvopastoril',
+];
+
+export const pastureOptions = [
+  'Brachiaria humidicola',
+  'Brachiaria decumbens',
+  'Brachiaria brizantha',
+  'Toledo',
+  'Mombasa',
+  'Tanzania',
+  'Mulato II',
+  'Estrella',
+  'Angleton',
+  'Guinea',
+  'Kikuyo',
+  'Ryegrass',
+  'Maralfalfa',
+  'Cuba 22',
+  'King Grass',
+  'Pasto de corte',
+  'Otros',
+];
+
+export const silvopastoralOptions = [
+  'Guasimo',
+  'Matarraton',
+  'Leucaena',
+  'Saman',
+  'Boton de oro',
+  'Nogal cafetero',
+  'Otros',
+];
+
+export const cattleBreeds = [
+  'Brahman Gris',
+  'Brahman Rojo',
+  'Gyr',
+  'Guzera',
+  'Nelore',
+  'Angus',
+  'Brangus',
+  'Simmental',
+  'Simbrah',
+  'Holstein',
+  'Jersey',
+  'Pardo Suizo',
+  'BON',
+  'Romosinuano',
+  'Beefmaster',
+  'Charolais',
+  'Limousin',
+  'Senepol',
+  'Wagyu',
+  'Girolando',
+  'Normando',
+  'Harton del Valle',
+  'Criollo Caqueteno',
+  'Costeno con Cuernos',
+  'Blanco Orejinegro',
+  'Ayrshire',
+  'Lucerna',
+  'Cruce comercial',
+];
+
+export const animalStatuses = [
+  'Ternero',
+  'Novilla',
+  'Vaca',
+  'Toro',
+  'Receptora',
+  'Donadora',
+];
+
+export const tenantRoles = [
+  'SUPER_ADMIN',
+  'ADMIN_FINCA',
+  'VETERINARIO',
+  'OPERARIO',
+  'CONSULTOR',
+  'INVITADO',
+];
+
+export const livestockModules = [
+  'Predios / Fincas',
+  'Animales',
+  'Reproduccion',
+  'Sanidad',
+  'Produccion',
+  'Nutricion',
+  'Potreros',
+  'Pesajes',
+  'Genetica',
+  'Reportes',
+  'QR y Trazabilidad',
+  'Transferencia de Embriones',
+  'IA e IAFT',
+  'Dashboard Inteligente',
+  'Administracion',
+  'Usuarios',
+  'Configuracion',
+];

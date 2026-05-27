@@ -33,11 +33,13 @@ import { motion } from 'framer-motion';
 import { lazy, Suspense, useEffect, useState } from 'react';
 
 const GisMap = lazy(() => import('./components/GisMap.jsx'));
+const LivestockPlatform = lazy(() => import('./components/LivestockPlatform.jsx'));
 
 // Version de despliegue 2026-05-26
 const navItems = [
   ['Plataforma', 'sobre'],
   ['Servicios', 'servicios'],
+  ['Gestion Ganadera', 'gestion-ganadera'],
   ['GIS', 'gis'],
   ['Regenerativa', 'ganaderia-regenerativa'],
   ['IA', 'analitica'],
@@ -246,6 +248,9 @@ function App() {
       <Header />
       <Hero />
       <About />
+      <Suspense fallback={<div className="gis-loading">Cargando gestion ganadera...</div>}>
+        <LivestockPlatform />
+      </Suspense>
       <FieldOperations />
       <Services />
       <Intelligence />
