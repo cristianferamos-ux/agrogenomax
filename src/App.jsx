@@ -46,6 +46,15 @@ const navItems = [
   ['Contacto', 'contacto'],
 ];
 
+function scrollToSection(target) {
+  const element = document.getElementById(target);
+  if (!element) return;
+
+  const headerHeight = document.querySelector('header')?.getBoundingClientRect().height || 0;
+  element.scrollIntoView({ block: 'start', behavior: 'auto' });
+  window.scrollBy({ top: -(headerHeight + 16), behavior: 'auto' });
+}
+
 const services = [
   {
     icon: Satellite,
@@ -242,13 +251,26 @@ const fadeUp = {
 };
 
 function App() {
+  useEffect(() => {
+    const syncHashScroll = () => {
+      const target = window.location.hash.replace('#', '');
+      if (!target) return;
+      window.setTimeout(() => scrollToSection(target), 120);
+      window.setTimeout(() => scrollToSection(target), 650);
+    };
+
+    syncHashScroll();
+    window.addEventListener('hashchange', syncHashScroll);
+    return () => window.removeEventListener('hashchange', syncHashScroll);
+  }, []);
+
   return (
     <main className="min-h-screen overflow-hidden bg-void text-white">
       <div className="fixed inset-0 -z-10 bg-[linear-gradient(180deg,rgba(2,5,8,0.34),#020508_48%,#020508)]" />
       <Header />
+      <LivestockPlatform />
       <Hero />
       <About />
-      <LivestockPlatform />
       <FieldOperations />
       <Services />
       <Intelligence />
@@ -285,6 +307,11 @@ function Header() {
             <a
               key={target}
               href={`#${target}`}
+              onClick={(event) => {
+                event.preventDefault();
+                window.history.pushState(null, '', `#${target}`);
+                scrollToSection(target);
+              }}
               className="shrink-0 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 transition hover:border-neon/35 hover:text-white lg:border-0 lg:bg-transparent lg:px-0 lg:py-0"
             >
               {label}

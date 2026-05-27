@@ -21,7 +21,6 @@ import {
   Users,
   WifiOff,
 } from 'lucide-react';
-import { motion } from 'framer-motion';
 import { useMemo, useState } from 'react';
 import {
   animalStatuses,
@@ -268,13 +267,7 @@ export default function LivestockPlatform() {
 
   return (
     <section id="gestion-ganadera" className="px-5 py-28 lg:px-8">
-      <motion.div
-        initial={{ opacity: 0, y: 28 }}
-        whileInView={{ opacity: 1, y: 0 }}
-        viewport={{ once: true, amount: 0.16 }}
-        transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-        className="mx-auto max-w-7xl"
-      >
+      <div className="mx-auto max-w-7xl">
         <div className="mb-10 grid gap-8 lg:grid-cols-[0.78fr_1.22fr] lg:items-end">
           <div>
             <p className="eyebrow text-neon">Gestion Ganadera SaaS</p>
@@ -611,7 +604,7 @@ export default function LivestockPlatform() {
             </div>
           </div>
         </div>
-      </motion.div>
+      </div>
     </section>
   );
 }
