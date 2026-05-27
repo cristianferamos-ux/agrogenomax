@@ -1346,3 +1346,20 @@ body::after {
     height: 300px !important;
     width: 100% !important;
 }
+/* Forzar al contenedor del mapa y al canvas a respetar la altura de 300px */
+.agrogenomax-map, 
+.mapboxgl-map, 
+.mapboxgl-canvas-container, 
+.mapboxgl-canvas {
+    height: 300px !important;
+}
+
+/* En pantallas grandes, que use la altura de 430px */
+@media (min-width: 1024px) {
+    .agrogenomax-map, 
+    .mapboxgl-map, 
+    .mapboxgl-canvas-container, 
+    .mapboxgl-canvas {
+        height: 430px !important;
+    }
+}
