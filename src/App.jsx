@@ -401,8 +401,6 @@ function PlatformConsole() {
           {/* Columna Derecha: Métricas y Paneles */}
           <div className="grid gap-4 content-start">
             <div className="grid grid-cols-2 gap-3">
-              {dashboardMetrics.map((metric, index) => (
-                ))}
             </div>
             <CoverageMonitor />
             <RiskPanel />
