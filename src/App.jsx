@@ -388,10 +388,8 @@ function PlatformConsole() {
         {/* Contenedor principal de la consola */}
         <div className="grid gap-4 p-4 lg:grid-cols-[1.05fr_0.95fr]">
           
-          {/* Columna Izquierda: Mapa */}
-          <div className="agrogenomax-map overflow-hidden rounded-lg border border-white/10 relative">
-            <GisMap compact /> 
-          </div>
+          {/* Columna Izquierda: Registro de predios y ganado */}
+          <RegistryConsole />
 
           {/* Columna Derecha: Métricas y Paneles */}
           <div className="grid gap-4 content-start">
@@ -403,6 +401,82 @@ function PlatformConsole() {
         </div>
       </div>
     </motion.div>
+  );
+}
+
+function RegistryConsole() {
+  const registrySteps = [
+    ['01', 'Predio', 'Georreferenciacion, propietario, area y vocacion productiva'],
+    ['02', 'Ganado', 'Identificacion animal, lote, origen y estado sanitario'],
+    ['03', 'Ambiente', 'Bosque, agua, cobertura, Ley 2 y riesgo de deforestacion'],
+    ['04', 'Cumplimiento', 'Evidencia para sostenibilidad y cadena libre de deforestacion'],
+  ];
+
+  return (
+    <div className="registry-console">
+      <div className="registry-header">
+        <div>
+          <span>AGX Registry OS</span>
+          <strong>Registro territorial ganadero</strong>
+        </div>
+        <BadgeCheck className="h-6 w-6 text-neon" />
+      </div>
+
+      <div className="registry-body">
+        <div className="registry-card-main">
+          <div className="flex items-center justify-between">
+            <span className="text-xs uppercase tracking-[0.2em] text-steel">Predio registrado</span>
+            <span className="rounded-full border border-neon/30 bg-neon/[0.08] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-neon">
+              Verificado
+            </span>
+          </div>
+          <h3 className="mt-5 font-display text-3xl font-bold">AGX-04 Genesis Norte</h3>
+          <div className="mt-5 grid grid-cols-3 gap-3">
+            {[
+              ['2,140 ha', 'area monitoreada'],
+              ['1,284', 'animales trazados'],
+              ['0', 'alertas activas'],
+            ].map(([value, label]) => (
+              <div key={label} className="registry-mini-stat">
+                <strong>{value}</strong>
+                <span>{label}</span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-6 space-y-4">
+            <TemporalBar label="Trazabilidad bovina" value={96} color="bg-neon" />
+            <TemporalBar label="Cumplimiento ambiental" value={92} color="bg-aqua" />
+            <TemporalBar label="Ganaderia sostenible" value={88} color="bg-white" />
+          </div>
+        </div>
+
+        <div className="registry-flow">
+          {registrySteps.map(([number, title, text]) => (
+            <div key={title} className="registry-step">
+              <span>{number}</span>
+              <div>
+                <strong>{title}</strong>
+                <small>{text}</small>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="registry-compliance">
+          <div className="flex items-center gap-3">
+            <ShieldCheck className="h-6 w-6 text-aqua" />
+            <div>
+              <span>Marco normativo</span>
+              <strong>Sostenibilidad ambiental verificable</strong>
+            </div>
+          </div>
+          <p>
+            El registro conecta predios, animales y evidencia geoespacial para soportar
+            trazabilidad, auditoria ambiental y cadenas ganaderas sostenibles libres de deforestacion.
+          </p>
+        </div>
+      </div>
+    </div>
   );
 }
 
