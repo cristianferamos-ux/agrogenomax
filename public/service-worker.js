@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'agrogenomax-pwa-v4';
+const CACHE_VERSION = 'agrogenomax-pwa-v5';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -54,6 +54,26 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (requestUrl.origin !== self.location.origin) return;
+
+  if (
+    request.destination === 'script' ||
+    request.destination === 'style' ||
+    request.destination === 'manifest'
+  ) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response && response.ok) {
+            const copy = response.clone();
+            caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy));
+          }
+
+          return response;
+        })
+        .catch(() => caches.match(request))
+    );
+    return;
+  }
 
   event.respondWith(
     caches.match(request).then((cachedResponse) => {

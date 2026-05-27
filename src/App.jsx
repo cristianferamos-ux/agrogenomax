@@ -31,9 +31,9 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { lazy, Suspense, useEffect, useState } from 'react';
+import LivestockPlatform from './components/LivestockPlatform.jsx';
 
 const GisMap = lazy(() => import('./components/GisMap.jsx'));
-const LivestockPlatform = lazy(() => import('./components/LivestockPlatform.jsx'));
 
 // Version de despliegue 2026-05-26
 const navItems = [
@@ -248,9 +248,7 @@ function App() {
       <Header />
       <Hero />
       <About />
-      <Suspense fallback={<div className="gis-loading">Cargando gestion ganadera...</div>}>
-        <LivestockPlatform />
-      </Suspense>
+      <LivestockPlatform />
       <FieldOperations />
       <Services />
       <Intelligence />
