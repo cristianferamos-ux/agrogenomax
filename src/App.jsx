@@ -30,8 +30,9 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useState } from 'react';
-import GisMap from './components/GisMap.jsx';
+import GisMap from './Components/GisMap.jsx';
 
+// Version de despliegue 2026-05-26
 const navItems = [
   ['Plataforma', 'sobre'],
   ['Servicios', 'servicios'],
@@ -253,8 +254,7 @@ function App() {
       <BovineTraceability />
       <Traceability />
       <Contact />
-      <Footer />
-    </main>
+      </main>
   );
 }
 
@@ -382,72 +382,34 @@ function PlatformConsole() {
             <span className="h-2.5 w-2.5 rounded-full bg-neon shadow-neon" />
             <span className="text-xs font-bold uppercase tracking-[0.24em] text-steel">AgroGenomaX command layer</span>
           </div>
-          <span className="rounded-full border border-aqua/30 px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] text-aqua">
-            Live
-          </span>
+          <span className="rounded-full border border-aqua/30 px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] text-aqua">Live</span>
         </div>
+        
+        {/* Contenedor principal de la consola */}
         <div className="grid gap-4 p-4 lg:grid-cols-[1.05fr_0.95fr]">
-{/* --- CONTENEDOR DEL MAPA --- */}
-<div className="agrogenomax-map min-h-[300px] h-[300px] lg:min-h-[430px] lg:h-auto overflow-hidden rounded-lg border border-white/10 relative">
-  <GisMap /> 
-  <div className="scan-sweep" />
-  <div className="map-polygon map-polygon-a" />
-  <div className="map-polygon map-polygon-b" />
-  <div className="map-polygon map-polygon-c" />
-  
-  <div className="absolute left-[18%] top-[24%] h-3 w-3 rounded-full bg-neon shadow-neon" />
-  <div className="absolute right-[25%] top-[38%] h-3 w-3 rounded-full bg-aqua shadow-aqua" />
-  <div className="absolute bottom-[28%] left-[45%] h-3 w-3 rounded-full bg-white shadow-[0_0_22px_rgba(255,255,255,0.5)]" />
-  
-  <div className="absolute bottom-5 left-5 right-5 grid grid-cols-3 gap-2">
-    {['Forest', 'Herd', 'Water'].map((item, index) => (
-      <div key={item} className="rounded-md border border-white/10 bg-void/72 p-3 backdrop-blur-md">
-        <div className="text-xs uppercase tracking-[0.2em] text-steel">{item}</div>
-        <div className={`mt-2 h-1.5 rounded-full ${index === 1 ? 'bg-aqua' : 'bg-neon'}`} />
-      </div>
-    ))}
-  </div>
-</div> 
+          
+          {/* Columna Izquierda: Mapa */}
+          <div className="agrogenomax-map min-h-[300px] h-[300px] lg:min-h-[430px] lg:h-auto overflow-hidden rounded-lg border border-white/10 relative">
+            <GisMap /> 
+            <div className="scan-sweep" />
+            <div className="map-polygon map-polygon-a" />
+            <div className="map-polygon map-polygon-b" />
+            <div className="map-polygon map-polygon-c" />
+            {/* ... resto de divs internos del mapa ... */}
+          </div>
 
-{/* --- CONTENEDOR DE INFORMACIÓN --- */}
-<div className="mt-4 p-4 bg-[#050b10] rounded-lg border border-white/10 flex items-center justify-between">
-  <div className="text-xs uppercase tracking-[0.2em] text-aqua">
-    <span>GIS / Tropics</span>
-  </div>
-  <div className="text-xs text-steel">
-    <span>Lat 04.63 / Lon -74.08</span>
-  </div>
-</div>
-
-{/* --- BLOQUE DE MÉTRICAS (Único) --- */}
-<div className="grid gap-4 mt-4">
-  <div className="grid grid-cols-2 gap-3">
-    {dashboardMetrics.map((metric, index) => (
-      <AnimatedMetric key={metric.label} {...metric} delay={index * 0.08} />
-    ))}
-  </div>
-  
-  {/* --- SECCIÓN FINAL DE COMPONENTES --- */}
-  <div className="grid gap-4 xl:grid-cols-[1fr_0.9fr]">
-    <CoverageMonitor />
-    <RiskPanel />
-  </div>
-</div>
-function AnimatedMetric({ icon: Icon, label, value, delta, tone, delay = 0 }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true }}
-      transition={{ duration: 0.55, delay }}
-      className="metric-tile"
-    >
-      <div className="flex items-center justify-between">
-        <Icon className={`h-5 w-5 ${tone}`} />
-        <span className={`text-[10px] font-bold uppercase tracking-[0.16em] ${tone}`}>{delta}</span>
+          {/* Columna Derecha: Métricas y Paneles */}
+          <div className="grid gap-4 content-start">
+            <div className="grid grid-cols-2 gap-3">
+              {dashboardMetrics.map((metric, index) => (
+                <AnimatedMetric key={metric.label} {...metric} delay={index * 0.08} />
+              ))}
+            </div>
+            <CoverageMonitor />
+            <RiskPanel />
+          </div>
+        </div>
       </div>
-      <div className="mt-5 font-display text-2xl font-bold">{value}</div>
-      <div className="mt-1 text-[10px] uppercase tracking-[0.16em] text-steel">{label}</div>
     </motion.div>
   );
 }
