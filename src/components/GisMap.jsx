@@ -3,9 +3,11 @@ import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 
 // Token oficial de AgroGenomaX
-const MAPBOX_TOKEN = 'pk.eyJ1IjoiYWdyb2dlbm9tYXgiLCJhIjoiY21wbjE0aHVjMm40ajJxb3FzOW16YTFxNCJ9.F9rWrhD8JZdNwHXzs1kIqg';
+mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
 const RONDA_HIDRICA_TILESET = 'mapbox://agrogenomax.4eb1ph5w';
 const RONDA_HIDRICA_SOURCE_LAYER = 'Ronda_Hidrica_Caqueta-7wmye6';
+const LEY2_TILESET = 'mapbox://agrogenomax.cxix9dvs'; 
+const LEY2_SOURCE_LAYER = 'ley_2_colombia_simplificada-dbv6on';
 
 function GisMap({ compact = false }) {
   const mapContainerRef = useRef(null);
@@ -108,7 +110,7 @@ function GisMap({ compact = false }) {
   };
 
   useEffect(() => {
-    mapboxgl.accessToken = MAPBOX_TOKEN;
+    mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
 
     const map = new mapboxgl.Map({
       container: mapContainerRef.current,
