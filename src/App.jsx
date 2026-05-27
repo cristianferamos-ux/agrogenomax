@@ -29,8 +29,9 @@ import {
   Zap,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { useState } from 'react';
-import GisMap from './components/GisMap.jsx';
+import { lazy, Suspense, useState } from 'react';
+
+const GisMap = lazy(() => import('./components/GisMap.jsx'));
 
 // Version de despliegue 2026-05-26
 const navItems = [
@@ -45,26 +46,26 @@ const navItems = [
 const services = [
   {
     icon: Satellite,
-    title: 'Observacion satelital',
+    title: 'Observación satelital',
     text: 'Lectura de cobertura, agua, bosque, infraestructura y riesgo territorial con capas GIS operativas.',
     code: 'SAT-OPS',
   },
   {
     icon: Trees,
-    title: 'Ganaderia regenerativa',
-    text: 'Planeacion silvopastoril, restauracion productiva y medicion de impacto en predios tropicales.',
+    title: 'Ganadería regenerativa',
+    text: 'Planeación silvopastoril, restauración productiva y medición de impacto en predios tropicales.',
     code: 'REGEN',
   },
   {
     icon: ShieldCheck,
     title: 'Cumplimiento ambiental',
-    text: 'Evidencia tecnica para auditorias, debida diligencia y cadenas ganaderas libres de deforestacion.',
+    text: 'Evidencia técnica para auditorías, debida diligencia y cadenas ganaderas libres de deforestación.',
     code: 'COMPLY',
   },
   {
     icon: BrainCircuit,
     title: 'IA agroterritorial',
-    text: 'Modelos predictivos para priorizar acciones, reducir riesgo y mejorar rentabilidad por hectarea.',
+    text: 'Modelos predictivos para priorizar acciones, reducir riesgo y mejorar rentabilidad por hectárea.',
     code: 'AI-MODEL',
   },
 ];
@@ -78,23 +79,23 @@ const metrics = [
 
 const capabilities = [
   'Trazabilidad bovina por predio, lote, movimiento y cadena de suministro',
-  'Analisis de bosque, agua, suelo, conectividad y riesgo ambiental',
-  'Diagnostico de sistemas silvopastoriles y regenerativos',
-  'Tableros ejecutivos para decisiones tecnicas, financieras y comerciales',
-  'Estandares para mercados premium, auditoria y cumplimiento normativo',
+  'Análisis de bosque, agua, suelo, conectividad y riesgo ambiental',
+  'Diagnóstico de sistemas silvopastoriles y regenerativos',
+  'Tableros ejecutivos para decisiones técnicas, financieras y comerciales',
+  'Estándares para mercados premium, auditoría y cumplimiento normativo',
   'Modelos de productividad, carbono y rentabilidad por metro cuadrado',
 ];
 
 const intelligenceRows = [
-  ['Cobertura arborea', '88%', 'stable'],
-  ['Riesgo deforestacion', '04%', 'low'],
+  ['Cobertura arbórea', '88%', 'stable'],
+  ['Riesgo deforestación', '04%', 'low'],
   ['Indice regenerativo', '76%', 'rising'],
   ['Trazabilidad lote', '100%', 'verified'],
 ];
 
 const dashboardMetrics = [
   { label: 'Riesgo ambiental', value: '04%', delta: '-12%', icon: ShieldCheck, tone: 'text-neon' },
-  { label: 'Cobertura arborea', value: '38.7%', delta: '+6.4%', icon: Trees, tone: 'text-neon' },
+  { label: 'Cobertura arbórea', value: '38.7%', delta: '+6.4%', icon: Trees, tone: 'text-neon' },
   { label: 'Trazabilidad bovina', value: '1,284', delta: '100%', icon: Fingerprint, tone: 'text-aqua' },
   { label: 'Indice regenerativo', value: '81', delta: '+9 pts', icon: Leaf, tone: 'text-aqua' },
 ];
@@ -105,18 +106,18 @@ const riskSeries = [62, 54, 49, 44, 31, 28, 22, 18, 15, 12, 8, 4];
 const alertFeed = [
   ['Cambio de cobertura', 'Predio Genesis Norte', 'Resuelto', 'text-neon'],
   ['Movimiento bovino', 'Lote BOV-AX-901', 'Verificado', 'text-aqua'],
-  ['Riesgo hidrico', 'Corredor Sur', 'Observacion', 'text-white'],
+  ['Riesgo hídrico', 'Corredor Sur', 'Observación', 'text-white'],
 ];
 
 const timelineFrames = [
   {
     year: '2019',
-    title: 'Linea base territorial',
+    title: 'Línea base territorial',
     coverage: 31,
     regeneration: 18,
     alerts: 6,
     risk: 'Alto',
-    note: 'Fragmentacion de cobertura y presion sobre rondas hidricas.',
+    note: 'Fragmentación de cobertura y presión sobre rondas hídricas.',
   },
   {
     year: '2020',
@@ -125,7 +126,7 @@ const timelineFrames = [
     regeneration: 22,
     alerts: 9,
     risk: 'Critico',
-    note: 'Alertas satelitales por perdida puntual de cobertura arborea.',
+    note: 'Alertas satelitales por pérdida puntual de cobertura arbórea.',
   },
   {
     year: '2021',
@@ -134,7 +135,7 @@ const timelineFrames = [
     regeneration: 38,
     alerts: 4,
     risk: 'Medio',
-    note: 'Inicio de corredores biologicos y proteccion de areas sensibles.',
+    note: 'Inicio de corredores biológicos y protección de áreas sensibles.',
   },
   {
     year: '2023',
@@ -152,20 +153,20 @@ const timelineFrames = [
     regeneration: 81,
     alerts: 0,
     risk: 'Minimo',
-    note: 'Cadena con evidencia temporal para trazabilidad libre de deforestacion.',
+    note: 'Cadena con evidencia temporal para trazabilidad libre de deforestación.',
   },
 ];
 
 const carbonMetrics = [
   ['Carbono capturado', '4,820 tCO2e', '+18.4%'],
   ['Biomasa estimada', '12,760 t', '+9.7%'],
-  ['Cobertura arborea', '38.7%', '+6.4%'],
+  ['Cobertura arbórea', '38.7%', '+6.4%'],
   ['Suelo regenerativo', '71/100', '+11 pts'],
 ];
 
 const carbonEquivalences = [
-  ['1,047', 'vehiculos fuera de circulacion por un ano'],
-  ['79,700', 'arboles equivalentes en captura anual'],
+  ['1,047', 'vehículos fuera de circulación por un año'],
+  ['79,700', 'árboles equivalentes en captura anual'],
   ['2,140 ha', 'territorio bajo monitoreo regenerativo'],
 ];
 
@@ -174,18 +175,18 @@ const cattleTrace = {
   origin: 'Lote Genesis Norte / Predio AGX-04',
   breed: 'Brahman x Angus tropical',
   status: 'Cumplimiento verificado',
-  health: 'Sanidad optima',
+  health: 'Sanidad óptima',
 };
 
 const cattleMovements = [
   ['Nacimiento', 'Predio AGX-04', '2023-02-18', 'Origen validado'],
   ['Levante', 'Unidad Silvopastoril X-12', '2024-01-09', 'Movilizacion registrada'],
-  ['Revision sanitaria', 'Modulo Bioseguridad', '2025-08-14', 'Vacunacion al dia'],
-  ['Auditoria ambiental', 'Cadena premium', '2026-05-11', 'Libre de deforestacion'],
+  ['Revisión sanitaria', 'Módulo Bioseguridad', '2025-08-14', 'Vacunación al día'],
+  ['Auditoría ambiental', 'Cadena premium', '2026-05-11', 'Libre de deforestación'],
 ];
 
 const cattleIndicators = [
-  ['Vacunacion', '100%', HeartPulse, 'text-neon'],
+  ['Vacunación', '100%', HeartPulse, 'text-neon'],
   ['Movilizaciones', '4', Map, 'text-aqua'],
   ['Cumplimiento', 'A+', FileCheck2, 'text-neon'],
   ['Riesgo sanitario', 'Bajo', ShieldCheck, 'text-aqua'],
@@ -202,13 +203,13 @@ const fieldPhotos = [
     src: '/field/operacion-campo-05.jpeg',
     title: 'Trazabilidad en movimiento',
     tag: 'Bovine route',
-    text: 'Seguimiento de lotes y movilizacion bajo condiciones reales de ladera tropical.',
+    text: 'Seguimiento de lotes y movilización bajo condiciones reales de ladera tropical.',
   },
   {
     src: '/field/operacion-campo-02.jpeg',
     title: 'Sistemas silvopastoriles',
     tag: 'Regeneration',
-    text: 'Ganaderia integrada con cobertura arborea, bosque y corredores biologicos.',
+    text: 'Ganadería integrada con cobertura arbórea, bosque y corredores biológicos.',
   },
   {
     src: '/field/operacion-campo-06.jpeg',
@@ -224,9 +225,9 @@ const fieldPhotos = [
   },
   {
     src: '/field/operacion-campo-07.jpeg',
-    title: 'Operacion sostenible',
+    title: 'Operación sostenible',
     tag: 'Premium chain',
-    text: 'Evidencia real de sostenibilidad, bienestar y decision tecnica en campo.',
+    text: 'Evidencia real de sostenibilidad, bienestar y decisión técnica en campo.',
   },
 ];
 
@@ -254,6 +255,7 @@ function App() {
       <BovineTraceability />
       <Traceability />
       <Contact />
+      <Footer />
       </main>
   );
 }
@@ -311,7 +313,7 @@ function Hero() {
           </h1>
           <p className="mt-7 max-w-2xl text-lg leading-8 text-steel sm:text-xl">
             Plataforma de inteligencia territorial ganadera para operar trazabilidad,
-            regeneracion, monitoreo satelital, cumplimiento ambiental e IA sobre sistemas
+            regeneración, monitoreo satelital, cumplimiento ambiental e IA sobre sistemas
             tropicales de alto valor.
           </p>
           <div className="mt-9 flex flex-col gap-4 sm:flex-row">
@@ -406,10 +408,10 @@ function PlatformConsole() {
 
 function RegistryConsole() {
   const registrySteps = [
-    ['01', 'Predio', 'Georreferenciacion, propietario, area y vocacion productiva'],
+    ['01', 'Predio', 'Georreferenciación, propietario, área y vocación productiva'],
     ['02', 'Ganado', 'Identificacion animal, lote, origen y estado sanitario'],
-    ['03', 'Ambiente', 'Bosque, agua, cobertura, Ley 2 y riesgo de deforestacion'],
-    ['04', 'Cumplimiento', 'Evidencia para sostenibilidad y cadena libre de deforestacion'],
+    ['03', 'Ambiente', 'Bosque, agua, cobertura, Ley 2 y riesgo de deforestación'],
+    ['04', 'Cumplimiento', 'Evidencia para sostenibilidad y cadena libre de deforestación'],
   ];
 
   return (
@@ -433,7 +435,7 @@ function RegistryConsole() {
           <h3 className="mt-5 font-display text-3xl font-bold">AGX-04 Genesis Norte</h3>
           <div className="mt-5 grid grid-cols-3 gap-3">
             {[
-              ['2,140 ha', 'area monitoreada'],
+              ['2,140 ha', 'área monitoreada'],
               ['1,284', 'animales trazados'],
               ['0', 'alertas activas'],
             ].map(([value, label]) => (
@@ -446,7 +448,7 @@ function RegistryConsole() {
           <div className="mt-6 space-y-4">
             <TemporalBar label="Trazabilidad bovina" value={96} color="bg-neon" />
             <TemporalBar label="Cumplimiento ambiental" value={92} color="bg-aqua" />
-            <TemporalBar label="Ganaderia sostenible" value={88} color="bg-white" />
+            <TemporalBar label="Ganadería sostenible" value={88} color="bg-white" />
           </div>
         </div>
 
@@ -472,7 +474,7 @@ function RegistryConsole() {
           </div>
           <p>
             El registro conecta predios, animales y evidencia geoespacial para soportar
-            trazabilidad, auditoria ambiental y cadenas ganaderas sostenibles libres de deforestacion.
+            trazabilidad, auditoría ambiental y cadenas ganaderas sostenibles libres de deforestación.
           </p>
         </div>
       </div>
@@ -515,7 +517,7 @@ function CoverageMonitor() {
   return (
     <div className="dashboard-panel p-4">
       <div className="flex items-center justify-between">
-        <span className="text-xs uppercase tracking-[0.2em] text-steel">Cobertura arborea</span>
+        <span className="text-xs uppercase tracking-[0.2em] text-steel">Cobertura arbórea</span>
         <TrendingUp className="h-5 w-5 text-neon" />
       </div>
       <div className="mt-4 flex items-end justify-between gap-4">
@@ -613,10 +615,10 @@ function About() {
           </div>
           <div className="grid gap-5 md:grid-cols-2">
             {[
-              ['Inteligencia territorial', 'Integra satelite, GIS, trazabilidad animal y desempeno productivo en una sola vista ejecutiva.'],
+              ['Inteligencia territorial', 'Integra satélite, GIS, trazabilidad animal y desempeño productivo en una sola vista ejecutiva.'],
               ['Mercados premium', 'Convierte cumplimiento ambiental y mejora regenerativa en evidencia comercializable.'],
-              ['Operacion tropical', 'Modelos pensados para predios, paisajes y cadenas ganaderas de alta complejidad.'],
-              ['Decision aumentada', 'IA aplicada a priorizacion de intervenciones, alertas y retornos por metro cuadrado.'],
+              ['Operación tropical', 'Modelos pensados para predios, paisajes y cadenas ganaderas de alta complejidad.'],
+              ['Decisión aumentada', 'IA aplicada a priorización de intervenciones, alertas y retornos por metro cuadrado.'],
             ].map(([title, text]) => (
               <article key={title} className="platform-card p-6">
                 <CircleDot className="h-5 w-5 text-neon" />
@@ -637,14 +639,14 @@ function FieldOperations() {
       <motion.div {...fadeUp} className="mx-auto max-w-7xl">
         <div className="mb-12 grid gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-end">
           <div>
-            <p className="eyebrow text-neon">Operacion en Campo</p>
+            <p className="eyebrow text-neon">Operación en campo</p>
             <h2 className="mt-4 font-display text-3xl font-bold sm:text-5xl">
-              Tecnologia territorial operando sobre paisajes ganaderos reales.
+              Tecnología territorial operando sobre paisajes ganaderos reales.
             </h2>
           </div>
           <p className="text-lg leading-8 text-steel">
-            AgroGenomaX combina datos satelitales, modelos de IA y verificacion en campo para
-            entender el territorio donde ocurre la ganaderia regenerativa.
+            AgroGenomaX combina datos satelitales, modelos de IA y verificación en campo para
+            entender el territorio donde ocurre la ganadería regenerativa.
           </p>
         </div>
 
@@ -655,8 +657,8 @@ function FieldOperations() {
               <span>Ground truth layer</span>
               <h3>Inteligencia territorial validada en el predio.</h3>
               <p>
-                La plataforma conecta lo que ve el satelite con lo que ocurre en la finca:
-                animales, cobertura, movilidad, regeneracion y cumplimiento ambiental.
+                La plataforma conecta lo que ve el satélite con lo que ocurre en la finca:
+                animales, cobertura, movilidad, regeneración y cumplimiento ambiental.
               </p>
             </div>
             <div className="field-hud">
@@ -707,7 +709,7 @@ function Services() {
           <div className="max-w-3xl">
             <p className="eyebrow text-neon">Servicios</p>
             <h2 className="mt-4 font-display text-3xl font-bold sm:text-5xl">
-              Modulos de inteligencia para una ganaderia medible y exportable.
+              Módulos de inteligencia para una ganadería medible y exportable.
             </h2>
           </div>
           <div className="hidden text-right text-xs uppercase tracking-[0.24em] text-steel lg:block">
@@ -743,18 +745,20 @@ function Intelligence() {
   return (
     <section id="gis" className="px-5 py-28 lg:px-8">
       <motion.div {...fadeUp} className="mx-auto grid max-w-7xl items-center gap-10 lg:grid-cols-[1.15fr_0.85fr]">
-        <GisMap />
+        <Suspense fallback={<div className="gis-loading">Cargando mapa GIS...</div>}>
+          <GisMap />
+        </Suspense>
         <div>
           <p className="eyebrow text-aqua">GIS y monitoreo satelital</p>
           <h2 className="mt-4 font-display text-3xl font-bold sm:text-5xl">
-            Geointeligencia para saber que ocurre en cada hectarea.
+            Geointeligencia para saber qué ocurre en cada hectárea.
           </h2>
           <p className="mt-6 text-lg leading-8 text-steel">
-            Capas satelitales, cartografia productiva, alertas ambientales y evidencia historica
+            Capas satelitales, cartografía productiva, alertas ambientales y evidencia histórica
             para operar predios como activos territoriales auditables.
           </p>
           <div className="mt-8 space-y-4">
-            {['Alertas de cambio de cobertura', 'Cruce predial con trazabilidad bovina', 'Reportes para auditoria y mercado'].map((item) => (
+            {['Alertas de cambio de cobertura', 'Cruce predial con trazabilidad bovina', 'Reportes para auditoría y mercado'].map((item) => (
               <div key={item} className="flex items-center gap-3 text-steel">
                 <BadgeCheck className="h-5 w-5 text-neon" />
                 <span>{item}</span>
@@ -779,9 +783,9 @@ function SatelliteTimeline() {
       <motion.div {...fadeUp} className="mx-auto max-w-7xl">
         <div className="mb-12 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl">
-            <p className="eyebrow text-neon">Linea de tiempo satelital</p>
+            <p className="eyebrow text-neon">Línea de tiempo satelital</p>
             <h2 className="mt-4 font-display text-3xl font-bold sm:text-5xl">
-              Analisis temporal del predio con inteligencia geoespacial.
+              Análisis temporal del predio con inteligencia geoespacial.
             </h2>
           </div>
           <div className="rounded-full border border-aqua/25 bg-aqua/[0.06] px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] text-aqua shadow-aqua">
@@ -849,7 +853,7 @@ function SatelliteTimeline() {
               <div className="flex items-center gap-3">
                 <CalendarClock className="h-6 w-6 text-aqua" />
                 <div>
-                  <div className="text-xs uppercase tracking-[0.2em] text-steel">Analisis temporal</div>
+                  <div className="text-xs uppercase tracking-[0.2em] text-steel">Análisis temporal</div>
                   <h3 className="font-display text-3xl font-bold">{frame.year}</h3>
                 </div>
               </div>
@@ -886,8 +890,8 @@ function SatelliteTimeline() {
                 </div>
                 <p className="mt-3 text-sm leading-6 text-steel">
                   {frame.alerts === 0
-                    ? 'Sin alertas activas en el periodo seleccionado. Evidencia favorable para cadena libre de deforestacion.'
-                    : 'Eventos detectados por contraste multitemporal. Requiere revision de campo y cierre documental.'}
+                    ? 'Sin alertas activas en el periodo seleccionado. Evidencia favorable para cadena libre de deforestación.'
+                    : 'Eventos detectados por contraste multitemporal. Requiere revisión de campo y cierre documental.'}
                 </p>
               </div>
             </div>
@@ -940,10 +944,10 @@ function CarbonIntelligence() {
           <div>
             <p className="eyebrow text-aqua">Inteligencia de carbono</p>
             <h2 className="mt-4 font-display text-3xl font-bold sm:text-5xl">
-              Captura, biomasa y regeneracion convertidas en indicadores verificables.
+              Captura, biomasa y regeneración convertidas en indicadores verificables.
             </h2>
             <p className="mt-6 text-lg leading-8 text-steel">
-              AgroGenomaX estima carbono capturado, biomasa arborea, cobertura y desempeno
+              AgroGenomaX estima carbono capturado, biomasa arbórea, cobertura y desempeño
               regenerativo para apoyar decisiones productivas, ambientales y comerciales.
             </p>
             <div className="mt-8 grid gap-3 sm:grid-cols-2">
@@ -974,13 +978,13 @@ function CarbonIntelligence() {
             <div className="grid gap-4 p-4 lg:grid-cols-[0.9fr_1.1fr]">
               <div className="rounded-lg border border-white/10 bg-void/70 p-5">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs uppercase tracking-[0.2em] text-steel">Metricas regenerativas</span>
+                  <span className="text-xs uppercase tracking-[0.2em] text-steel">Métricas regenerativas</span>
                   <Leaf className="h-5 w-5 text-neon" />
                 </div>
                 <div className="mt-6 space-y-5">
                   <TemporalBar label="Carbono suelo" value={68} color="bg-neon" />
-                  <TemporalBar label="Biomasa arborea" value={74} color="bg-aqua" />
-                  <TemporalBar label="Conectividad ecologica" value={59} color="bg-white" />
+                  <TemporalBar label="Biomasa arbórea" value={74} color="bg-aqua" />
+                  <TemporalBar label="Conectividad ecológica" value={59} color="bg-white" />
                 </div>
               </div>
 
@@ -1018,12 +1022,12 @@ function Regenerative() {
       <motion.div {...fadeUp} className="mx-auto max-w-7xl">
         <div className="grid gap-10 lg:grid-cols-[0.9fr_1.1fr]">
           <div>
-            <p className="eyebrow text-neon">Ganaderia regenerativa</p>
+            <p className="eyebrow text-neon">Ganadería regenerativa</p>
             <h2 className="mt-4 font-display text-3xl font-bold sm:text-5xl">
               Regeneracion convertida en datos, evidencia y retorno.
             </h2>
             <p className="mt-6 text-lg leading-8 text-steel">
-              Planifica corredores biologicos, arboles, potreros, agua y cargas animales con
+              Planifica corredores biológicos, árboles, potreros, agua y cargas animales con
               indicadores que conectan impacto ambiental y productividad.
             </p>
           </div>
@@ -1049,9 +1053,9 @@ function Analytics() {
         <div className="overflow-hidden rounded-xl border border-white/12 bg-white/[0.035]">
           <div className="grid lg:grid-cols-[0.85fr_1.15fr]">
             <div className="p-8 sm:p-12">
-              <p className="eyebrow text-aqua">Analitica e inteligencia artificial</p>
+              <p className="eyebrow text-aqua">Analítica e inteligencia artificial</p>
               <h2 className="mt-4 font-display text-3xl font-bold sm:text-5xl">
-                Modelos predictivos para dirigir inversion territorial.
+                Modelos predictivos para dirigir inversión territorial.
               </h2>
               <p className="mt-6 text-lg leading-8 text-steel">
                 Fusiona trazabilidad, ambiente, productividad y mercado para anticipar riesgo,
@@ -1063,7 +1067,7 @@ function Analytics() {
                 {[
                   ['Riesgo ambiental', '92', BarChart3],
                   ['Elegibilidad premium', '76', Layers3],
-                  ['Decision AI', '41k', Binary],
+                  ['Decisión IA', '41k', Binary],
                 ].map(([label, value, Icon]) => (
                   <div key={label} className="rounded-lg border border-white/10 bg-void/72 p-5 backdrop-blur-md">
                     <Icon className="h-6 w-6 text-aqua" />
@@ -1134,7 +1138,7 @@ function BovineTraceability() {
               <div className="mt-8 space-y-4">
                 {[
                   ['Lote de origen', cattleTrace.origin],
-                  ['Linea genetica', cattleTrace.breed],
+                  ['Línea genética', cattleTrace.breed],
                   ['Ambiental', cattleTrace.status],
                   ['Sanidad', cattleTrace.health],
                 ].map(([label, value]) => (
@@ -1160,7 +1164,7 @@ function BovineTraceability() {
               <div className="mt-8 grid gap-6 xl:grid-cols-[1fr_0.86fr]">
                 <div className="rounded-lg border border-white/10 bg-void/70 p-5">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs uppercase tracking-[0.2em] text-steel">Historial de movilizacion</span>
+                    <span className="text-xs uppercase tracking-[0.2em] text-steel">Historial de movilización</span>
                     <Map className="h-5 w-5 text-aqua" />
                   </div>
                   <div className="bovine-route mt-6">
@@ -1184,14 +1188,14 @@ function BovineTraceability() {
                     <BadgeCheck className="h-5 w-5 text-neon" />
                   </div>
                   <div className="mt-6 space-y-5">
-                    <TemporalBar label="Libre de deforestacion" value={100} color="bg-neon" />
+                    <TemporalBar label="Libre de deforestación" value={100} color="bg-neon" />
                     <TemporalBar label="Trazabilidad documental" value={96} color="bg-aqua" />
                     <TemporalBar label="Elegibilidad mercado premium" value={88} color="bg-white" />
                   </div>
                   <div className="mt-6 rounded-md border border-neon/20 bg-neon/[0.06] p-4">
                     <div className="text-xs uppercase tracking-[0.18em] text-neon">Estado de cadena</div>
                     <p className="mt-2 text-sm leading-6 text-steel">
-                      Animal asociado a predio sin alertas activas de deforestacion y con historial sanitario completo.
+                      Animal asociado a predio sin alertas activas de deforestación y con historial sanitario completo.
                     </p>
                   </div>
                 </div>
@@ -1212,7 +1216,7 @@ function Traceability() {
           <div>
             <p className="eyebrow text-neon">Trazabilidad y cumplimiento</p>
             <h2 className="mt-4 font-display text-3xl font-bold sm:text-5xl">
-              Cadena ganadera libre de deforestacion, verificable por diseno.
+              Cadena ganadera libre de deforestación, verificable por diseño.
             </h2>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -1240,8 +1244,8 @@ function Contact() {
               Activa una capa de inteligencia sobre tu territorio ganadero.
             </h2>
             <p className="mt-6 text-lg leading-8 text-steel">
-              Agenda una conversacion para implementar trazabilidad, regeneracion, GIS e IA
-              en una operacion preparada para mercados exigentes.
+              Agenda una conversación para implementar trazabilidad, regeneración, GIS e IA
+              en una operación preparada para mercados exigentes.
             </p>
           </div>
           <form className="border-t border-white/10 bg-white/[0.035] p-8 sm:p-12 lg:border-l lg:border-t-0">

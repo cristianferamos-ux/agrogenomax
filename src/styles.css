@@ -1371,6 +1371,221 @@ body::after {
   padding-left: 0.7rem;
 }
 
+.gis-loading,
+.gis-mapbox-error {
+  display: grid;
+  min-height: 520px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.75rem;
+  background: #03080d;
+  color: #a7b3c2;
+  text-align: center;
+}
+
+.gis-mapbox {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.gis-mapbox-canvas {
+  position: relative;
+  min-height: 70vh;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.75rem;
+  background: #03080d;
+  box-shadow: 0 34px 120px rgba(0, 0, 0, 0.48), 0 0 44px rgba(0, 216, 255, 0.12);
+}
+
+.gis-mapbox-host {
+  position: absolute;
+  inset: 0;
+}
+
+.gis-mapbox-host.leaflet-container,
+.gis-mapbox-host .leaflet-grab {
+  cursor: grab;
+}
+
+.gis-mapbox-host .leaflet-drag-pane,
+.gis-mapbox-host .gis-drag-surface {
+  cursor: grab;
+  pointer-events: auto;
+}
+
+.gis-mapbox-host.leaflet-container:active,
+.gis-mapbox-host .leaflet-dragging .leaflet-grab,
+.leaflet-dragging .gis-mapbox-host,
+.leaflet-dragging .gis-mapbox-host .leaflet-grab,
+.leaflet-dragging .gis-mapbox-host .leaflet-drag-pane,
+.leaflet-dragging .gis-mapbox-host .gis-drag-surface {
+  cursor: grabbing;
+}
+
+.gis-mapbox-error {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  min-height: 0;
+  padding: 1.5rem;
+  background: rgba(3, 8, 13, 0.92);
+}
+
+.gis-mapbox-panel {
+  display: flex;
+  width: min(100%, 320px);
+  flex-direction: column;
+  gap: 0.875rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.75rem;
+  background: rgba(0, 0, 0, 0.85);
+  padding: 1rem;
+  backdrop-filter: blur(12px);
+}
+
+.gis-mapbox-panel form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.gis-mapbox-panel button,
+.gis-mapbox-panel input {
+  min-height: 48px;
+  border-radius: 0.55rem;
+  font: inherit;
+}
+
+.gis-mapbox-panel button {
+  border: 0;
+  background: #06b6d4;
+  color: #ffffff;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.gis-mapbox-panel button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.gis-mapbox-panel input {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #ffffff;
+  padding: 0 0.875rem;
+  color: #020508;
+}
+
+.gps-location-marker {
+  background: transparent;
+  border: 0;
+}
+
+.gps-location-pin {
+  position: relative;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 3px solid #ffffff;
+  border-radius: 50% 50% 50% 0;
+  background: #00d8ff;
+  box-shadow: 0 0 0 6px rgba(0, 216, 255, 0.16), 0 0 24px rgba(0, 216, 255, 0.75);
+  transform: rotate(-45deg);
+}
+
+.gps-location-pin::before {
+  position: absolute;
+  inset: -0.55rem;
+  border: 1px solid rgba(0, 216, 255, 0.55);
+  border-radius: 999px;
+  content: '';
+  animation: markerPulse 2.2s ease-out infinite;
+}
+
+.gps-location-pin span {
+  width: 12px;
+  height: 12px;
+  border: 2px solid #002936;
+  border-radius: 999px;
+  background: #ffffff;
+  transform: rotate(45deg);
+}
+
+.leaflet-control-layers,
+.leaflet-bar a,
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip,
+.gis-legend {
+  border: 1px solid rgba(0, 216, 255, 0.22) !important;
+  background: rgba(3, 8, 13, 0.92) !important;
+  color: #f7fbff !important;
+  box-shadow: 0 0 24px rgba(0, 216, 255, 0.18) !important;
+  backdrop-filter: blur(14px);
+}
+
+.leaflet-control-layers label,
+.leaflet-control-attribution,
+.leaflet-popup-content {
+  color: #d1d8e2 !important;
+}
+
+.leaflet-control-attribution {
+  background: rgba(2, 5, 8, 0.72) !important;
+}
+
+.leaflet-bar a {
+  color: #9cff1a !important;
+}
+
+.gis-legend {
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  line-height: 1.4;
+}
+
+.gis-legend h4 {
+  margin: 0 0 0.5rem;
+  color: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.gis-legend div {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: #d1d8e2;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.gis-legend span {
+  width: 0.9rem;
+  height: 0.9rem;
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  border-radius: 0.2rem;
+}
+
+@keyframes pulseGps {
+  0% {
+    box-shadow: 0 0 0 0 rgba(0, 216, 255, 0.8);
+  }
+
+  70% {
+    box-shadow: 0 0 0 18px rgba(0, 216, 255, 0);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(0, 216, 255, 0);
+  }
+}
+
 @keyframes sweep {
   to {
     transform: rotate(1turn);
@@ -1478,120 +1693,3 @@ body::after {
   }
 }
 /* Forzar altura del mapa en dispositivos móviles y escritorio */
-.mapboxgl-map {
-    width: 100% !important;
-}
-
-.mapboxgl-canvas {
-    width: 100% !important;
-}
-/* Forzar al contenedor del mapa y al canvas a respetar la altura de 300px */
-.agrogenomax-map {
-    min-height: 300px;
-}
-
-/* En pantallas grandes, que use la altura de 430px */
-@media (min-width: 1024px) {
-    .agrogenomax-map {
-        min-height: 430px;
-    }
-}
-
-.mapbox-shell {
-  position: relative;
-  width: 100%;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 0.55rem;
-  background: #000;
-}
-
-.mapbox-shell-full {
-  height: 620px;
-}
-
-.mapbox-shell-compact {
-  height: 430px;
-}
-
-.mapbox-canvas-host {
-  width: 100%;
-  height: 100%;
-}
-
-.mapbox-telemetry {
-  position: absolute;
-  top: 1rem;
-  left: 1rem;
-  z-index: 10;
-}
-
-.mapbox-control-panel {
-  position: absolute;
-  top: 1rem;
-  right: 1rem;
-  z-index: 10;
-}
-
-.mapbox-shell .mapboxgl-map,
-.mapbox-shell .mapboxgl-canvas-container,
-.mapbox-shell .mapboxgl-canvas {
-  width: 100% !important;
-  height: 100% !important;
-}
-
-@media (max-width: 640px) {
-  .mapbox-shell {
-    display: flex;
-    height: auto;
-    min-height: 0;
-    flex-direction: column;
-    overflow: visible;
-    background: transparent;
-  }
-
-  .mapbox-shell-full .mapbox-canvas-host {
-    height: 460px !important;
-  }
-
-  .mapbox-shell-compact .mapbox-canvas-host {
-    height: 300px !important;
-  }
-
-  .mapbox-shell-full .mapbox-canvas-host.mapboxgl-map,
-  .mapbox-shell-full .mapbox-canvas-host .mapboxgl-canvas-container,
-  .mapbox-shell-full .mapbox-canvas-host .mapboxgl-canvas {
-    height: 460px !important;
-  }
-
-  .mapbox-shell-compact .mapbox-canvas-host.mapboxgl-map,
-  .mapbox-shell-compact .mapbox-canvas-host .mapboxgl-canvas-container,
-  .mapbox-shell-compact .mapbox-canvas-host .mapboxgl-canvas {
-    height: 300px !important;
-  }
-
-  .mapbox-canvas-host {
-    order: 1;
-    overflow: hidden;
-    border-radius: 0.55rem;
-    background: #000;
-  }
-
-  .mapbox-control-panel {
-    position: relative;
-    top: auto;
-    right: auto;
-    order: 2;
-    width: 100%;
-    max-height: none;
-    margin-top: 0.75rem;
-    overflow: visible;
-  }
-
-  .mapbox-telemetry {
-    top: 0.75rem;
-    left: 0.75rem;
-    max-width: calc(100% - 1.5rem);
-    font-size: 0.62rem;
-  }
-}
