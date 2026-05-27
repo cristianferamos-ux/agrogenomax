@@ -14,7 +14,7 @@ function GisMap({ compact = false }) {
   const mapRef = useRef(null);
   const userMarkerRef = useRef(null);
   
-  const [mapStyle, setMapStyle] = useState('mapbox://styles/mapbox/satellite-streets-v12');
+  const [mapStyle, setMapStyle] = useState('mapbox://styles/agrogenomax/cmpo6hskr000601qtddjm5lhz');
   const [showLey2, setShowLey2] = useState(true);
   const [showRondaHidrica, setShowRondaHidrica] = useState(true);
   const [isLocating, setIsLocating] = useState(false);
@@ -124,12 +124,6 @@ function GisMap({ compact = false }) {
 
     map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
     map.addControl(new mapboxgl.ScaleControl({ unit: 'metric' }), 'bottom-left');
-
-    map.on('style.load', () => {
-      map.addSource('source-ley2', {
-        type: 'vector',
-        url: 'mapbox://agrogenomax.cxix9dvs'
-      });
 
       // CAPA CON LOS CÓDIGOS CORREGIDOS SEGÚN TU PARAMETRIZACIÓN DE QGIS
       map.addLayer({
