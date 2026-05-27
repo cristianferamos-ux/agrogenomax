@@ -402,8 +402,7 @@ function PlatformConsole() {
           <div className="grid gap-4 content-start">
             <div className="grid grid-cols-2 gap-3">
               {dashboardMetrics.map((metric, index) => (
-                <AnimatedMetric key={metric.label} {...metric} delay={index * 0.08} />
-              ))}
+                ))}
             </div>
             <CoverageMonitor />
             <RiskPanel />
