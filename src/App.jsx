@@ -387,48 +387,52 @@ function PlatformConsole() {
           </span>
         </div>
         <div className="grid gap-4 p-4 lg:grid-cols-[1.05fr_0.95fr]">
-          <div className="agrogenomax-map min-h-[300px] h-[300px] lg:min-h-[430px] lg:h-auto overflow-hidden rounded-lg border border-white/10">
-            <div className="absolute inset-x-6 top-5 z-10 flex items-center justify-between text-xs uppercase tracking-[0.2em] text-aqua">
-              <span>GIS / Tropics</span>
-              <span>Lat 04.63 / Lon -74.08</span>
-            </div>
-            <div className="scan-sweep" />
-            <div className="map-polygon map-polygon-a" />
-            <div className="map-polygon map-polygon-b" />
-            <div className="map-polygon map-polygon-c" />
-            <div className="absolute left-[18%] top-[24%] h-3 w-3 rounded-full bg-neon shadow-neon" />
-            <div className="absolute right-[25%] top-[38%] h-3 w-3 rounded-full bg-aqua shadow-aqua" />
-            <div className="absolute bottom-[28%] left-[45%] h-3 w-3 rounded-full bg-white shadow-[0_0_22px_rgba(255,255,255,0.5)]" />
-            <div className="absolute bottom-5 left-5 right-5 grid grid-cols-3 gap-2">
-              {['Forest', 'Herd', 'Water'].map((item, index) => (
-                <div key={item} className="rounded-md border border-white/10 bg-void/72 p-3 backdrop-blur-md">
-                  <div className="text-xs uppercase tracking-[0.18em] text-steel">{item}</div>
-                  <div className={`mt-2 h-1.5 rounded-full ${index === 1 ? 'bg-aqua' : 'bg-neon'}`} />
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="grid gap-4">
-            <div className="grid grid-cols-2 gap-3">
-              {dashboardMetrics.map((metric, index) => (
-                <AnimatedMetric key={metric.label} {...metric} delay={index * 0.08} />
-              ))}
-            </div>
-            <div className="grid gap-4 xl:grid-cols-[1fr_0.9fr]">
-              <CoverageMonitor />
-              <RiskPanel />
-            </div>
-            <div className="grid gap-4 xl:grid-cols-[1fr_0.9fr]">
-              <TraceabilityFlow />
-              <AlertFeed />
-            </div>
-          </div>
-        </div>
+{/* --- CONTENEDOR DEL MAPA --- */}
+<div className="agrogenomax-map min-h-[300px] h-[300px] lg:min-h-[430px] lg:h-auto overflow-hidden rounded-lg border border-white/10 relative">
+  <GisMap /> 
+  <div className="scan-sweep" />
+  <div className="map-polygon map-polygon-a" />
+  <div className="map-polygon map-polygon-b" />
+  <div className="map-polygon map-polygon-c" />
+  
+  <div className="absolute left-[18%] top-[24%] h-3 w-3 rounded-full bg-neon shadow-neon" />
+  <div className="absolute right-[25%] top-[38%] h-3 w-3 rounded-full bg-aqua shadow-aqua" />
+  <div className="absolute bottom-[28%] left-[45%] h-3 w-3 rounded-full bg-white shadow-[0_0_22px_rgba(255,255,255,0.5)]" />
+  
+  <div className="absolute bottom-5 left-5 right-5 grid grid-cols-3 gap-2">
+    {['Forest', 'Herd', 'Water'].map((item, index) => (
+      <div key={item} className="rounded-md border border-white/10 bg-void/72 p-3 backdrop-blur-md">
+        <div className="text-xs uppercase tracking-[0.2em] text-steel">{item}</div>
+        <div className={`mt-2 h-1.5 rounded-full ${index === 1 ? 'bg-aqua' : 'bg-neon'}`} />
       </div>
-    </motion.div>
-  );
-}
+    ))}
+  </div>
+</div> 
 
+{/* --- CONTENEDOR DE INFORMACIÓN --- */}
+<div className="mt-4 p-4 bg-[#050b10] rounded-lg border border-white/10 flex items-center justify-between">
+  <div className="text-xs uppercase tracking-[0.2em] text-aqua">
+    <span>GIS / Tropics</span>
+  </div>
+  <div className="text-xs text-steel">
+    <span>Lat 04.63 / Lon -74.08</span>
+  </div>
+</div>
+
+{/* --- BLOQUE DE MÉTRICAS (Único) --- */}
+<div className="grid gap-4 mt-4">
+  <div className="grid grid-cols-2 gap-3">
+    {dashboardMetrics.map((metric, index) => (
+      <AnimatedMetric key={metric.label} {...metric} delay={index * 0.08} />
+    ))}
+  </div>
+  
+  {/* --- SECCIÓN FINAL DE COMPONENTES --- */}
+  <div className="grid gap-4 xl:grid-cols-[1fr_0.9fr]">
+    <CoverageMonitor />
+    <RiskPanel />
+  </div>
+</div>
 function AnimatedMetric({ icon: Icon, label, value, delta, tone, delay = 0 }) {
   return (
     <motion.div
