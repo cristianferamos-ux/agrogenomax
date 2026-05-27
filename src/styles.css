@@ -1338,28 +1338,119 @@ body::after {
 }
 /* Forzar altura del mapa en dispositivos móviles y escritorio */
 .mapboxgl-map {
-    height: 300px !important;
     width: 100% !important;
 }
 
 .mapboxgl-canvas {
-    height: 300px !important;
     width: 100% !important;
 }
 /* Forzar al contenedor del mapa y al canvas a respetar la altura de 300px */
-.agrogenomax-map, 
-.mapboxgl-map, 
-.mapboxgl-canvas-container, 
-.mapboxgl-canvas {
-    height: 300px !important;
+.agrogenomax-map {
+    min-height: 300px;
 }
 
 /* En pantallas grandes, que use la altura de 430px */
 @media (min-width: 1024px) {
-    .agrogenomax-map, 
-    .mapboxgl-map, 
-    .mapboxgl-canvas-container, 
-    .mapboxgl-canvas {
-        height: 430px !important;
+    .agrogenomax-map {
+        min-height: 430px;
     }
+}
+
+.mapbox-shell {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.55rem;
+  background: #000;
+}
+
+.mapbox-shell-full {
+  height: 620px;
+}
+
+.mapbox-shell-compact {
+  height: 430px;
+}
+
+.mapbox-canvas-host {
+  width: 100%;
+  height: 100%;
+}
+
+.mapbox-telemetry {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  z-index: 10;
+}
+
+.mapbox-control-panel {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 10;
+}
+
+.mapbox-shell .mapboxgl-map,
+.mapbox-shell .mapboxgl-canvas-container,
+.mapbox-shell .mapboxgl-canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+@media (max-width: 640px) {
+  .mapbox-shell {
+    display: flex;
+    height: auto;
+    min-height: 0;
+    flex-direction: column;
+    overflow: visible;
+    background: transparent;
+  }
+
+  .mapbox-shell-full .mapbox-canvas-host {
+    height: 460px !important;
+  }
+
+  .mapbox-shell-compact .mapbox-canvas-host {
+    height: 300px !important;
+  }
+
+  .mapbox-shell-full .mapbox-canvas-host.mapboxgl-map,
+  .mapbox-shell-full .mapbox-canvas-host .mapboxgl-canvas-container,
+  .mapbox-shell-full .mapbox-canvas-host .mapboxgl-canvas {
+    height: 460px !important;
+  }
+
+  .mapbox-shell-compact .mapbox-canvas-host.mapboxgl-map,
+  .mapbox-shell-compact .mapbox-canvas-host .mapboxgl-canvas-container,
+  .mapbox-shell-compact .mapbox-canvas-host .mapboxgl-canvas {
+    height: 300px !important;
+  }
+
+  .mapbox-canvas-host {
+    order: 1;
+    overflow: hidden;
+    border-radius: 0.55rem;
+    background: #000;
+  }
+
+  .mapbox-control-panel {
+    position: relative;
+    top: auto;
+    right: auto;
+    order: 2;
+    width: 100%;
+    max-height: none;
+    margin-top: 0.75rem;
+    overflow: visible;
+  }
+
+  .mapbox-telemetry {
+    top: 0.75rem;
+    left: 0.75rem;
+    max-width: calc(100% - 1.5rem);
+    font-size: 0.62rem;
+  }
 }

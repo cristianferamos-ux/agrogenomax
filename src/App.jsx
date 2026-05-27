@@ -389,13 +389,8 @@ function PlatformConsole() {
         <div className="grid gap-4 p-4 lg:grid-cols-[1.05fr_0.95fr]">
           
           {/* Columna Izquierda: Mapa */}
-          <div className="agrogenomax-map min-h-[300px] h-[300px] lg:min-h-[430px] lg:h-auto overflow-hidden rounded-lg border border-white/10 relative">
-            <GisMap /> 
-            <div className="scan-sweep" />
-            <div className="map-polygon map-polygon-a" />
-            <div className="map-polygon map-polygon-b" />
-            <div className="map-polygon map-polygon-c" />
-            {/* ... resto de divs internos del mapa ... */}
+          <div className="agrogenomax-map overflow-hidden rounded-lg border border-white/10 relative">
+            <GisMap compact /> 
           </div>
 
           {/* Columna Derecha: Métricas y Paneles */}

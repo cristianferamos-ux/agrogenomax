@@ -5,7 +5,7 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 // Token oficial de AgroGenomaX
 const MAPBOX_TOKEN = 'pk.eyJ1IjoiYWdyb2dlbm9tYXgiLCJhIjoiY21wbjE0aHVjMm40ajJxb3FzOW16YTFxNCJ9.F9rWrhD8JZdNwHXzs1kIqg';
 
-function GisMap() {
+function GisMap({ compact = false }) {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const userMarkerRef = useRef(null);
@@ -161,15 +161,15 @@ function GisMap() {
   }, [showLey2]);
 
   return (
-    <div className="relative w-full h-[620px] rounded-lg border border-white/10 overflow-hidden bg-black">
+    <div className={`mapbox-shell ${compact ? 'mapbox-shell-compact' : 'mapbox-shell-full'}`}>
       
       {/* Telemetría en pantalla */}
-      <div className="absolute top-4 left-4 z-10 bg-black/80 backdrop-blur-md border border-[#00ffcc]/30 px-3 py-2 rounded text-xs font-mono text-[#00ffcc]">
+      <div className="mapbox-telemetry bg-black/80 backdrop-blur-md border border-[#00ffcc]/30 px-3 py-2 rounded text-xs font-mono text-[#00ffcc]">
         AGX-OS // MAPPING_ANALYSIS: LEY_2_COLOMBIA
       </div>
 
       {/* PANEL UNIFICADO DE CONTROL */}
-      <div className="absolute top-4 right-4 z-10 bg-black/95 backdrop-blur-md border border-white/10 p-4 rounded-md flex flex-col gap-3 shadow-2xl w-64 max-h-[580px] overflow-y-auto">
+      <div className="mapbox-control-panel bg-black/95 backdrop-blur-md border border-white/10 p-4 rounded-md flex flex-col gap-3 shadow-2xl w-64 max-h-[580px] overflow-y-auto">
         
         {/* 1. BOTÓN INTERACTIVO GPS */}
         <button
@@ -277,7 +277,7 @@ function GisMap() {
       </div>
 
       {/* Contenedor del Canvas de Mapbox */}
-      <div ref={mapContainerRef} className="w-full h-full" />
+      <div ref={mapContainerRef} className="mapbox-canvas-host" />
 
       {/* Estilos del marcador radar */}
       <style>{`
