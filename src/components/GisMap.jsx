@@ -4,6 +4,8 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 
 // Token oficial de AgroGenomaX
 const MAPBOX_TOKEN = 'pk.eyJ1IjoiYWdyb2dlbm9tYXgiLCJhIjoiY21wbjE0aHVjMm40ajJxb3FzOW16YTFxNCJ9.F9rWrhD8JZdNwHXzs1kIqg';
+const RONDA_HIDRICA_TILESET = 'mapbox://agrogenomax.4eb1ph5w';
+const RONDA_HIDRICA_SOURCE_LAYER = 'Ronda_Hidrica_Caqueta-7wmye6';
 
 function GisMap({ compact = false }) {
   const mapContainerRef = useRef(null);
@@ -12,6 +14,7 @@ function GisMap({ compact = false }) {
   
   const [mapStyle, setMapStyle] = useState('mapbox://styles/mapbox/satellite-streets-v12');
   const [showLey2, setShowLey2] = useState(true);
+  const [showRondaHidrica, setShowRondaHidrica] = useState(true);
   const [isLocating, setIsLocating] = useState(false);
   const [coordInput, setCoordInput] = useState('');
 
@@ -146,6 +149,43 @@ function GisMap({ compact = false }) {
           'fill-opacity': 0.35 // Opacidad óptima para superposición satelital
         }
       });
+
+      map.addSource('source-ronda-hidrica-caqueta', {
+        type: 'vector',
+        url: RONDA_HIDRICA_TILESET
+      });
+
+      map.addLayer({
+        id: 'capa-ronda-hidrica-caqueta-relleno',
+        type: 'fill',
+        source: 'source-ronda-hidrica-caqueta',
+        'source-layer': RONDA_HIDRICA_SOURCE_LAYER,
+        layout: { 'visibility': showRondaHidrica ? 'visible' : 'none' },
+        paint: {
+          'fill-color': '#00d8ff',
+          'fill-opacity': 0.2
+        }
+      });
+
+      map.addLayer({
+        id: 'capa-ronda-hidrica-caqueta-borde',
+        type: 'line',
+        source: 'source-ronda-hidrica-caqueta',
+        'source-layer': RONDA_HIDRICA_SOURCE_LAYER,
+        layout: { 'visibility': showRondaHidrica ? 'visible' : 'none' },
+        paint: {
+          'line-color': '#00d8ff',
+          'line-opacity': 0.95,
+          'line-width': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            8, 1.1,
+            13, 2.6,
+            16, 4
+          ]
+        }
+      });
     });
 
     return () => {
@@ -160,12 +200,22 @@ function GisMap({ compact = false }) {
     }
   }, [showLey2]);
 
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    ['capa-ronda-hidrica-caqueta-relleno', 'capa-ronda-hidrica-caqueta-borde'].forEach((layerId) => {
+      if (mapRef.current.getLayer(layerId)) {
+        mapRef.current.setLayoutProperty(layerId, 'visibility', showRondaHidrica ? 'visible' : 'none');
+      }
+    });
+  }, [showRondaHidrica]);
+
   return (
     <div className={`mapbox-shell ${compact ? 'mapbox-shell-compact' : 'mapbox-shell-full'}`}>
       
       {/* Telemetría en pantalla */}
       <div className="mapbox-telemetry bg-black/80 backdrop-blur-md border border-[#00ffcc]/30 px-3 py-2 rounded text-xs font-mono text-[#00ffcc]">
-        AGX-OS // MAPPING_ANALYSIS: LEY_2_COLOMBIA
+        AGX-OS // ENVIRONMENTAL_LAYERS: LEY_2 + RONDA_HIDRICA
       </div>
 
       {/* PANEL UNIFICADO DE CONTROL */}
@@ -262,6 +312,17 @@ function GisMap({ compact = false }) {
               Zonificación Ley 2 de 1959
             </span>
           </label>
+          <label className="mt-2 flex items-center gap-2 text-xs font-mono text-gray-200 cursor-pointer select-none">
+            <input 
+              type="checkbox" 
+              checked={showRondaHidrica} 
+              onChange={(e) => setShowRondaHidrica(e.target.checked)}
+              className="accent-[#00d8ff] h-3.5 w-3.5 rounded bg-black border-white/20 cursor-pointer"
+            />
+            <span className="text-gray-300 hover:text-white transition-colors">
+              Ronda Hídrica Caquetá
+            </span>
+          </label>
         </div>
 
         {/* 5. LEYENDA SINCRO CON CÓDIGOS CORREGIDOS */}
@@ -272,6 +333,13 @@ function GisMap({ compact = false }) {
             <div className="flex items-center gap-2 text-[10px] font-mono text-gray-400"><span className="w-2.5 h-2.5 rounded-sm bg-[#e1c124]" />Zona B (Amarillo)</div>
             <div className="flex items-center gap-2 text-[10px] font-mono text-gray-400"><span className="w-2.5 h-2.5 rounded-sm bg-[#24a138]" />Zona C (Verde)</div>
             <div className="flex items-center gap-2 text-[10px] font-mono text-gray-400"><span className="w-2.5 h-2.5 rounded-sm bg-[#b55fb5]" />Área Previa Decisión (Lila)</div>
+          </div>
+        )}
+        {showRondaHidrica && (
+          <div className="bg-cyan-400/10 p-2 rounded border border-cyan-400/20 flex flex-col gap-1.5 mt-1">
+            <span className="text-[8px] font-mono text-cyan-200 uppercase tracking-wider block mb-0.5">Ronda Hídrica Caquetá</span>
+            <div className="flex items-center gap-2 text-[10px] font-mono text-gray-300"><span className="w-2.5 h-2.5 rounded-sm bg-[#00d8ff]" />Área de protección hídrica</div>
+            <div className="flex items-center gap-2 text-[10px] font-mono text-gray-400"><span className="w-5 h-0.5 rounded-sm bg-[#00d8ff]" />Borde de ronda</div>
           </div>
         )}
       </div>
