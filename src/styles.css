@@ -1336,3 +1336,13 @@ body::after {
     transition-duration: 0.01ms !important;
   }
 }
+/* Forzar altura del mapa en dispositivos móviles y escritorio */
+.mapboxgl-map {
+    height: 300px !important;
+    width: 100% !important;
+}
+
+.mapboxgl-canvas {
+    height: 300px !important;
+    width: 100% !important;
+}
