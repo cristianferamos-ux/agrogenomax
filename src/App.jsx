@@ -30,7 +30,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useState } from 'react';
-import GisMap from './Components/GisMap.jsx';
+import GisMap from './components/GisMap.jsx';
 
 // Version de despliegue 2026-05-26
 const navItems = [
