@@ -1,111 +1,110 @@
 import React, { useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 
-// ======================================================
-// TOKEN MAPBOX
-// ======================================================
-
+// TOKEN
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
 
-// ======================================================
-// COMPONENTE
-// ======================================================
+function GisMap() {
 
-function GisMap({ compact = false }) {
-
-  const mapContainerRef = useRef(null);
-  const mapRef = useRef(null);
-  const userMarkerRef = useRef(null);
-
-  // ======================================================
-  // ESTADOS
-  // ======================================================
-
-  const [mapStyle, setMapStyle] = useState(
-    'mapbox://styles/mapbox/satellite-streets-v12'
-  );
+  const mapContainer = useRef(null);
+  const map = useRef(null);
+  const markerRef = useRef(null);
 
   const [coordInput, setCoordInput] = useState('');
   const [isLocating, setIsLocating] = useState(false);
 
-  // ======================================================
-  // CONSULTA MANUAL
-  // ======================================================
+  // =====================================================
+  // INICIALIZAR MAPA
+  // =====================================================
 
-  const handleManualQuery = (e) => {
+  useEffect(() => {
 
-    e.preventDefault();
+    if (!mapContainer.current) return;
 
-    if (!coordInput.trim()) {
-      alert('Ingresa coordenadas');
-      return;
-    }
+    if (map.current) return;
 
-    const parts = coordInput.split(/[\s,]+/);
+    map.current = new mapboxgl.Map({
 
-    if (parts.length < 2) {
-      alert('Formato inválido');
-      return;
-    }
+      container: mapContainer.current,
 
-    const lat = parseFloat(parts[0]);
-    const lng = parseFloat(parts[1]);
+      style: 'mapbox://styles/mapbox/satellite-streets-v12',
 
-    if (
-      isNaN(lat) ||
-      isNaN(lng) ||
-      Math.abs(lat) > 90 ||
-      Math.abs(lng) > 180
-    ) {
-      alert('Coordenadas inválidas');
-      return;
-    }
+      center: [-75.6062, 1.6144],
 
-    if (!mapRef.current) return;
+      zoom: 8,
 
-    mapRef.current.flyTo({
-      center: [lng, lat],
-      zoom: 15,
-      essential: true
+      attributionControl: false
+
     });
 
-    // Marker
+    // CONTROLES
 
-    if (!userMarkerRef.current) {
+    map.current.addControl(
+      new mapboxgl.NavigationControl(),
+      'top-right'
+    );
 
-      const el = document.createElement('div');
-      el.className = 'user-gps-marker';
+    map.current.addControl(
+      new mapboxgl.ScaleControl({
+        unit: 'metric'
+      }),
+      'bottom-left'
+    );
 
-      userMarkerRef.current = new mapboxgl.Marker(el)
-        .setLngLat([lng, lat])
-        .setPopup(
-          new mapboxgl.Popup({ offset: 25 }).setHTML(`
-            <div style="font-size:12px;">
-              <b>Predio consultado</b><br/>
-              Lat: ${lat}<br/>
-              Lng: ${lng}
-            </div>
-          `)
-        )
-        .addTo(mapRef.current);
+    // LOAD
 
-    } else {
+    map.current.on('load', () => {
 
-      userMarkerRef.current.setLngLat([lng, lat]);
+      map.current.resize();
 
-    }
+      console.log('MAPA CARGADO');
 
-  };
+    });
 
-  // ======================================================
-  // GEOLOCALIZACIÓN GPS
-  // ======================================================
+    // ERROR
+
+    map.current.on('error', (e) => {
+
+      console.error('MAPBOX ERROR:', e);
+
+    });
+
+    // RESIZE
+
+    window.addEventListener('resize', () => {
+      if (map.current) {
+        map.current.resize();
+      }
+    });
+
+    // CLEANUP
+
+    return () => {
+
+      if (markerRef.current) {
+        markerRef.current.remove();
+      }
+
+      if (map.current) {
+        map.current.remove();
+      }
+
+    };
+
+  }, []);
+
+  // =====================================================
+  // GEOLOCALIZACIÓN
+  // =====================================================
 
   const handleGeolocate = () => {
 
     if (!navigator.geolocation) {
-      alert('Tu navegador no soporta GPS');
+
+      alert('GPS no soportado');
+
       return;
+
     }
 
     setIsLocating(true);
@@ -114,37 +113,10 @@ function GisMap({ compact = false }) {
 
       (position) => {
 
-        const { longitude, latitude } = position.coords;
+        const lng = position.coords.longitude;
+        const lat = position.coords.latitude;
 
-        if (!mapRef.current) return;
-
-        mapRef.current.flyTo({
-          center: [longitude, latitude],
-          zoom: 15,
-          essential: true
-        });
-
-        if (!userMarkerRef.current) {
-
-          const el = document.createElement('div');
-          el.className = 'user-gps-marker';
-
-          userMarkerRef.current = new mapboxgl.Marker(el)
-            .setLngLat([longitude, latitude])
-            .setPopup(
-              new mapboxgl.Popup({ offset: 25 }).setHTML(`
-                <div style="font-size:12px;">
-                  Tu ubicación actual
-                </div>
-              `)
-            )
-            .addTo(mapRef.current);
-
-        } else {
-
-          userMarkerRef.current.setLngLat([longitude, latitude]);
-
-        }
+        flyToLocation(lat, lng);
 
         setIsLocating(false);
 
@@ -162,130 +134,179 @@ function GisMap({ compact = false }) {
 
       {
         enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0
+        timeout: 10000
       }
 
     );
 
   };
 
-  // ======================================================
-  // MAPA PRINCIPAL
-  // ======================================================
+  // =====================================================
+  // CONSULTA MANUAL
+  // =====================================================
 
-  useEffect(() => {
+  const handleManualQuery = (e) => {
 
-    if (!mapContainerRef.current) return;
+    e.preventDefault();
 
-    // Verificación token
+    if (!coordInput.trim()) {
 
-    if (!mapboxgl.accessToken) {
-
-      console.error('MAPBOX TOKEN NO CONFIGURADO');
+      alert('Ingresa coordenadas');
 
       return;
+
     }
 
-    const map = new mapboxgl.Map({
+    const parts = coordInput.split(/[\s,]+/);
 
-      container: mapContainerRef.current,
+    if (parts.length < 2) {
 
-      style: mapStyle,
+      alert('Formato inválido');
 
-      center: [-75.6062, 1.6144],
+      return;
 
-      zoom: 9,
+    }
 
-      pitch: 0,
+    const lat = parseFloat(parts[0]);
+    const lng = parseFloat(parts[1]);
 
-      attributionControl: false
+    if (
+      isNaN(lat) ||
+      isNaN(lng) ||
+      Math.abs(lat) > 90 ||
+      Math.abs(lng) > 180
+    ) {
 
-    });
+      alert('Coordenadas inválidas');
 
-    mapRef.current = map;
+      return;
 
-    // ======================================================
-    // CONTROLES
-    // ======================================================
+    }
 
-    map.addControl(
-      new mapboxgl.NavigationControl(),
-      'top-right'
-    );
+    flyToLocation(lat, lng);
 
-    map.addControl(
-      new mapboxgl.ScaleControl({
-        unit: 'metric'
-      }),
-      'bottom-left'
-    );
+  };
 
-    // ======================================================
-    // EVENTO LOAD
-    // ======================================================
+  // =====================================================
+  // IR A UBICACIÓN
+  // =====================================================
 
-    map.on('load', () => {
+  const flyToLocation = (lat, lng) => {
 
-      console.log('Mapa cargado correctamente');
+    if (!map.current) return;
 
-    });
+    map.current.flyTo({
 
-    // ======================================================
-    // ERROR MAPBOX
-    // ======================================================
+      center: [lng, lat],
 
-    map.on('error', (e) => {
+      zoom: 15,
 
-      console.error('MAPBOX ERROR:', e);
+      essential: true
 
     });
 
-    // ======================================================
-    // CLEANUP
-    // ======================================================
+    // MARKER
 
-    return () => {
+    if (!markerRef.current) {
 
-      if (userMarkerRef.current) {
-        userMarkerRef.current.remove();
-      }
+      const el = document.createElement('div');
 
-      map.remove();
+      el.className = 'gps-marker';
 
-    };
+      markerRef.current = new mapboxgl.Marker(el)
+        .setLngLat([lng, lat])
+        .setPopup(
+          new mapboxgl.Popup({ offset: 25 }).setHTML(`
+            <div style="font-size:12px;">
+              <b>Predio consultado</b><br/>
+              Lat: ${lat}<br/>
+              Lng: ${lng}
+            </div>
+          `)
+        )
+        .addTo(map.current);
 
-  }, [mapStyle]);
+    } else {
 
-  // ======================================================
+      markerRef.current.setLngLat([lng, lat]);
+
+    }
+
+  };
+
+  // =====================================================
   // UI
-  // ======================================================
+  // =====================================================
 
   return (
 
     <div
-      className={`relative w-full h-full rounded-xl overflow-hidden ${
-        compact ? 'min-h-[500px]' : 'min-h-[700px]'
-      }`}
+      style={{
+        width: '100%',
+        display: 'flex',
+        flexDirection: window.innerWidth < 768 ? 'column' : 'row',
+        gap: '16px',
+        alignItems: 'stretch'
+      }}
     >
 
       {/* MAPA */}
 
       <div
-        ref={mapContainerRef}
-        className="absolute inset-0"
-      />
+        style={{
+          flex: 1,
+          position: 'relative',
+          minHeight: window.innerWidth < 768 ? '450px' : '700px',
+          height: window.innerWidth < 768 ? '450px' : '700px',
+          borderRadius: '18px',
+          overflow: 'hidden',
+          background: '#111'
+        }}
+      >
+
+        <div
+          ref={mapContainer}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%'
+          }}
+        />
+
+      </div>
 
       {/* PANEL */}
 
-      <div className="absolute top-4 left-4 z-10 bg-black/80 backdrop-blur-md border border-white/10 rounded-lg p-4 w-72 flex flex-col gap-3">
+      <div
+        style={{
+          width: window.innerWidth < 768 ? '100%' : '320px',
+          background: 'rgba(0,0,0,0.85)',
+          backdropFilter: 'blur(12px)',
+          border: '1px solid rgba(255,255,255,0.08)',
+          borderRadius: '18px',
+          padding: '18px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '14px'
+        }}
+      >
 
         {/* GPS */}
 
         <button
           onClick={handleGeolocate}
           disabled={isLocating}
-          className="bg-cyan-500 hover:bg-cyan-400 text-white px-4 py-2 rounded font-semibold"
+          style={{
+            background: '#06b6d4',
+            color: 'white',
+            border: 'none',
+            borderRadius: '12px',
+            padding: '14px',
+            fontWeight: '700',
+            fontSize: '16px',
+            cursor: 'pointer'
+          }}
         >
           {isLocating ? 'Buscando GPS...' : '📍 Mi ubicación'}
         </button>
@@ -294,7 +315,11 @@ function GisMap({ compact = false }) {
 
         <form
           onSubmit={handleManualQuery}
-          className="flex flex-col gap-2"
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px'
+          }}
         >
 
           <input
@@ -302,75 +327,62 @@ function GisMap({ compact = false }) {
             value={coordInput}
             onChange={(e) => setCoordInput(e.target.value)}
             placeholder="Latitud, Longitud"
-            className="px-3 py-2 rounded bg-white text-black"
+            style={{
+              padding: '14px',
+              borderRadius: '12px',
+              border: 'none',
+              fontSize: '15px'
+            }}
           />
 
           <button
             type="submit"
-            className="bg-cyan-500 hover:bg-cyan-400 text-white px-4 py-2 rounded font-semibold"
+            style={{
+              background: '#06b6d4',
+              color: 'white',
+              border: 'none',
+              borderRadius: '12px',
+              padding: '14px',
+              fontWeight: '700',
+              cursor: 'pointer'
+            }}
           >
             Consultar
           </button>
 
         </form>
 
-        {/* ESTILOS */}
-
-        <div className="flex flex-col gap-2">
-
-          <button
-            onClick={() =>
-              setMapStyle('mapbox://styles/mapbox/satellite-streets-v12')
-            }
-            className="bg-white/10 hover:bg-white/20 text-white px-3 py-2 rounded text-sm"
-          >
-            🛰️ Satelital
-          </button>
-
-          <button
-            onClick={() =>
-              setMapStyle('mapbox://styles/mapbox/dark-v11')
-            }
-            className="bg-white/10 hover:bg-white/20 text-white px-3 py-2 rounded text-sm"
-          >
-            🌑 Oscuro
-          </button>
-
-        </div>
-
       </div>
 
-      {/* ESTILOS MARKER */}
+      {/* ESTILOS */}
 
       <style>{`
 
-        .user-gps-marker {
+        .gps-marker {
 
-          width: 18px;
-          height: 18px;
+          width: 20px;
+          height: 20px;
 
           background: #00d8ff;
 
-          border: 3px solid white;
-
           border-radius: 50%;
 
-          box-shadow: 0 0 12px rgba(0,216,255,0.7);
+          border: 3px solid white;
+
+          box-shadow: 0 0 12px rgba(0,216,255,0.8);
 
           animation: pulseGps 2s infinite;
-
-          cursor: pointer;
 
         }
 
         @keyframes pulseGps {
 
           0% {
-            box-shadow: 0 0 0 0 rgba(0,216,255,0.7);
+            box-shadow: 0 0 0 0 rgba(0,216,255,0.8);
           }
 
           70% {
-            box-shadow: 0 0 0 16px rgba(0,216,255,0);
+            box-shadow: 0 0 0 18px rgba(0,216,255,0);
           }
 
           100% {
