@@ -19,6 +19,7 @@
 
 html {
   scroll-behavior: smooth;
+  scroll-padding-top: 8.5rem;
 }
 
 body {
@@ -52,6 +53,10 @@ body::after {
     linear-gradient(90deg, transparent 0 8%, rgba(156, 255, 26, 0.05) 8.2%, transparent 8.4% 100%),
     linear-gradient(124deg, transparent 0 51%, rgba(0, 216, 255, 0.08) 51.15%, transparent 51.45% 100%),
     linear-gradient(64deg, transparent 0 38%, rgba(156, 255, 26, 0.06) 38.15%, transparent 38.4% 100%);
+}
+
+header nav > div[role='navigation']::-webkit-scrollbar {
+  display: none;
 }
 
 ::selection {
@@ -1633,6 +1638,14 @@ body::after {
 }
 
 @media (max-width: 640px) {
+  html {
+    scroll-padding-top: 9.5rem;
+  }
+
+  header nav > div[role='navigation'] {
+    padding-bottom: 0.15rem;
+  }
+
   .brand-showcase {
     min-height: 520px;
   }

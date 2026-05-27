@@ -264,29 +264,39 @@ function App() {
 function Header() {
   return (
     <header className="fixed inset-x-0 top-0 z-50 border-b border-white/10 bg-void/70 backdrop-blur-2xl">
-      <nav className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 lg:px-8">
-        <a href="#inicio" className="group flex items-center gap-3" aria-label="AgroGenomaX inicio">
+      <nav className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5 lg:flex-nowrap lg:px-8 lg:py-4">
+        <a href="#inicio" className="group flex min-w-0 shrink-0 items-center gap-3" aria-label="AgroGenomaX inicio">
           <span className="grid h-10 w-10 place-items-center rounded-md border border-neon/35 bg-neon/[0.08] shadow-neon transition group-hover:border-aqua/60">
             <Dna className="h-5 w-5 text-neon" />
           </span>
-          <span className="font-display text-lg font-bold tracking-[0.08em]">
+          <span className="font-display text-base font-bold tracking-[0.06em] sm:text-lg sm:tracking-[0.08em]">
             Agro<span className="text-neon">Genoma</span><span className="text-aqua">X</span>
           </span>
         </a>
-        <div className="hidden items-center gap-7 text-sm font-medium text-steel lg:flex">
+        <div
+          role="navigation"
+          aria-label="Secciones principales"
+          className="order-3 -mx-4 flex w-[calc(100%+2rem)] items-center gap-2 overflow-x-auto border-t border-white/10 px-4 pt-3 text-sm font-medium text-steel [scrollbar-width:none] sm:-mx-5 sm:w-[calc(100%+2.5rem)] sm:px-5 lg:order-none lg:mx-0 lg:w-auto lg:gap-7 lg:overflow-visible lg:border-t-0 lg:px-0 lg:pt-0"
+        >
           {navItems.map(([label, target]) => (
-            <a key={target} href={`#${target}`} className="transition hover:text-white">
+            <a
+              key={target}
+              href={`#${target}`}
+              className="shrink-0 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 transition hover:border-neon/35 hover:text-white lg:border-0 lg:bg-transparent lg:px-0 lg:py-0"
+            >
               {label}
             </a>
           ))}
         </div>
+        <div className="flex shrink-0 items-center gap-2">
         <a
           href="#contacto"
-          className="hidden items-center gap-2 rounded-full border border-aqua/35 bg-aqua/[0.06] px-5 py-2 text-sm font-semibold text-aqua shadow-aqua transition hover:border-neon/60 hover:text-neon sm:inline-flex"
+          className="hidden items-center gap-2 rounded-full border border-aqua/35 bg-aqua/[0.06] px-4 py-2 text-sm font-semibold text-aqua shadow-aqua transition hover:border-neon/60 hover:text-neon sm:inline-flex lg:px-5"
         >
           Solicitar demo <ArrowRight className="h-4 w-4" />
         </a>
         <InstallPwaButton />
+        </div>
       </nav>
     </header>
   );
@@ -336,16 +346,18 @@ function InstallPwaButton() {
     <button
       type="button"
       onClick={handleInstall}
-      className="hidden items-center gap-2 rounded-full border border-neon/35 bg-neon/[0.08] px-5 py-2 text-sm font-semibold text-neon shadow-neon transition hover:border-aqua/60 hover:text-aqua md:inline-flex"
+      className="inline-flex shrink-0 items-center gap-2 rounded-full border border-neon/35 bg-neon/[0.08] px-3 py-2 text-sm font-semibold text-neon shadow-neon transition hover:border-aqua/60 hover:text-aqua sm:px-5"
     >
-      Instalar app <Download className="h-4 w-4" />
+      <span className="sm:hidden">Instalar</span>
+      <span className="hidden sm:inline">Instalar app</span>
+      <Download className="h-4 w-4" />
     </button>
   );
 }
 
 function Hero() {
   return (
-    <section id="inicio" className="relative min-h-screen px-5 pt-28 lg:px-8">
+    <section id="inicio" className="relative min-h-screen px-5 pt-40 sm:pt-32 lg:px-8 lg:pt-28">
       <div className="absolute inset-0 -z-10 overflow-hidden">
         <div className="data-beam left-[12%] top-[-8%] h-[120%] rotate-[22deg] bg-neon/25" />
         <div className="data-beam right-[18%] top-[-6%] h-[112%] -rotate-[18deg] bg-aqua/25" />
