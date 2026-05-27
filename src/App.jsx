@@ -387,7 +387,7 @@ function PlatformConsole() {
           </span>
         </div>
         <div className="grid gap-4 p-4 lg:grid-cols-[1.05fr_0.95fr]">
-          <div className="satellite-map min-h-[430px] overflow-hidden rounded-lg border border-white/10">
+          <div className="agrogenomax-map min-h-[300px] h-[300px] lg:min-h-[430px] lg:h-auto overflow-hidden rounded-lg border border-white/10">
             <div className="absolute inset-x-6 top-5 z-10 flex items-center justify-between text-xs uppercase tracking-[0.2em] text-aqua">
               <span>GIS / Tropics</span>
               <span>Lat 04.63 / Lon -74.08</span>
