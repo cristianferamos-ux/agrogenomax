@@ -2247,4 +2247,456 @@ header nav > div[role='navigation']::-webkit-scrollbar {
     transition-duration: 0.01ms !important;
   }
 }
+
+.gan-home-gateway {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  border: 1px solid rgba(156, 255, 26, 0.28);
+  border-radius: 0.75rem;
+  background:
+    linear-gradient(135deg, rgba(156, 255, 26, 0.12), rgba(0, 216, 255, 0.06)),
+    rgba(5, 11, 16, 0.88);
+  padding: 1.25rem;
+  color: #f7fbff;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.32), 0 0 34px rgba(156, 255, 26, 0.12);
+  text-decoration: none;
+  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
+}
+
+.gan-home-gateway:hover {
+  border-color: rgba(0, 216, 255, 0.55);
+  transform: translateY(-2px);
+}
+
+.gan-home-gateway span,
+.gan-eyebrow {
+  display: block;
+  color: #00d8ff;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.gan-home-gateway strong {
+  display: block;
+  margin-top: 0.45rem;
+  font-family: Space Grotesk, Inter, sans-serif;
+  font-size: clamp(1.45rem, 3vw, 2.25rem);
+}
+
+.gan-home-gateway p {
+  margin: 0.35rem 0 0;
+  color: #a7b3c2;
+}
+
+.gan-page {
+  min-height: 100vh;
+  background:
+    linear-gradient(120deg, rgba(0, 216, 255, 0.07), transparent 22%, transparent 78%, rgba(156, 255, 26, 0.08)),
+    #020508;
+  color: #f7fbff;
+  padding: 1rem;
+}
+
+.gan-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1.5rem;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 1rem 0 1.25rem;
+}
+
+.gan-header h1 {
+  margin: 0.5rem 0 0;
+  font-family: Space Grotesk, Inter, sans-serif;
+  font-size: clamp(2rem, 4vw, 4rem);
+  line-height: 1;
+}
+
+.gan-header p,
+.gan-section-heading p {
+  max-width: 720px;
+  margin: 0.6rem 0 0;
+  color: #a7b3c2;
+  line-height: 1.7;
+}
+
+.gan-back,
+.gan-back-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #9cff1a;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.gan-health-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid rgba(0, 216, 255, 0.24);
+  border-radius: 999px;
+  background: rgba(0, 216, 255, 0.07);
+  padding: 0.7rem 1rem;
+  color: #00d8ff;
+  font-size: 0.85rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.gan-layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 1rem;
+  max-width: 1440px;
+  margin: 0 auto;
+}
+
+.gan-tabs {
+  position: sticky;
+  top: 1rem;
+  align-self: start;
+  display: grid;
+  gap: 0.4rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.75rem;
+  background: rgba(5, 11, 16, 0.88);
+  padding: 0.6rem;
+}
+
+.gan-tabs a {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  border: 1px solid transparent;
+  border-radius: 0.55rem;
+  padding: 0.85rem;
+  color: #a7b3c2;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.gan-tabs a.active,
+.gan-tabs a:hover {
+  border-color: rgba(156, 255, 26, 0.3);
+  background: rgba(156, 255, 26, 0.08);
+  color: #f7fbff;
+}
+
+.gan-content,
+.gan-stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.gan-panel,
+.gan-card {
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 0.75rem;
+  background: linear-gradient(180deg, rgba(8, 16, 23, 0.96), rgba(2, 5, 8, 0.96));
+  padding: clamp(1rem, 2vw, 1.5rem);
+}
+
+.gan-hero-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.gan-section-heading h2,
+.gan-section-heading h3,
+.gan-hero-panel h2 {
+  margin: 0.45rem 0 0;
+  font-family: Space Grotesk, Inter, sans-serif;
+  font-size: clamp(1.6rem, 3vw, 2.6rem);
+  line-height: 1.05;
+}
+
+.gan-card-grid,
+.gan-qr-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.gan-card {
+  display: grid;
+  gap: 0.7rem;
+  color: #f7fbff;
+  text-decoration: none;
+}
+
+.gan-card svg,
+.gan-home-gateway svg {
+  color: #9cff1a;
+}
+
+.gan-card span,
+.gan-list-row span {
+  color: #a7b3c2;
+}
+
+.gan-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+.gan-field {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.gan-field span {
+  color: #a7b3c2;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.gan-field b {
+  color: #9cff1a;
+}
+
+.gan-field input,
+.gan-field select,
+.gan-field textarea,
+.gan-manual-qr input,
+.gan-breed-row select,
+.gan-breed-row input {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 0.55rem;
+  background: rgba(2, 5, 8, 0.8);
+  color: #f7fbff;
+  padding: 0.9rem 1rem;
+  outline: none;
+}
+
+.gan-field textarea {
+  min-height: 104px;
+  resize: vertical;
+}
+
+.gan-submit,
+.gan-secondary-button,
+.gan-primary-action,
+.gan-segment button,
+.gan-breed-row button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.9rem 1.15rem;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.gan-submit,
+.gan-primary-action {
+  background: #9cff1a;
+  color: #020508;
+}
+
+.gan-secondary-button,
+.gan-breed-row button {
+  border: 1px solid rgba(0, 216, 255, 0.28);
+  background: rgba(0, 216, 255, 0.08);
+  color: #00d8ff;
+}
+
+.gan-primary-action {
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.gan-status {
+  margin-top: 1rem;
+  border-radius: 0.6rem;
+  padding: 0.85rem 1rem;
+  font-weight: 750;
+}
+
+.gan-status-success {
+  border: 1px solid rgba(156, 255, 26, 0.24);
+  background: rgba(156, 255, 26, 0.08);
+  color: #9cff1a;
+}
+
+.gan-status-error {
+  border: 1px solid rgba(255, 99, 99, 0.28);
+  background: rgba(255, 99, 99, 0.08);
+  color: #ffb4b4;
+}
+
+.gan-list {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 1rem;
+}
+
+.gan-list-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 0.9rem 1rem;
+}
+
+.gan-qr-grid {
+  grid-template-columns: 1fr 1fr;
+  margin-top: 1rem;
+}
+
+.gan-manual-qr,
+.gan-scanner {
+  display: grid;
+  gap: 1rem;
+}
+
+#agx-html5-qr-reader {
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.75rem;
+  min-height: 260px;
+  background: #020508;
+}
+
+.gan-action-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+
+.gan-breed-box {
+  grid-column: 1 / -1;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 1rem;
+}
+
+.gan-segment {
+  display: inline-flex;
+  gap: 0.4rem;
+  margin: 1rem 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  padding: 0.25rem;
+}
+
+.gan-segment button {
+  background: transparent;
+  color: #a7b3c2;
+}
+
+.gan-segment button.is-active {
+  background: #00d8ff;
+  color: #020508;
+}
+
+.gan-breed-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px auto;
+  gap: 0.7rem;
+  margin-top: 0.65rem;
+}
+
+.gan-total-ok {
+  color: #9cff1a;
+}
+
+.gan-total-bad {
+  color: #ffb4b4;
+}
+
+.gan-ficha-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.gan-ficha-tabs button {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #a7b3c2;
+  padding: 0.65rem 0.85rem;
+}
+
+.gan-ficha-tabs button.is-active {
+  border-color: rgba(156, 255, 26, 0.3);
+  color: #9cff1a;
+}
+
+.gan-ficha-tabs button:disabled {
+  opacity: 0.48;
+}
+
+@media (max-width: 900px) {
+  .gan-header,
+  .gan-hero-panel,
+  .gan-home-gateway {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .gan-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .gan-tabs {
+    position: static;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .gan-card-grid,
+  .gan-qr-grid,
+  .gan-form {
+    grid-template-columns: 1fr;
+  }
+
+  .gan-breed-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .gan-page {
+    padding: 0.75rem;
+  }
+
+  .gan-tabs {
+    grid-template-columns: 1fr;
+  }
+
+  .gan-tabs a,
+  .gan-submit,
+  .gan-secondary-button,
+  .gan-primary-action {
+    min-height: 52px;
+    width: 100%;
+  }
+
+  .gan-health-pill {
+    width: 100%;
+    justify-content: center;
+  }
+}
 /* Forzar altura del mapa en dispositivos móviles y escritorio */

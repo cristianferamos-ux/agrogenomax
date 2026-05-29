@@ -31,7 +31,8 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { lazy, Suspense, useEffect, useState } from 'react';
-import LivestockPlatform from './components/LivestockPlatform.jsx';
+import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
+import GanaderiaApp from './modules/ganaderia/GanaderiaApp.jsx';
 
 const GisMap = lazy(() => import('./components/GisMap.jsx'));
 
@@ -39,7 +40,6 @@ const GisMap = lazy(() => import('./components/GisMap.jsx'));
 const navItems = [
   ['Plataforma', 'sobre'],
   ['Servicios', 'servicios'],
-  ['Gestion Ganadera', 'gestion-ganadera'],
   ['GIS', 'gis'],
   ['Regenerativa', 'ganaderia-regenerativa'],
   ['IA', 'analitica'],
@@ -251,6 +251,18 @@ const fadeUp = {
 };
 
 function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/ganaderia/*" element={<GanaderiaApp />} />
+        <Route path="/qr/:codigo" element={<GanaderiaApp />} />
+      </Routes>
+    </BrowserRouter>
+  );
+}
+
+function HomePage() {
   useEffect(() => {
     const syncHashScroll = () => {
       const target = window.location.hash.replace('#', '');
@@ -268,7 +280,7 @@ function App() {
     <main className="min-h-screen overflow-hidden bg-void text-white">
       <div className="fixed inset-0 -z-10 bg-[linear-gradient(180deg,rgba(2,5,8,0.34),#020508_48%,#020508)]" />
       <Header />
-      <LivestockPlatform />
+      <GanaderiaGateway />
       <Hero />
       <About />
       <FieldOperations />
@@ -283,6 +295,23 @@ function App() {
       <Contact />
       <Footer />
       </main>
+  );
+}
+
+function GanaderiaGateway() {
+  return (
+    <section className="px-5 pb-8 pt-36 sm:pt-32 lg:px-8">
+      <div className="mx-auto max-w-7xl">
+        <Link to="/ganaderia" className="gan-home-gateway">
+          <div>
+            <span>Nuevo módulo cerrado</span>
+            <strong>AgroGenomaX Ganadería Inteligente</strong>
+            <p>Entrar al registro por QR, predios, potreros y ficha animal.</p>
+          </div>
+          <ArrowRight className="h-6 w-6" />
+        </Link>
+      </div>
+    </section>
   );
 }
 
