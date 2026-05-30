@@ -19,6 +19,18 @@ function todayLocal() {
   return new Date(now.getTime() - timezoneOffset).toISOString().slice(0, 10);
 }
 
+function isCommaDecimalInput(value) {
+  return /^\d*(,\d{0,2})?$/.test(value);
+}
+
+function isValidCommaDecimal(value) {
+  return /^\d+(,\d{1,2})?$/.test(value);
+}
+
+function toApiDecimal(value) {
+  return value.replace(',', '.');
+}
+
 function valueOf(row, aliases) {
   return aliases.map((key) => row?.[key]).find((value) => value !== undefined && value !== null) || '';
 }
@@ -127,6 +139,9 @@ export default function AnimalPesajesTab({ animalId }) {
   );
 
   const update = (field, value) => setForm((current) => ({ ...current, [field]: value }));
+  const updateWeight = (value) => {
+    if (isCommaDecimalInput(value)) update('peso_kg', value);
+  };
 
   const submit = async (event) => {
     event.preventDefault();
@@ -148,7 +163,12 @@ export default function AnimalPesajesTab({ animalId }) {
       return;
     }
 
-    const nextWeight = Number(form.peso_kg);
+    if (!isValidCommaDecimal(form.peso_kg)) {
+      setError('Ingresa el peso con coma y maximo dos decimales. Ejemplo: 56,45.');
+      return;
+    }
+
+    const nextWeight = Number(toApiDecimal(form.peso_kg));
     if (!Number.isFinite(nextWeight) || nextWeight <= 0) {
       setError('El peso debe ser mayor que 0.');
       return;
@@ -166,7 +186,7 @@ export default function AnimalPesajesTab({ animalId }) {
       await ganaderiaApi.createPesaje({
         animal_id: resolvedAnimalId,
         fecha_pesaje: form.fecha_pesaje,
-        peso_kg: form.peso_kg,
+        peso_kg: toApiDecimal(form.peso_kg),
         observaciones: form.observaciones,
       });
       setForm({ fecha_pesaje: todayLocal(), peso_kg: '', observaciones: '' });
@@ -214,11 +234,11 @@ export default function AnimalPesajesTab({ animalId }) {
         </FormField>
         <FormField label="Peso kg">
           <input
-            min="0.01"
-            step="0.01"
-            type="number"
+            inputMode="decimal"
+            pattern="[0-9]+(,[0-9]{1,2})?"
+            placeholder="56,45"
             value={form.peso_kg}
-            onChange={(event) => update('peso_kg', event.target.value)}
+            onChange={(event) => updateWeight(event.target.value)}
             required
           />
         </FormField>

@@ -31,6 +31,22 @@ function valueOf(animal, field) {
   return aliases[field]?.map((key) => animal?.[key]).find((value) => value !== undefined && value !== null) || '';
 }
 
+function isCommaDecimalInput(value) {
+  return /^\d*(,\d{0,2})?$/.test(value);
+}
+
+function isValidCommaDecimal(value) {
+  return value === '' || /^\d+(,\d{1,2})?$/.test(value);
+}
+
+function toCommaDecimal(value) {
+  return value === '' ? '' : String(value).replace('.', ',');
+}
+
+function toApiDecimal(value) {
+  return value === '' ? '' : String(value).replace(',', '.');
+}
+
 export default function AnimalFichaBasica() {
   const { id } = useParams();
   const [animal, setAnimal] = useState(null);
@@ -44,19 +60,38 @@ export default function AnimalFichaBasica() {
       .then(([row, razaRows]) => {
         setAnimal(row);
         setRazas(razaRows);
-        setForm(Object.fromEntries(fields.map(([field]) => [field, valueOf(row, field)])));
+        setForm(
+          Object.fromEntries(
+            fields.map(([field]) => {
+              const value = valueOf(row, field);
+              return [field, field === 'peso_nacimiento' ? toCommaDecimal(value) : value];
+            }),
+          ),
+        );
       })
       .catch((err) => setError(err.message));
   }, [id]);
 
   const update = (field, value) => setForm((current) => ({ ...current, [field]: value }));
+  const updateWeight = (value) => {
+    if (isCommaDecimalInput(value)) update('peso_nacimiento', value);
+  };
 
   const submit = async (event) => {
     event.preventDefault();
     setError('');
     setStatus('');
+
+    if (!isValidCommaDecimal(form.peso_nacimiento || '')) {
+      setError('Ingresa el peso nacimiento con coma y maximo dos decimales. Ejemplo: 56,45.');
+      return;
+    }
+
     try {
-      const updated = await ganaderiaApi.updateAnimal(id, form);
+      const updated = await ganaderiaApi.updateAnimal(id, {
+        ...form,
+        peso_nacimiento: toApiDecimal(form.peso_nacimiento || ''),
+      });
       setAnimal(updated);
       setStatus('Ficha basica actualizada en PostgreSQL.');
     } catch (err) {
@@ -132,7 +167,13 @@ export default function AnimalFichaBasica() {
             <input type="date" value={String(form.fecha_nacimiento || '').slice(0, 10)} onChange={(event) => update('fecha_nacimiento', event.target.value)} />
           </FormField>
           <FormField label="Peso nacimiento">
-            <input type="number" value={form.peso_nacimiento || ''} onChange={(event) => update('peso_nacimiento', event.target.value)} />
+            <input
+              inputMode="decimal"
+              pattern="[0-9]+(,[0-9]{1,2})?"
+              placeholder="56,45"
+              value={form.peso_nacimiento || ''}
+              onChange={(event) => updateWeight(event.target.value)}
+            />
           </FormField>
           <FormField label="Color">
             <input value={form.color || ''} onChange={(event) => update('color', event.target.value)} />

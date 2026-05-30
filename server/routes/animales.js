@@ -51,6 +51,19 @@ function validateBreedPayload(tipoRaza, razas = []) {
   }
 }
 
+function parseDecimal(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const normalized = String(value).trim().replace(',', '.');
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : null;
+}
+
+function todayLocal() {
+  const now = new Date();
+  const timezoneOffset = now.getTimezoneOffset() * 60000;
+  return new Date(now.getTime() - timezoneOffset).toISOString().slice(0, 10);
+}
+
 async function insertAnimalBreeds(client, animalId, razas, tipoRaza) {
   const columns = await getColumns('animal_razas');
   const animalColumn = pickColumn(columns, ['animal_id', 'id_animal']);
@@ -153,6 +166,10 @@ router.post('/', async (req, res, next) => {
       throw Object.assign(new Error('El sexo debe ser Macho o Hembra.'), { status: 400 });
     }
 
+    if (req.body.peso_nacimiento && (!parseDecimal(req.body.peso_nacimiento) || parseDecimal(req.body.peso_nacimiento) <= 0)) {
+      throw Object.assign(new Error('El peso al nacimiento debe ser mayor que 0.'), { status: 400 });
+    }
+
     validateBreedPayload(tipo_raza, razas);
 
     await client.query('begin');
@@ -166,7 +183,11 @@ router.post('/', async (req, res, next) => {
     }
 
     const animalColumns = await getColumns('animales');
-    const payload = pickPayload(animalColumns, req.body, animalAliases);
+    const normalizedBody = {
+      ...req.body,
+      peso_nacimiento: parseDecimal(req.body.peso_nacimiento) ?? req.body.peso_nacimiento,
+    };
+    const payload = pickPayload(animalColumns, normalizedBody, animalAliases);
     const animalQrColumn = pickColumn(animalColumns, ['qr_id', 'qr_code_id', 'id_qr']);
     const qrIdColumn = idColumnFor('qr_codes', qrColumns);
     if (animalQrColumn && qrIdColumn && qr[qrIdColumn]) payload[animalQrColumn] = qr[qrIdColumn];
@@ -177,6 +198,28 @@ router.post('/', async (req, res, next) => {
     const animalId = animal[animalIdColumn];
 
     await insertAnimalBreeds(client, animalId, razas, tipo_raza);
+
+    const pesoNacimiento = parseDecimal(req.body.peso_nacimiento);
+    if (pesoNacimiento && pesoNacimiento > 0) {
+      const pesajeColumns = await getColumns('pesajes');
+      const pesajeAnimalColumn = pickColumn(pesajeColumns, ['animal_id', 'id_animal']);
+      const fechaColumn = pickColumn(pesajeColumns, ['fecha_pesaje', 'fecha', 'weighing_date']);
+      const pesoColumn = pickColumn(pesajeColumns, ['peso_kg', 'peso', 'weight_kg']);
+      const observacionesColumn = pickColumn(pesajeColumns, ['observaciones', 'notes']);
+
+      if (pesajeAnimalColumn && fechaColumn && pesoColumn) {
+        await insertDynamic(
+          'pesajes',
+          {
+            [pesajeAnimalColumn]: animalId,
+            [fechaColumn]: req.body.fecha_nacimiento || todayLocal(),
+            [pesoColumn]: pesoNacimiento,
+            ...(observacionesColumn ? { [observacionesColumn]: 'Peso inicial registrado al nacimiento' } : {}),
+          },
+          client,
+        );
+      }
+    }
 
     const qrAnimalColumn = pickColumn(qrColumns, ['animal_id', 'id_animal']);
     const qrStatusColumn = pickColumn(qrColumns, ['estado', 'status']);
@@ -206,7 +249,11 @@ router.post('/', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const columns = await getColumns('animales');
-    const payload = pickPayload(columns, req.body, animalAliases);
+    const normalizedBody = {
+      ...req.body,
+      peso_nacimiento: parseDecimal(req.body.peso_nacimiento) ?? req.body.peso_nacimiento,
+    };
+    const payload = pickPayload(columns, normalizedBody, animalAliases);
     const row = await updateDynamic('animales', req.params.id, payload);
 
     if (!row) {

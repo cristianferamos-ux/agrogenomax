@@ -24,7 +24,7 @@ async function ensureAnimalExists(animalId) {
 }
 
 function validatePesajePayload(payload) {
-  const pesoKg = Number(payload.peso_kg);
+  const pesoKg = Number(String(payload.peso_kg || '').replace(',', '.'));
   const fechaPesaje = String(payload.fecha_pesaje || '').slice(0, 10);
 
   if (!payload.animal_id) {
@@ -111,7 +111,7 @@ router.post('/pesajes', async (req, res, next) => {
     const pesoColumn = pickColumn(columns, pesajeAliases.peso_kg);
 
     if (pesoColumn) {
-      payload[pesoColumn] = Number(req.body.peso_kg);
+      payload[pesoColumn] = Number(String(req.body.peso_kg).replace(',', '.'));
     }
 
     const row = await insertDynamic('pesajes', payload);

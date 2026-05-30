@@ -17,6 +17,18 @@ const initialForm = {
   tipo_raza: '',
 };
 
+function isCommaDecimalInput(value) {
+  return /^\d*(,\d{0,2})?$/.test(value);
+}
+
+function isValidCommaDecimal(value) {
+  return value === '' || /^\d+(,\d{1,2})?$/.test(value);
+}
+
+function toApiDecimal(value) {
+  return value === '' ? '' : value.replace(',', '.');
+}
+
 export default function AnimalInitialForm({ codigoQr, onCreated }) {
   const [form, setForm] = useState(initialForm);
   const [predios, setPredios] = useState([]);
@@ -49,6 +61,9 @@ export default function AnimalInitialForm({ codigoQr, onCreated }) {
   );
 
   const update = (field, value) => setForm((current) => ({ ...current, [field]: value }));
+  const updateWeight = (field, value) => {
+    if (isCommaDecimalInput(value)) update(field, value);
+  };
   const updateRaza = (index, field, value) => {
     setSelectedRazas((current) =>
       current.map((item, itemIndex) => (itemIndex === index ? { ...item, [field]: value } : item)),
@@ -72,6 +87,7 @@ export default function AnimalInitialForm({ codigoQr, onCreated }) {
     if (!form.potrero_id) return setError('Selecciona un potrero asociado al predio.');
     if (!['Macho', 'Hembra'].includes(form.sexo)) return setError('Selecciona sexo Macho o Hembra.');
     if (!['puro', 'cruzado'].includes(form.tipo_raza)) return setError('Selecciona si el animal es puro o cruzado.');
+    if (!isValidCommaDecimal(form.peso_nacimiento)) return setError('Ingresa el peso al nacimiento con coma y máximo dos decimales. Ejemplo: 56,45.');
     if (form.tipo_raza === 'cruzado' && selectedRazas.some((item) => !item.raza_id || Number(item.porcentaje || 0) <= 0)) {
       return setError('Selecciona cada raza e ingresa porcentajes mayores a cero.');
     }
@@ -83,6 +99,7 @@ export default function AnimalInitialForm({ codigoQr, onCreated }) {
     try {
       const animal = await ganaderiaApi.createAnimal({
         ...form,
+        peso_nacimiento: toApiDecimal(form.peso_nacimiento),
         codigo_qr: codigoQr,
         razas: selectedRazas.filter((item) => item.raza_id),
       });
@@ -136,7 +153,13 @@ export default function AnimalInitialForm({ codigoQr, onCreated }) {
           <input type="date" value={form.fecha_nacimiento} onChange={(event) => update('fecha_nacimiento', event.target.value)} />
         </FormField>
         <FormField label="Peso al nacimiento">
-          <input type="number" value={form.peso_nacimiento} onChange={(event) => update('peso_nacimiento', event.target.value)} />
+          <input
+            inputMode="decimal"
+            pattern="[0-9]+(,[0-9]{1,2})?"
+            placeholder="56,45"
+            value={form.peso_nacimiento}
+            onChange={(event) => updateWeight('peso_nacimiento', event.target.value)}
+          />
         </FormField>
         <FormField label="Color">
           <input value={form.color} onChange={(event) => update('color', event.target.value)} />
