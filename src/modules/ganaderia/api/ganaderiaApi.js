@@ -1,13 +1,18 @@
 const API_BASE = import.meta.env.VITE_AGX_API_URL || 'http://127.0.0.1:3001/api';
 
 async function request(path, options = {}) {
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
-  });
+  let response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+    });
+  } catch {
+    throw new Error('No se pudo conectar con la API de AgroGenomaX. Verifica que el backend esté disponible.');
+  }
 
   const contentType = response.headers.get('content-type') || '';
   const payload = contentType.includes('application/json') ? await response.json() : null;
@@ -17,6 +22,13 @@ async function request(path, options = {}) {
   }
 
   return payload;
+}
+
+export function isCloudflareWithoutLocalApi() {
+  if (typeof window === 'undefined') return false;
+  const isCloudflareHost = window.location.hostname.endsWith('.pages.dev');
+  const apiIsLocal = API_BASE.includes('127.0.0.1') || API_BASE.includes('localhost');
+  return isCloudflareHost && apiIsLocal;
 }
 
 export const ganaderiaApi = {

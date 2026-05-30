@@ -1,5 +1,6 @@
 import { Save } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { useParams } from 'react-router-dom';
 import {
   CartesianGrid,
   Line,
@@ -66,6 +67,8 @@ function sortByDateAsc(rows) {
 }
 
 export default function AnimalPesajesTab({ animalId }) {
+  const params = useParams();
+  const resolvedAnimalId = animalId || params.id;
   const [pesajes, setPesajes] = useState([]);
   const [form, setForm] = useState({ fecha_pesaje: todayLocal(), peso_kg: '', observaciones: '' });
   const [loading, setLoading] = useState(true);
@@ -73,11 +76,11 @@ export default function AnimalPesajesTab({ animalId }) {
   const [status, setStatus] = useState('');
 
   const loadPesajes = async () => {
-    if (!animalId) return;
+    if (!resolvedAnimalId) return;
     setLoading(true);
     setError('');
     try {
-      const rows = await ganaderiaApi.listAnimalPesajesEvolucion(animalId);
+      const rows = await ganaderiaApi.listAnimalPesajesEvolucion(resolvedAnimalId);
       setPesajes(rows);
     } catch (err) {
       setError(err.message);
@@ -88,7 +91,7 @@ export default function AnimalPesajesTab({ animalId }) {
 
   useEffect(() => {
     loadPesajes();
-  }, [animalId]);
+  }, [resolvedAnimalId]);
 
   const summary = useMemo(() => {
     const ordered = sortByDateAsc(pesajes).filter((row) => Number.isFinite(getPeso(row)));
@@ -130,7 +133,7 @@ export default function AnimalPesajesTab({ animalId }) {
     setError('');
     setStatus('');
 
-    if (!animalId) {
+    if (!resolvedAnimalId) {
       setError('No hay animal valido para registrar pesaje.');
       return;
     }
@@ -161,7 +164,7 @@ export default function AnimalPesajesTab({ animalId }) {
 
     try {
       await ganaderiaApi.createPesaje({
-        animal_id: animalId,
+        animal_id: resolvedAnimalId,
         fecha_pesaje: form.fecha_pesaje,
         peso_kg: form.peso_kg,
         observaciones: form.observaciones,

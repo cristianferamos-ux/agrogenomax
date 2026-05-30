@@ -1,5 +1,6 @@
 import { Save } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
 import { ganaderiaApi } from '../api/ganaderiaApi.js';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
 
@@ -68,6 +69,8 @@ function resolveOptionValue(selected, manual) {
 }
 
 export default function AnimalVacunacionesTab({ animalId }) {
+  const params = useParams();
+  const resolvedAnimalId = animalId || params.id;
   const [catalogo, setCatalogo] = useState([]);
   const [vacunaciones, setVacunaciones] = useState([]);
   const [form, setForm] = useState(emptyForm);
@@ -76,13 +79,13 @@ export default function AnimalVacunacionesTab({ animalId }) {
   const [status, setStatus] = useState('');
 
   const load = async () => {
-    if (!animalId) return;
+    if (!resolvedAnimalId) return;
     setLoading(true);
     setError('');
     try {
       const [catalogoRows, vacunacionRows] = await Promise.all([
         ganaderiaApi.listCatalogoVacunas(),
-        ganaderiaApi.listAnimalVacunaciones(animalId),
+        ganaderiaApi.listAnimalVacunaciones(resolvedAnimalId),
       ]);
       setCatalogo(catalogoRows);
       setVacunaciones(vacunacionRows);
@@ -95,7 +98,7 @@ export default function AnimalVacunacionesTab({ animalId }) {
 
   useEffect(() => {
     load();
-  }, [animalId]);
+  }, [resolvedAnimalId]);
 
   const update = (field, value) => setForm((current) => ({ ...current, [field]: value }));
 
@@ -104,7 +107,7 @@ export default function AnimalVacunacionesTab({ animalId }) {
     setError('');
     setStatus('');
 
-    if (!animalId) {
+    if (!resolvedAnimalId) {
       setError('No hay animal válido para registrar vacunación.');
       return;
     }
@@ -134,7 +137,7 @@ export default function AnimalVacunacionesTab({ animalId }) {
 
     try {
       await ganaderiaApi.createVacunacion({
-        animal_id: animalId,
+        animal_id: resolvedAnimalId,
         catalogo_vacuna_id: form.catalogo_vacuna_id,
         fecha_aplicacion: form.fecha_aplicacion,
         lote: form.lote,

@@ -1,4 +1,4 @@
-import { ArrowRight, Home, QrCode, Sprout } from 'lucide-react';
+import { ArrowRight, ClipboardList, Home, QrCode, ShieldPlus, Sprout } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export default function GanaderiaHome() {
@@ -12,7 +12,7 @@ export default function GanaderiaHome() {
             Primero registra predios y potreros. Luego escanea o ingresa un QR para crear o abrir la ficha del animal.
           </p>
         </div>
-        <Link to="/ganaderia/animales" className="gan-primary-action">
+        <Link to="/ganaderia/escanear-qr" className="gan-primary-action">
           Empezar con QR
           <ArrowRight className="h-5 w-5" />
         </Link>
@@ -29,9 +29,19 @@ export default function GanaderiaHome() {
           <span>Asociar potreros a un predio.</span>
         </Link>
         <Link to="/ganaderia/animales" className="gan-card">
-          <QrCode className="h-6 w-6" />
+          <ClipboardList className="h-6 w-6" />
           <strong>Registro de Animales</strong>
           <span>Validar QR antes de registrar.</span>
+        </Link>
+        <Link to="/ganaderia/escanear-qr" className="gan-card">
+          <QrCode className="h-6 w-6" />
+          <strong>Escanear QR</strong>
+          <span>Abrir cámara o ingresar código.</span>
+        </Link>
+        <Link to="/ganaderia/animales" className="gan-card">
+          <ShieldPlus className="h-6 w-6" />
+          <strong>Ficha Animal</strong>
+          <span>Buscar QR para abrir la ficha.</span>
         </Link>
       </div>
     </div>

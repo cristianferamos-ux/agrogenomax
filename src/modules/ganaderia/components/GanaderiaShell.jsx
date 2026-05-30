@@ -1,5 +1,6 @@
 import { ArrowLeft, Database, Wifi } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { isCloudflareWithoutLocalApi } from '../api/ganaderiaApi.js';
 import GanaderiaTabs from './GanaderiaTabs.jsx';
 
 export default function GanaderiaShell({ children }) {
@@ -20,6 +21,11 @@ export default function GanaderiaShell({ children }) {
           <Wifi className="h-4 w-4" />
         </div>
       </header>
+      {isCloudflareWithoutLocalApi() ? (
+        <div className="gan-demo-banner">
+          Modo demostración: la interfaz está disponible, pero la base de datos local no está conectada desde Internet.
+        </div>
+      ) : null}
       <div className="gan-layout">
         <GanaderiaTabs />
         <section className="gan-content">{children}</section>

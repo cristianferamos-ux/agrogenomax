@@ -2316,6 +2316,7 @@ header nav > div[role='navigation']::-webkit-scrollbar {
   font-family: Space Grotesk, Inter, sans-serif;
   font-size: clamp(2rem, 4vw, 4rem);
   line-height: 1;
+  overflow-wrap: anywhere;
 }
 
 .gan-header p,
@@ -2356,6 +2357,16 @@ header nav > div[role='navigation']::-webkit-scrollbar {
   gap: 1rem;
   max-width: 1440px;
   margin: 0 auto;
+}
+
+.gan-demo-banner {
+  max-width: 1440px;
+  margin: 0 auto 1rem;
+  border: 1px solid rgba(255, 214, 102, 0.28);
+  border-radius: 0.75rem;
+  background: rgba(255, 214, 102, 0.08);
+  color: #ffd666;
+  padding: 0.85rem 1rem;
 }
 
 .gan-tabs {
@@ -2704,6 +2715,10 @@ header nav > div[role='navigation']::-webkit-scrollbar {
   margin-top: 1rem;
 }
 
+.gan-qr-grid.is-scan-first .gan-qr-mobile {
+  order: -1;
+}
+
 .gan-manual-qr,
 .gan-scanner {
   display: grid;
@@ -2775,15 +2790,18 @@ header nav > div[role='navigation']::-webkit-scrollbar {
   margin: 1rem 0;
 }
 
-.gan-ficha-tabs button {
+.gan-ficha-tabs button,
+.gan-ficha-tabs a {
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.04);
   color: #a7b3c2;
   padding: 0.65rem 0.85rem;
+  text-decoration: none;
 }
 
-.gan-ficha-tabs button.is-active {
+.gan-ficha-tabs button.is-active,
+.gan-ficha-tabs a.is-active {
   border-color: rgba(156, 255, 26, 0.3);
   color: #9cff1a;
 }
@@ -2805,8 +2823,7 @@ header nav > div[role='navigation']::-webkit-scrollbar {
   }
 
   .gan-tabs {
-    position: static;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: none;
   }
 
   .gan-card-grid,
@@ -2822,11 +2839,24 @@ header nav > div[role='navigation']::-webkit-scrollbar {
   .gan-metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .gan-content {
+    min-width: 0;
+  }
 }
 
 @media (max-width: 640px) {
   .gan-page {
     padding: 0.75rem;
+  }
+
+  .gan-header h1 {
+    font-size: 1.8rem;
+    line-height: 1.08;
+  }
+
+  .gan-header p {
+    font-size: 0.95rem;
   }
 
   .gan-tabs {
@@ -2860,6 +2890,12 @@ header nav > div[role='navigation']::-webkit-scrollbar {
 
   .gan-alert-pill {
     justify-self: start;
+  }
+
+  .gan-ficha-tabs a,
+  .gan-ficha-tabs button {
+    min-height: 48px;
+    width: 100%;
   }
 }
 /* Forzar altura del mapa en dispositivos móviles y escritorio */

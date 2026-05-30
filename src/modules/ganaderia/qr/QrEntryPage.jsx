@@ -1,16 +1,17 @@
 import { Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ganaderiaApi } from '../api/ganaderiaApi.js';
-import { FormField, StatusMessage } from '../components/FormField.jsx';
 import AnimalInitialForm from '../animales/AnimalInitialForm.jsx';
+import { ganaderiaApi } from '../api/ganaderiaApi.js';
+import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
+import { FormField, StatusMessage } from '../components/FormField.jsx';
 import QrScanner from './QrScanner.jsx';
 
 function normalizeCode(value) {
   return String(value || '').trim().toUpperCase();
 }
 
-export default function QrEntryPage() {
+export default function QrEntryPage({ mode = 'manual' }) {
   const { codigo } = useParams();
   const navigate = useNavigate();
   const [manualCode, setManualCode] = useState(codigo || '');
@@ -38,10 +39,10 @@ export default function QrEntryPage() {
       }
       setQrState({ ...result, codigo: code });
     } catch (err) {
-      setError(err.message.includes('404') ? 'QR no registrado en AgroGenomaX' : err.message);
-      if (err.message.toLowerCase().includes('not found')) {
-        setError('QR no registrado en AgroGenomaX');
-      }
+      const message = err.message.includes('404') || err.message.toLowerCase().includes('not found')
+        ? 'QR no registrado en AgroGenomaX'
+        : err.message;
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -59,12 +60,13 @@ export default function QrEntryPage() {
   return (
     <div className="gan-stack">
       <div className="gan-panel">
+        <GanaderiaBackLink />
         <div className="gan-section-heading">
-          <span className="gan-eyebrow">Registro de Animales</span>
-          <h2>Primero valida el QR</h2>
+          <span className="gan-eyebrow">{mode === 'scan' ? 'Escanear QR' : 'Registro de Animales'}</span>
+          <h2>{mode === 'scan' ? 'Escanea o ingresa el QR' : 'Primero valida el QR'}</h2>
           <p>No se muestra el formulario animal hasta confirmar que el QR existe y está libre.</p>
         </div>
-        <div className="gan-qr-grid">
+        <div className={`gan-qr-grid ${mode === 'scan' ? 'is-scan-first' : ''}`}>
           <div className="gan-qr-mobile">
             <QrScanner onCode={(code) => lookup(code)} />
           </div>
@@ -86,7 +88,7 @@ export default function QrEntryPage() {
       </div>
 
       {qrState?.exists && !qrState.assigned ? (
-        <AnimalInitialForm codigoQr={qrState.codigo} onCreated={(animal) => navigate(`/ganaderia/animal/${animal.id}`)} />
+        <AnimalInitialForm codigoQr={qrState.codigo} onCreated={(animal) => navigate(`/ganaderia/animal/${animal.id || animal.animal_id}`)} />
       ) : null}
     </div>
   );

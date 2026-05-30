@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ganaderiaApi, getRowId, getRowLabel } from '../api/ganaderiaApi.js';
+import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
 
 const initialForm = {
@@ -50,6 +51,7 @@ export default function PrediosPage() {
   return (
     <div className="gan-stack">
       <div className="gan-panel">
+        <GanaderiaBackLink />
         <div className="gan-section-heading">
           <span className="gan-eyebrow">Registro de Predio</span>
           <h2>Datos básicos del predio</h2>

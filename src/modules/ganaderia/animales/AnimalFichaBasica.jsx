@@ -3,8 +3,6 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ganaderiaApi } from '../api/ganaderiaApi.js';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
-import AnimalPesajesTab from './AnimalPesajesTab.jsx';
-import AnimalVacunacionesTab from './AnimalVacunacionesTab.jsx';
 
 const fields = [
   ['codigo_interno', 'Codigo interno'],
@@ -38,7 +36,6 @@ export default function AnimalFichaBasica() {
   const [animal, setAnimal] = useState(null);
   const [form, setForm] = useState({});
   const [razas, setRazas] = useState([]);
-  const [activeTab, setActiveTab] = useState('general');
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
 
@@ -84,86 +81,78 @@ export default function AnimalFichaBasica() {
           <p>Vista basica del animal. Las pestanas clinicas y productivas adicionales quedan para fases posteriores.</p>
         </div>
         <div className="gan-ficha-tabs">
-          <button className={activeTab === 'general' ? 'is-active' : ''} type="button" onClick={() => setActiveTab('general')}>
+          <Link className="is-active" to={`/ganaderia/animal/${id}`}>
             Informacion general
-          </button>
-          <button className={activeTab === 'pesajes' ? 'is-active' : ''} type="button" onClick={() => setActiveTab('pesajes')}>
+          </Link>
+          <Link to={`/ganaderia/animal/${id}/pesajes`}>
             Pesajes
-          </button>
-          <button className={activeTab === 'vacunaciones' ? 'is-active' : ''} type="button" onClick={() => setActiveTab('vacunaciones')}>
+          </Link>
+          <Link to={`/ganaderia/animal/${id}/vacunaciones`}>
             Vacunaciones
-          </button>
+          </Link>
           <button type="button" disabled>Tratamientos</button>
           <button type="button" disabled>Reproduccion</button>
           <button type="button" disabled>Genetica</button>
           <button type="button" disabled>Historial QR</button>
         </div>
 
-        {activeTab === 'general' ? (
-          <>
-            <div className="gan-breed-box">
-              <div className="gan-section-heading">
-                <span className="gan-eyebrow">Composicion racial</span>
-                <h3>Razas registradas en PostgreSQL</h3>
-              </div>
-              {razas.length ? (
-                <div className="gan-list">
-                  {razas.map((raza) => (
-                    <article className="gan-list-row" key={raza.animal_raza_id || `${raza.raza_id}-${raza.porcentaje}`}>
-                      <strong>{raza.nombre_raza || `Raza ${raza.raza_id}`}</strong>
-                      <span>{raza.porcentaje}%</span>
-                    </article>
-                  ))}
-                </div>
-              ) : (
-                <p className="gan-empty-text">Sin composicion racial registrada.</p>
-              )}
+        <div className="gan-breed-box">
+          <div className="gan-section-heading">
+            <span className="gan-eyebrow">Composicion racial</span>
+            <h3>Razas registradas en PostgreSQL</h3>
+          </div>
+          {razas.length ? (
+            <div className="gan-list">
+              {razas.map((raza) => (
+                <article className="gan-list-row" key={raza.animal_raza_id || `${raza.raza_id}-${raza.porcentaje}`}>
+                  <strong>{raza.nombre_raza || `Raza ${raza.raza_id}`}</strong>
+                  <span>{raza.porcentaje}%</span>
+                </article>
+              ))}
             </div>
-            <form className="gan-form" onSubmit={submit}>
-              <FormField label="Codigo interno">
-                <input value={form.codigo_interno || ''} onChange={(event) => update('codigo_interno', event.target.value)} />
-              </FormField>
-              <FormField label="Nombre">
-                <input value={form.nombre || ''} onChange={(event) => update('nombre', event.target.value)} />
-              </FormField>
-              <FormField label="Sexo">
-                <select value={form.sexo || ''} onChange={(event) => update('sexo', event.target.value)}>
-                  <option value="">Seleccionar</option>
-                  <option>Macho</option>
-                  <option>Hembra</option>
-                </select>
-              </FormField>
-              <FormField label="Fecha de nacimiento">
-                <input type="date" value={String(form.fecha_nacimiento || '').slice(0, 10)} onChange={(event) => update('fecha_nacimiento', event.target.value)} />
-              </FormField>
-              <FormField label="Peso nacimiento">
-                <input type="number" value={form.peso_nacimiento || ''} onChange={(event) => update('peso_nacimiento', event.target.value)} />
-              </FormField>
-              <FormField label="Color">
-                <input value={form.color || ''} onChange={(event) => update('color', event.target.value)} />
-              </FormField>
-              <FormField label="Numero de arete">
-                <input value={form.numero_arete || ''} onChange={(event) => update('numero_arete', event.target.value)} />
-              </FormField>
-              <FormField label="Estado">
-                <input value={form.estado || ''} onChange={(event) => update('estado', event.target.value)} />
-              </FormField>
-              <FormField label="Observaciones">
-                <textarea value={form.observaciones || ''} onChange={(event) => update('observaciones', event.target.value)} />
-              </FormField>
-              <button className="gan-submit" type="submit">
-                <Save className="h-5 w-5" />
-                Guardar cambios
-              </button>
-            </form>
-            <StatusMessage type="success">{status}</StatusMessage>
-            <StatusMessage type="error">{error}</StatusMessage>
-          </>
-        ) : activeTab === 'pesajes' ? (
-          <AnimalPesajesTab animalId={id} />
-        ) : (
-          <AnimalVacunacionesTab animalId={id} />
-        )}
+          ) : (
+            <p className="gan-empty-text">Sin composicion racial registrada.</p>
+          )}
+        </div>
+        <form className="gan-form" onSubmit={submit}>
+          <FormField label="Codigo interno">
+            <input value={form.codigo_interno || ''} onChange={(event) => update('codigo_interno', event.target.value)} />
+          </FormField>
+          <FormField label="Nombre">
+            <input value={form.nombre || ''} onChange={(event) => update('nombre', event.target.value)} />
+          </FormField>
+          <FormField label="Sexo">
+            <select value={form.sexo || ''} onChange={(event) => update('sexo', event.target.value)}>
+              <option value="">Seleccionar</option>
+              <option>Macho</option>
+              <option>Hembra</option>
+            </select>
+          </FormField>
+          <FormField label="Fecha de nacimiento">
+            <input type="date" value={String(form.fecha_nacimiento || '').slice(0, 10)} onChange={(event) => update('fecha_nacimiento', event.target.value)} />
+          </FormField>
+          <FormField label="Peso nacimiento">
+            <input type="number" value={form.peso_nacimiento || ''} onChange={(event) => update('peso_nacimiento', event.target.value)} />
+          </FormField>
+          <FormField label="Color">
+            <input value={form.color || ''} onChange={(event) => update('color', event.target.value)} />
+          </FormField>
+          <FormField label="Numero de arete">
+            <input value={form.numero_arete || ''} onChange={(event) => update('numero_arete', event.target.value)} />
+          </FormField>
+          <FormField label="Estado">
+            <input value={form.estado || ''} onChange={(event) => update('estado', event.target.value)} />
+          </FormField>
+          <FormField label="Observaciones">
+            <textarea value={form.observaciones || ''} onChange={(event) => update('observaciones', event.target.value)} />
+          </FormField>
+          <button className="gan-submit" type="submit">
+            <Save className="h-5 w-5" />
+            Guardar cambios
+          </button>
+        </form>
+        <StatusMessage type="success">{status}</StatusMessage>
+        <StatusMessage type="error">{error}</StatusMessage>
       </div>
     </div>
   );
