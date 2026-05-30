@@ -9,8 +9,8 @@ import prediosRouter from './routes/predios.js';
 import qrRouter from './routes/qr.js';
 import razasRouter from './routes/razas.js';
 
-dotenv.config({ path: '.env' });
-dotenv.config({ path: 'server/.env' });
+dotenv.config({ path: '.env', quiet: true });
+dotenv.config({ path: 'server/.env', quiet: true });
 
 const app = express();
 const port = Number(process.env.PORT || 3001);

@@ -8,7 +8,7 @@ const initialForm = {
   codigo: '',
   area: '',
   capacidad: '',
-  estado: 'activo',
+  estado: '',
   observaciones: '',
 };
 

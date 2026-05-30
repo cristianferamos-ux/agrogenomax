@@ -3,8 +3,8 @@ import pg from 'pg';
 
 const { Pool } = pg;
 
-dotenv.config({ path: '.env' });
-dotenv.config({ path: 'server/.env' });
+dotenv.config({ path: '.env', quiet: true });
+dotenv.config({ path: 'server/.env', quiet: true });
 
 export const schema = process.env.PGSCHEMA || 'agx';
 

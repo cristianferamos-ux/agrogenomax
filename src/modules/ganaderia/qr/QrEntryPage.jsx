@@ -73,7 +73,7 @@ export default function QrEntryPage() {
               <input
                 value={manualCode}
                 onChange={(event) => setManualCode(event.target.value)}
-                placeholder="AGX-000001"
+                placeholder="AGX-XXXXXX"
               />
             </FormField>
             <button className="gan-submit" type="submit" disabled={loading}>

@@ -35,14 +35,15 @@ export default function AnimalFichaBasica() {
   const { id } = useParams();
   const [animal, setAnimal] = useState(null);
   const [form, setForm] = useState({});
+  const [razas, setRazas] = useState([]);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
 
   useEffect(() => {
-    ganaderiaApi
-      .getAnimal(id)
-      .then((row) => {
+    Promise.all([ganaderiaApi.getAnimal(id), ganaderiaApi.getAnimalRazas(id)])
+      .then(([row, razaRows]) => {
         setAnimal(row);
+        setRazas(razaRows);
         setForm(Object.fromEntries(fields.map(([field]) => [field, valueOf(row, field)])));
       })
       .catch((err) => setError(err.message));
@@ -87,6 +88,24 @@ export default function AnimalFichaBasica() {
           <button type="button" disabled>Reproducción</button>
           <button type="button" disabled>Genética</button>
           <button type="button" disabled>Historial QR</button>
+        </div>
+        <div className="gan-breed-box">
+          <div className="gan-section-heading">
+            <span className="gan-eyebrow">Composición racial</span>
+            <h3>Razas registradas en PostgreSQL</h3>
+          </div>
+          {razas.length ? (
+            <div className="gan-list">
+              {razas.map((raza) => (
+                <article className="gan-list-row" key={raza.animal_raza_id || `${raza.raza_id}-${raza.porcentaje}`}>
+                  <strong>{raza.nombre_raza || `Raza ${raza.raza_id}`}</strong>
+                  <span>{raza.porcentaje}%</span>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="gan-empty-text">Sin composición racial registrada.</p>
+          )}
         </div>
         <form className="gan-form" onSubmit={submit}>
           <FormField label="Código interno">

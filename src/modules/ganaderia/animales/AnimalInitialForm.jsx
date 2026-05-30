@@ -12,9 +12,9 @@ const initialForm = {
   peso_nacimiento: '',
   color: '',
   numero_arete: '',
-  estado: 'activo',
+  estado: '',
   observaciones: '',
-  tipo_raza: 'puro',
+  tipo_raza: '',
 };
 
 export default function AnimalInitialForm({ codigoQr, onCreated }) {
@@ -22,7 +22,7 @@ export default function AnimalInitialForm({ codigoQr, onCreated }) {
   const [predios, setPredios] = useState([]);
   const [potreros, setPotreros] = useState([]);
   const [razas, setRazas] = useState([]);
-  const [selectedRazas, setSelectedRazas] = useState([{ raza_id: '', porcentaje: 100 }]);
+  const [selectedRazas, setSelectedRazas] = useState([]);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
 
@@ -71,6 +71,10 @@ export default function AnimalInitialForm({ codigoQr, onCreated }) {
     if (!form.predio_id) return setError('Selecciona un predio.');
     if (!form.potrero_id) return setError('Selecciona un potrero asociado al predio.');
     if (!['Macho', 'Hembra'].includes(form.sexo)) return setError('Selecciona sexo Macho o Hembra.');
+    if (!['puro', 'cruzado'].includes(form.tipo_raza)) return setError('Selecciona si el animal es puro o cruzado.');
+    if (form.tipo_raza === 'cruzado' && selectedRazas.some((item) => !item.raza_id || Number(item.porcentaje || 0) <= 0)) {
+      return setError('Selecciona cada raza e ingresa porcentajes mayores a cero.');
+    }
     if (form.tipo_raza === 'cruzado' && Math.round(razaTotal * 100) / 100 !== 100) {
       return setError('La suma de porcentajes raciales debe ser 100%.');
     }
@@ -153,18 +157,21 @@ export default function AnimalInitialForm({ codigoQr, onCreated }) {
 
         <div className="gan-breed-box">
           <div className="gan-section-heading">
-            <span className="gan-eyebrow">Razas</span>
-            <h3>Tipo racial</h3>
+            <span className="gan-eyebrow">Composición racial</span>
+            <h3>Selecciona el tipo y las razas desde PostgreSQL</h3>
           </div>
           <div className="gan-segment">
             <button type="button" className={form.tipo_raza === 'puro' ? 'is-active' : ''} onClick={() => {
               update('tipo_raza', 'puro');
               setSelectedRazas([{ raza_id: selectedRazas[0]?.raza_id || '', porcentaje: 100 }]);
-            }}>Puro</button>
-            <button type="button" className={form.tipo_raza === 'cruzado' ? 'is-active' : ''} onClick={() => update('tipo_raza', 'cruzado')}>Cruzado</button>
+            }}>Animal puro</button>
+            <button type="button" className={form.tipo_raza === 'cruzado' ? 'is-active' : ''} onClick={() => {
+              update('tipo_raza', 'cruzado');
+              setSelectedRazas(selectedRazas.length ? selectedRazas : [{ raza_id: '', porcentaje: '' }]);
+            }}>Animal cruzado</button>
           </div>
 
-          {selectedRazas.map((item, index) => (
+          {form.tipo_raza ? selectedRazas.map((item, index) => (
             <div className="gan-breed-row" key={`${index}-${item.raza_id}`}>
               <select value={item.raza_id} onChange={(event) => updateRaza(index, 'raza_id', event.target.value)}>
                 <option value="">Seleccionar raza</option>
@@ -182,7 +189,7 @@ export default function AnimalInitialForm({ codigoQr, onCreated }) {
                 <button type="button" onClick={() => removeRaza(index)}>Quitar</button>
               ) : null}
             </div>
-          ))}
+          )) : null}
           {form.tipo_raza === 'cruzado' ? (
             <div className="gan-action-row">
               <button type="button" className="gan-secondary-button" onClick={addRaza}>Agregar raza</button>

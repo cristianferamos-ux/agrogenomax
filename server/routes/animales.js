@@ -31,10 +31,18 @@ const animalAliases = {
 };
 
 function validateBreedPayload(tipoRaza, razas = []) {
+  if (!['puro', 'cruzado'].includes(tipoRaza)) {
+    throw Object.assign(new Error('Selecciona si el animal es puro o cruzado.'), { status: 400 });
+  }
+
   if (tipoRaza === 'cruzado') {
     const total = razas.reduce((sum, item) => sum + Number(item.porcentaje || 0), 0);
     if (Math.round(total * 100) / 100 !== 100) {
       throw Object.assign(new Error('La suma de porcentajes raciales debe ser 100%.'), { status: 400 });
+    }
+
+    if (!razas.length || razas.some((item) => !item.raza_id || Number(item.porcentaje || 0) <= 0)) {
+      throw Object.assign(new Error('Selecciona cada raza e ingresa porcentajes mayores a cero.'), { status: 400 });
     }
   }
 
@@ -101,6 +109,22 @@ router.get('/', async (_req, res, next) => {
   }
 });
 
+router.get('/:id/razas', async (req, res, next) => {
+  try {
+    const result = await query(
+      `select ar.*, r.nombre_raza, r.aptitud, r.origen
+         from ${tableName('animal_razas')} ar
+         left join ${tableName('razas')} r on r.raza_id = ar.raza_id
+        where ar.animal_id = $1
+        order by ar.porcentaje desc, r.nombre_raza asc`,
+      [req.params.id],
+    );
+    res.json(result.rows);
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/:id', async (req, res, next) => {
   try {
     const columns = await getColumns('animales');
@@ -120,7 +144,7 @@ router.post('/', async (req, res, next) => {
   const client = await pool.connect();
 
   try {
-    const { codigo_qr, predio_id, potrero_id, sexo, tipo_raza = 'puro', razas = [] } = req.body;
+    const { codigo_qr, predio_id, potrero_id, sexo, tipo_raza, razas = [] } = req.body;
 
     if (!codigo_qr) throw Object.assign(new Error('El código QR es obligatorio.'), { status: 400 });
     if (!predio_id) throw Object.assign(new Error('El predio es obligatorio.'), { status: 400 });

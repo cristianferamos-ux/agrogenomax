@@ -28,6 +28,7 @@ export const ganaderiaApi = {
   lookupQr: (codigo) => request(`/qr/${encodeURIComponent(codigo)}`),
   listAnimales: () => request('/animales'),
   getAnimal: (id) => request(`/animales/${id}`),
+  getAnimalRazas: (id) => request(`/animales/${id}/razas`),
   createAnimal: (payload) => request('/animales', { method: 'POST', body: JSON.stringify(payload) }),
   updateAnimal: (id, payload) => request(`/animales/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   listRazas: () => request('/razas'),
