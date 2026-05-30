@@ -2641,6 +2641,64 @@ header nav > div[role='navigation']::-webkit-scrollbar {
   color: #a7b3c2;
 }
 
+.gan-vaccine-list {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 1rem;
+}
+
+.gan-vaccine-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 0.95rem 1rem;
+}
+
+.gan-vaccine-row div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.gan-vaccine-row strong {
+  color: #f6f8fb;
+}
+
+.gan-vaccine-row span,
+.gan-vaccine-row small {
+  color: #a7b3c2;
+}
+
+.gan-vaccine-row small {
+  grid-column: 1 / -1;
+}
+
+.gan-alert-pill {
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 999px;
+  padding: 0.35rem 0.65rem;
+  color: #dce5ef;
+  white-space: nowrap;
+}
+
+.gan-alert-pill.is-ok {
+  border-color: rgba(156, 255, 26, 0.35);
+  color: #9cff1a;
+}
+
+.gan-alert-pill.is-warning {
+  border-color: rgba(255, 214, 102, 0.35);
+  color: #ffd666;
+}
+
+.gan-alert-pill.is-danger {
+  border-color: rgba(255, 120, 120, 0.35);
+  color: #ff9b9b;
+}
+
 .gan-qr-grid {
   grid-template-columns: 1fr 1fr;
   margin-top: 1rem;
@@ -2794,6 +2852,14 @@ header nav > div[role='navigation']::-webkit-scrollbar {
 
   .gan-weight-chart {
     height: 260px;
+  }
+
+  .gan-vaccine-row {
+    grid-template-columns: 1fr;
+  }
+
+  .gan-alert-pill {
+    justify-self: start;
   }
 }
 /* Forzar altura del mapa en dispositivos móviles y escritorio */

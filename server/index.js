@@ -9,6 +9,7 @@ import potrerosRouter from './routes/potreros.js';
 import prediosRouter from './routes/predios.js';
 import qrRouter from './routes/qr.js';
 import razasRouter from './routes/razas.js';
+import vacunacionesRouter from './routes/vacunaciones.js';
 
 dotenv.config({ path: '.env', quiet: true });
 dotenv.config({ path: 'server/.env', quiet: true });
@@ -31,6 +32,7 @@ app.use('/api/animales', animalesRouter);
 app.use('/api/razas', razasRouter);
 app.use('/api', razasRouter);
 app.use('/api', pesajesRouter);
+app.use('/api', vacunacionesRouter);
 
 app.use(notFound);
 app.use(errorHandler);

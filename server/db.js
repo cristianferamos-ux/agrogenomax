@@ -50,6 +50,8 @@ export function idColumnFor(table, columns) {
     razas: ['raza_id'],
     animal_razas: ['animal_raza_id'],
     pesajes: ['pesaje_id'],
+    vacunaciones: ['vacunacion_id'],
+    catalogo_vacunas: ['catalogo_vacuna_id'],
   };
 
   return pickColumn(columns, [...(explicit[table] || []), 'id', `${table.slice(0, -1)}_id`]);

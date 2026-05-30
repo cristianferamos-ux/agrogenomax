@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router-dom';
 import { ganaderiaApi } from '../api/ganaderiaApi.js';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
 import AnimalPesajesTab from './AnimalPesajesTab.jsx';
+import AnimalVacunacionesTab from './AnimalVacunacionesTab.jsx';
 
 const fields = [
   ['codigo_interno', 'Codigo interno'],
@@ -89,7 +90,9 @@ export default function AnimalFichaBasica() {
           <button className={activeTab === 'pesajes' ? 'is-active' : ''} type="button" onClick={() => setActiveTab('pesajes')}>
             Pesajes
           </button>
-          <button type="button" disabled>Vacunaciones</button>
+          <button className={activeTab === 'vacunaciones' ? 'is-active' : ''} type="button" onClick={() => setActiveTab('vacunaciones')}>
+            Vacunaciones
+          </button>
           <button type="button" disabled>Tratamientos</button>
           <button type="button" disabled>Reproduccion</button>
           <button type="button" disabled>Genetica</button>
@@ -156,8 +159,10 @@ export default function AnimalFichaBasica() {
             <StatusMessage type="success">{status}</StatusMessage>
             <StatusMessage type="error">{error}</StatusMessage>
           </>
-        ) : (
+        ) : activeTab === 'pesajes' ? (
           <AnimalPesajesTab animalId={id} />
+        ) : (
+          <AnimalVacunacionesTab animalId={id} />
         )}
       </div>
     </div>
