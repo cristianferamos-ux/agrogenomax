@@ -254,7 +254,7 @@ export default function AnimalPesajesTab({ animalId }) {
     <div className="gan-stack">
       <div className="gan-metric-grid">
         <article className="gan-metric">
-          <span>Peso inicial</span>
+          <span>Peso al nacer</span>
           <strong>{formatMetric(summary.primerPeso, ' kg')}</strong>
         </article>
         <article className="gan-metric">
