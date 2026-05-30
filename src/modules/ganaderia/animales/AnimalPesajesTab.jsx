@@ -44,6 +44,16 @@ function getPeso(row, aliases = ['peso_kg', 'peso', 'weight_kg']) {
   return value === '' ? null : Number(value);
 }
 
+function getPesoNacimiento(animal) {
+  const value = valueOf(animal, ['peso_nacimiento', 'peso_nacimiento_kg', 'birth_weight_kg']);
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function getFechaNacimiento(animal) {
+  return valueOf(animal, ['fecha_nacimiento', 'birth_date']);
+}
+
 function formatDate(value) {
   return value ? String(value).slice(0, 10) : '';
 }
@@ -72,8 +82,8 @@ function sortByDateAsc(rows) {
   return [...rows].sort((a, b) => {
     const dateA = new Date(getFecha(a)).getTime() || 0;
     const dateB = new Date(getFecha(b)).getTime() || 0;
-    const idA = Number(a.pesaje_id || 0);
-    const idB = Number(b.pesaje_id || 0);
+    const idA = a.es_peso_nacimiento ? -1 : Number(a.pesaje_id || 0);
+    const idB = b.es_peso_nacimiento ? -1 : Number(b.pesaje_id || 0);
     return dateA - dateB || idA - idB;
   });
 }
@@ -81,6 +91,7 @@ function sortByDateAsc(rows) {
 export default function AnimalPesajesTab({ animalId }) {
   const params = useParams();
   const resolvedAnimalId = animalId || params.id;
+  const [animal, setAnimal] = useState(null);
   const [pesajes, setPesajes] = useState([]);
   const [form, setForm] = useState({ fecha_pesaje: todayLocal(), peso_kg: '', observaciones: '' });
   const [loading, setLoading] = useState(true);
@@ -92,7 +103,11 @@ export default function AnimalPesajesTab({ animalId }) {
     setLoading(true);
     setError('');
     try {
-      const rows = await ganaderiaApi.listAnimalPesajesEvolucion(resolvedAnimalId);
+      const [animalRow, rows] = await Promise.all([
+        ganaderiaApi.getAnimal(resolvedAnimalId),
+        ganaderiaApi.listAnimalPesajesEvolucion(resolvedAnimalId),
+      ]);
+      setAnimal(animalRow);
       setPesajes(rows);
     } catch (err) {
       setError(err.message);
@@ -105,8 +120,38 @@ export default function AnimalPesajesTab({ animalId }) {
     loadPesajes();
   }, [resolvedAnimalId]);
 
+  const pesoNacimientoRow = useMemo(() => {
+    const pesoNacimiento = getPesoNacimiento(animal);
+    if (!Number.isFinite(pesoNacimiento)) return null;
+
+    const fechaNacimiento = formatDate(getFechaNacimiento(animal)) || formatDate(getFecha(sortByDateAsc(pesajes)[0])) || todayLocal();
+    const alreadyExists = pesajes.some((pesaje) => {
+      const peso = getPeso(pesaje);
+      return formatDate(getFecha(pesaje)) === fechaNacimiento && Number.isFinite(peso) && Math.abs(peso - pesoNacimiento) < 0.001;
+    });
+
+    if (alreadyExists) return null;
+
+    return {
+      pesaje_id: 'peso-nacimiento',
+      fecha_pesaje: fechaNacimiento,
+      peso_kg: pesoNacimiento,
+      observaciones: 'Peso al nacimiento registrado en ficha animal',
+      peso_anterior: null,
+      diferencia_kg: null,
+      dias_entre_pesajes: null,
+      ganancia_diaria_kg: null,
+      es_peso_nacimiento: true,
+    };
+  }, [animal, pesajes]);
+
+  const pesajesConPesoInicial = useMemo(
+    () => (pesoNacimientoRow ? [pesoNacimientoRow, ...pesajes] : pesajes),
+    [pesoNacimientoRow, pesajes],
+  );
+
   const summary = useMemo(() => {
-    const ordered = sortByDateAsc(pesajes).filter((row) => Number.isFinite(getPeso(row)));
+    const ordered = sortByDateAsc(pesajesConPesoInicial).filter((row) => Number.isFinite(getPeso(row)));
     const first = ordered[0];
     const last = ordered[ordered.length - 1];
     const firstWeight = first ? getPeso(first) : null;
@@ -119,24 +164,32 @@ export default function AnimalPesajesTab({ animalId }) {
     const dailyAverage = Number.isFinite(difference) && daysBetween > 0 ? difference / daysBetween : null;
 
     return {
-      total: pesajes.length,
+      total: pesajesConPesoInicial.length,
       primerPeso: firstWeight,
       ultimoPeso: lastWeight,
       diferencia: difference,
       promedioDiario: dailyAverage,
     };
-  }, [pesajes]);
+  }, [pesajesConPesoInicial]);
 
   const chartData = useMemo(
     () =>
-      sortByDateAsc(pesajes)
+      sortByDateAsc(pesajesConPesoInicial)
         .filter((row) => Number.isFinite(getPeso(row)))
         .map((row) => ({
           fecha: formatDate(getFecha(row)),
           peso: getPeso(row),
         })),
-    [pesajes],
+    [pesajesConPesoInicial],
   );
+
+  const historyRows = useMemo(() => [...pesajesConPesoInicial].sort((a, b) => {
+    const dateA = new Date(getFecha(a)).getTime() || 0;
+    const dateB = new Date(getFecha(b)).getTime() || 0;
+    const idA = a.es_peso_nacimiento ? -1 : Number(a.pesaje_id || 0);
+    const idB = b.es_peso_nacimiento ? -1 : Number(b.pesaje_id || 0);
+    return dateB - dateA || idB - idA;
+  }), [pesajesConPesoInicial]);
 
   const update = (field, value) => setForm((current) => ({ ...current, [field]: value }));
   const updateWeight = (value) => {
@@ -297,7 +350,7 @@ export default function AnimalPesajesTab({ animalId }) {
         </div>
         {loading ? (
           <p className="gan-empty-text">Cargando pesajes...</p>
-        ) : pesajes.length ? (
+        ) : historyRows.length ? (
           <div className="gan-pesajes-table">
             <div className="gan-pesajes-head">
               <span>Fecha</span>
@@ -307,7 +360,7 @@ export default function AnimalPesajesTab({ animalId }) {
               <span>Días</span>
               <span>Ganancia diaria de peso</span>
             </div>
-            {pesajes.map((pesaje) => (
+            {historyRows.map((pesaje) => (
               <article className="gan-pesajes-row" key={pesaje.pesaje_id || `${getFecha(pesaje)}-${getPeso(pesaje)}`}>
                 <span>{formatDate(getFecha(pesaje))}</span>
                 <strong>{formatMetric(getPeso(pesaje), ' kg')}</strong>
