@@ -2561,6 +2561,86 @@ header nav > div[role='navigation']::-webkit-scrollbar {
   padding: 0.9rem 1rem;
 }
 
+.gan-list-row-stack div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.gan-list-row-stack span {
+  display: block;
+}
+
+.gan-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.gan-metric {
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 0.7rem;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 1rem;
+}
+
+.gan-metric span {
+  display: block;
+  color: #a7b3c2;
+  font-size: 0.82rem;
+}
+
+.gan-metric strong {
+  display: block;
+  margin-top: 0.35rem;
+  color: #f6f8fb;
+  font-size: 1.25rem;
+}
+
+.gan-weight-chart {
+  height: 320px;
+  margin-top: 1rem;
+  min-width: 0;
+}
+
+.gan-pesajes-table {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 1rem;
+  overflow-x: auto;
+}
+
+.gan-pesajes-head,
+.gan-pesajes-row {
+  display: grid;
+  grid-template-columns: 110px 100px 120px 110px 90px 140px;
+  min-width: 760px;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.gan-pesajes-head {
+  color: #a7b3c2;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.gan-pesajes-row {
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.035);
+  color: #dce5ef;
+  padding: 0.85rem 1rem;
+}
+
+.gan-pesajes-row strong {
+  color: #f6f8fb;
+}
+
+.gan-pesajes-row small {
+  grid-column: 1 / -1;
+  color: #a7b3c2;
+}
+
 .gan-qr-grid {
   grid-template-columns: 1fr 1fr;
   margin-top: 1rem;
@@ -2680,6 +2760,10 @@ header nav > div[role='navigation']::-webkit-scrollbar {
   .gan-breed-row {
     grid-template-columns: 1fr;
   }
+
+  .gan-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 640px) {
@@ -2702,6 +2786,14 @@ header nav > div[role='navigation']::-webkit-scrollbar {
   .gan-health-pill {
     width: 100%;
     justify-content: center;
+  }
+
+  .gan-metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .gan-weight-chart {
+    height: 260px;
   }
 }
 /* Forzar altura del mapa en dispositivos móviles y escritorio */

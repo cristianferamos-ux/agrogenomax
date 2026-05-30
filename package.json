@@ -25,6 +25,7 @@
     "react-leaflet": "^5.0.0",
     "react-map-gl": "^8.1.1",
     "react-router-dom": "^7.16.0",
+    "recharts": "^3.8.1",
     "vite": "^7.0.0"
   },
   "devDependencies": {

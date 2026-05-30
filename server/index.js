@@ -4,6 +4,7 @@ import express from 'express';
 import { errorHandler, notFound } from './middleware/errors.js';
 import animalesRouter from './routes/animales.js';
 import healthRouter from './routes/health.js';
+import pesajesRouter from './routes/pesajes.js';
 import potrerosRouter from './routes/potreros.js';
 import prediosRouter from './routes/predios.js';
 import qrRouter from './routes/qr.js';
@@ -29,6 +30,7 @@ app.use('/api/qr', qrRouter);
 app.use('/api/animales', animalesRouter);
 app.use('/api/razas', razasRouter);
 app.use('/api', razasRouter);
+app.use('/api', pesajesRouter);
 
 app.use(notFound);
 app.use(errorHandler);

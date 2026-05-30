@@ -29,8 +29,11 @@ export const ganaderiaApi = {
   listAnimales: () => request('/animales'),
   getAnimal: (id) => request(`/animales/${id}`),
   getAnimalRazas: (id) => request(`/animales/${id}/razas`),
+  listAnimalPesajes: (id) => request(`/animales/${id}/pesajes`),
+  listAnimalPesajesEvolucion: (id) => request(`/animales/${id}/pesajes/evolucion`),
   createAnimal: (payload) => request('/animales', { method: 'POST', body: JSON.stringify(payload) }),
   updateAnimal: (id, payload) => request(`/animales/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  createPesaje: (payload) => request('/pesajes', { method: 'POST', body: JSON.stringify(payload) }),
   listRazas: () => request('/razas'),
 };
 
