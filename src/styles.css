@@ -2517,6 +2517,17 @@ header nav > div[role='navigation']::-webkit-scrollbar {
   padding: 0.9rem 1.15rem;
   font-weight: 850;
   cursor: pointer;
+  min-height: 46px;
+  position: relative;
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    color 0.16s ease,
+    opacity 0.16s ease,
+    transform 0.12s ease;
+  user-select: none;
+  -webkit-tap-highlight-color: rgba(154, 255, 0, 0.22);
 }
 
 .gan-submit,
@@ -2530,6 +2541,82 @@ header nav > div[role='navigation']::-webkit-scrollbar {
   border: 1px solid rgba(0, 216, 255, 0.28);
   background: rgba(0, 216, 255, 0.08);
   color: #00d8ff;
+}
+
+.gan-submit:hover,
+.gan-primary-action:hover,
+.gan-submit:focus-visible,
+.gan-primary-action:focus-visible {
+  background: #b7ff45;
+  box-shadow: 0 0 0 3px rgba(154, 255, 0, 0.16), 0 0 24px rgba(154, 255, 0, 0.24);
+  outline: none;
+}
+
+.gan-secondary-button:hover,
+.gan-secondary-button:focus-visible,
+.gan-breed-row button:hover,
+.gan-breed-row button:focus-visible {
+  border-color: rgba(0, 216, 255, 0.82);
+  background: rgba(0, 216, 255, 0.18);
+  box-shadow: 0 0 0 3px rgba(0, 216, 255, 0.12), 0 0 24px rgba(0, 216, 255, 0.18);
+  color: #7ff0ff;
+  outline: none;
+}
+
+.gan-submit:active,
+.gan-primary-action:active,
+.gan-secondary-button:active,
+.gan-segment button:active,
+.gan-breed-row button:active,
+.gan-submit.is-loading,
+.gan-primary-action.is-loading,
+.gan-secondary-button.is-loading,
+.gan-breed-row button.is-loading {
+  transform: translateY(1px) scale(0.985);
+}
+
+.gan-secondary-button:active,
+.gan-secondary-button.is-loading {
+  border-color: rgba(154, 255, 0, 0.82);
+  background: rgba(154, 255, 0, 0.18);
+  box-shadow: 0 0 0 3px rgba(154, 255, 0, 0.14), 0 0 26px rgba(154, 255, 0, 0.24);
+  color: #9aff00;
+}
+
+.gan-submit:disabled,
+.gan-primary-action:disabled,
+.gan-secondary-button:disabled,
+.gan-segment button:disabled,
+.gan-breed-row button:disabled {
+  cursor: progress;
+  opacity: 0.86;
+}
+
+.gan-secondary-button.is-loading::after,
+.gan-submit.is-loading::after,
+.gan-primary-action.is-loading::after {
+  animation: gan-button-pulse 0.85s ease-in-out infinite;
+  border: 2px solid currentColor;
+  border-radius: 999px;
+  content: "";
+  height: 0.72rem;
+  opacity: 0.9;
+  width: 0.72rem;
+}
+
+@keyframes gan-button-pulse {
+  0% {
+    opacity: 0.35;
+    transform: scale(0.82);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+  100% {
+    opacity: 0.35;
+    transform: scale(0.82);
+  }
 }
 
 .gan-primary-action {
@@ -2591,26 +2678,834 @@ header nav > div[role='navigation']::-webkit-scrollbar {
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 0.7rem;
   background: rgba(255, 255, 255, 0.04);
-  padding: 1rem;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-height: 8.4rem;
+  min-width: 0;
+  overflow: visible;
+  padding: 0.78rem 0.82rem;
 }
 
-.gan-metric span {
-  display: block;
+.gan-metric > span {
+  align-items: center;
   color: #a7b3c2;
-  font-size: 0.82rem;
+  display: grid;
+  font-size: clamp(0.68rem, 0.8vw, 0.78rem);
+  gap: 0.42rem;
+  justify-items: center;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.gan-metric-title {
+  align-content: start;
+  min-height: 4.35rem;
+}
+
+.gan-metric-title > span:last-child {
+  display: block;
+  min-height: 2rem;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .gan-metric strong {
+  align-self: end;
   display: block;
-  margin-top: 0.35rem;
+  line-height: 1;
+  margin-top: 0.25rem;
   color: #f6f8fb;
-  font-size: 1.25rem;
+  font-size: clamp(1.08rem, 1.45vw, 1.45rem);
+  max-width: 100%;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.gan-health-summary {
+  align-items: stretch;
+  grid-template-columns: repeat(6, minmax(150px, 1fr));
+  gap: 0.6rem;
+  overflow-x: auto;
+  padding-bottom: 0.2rem;
+}
+
+.gan-health-summary .gan-metric:nth-child(1) {
+  background: rgba(154, 255, 0, 0.08);
+  border-color: rgba(154, 255, 0, 0.46);
+  box-shadow: 0 0 18px rgba(154, 255, 0, 0.08);
+}
+
+.gan-health-summary .gan-metric:nth-child(1) strong {
+  color: #9aff00;
+  text-shadow: 0 0 12px rgba(154, 255, 0, 0.35);
+}
+
+.gan-health-summary .gan-metric:nth-child(2),
+.gan-health-summary .gan-metric:nth-child(4) {
+  background: rgba(255, 214, 0, 0.08);
+  border-color: rgba(255, 214, 0, 0.46);
+  box-shadow: 0 0 18px rgba(255, 214, 0, 0.08);
+}
+
+.gan-health-summary .gan-metric:nth-child(2) strong,
+.gan-health-summary .gan-metric:nth-child(4) strong {
+  color: #ffd600;
+  text-shadow: 0 0 12px rgba(255, 214, 0, 0.35);
+}
+
+.gan-health-summary .gan-week-card.estado-vigente {
+  background: rgba(154, 255, 0, 0.055);
+  border-color: rgba(154, 255, 0, 0.34);
+  box-shadow: 0 0 18px rgba(154, 255, 0, 0.07);
+}
+
+.gan-health-summary .gan-week-card.estado-vigente strong {
+  color: #9aff00;
+  text-shadow: 0 0 12px rgba(154, 255, 0, 0.28);
+}
+
+.gan-week-empty {
+  font-size: clamp(0.88rem, 1.05vw, 1rem) !important;
+  line-height: 1.15 !important;
+  white-space: normal;
+}
+
+.gan-week-count {
+  font-size: clamp(0.82rem, 1vw, 0.98rem) !important;
+  line-height: 1.15 !important;
+  white-space: normal;
+}
+
+.gan-week-empty span {
+  color: inherit;
+  display: inline;
+  font-size: inherit;
+}
+
+.gan-health-summary .gan-metric:nth-child(3) {
+  background: rgba(255, 59, 59, 0.08);
+  border-color: rgba(255, 59, 59, 0.46);
+  box-shadow: 0 0 18px rgba(255, 59, 59, 0.08);
+}
+
+.gan-health-summary .gan-metric:nth-child(3) strong {
+  color: #ff3b3b;
+  text-shadow: 0 0 12px rgba(255, 59, 59, 0.35);
+}
+
+.gan-health-summary .gan-metric:nth-child(5) {
+  background: rgba(154, 255, 0, 0.055);
+  border-color: rgba(154, 255, 0, 0.32);
+}
+
+.gan-health-summary .gan-metric.estado-vigente strong,
+.gan-health-summary .gan-compliance-card.estado-vigente strong {
+  color: #9aff00;
+  text-shadow: 0 0 14px rgba(154, 255, 0, 0.42);
+}
+
+.gan-health-summary .gan-metric.estado-proxima strong,
+.gan-health-summary .gan-compliance-card.estado-proxima strong {
+  color: #ffd600;
+  text-shadow: 0 0 14px rgba(255, 214, 0, 0.42);
+}
+
+.gan-health-summary .gan-metric.estado-vencida strong,
+.gan-health-summary .gan-compliance-card.estado-vencida strong {
+  color: #ff3b3b;
+  text-shadow: 0 0 14px rgba(255, 59, 59, 0.42);
+}
+
+.gan-health-summary .gan-metric.estado-sin-programacion strong,
+.gan-health-summary .gan-compliance-card.estado-sin-programacion strong {
+  color: #cbd5e1;
+  text-shadow: none;
+}
+
+.gan-health-summary .gan-general-status {
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.gan-health-summary .gan-general-status small {
+  color: #a7b3c2;
+  display: block;
+  font-size: clamp(0.58rem, 0.72vw, 0.66rem);
+  font-weight: 700;
+  line-height: 1.25;
+  margin-top: 0.42rem;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.gan-health-summary .gan-general-status strong {
+  font-size: clamp(0.82rem, 1.05vw, 1.08rem);
+  letter-spacing: 0;
+  line-height: 1.08;
+  overflow-wrap: normal;
+  text-transform: uppercase;
+  word-break: keep-all;
+}
+
+.gan-health-summary .gan-general-status.estado-vigente {
+  border-color: rgba(154, 255, 0, 0.54);
+  box-shadow: 0 0 18px rgba(154, 255, 0, 0.1);
+}
+
+.gan-health-summary .gan-general-status.estado-proxima {
+  border-color: rgba(255, 214, 0, 0.54);
+  box-shadow: 0 0 18px rgba(255, 214, 0, 0.1);
+}
+
+.gan-health-summary .gan-general-status.estado-vencida {
+  border-color: rgba(255, 59, 59, 0.54);
+  box-shadow: 0 0 18px rgba(255, 59, 59, 0.1);
+}
+
+.gan-health-summary .gan-general-status.estado-vigente strong {
+  color: #9aff00;
+  text-shadow: 0 0 14px rgba(154, 255, 0, 0.42);
+}
+
+.gan-health-summary .gan-general-status.estado-proxima strong {
+  color: #ffd600;
+  text-shadow: 0 0 14px rgba(255, 214, 0, 0.42);
+}
+
+.gan-health-summary .gan-general-status.estado-vencida strong {
+  color: #ff3b3b;
+  text-shadow: 0 0 14px rgba(255, 59, 59, 0.42);
+}
+
+.gan-health-summary .gan-metric .gan-card-icon {
+  display: inline-grid;
+  font-size: clamp(1.75rem, 2.35vw, 2.15rem);
+  line-height: 1;
+  margin: 0 auto 0.1rem;
+  place-items: center;
+}
+
+.gan-health-summary .gan-metric.estado-vigente .gan-card-icon {
+  filter: drop-shadow(0 0 10px #7cff00);
+}
+
+.gan-health-summary .gan-metric.estado-proxima .gan-card-icon {
+  filter: drop-shadow(0 0 10px #ffd600);
+}
+
+.gan-health-summary .gan-metric.estado-vencida .gan-card-icon {
+  filter: drop-shadow(0 0 10px #ff3b3b);
+}
+
+.gan-health-summary .gan-metric.estado-sin-programacion .gan-card-icon {
+  filter: drop-shadow(0 0 6px rgba(203, 213, 225, 0.22));
+}
+
+.gan-compliance-card {
+  display: grid;
+}
+
+.gan-health-summary .gan-compliance-card.estado-vigente {
+  background: rgba(154, 255, 0, 0.055);
+  border-color: rgba(154, 255, 0, 0.38);
+  box-shadow: 0 0 18px rgba(154, 255, 0, 0.08);
+}
+
+.gan-health-summary .gan-compliance-card.estado-proxima {
+  background: rgba(255, 214, 0, 0.075);
+  border-color: rgba(255, 214, 0, 0.48);
+  box-shadow: 0 0 18px rgba(255, 214, 0, 0.09);
+}
+
+.gan-health-summary .gan-compliance-card.estado-vencida {
+  background: rgba(255, 59, 59, 0.075);
+  border-color: rgba(255, 59, 59, 0.48);
+  box-shadow: 0 0 18px rgba(255, 59, 59, 0.09);
+}
+
+.gan-progress-bar {
+  align-self: end;
+  background: rgba(154, 255, 0, 0.08);
+  border: 1px solid rgba(154, 255, 0, 0.24);
+  border-radius: 999px;
+  height: 0.58rem;
+  margin-top: 0.7rem;
+  overflow: hidden;
+}
+
+.gan-progress-bar span {
+  background: linear-gradient(90deg, rgba(154, 255, 0, 0.65), #9aff00);
+  border-radius: inherit;
+  box-shadow: 0 0 16px rgba(154, 255, 0, 0.36);
+  display: block;
+  height: 100%;
+  transition: width 0.45s ease;
+}
+
+.gan-compliance-card.estado-proxima .gan-progress-bar {
+  background: rgba(255, 214, 0, 0.08);
+  border-color: rgba(255, 214, 0, 0.3);
+}
+
+.gan-compliance-card.estado-proxima .gan-progress-bar span {
+  background: linear-gradient(90deg, rgba(255, 214, 0, 0.56), #ffd600);
+  box-shadow: 0 0 16px rgba(255, 214, 0, 0.34);
+}
+
+.gan-compliance-card.estado-vencida .gan-progress-bar {
+  background: rgba(255, 59, 59, 0.08);
+  border-color: rgba(255, 59, 59, 0.3);
+}
+
+.gan-compliance-card.estado-vencida .gan-progress-bar span {
+  background: linear-gradient(90deg, rgba(255, 59, 59, 0.56), #ff3b3b);
+  box-shadow: 0 0 16px rgba(255, 59, 59, 0.34);
+}
+
+.gan-animal-dashboard {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.gan-animal-meta {
+  display: grid;
+  gap: 0.55rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 0.85rem;
+}
+
+.gan-animal-meta span {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.032);
+  color: #dce5ef;
+  font-size: 0.85rem;
+  padding: 0.72rem 0.8rem;
+}
+
+.gan-animal-meta strong {
+  color: #9aff00;
+}
+
+.gan-dashboard-grid {
+  display: grid;
+  gap: 0.7rem;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-top: 1rem;
+}
+
+.gan-dashboard-grid article {
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 0.65rem;
+  background: rgba(255, 255, 255, 0.035);
+  min-width: 0;
+  padding: 0.85rem;
+}
+
+.gan-dashboard-grid article.estado-vigente {
+  border-color: rgba(154, 255, 0, 0.3);
+  background: linear-gradient(180deg, rgba(154, 255, 0, 0.075), rgba(255, 255, 255, 0.025));
+}
+
+.gan-dashboard-grid article.estado-proxima {
+  border-color: rgba(255, 214, 0, 0.32);
+  background: linear-gradient(180deg, rgba(255, 214, 0, 0.08), rgba(255, 255, 255, 0.025));
+}
+
+.gan-dashboard-grid article.estado-vencida {
+  border-color: rgba(255, 59, 59, 0.34);
+  background: linear-gradient(180deg, rgba(255, 59, 59, 0.08), rgba(255, 255, 255, 0.025));
+}
+
+.gan-dashboard-grid article.estado-sin-programacion,
+.gan-dashboard-grid article.estado-neutro {
+  border-color: rgba(203, 213, 225, 0.16);
+}
+
+.gan-dashboard-grid span {
+  color: #a7b3c2;
+  display: block;
+  font-size: 0.78rem;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.gan-dashboard-grid strong {
+  color: #f6f8fb;
+  display: block;
+  font-size: 1.22rem;
+  margin-top: 0.35rem;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.gan-dashboard-grid article.estado-vigente strong {
+  color: #9aff00;
+  text-shadow: 0 0 12px rgba(154, 255, 0, 0.38);
+}
+
+.gan-dashboard-grid article.estado-proxima strong {
+  color: #ffd600;
+  text-shadow: 0 0 12px rgba(255, 214, 0, 0.34);
+}
+
+.gan-dashboard-grid article.estado-vencida strong {
+  color: #ff3b3b;
+  text-shadow: 0 0 12px rgba(255, 59, 59, 0.34);
+}
+
+.gan-dashboard-grid article.estado-sin-programacion strong {
+  color: #cbd5e1;
+  text-shadow: none;
+}
+
+.gan-dashboard-grid article.estado-neutro strong {
+  color: #f6f8fb;
+  text-shadow: 0 0 10px rgba(246, 248, 251, 0.18);
+}
+
+.gan-dashboard-grid article.gan-threshold-card {
+  border-color: rgba(0, 216, 255, 0.24);
+  background: linear-gradient(180deg, rgba(0, 216, 255, 0.055), rgba(255, 255, 255, 0.025));
+}
+
+.gan-dashboard-grid article.gan-threshold-card strong {
+  color: #dce5ef;
+  font-size: clamp(0.86rem, 1vw, 1rem);
+  line-height: 1.35;
+  text-shadow: 0 0 10px rgba(0, 216, 255, 0.12);
+}
+
+.gan-dashboard-grid article.gan-threshold-card .gan-threshold-list {
+  display: grid;
+  gap: 0.28rem;
+  margin-top: 0.45rem;
+}
+
+.gan-dashboard-grid article.gan-threshold-card .gan-threshold-excellent {
+  color: #9aff00;
+  text-shadow: 0 0 10px rgba(154, 255, 0, 0.38);
+}
+
+.gan-dashboard-grid article.gan-threshold-card .gan-threshold-acceptable {
+  color: #ffd600;
+  text-shadow: 0 0 10px rgba(255, 214, 0, 0.34);
+}
+
+.gan-dashboard-grid article.gan-threshold-card .gan-threshold-critical {
+  color: #ff3b3b;
+  text-shadow: 0 0 10px rgba(255, 59, 59, 0.34);
+}
+
+.gan-feature-alert {
+  align-items: center;
+  border: 2px solid rgba(154, 255, 0, 0.55);
+  border-radius: 1rem;
+  background: rgba(154, 255, 0, 0.08);
+  box-shadow: 0 0 26px rgba(154, 255, 0, 0.12);
+  color: #dce5ef;
+  display: flex;
+  gap: 1.15rem;
+  padding: 1.25rem 1.35rem;
+}
+
+.gan-feature-alert-premium {
+  margin: 0.2rem 0;
+  padding: 1.45rem 1.55rem;
+}
+
+.gan-feature-alert.estado-proxima {
+  background: rgba(255, 214, 0, 0.1);
+  border-color: rgba(255, 214, 0, 0.65);
+  box-shadow: 0 0 26px rgba(255, 214, 0, 0.14);
+}
+
+.gan-feature-alert.estado-vencida {
+  background: rgba(255, 59, 59, 0.1);
+  border-color: rgba(255, 59, 59, 0.65);
+  box-shadow: 0 0 26px rgba(255, 59, 59, 0.14);
+}
+
+.gan-feature-alert.estado-sin-programacion {
+  background: rgba(15, 23, 42, 0.74);
+  border-color: rgba(148, 163, 184, 0.44);
+  box-shadow: none;
+}
+
+.gan-feature-icon {
+  display: grid;
+  flex: 0 0 3.5rem;
+  font-size: 2.45rem;
+  height: 3.5rem;
+  place-items: center;
+  width: 3.5rem;
+  filter: drop-shadow(0 0 12px rgba(154, 255, 0, 0.34));
+}
+
+.gan-feature-alert.estado-proxima .gan-feature-icon {
+  filter: drop-shadow(0 0 12px rgba(255, 214, 0, 0.42));
+}
+
+.gan-feature-alert.estado-vencida .gan-feature-icon {
+  filter: drop-shadow(0 0 12px rgba(255, 59, 59, 0.42));
+}
+
+.gan-feature-alert.estado-sin-programacion .gan-feature-icon {
+  filter: none;
+}
+
+.gan-feature-alert div {
+  display: grid;
+  gap: 0.28rem;
+  min-width: 0;
+}
+
+.gan-feature-kicker {
+  color: #00e5ff !important;
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.gan-feature-alert strong {
+  color: #9aff00;
+  font-size: clamp(1.45rem, 2.5vw, 2rem);
+  line-height: 1.1;
+  overflow-wrap: break-word;
+  text-shadow: 0 0 12px rgba(154, 255, 0, 0.32);
+  word-break: normal;
+}
+
+.gan-feature-alert span,
+.gan-feature-alert small {
+  color: #a7b3c2;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.gan-feature-alert.estado-proxima strong,
+.gan-feature-alert.estado-proxima small {
+  color: #ffd600;
+  text-shadow: 0 0 12px rgba(255, 214, 0, 0.28);
+}
+
+.gan-feature-alert.estado-vencida strong,
+.gan-feature-alert.estado-vencida small {
+  color: #ff3b3b;
+  text-shadow: 0 0 12px rgba(255, 59, 59, 0.28);
+}
+
+.gan-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.gan-filter-row button {
+  border: 2px solid rgba(255, 255, 255, 0.11);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+  color: #dce5ef;
+  cursor: pointer;
+  font-weight: 800;
+  min-height: 46px;
+  padding: 0.65rem 1rem;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
+}
+
+.gan-filter-row button.is-active,
+.gan-filter-row button:hover {
+  box-shadow: 0 0 0 2px rgba(246, 248, 251, 0.08) inset;
+  color: #f6f8fb;
+}
+
+.gan-filter-row button.estado-todas {
+  border-color: rgba(148, 163, 184, 0.38);
+  background: rgba(148, 163, 184, 0.12);
+  color: #dce5ef;
 }
 
 .gan-weight-chart {
-  height: 320px;
+  height: 370px;
   margin-top: 1rem;
   min-width: 0;
+}
+
+.gan-productivity-summary {
+  grid-template-columns: repeat(6, minmax(150px, 1fr));
+}
+
+.gan-productivity-summary .gan-metric,
+.gan-productivity-summary > article {
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 0.75rem;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-rows: auto 1fr auto auto;
+  min-height: 12rem;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0.88rem 1rem;
+}
+
+.gan-productivity-summary > article.estado-neutro {
+  background: rgba(15, 23, 42, 0.62);
+  border-color: rgba(148, 163, 184, 0.28);
+  box-shadow: 0 0 18px rgba(148, 163, 184, 0.06);
+}
+
+.gan-productivity-summary > article.estado-neutro strong {
+  color: #f6f8fb;
+  text-shadow: 0 0 12px rgba(246, 248, 251, 0.2);
+}
+
+.gan-productivity-summary .gan-metric-title {
+  align-content: start;
+  align-items: start;
+  display: grid;
+  gap: 0.52rem;
+  justify-items: center;
+  min-height: 6.35rem;
+  text-align: center;
+}
+
+.gan-productivity-summary .gan-metric-title > span:last-child {
+  color: #c7ddff;
+  display: block;
+  font-size: clamp(0.78rem, 0.95vw, 0.98rem);
+  font-weight: 700;
+  line-height: 1.25;
+  max-width: 100%;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.gan-productivity-summary > article > strong {
+  align-self: end;
+  display: block;
+  font-size: clamp(1.08rem, 1.5vw, 1.45rem);
+  line-height: 1.08;
+  margin-top: 0.55rem;
+  max-width: 100%;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.gan-productivity-summary > article.estado-vigente {
+  background: rgba(154, 255, 0, 0.07);
+  border-color: rgba(154, 255, 0, 0.48);
+  box-shadow: 0 0 18px rgba(154, 255, 0, 0.08);
+}
+
+.gan-productivity-summary > article.estado-proxima {
+  background: rgba(255, 214, 0, 0.08);
+  border-color: rgba(255, 214, 0, 0.48);
+  box-shadow: 0 0 18px rgba(255, 214, 0, 0.08);
+}
+
+.gan-productivity-summary > article.estado-vencida {
+  background: rgba(255, 59, 59, 0.08);
+  border-color: rgba(255, 59, 59, 0.48);
+  box-shadow: 0 0 18px rgba(255, 59, 59, 0.08);
+}
+
+.gan-productivity-summary > article.estado-sin-programacion {
+  background: rgba(15, 23, 42, 0.72);
+  border-color: rgba(148, 163, 184, 0.34);
+}
+
+.gan-productivity-summary > article.estado-vigente strong,
+.gan-productivity-summary .gan-general-status.estado-vigente strong {
+  color: #9aff00;
+  text-shadow: 0 0 14px rgba(154, 255, 0, 0.42);
+}
+
+.gan-productivity-summary > article.estado-proxima strong,
+.gan-productivity-summary .gan-general-status.estado-proxima strong {
+  color: #ffd600;
+  text-shadow: 0 0 14px rgba(255, 214, 0, 0.42);
+}
+
+.gan-productivity-summary > article.estado-vencida strong,
+.gan-productivity-summary .gan-general-status.estado-vencida strong {
+  color: #ff3b3b;
+  text-shadow: 0 0 14px rgba(255, 59, 59, 0.42);
+}
+
+.gan-productivity-summary > article.estado-sin-programacion strong,
+.gan-productivity-summary .gan-general-status.estado-sin-programacion strong {
+  color: #cbd5e1;
+  text-shadow: none;
+}
+
+.gan-productivity-summary .gan-card-icon {
+  display: inline-grid;
+  font-size: clamp(2.05rem, 2.8vw, 2.65rem);
+  line-height: 1;
+  margin: 0 auto;
+  place-items: center;
+}
+
+.gan-productivity-summary .estado-vigente .gan-card-icon {
+  filter: drop-shadow(0 0 10px #7cff00);
+}
+
+.gan-productivity-summary .estado-proxima .gan-card-icon {
+  filter: drop-shadow(0 0 10px #ffd600);
+}
+
+.gan-productivity-summary .estado-vencida .gan-card-icon {
+  filter: drop-shadow(0 0 10px #ff3b3b);
+}
+
+.gan-productivity-summary .gan-general-status small {
+  color: #a7b3c2;
+  display: block;
+  font-size: clamp(0.58rem, 0.72vw, 0.66rem);
+  font-weight: 700;
+  line-height: 1.25;
+  margin-top: 0.42rem;
+  max-width: 100%;
+  overflow-wrap: break-word;
+  text-align: left;
+}
+
+.gan-productivity-summary .gan-general-status strong {
+  font-size: clamp(1rem, 1.3vw, 1.28rem);
+  text-transform: uppercase;
+}
+
+.gan-productivity-summary .gan-metric-note {
+  color: #dce5ef;
+  display: block;
+  font-size: clamp(0.72rem, 0.82vw, 0.78rem);
+  font-weight: 800;
+  line-height: 1.2;
+  margin-top: 0.32rem;
+  overflow-wrap: break-word;
+  text-align: center;
+}
+
+.gan-productivity-form {
+  align-items: end;
+}
+
+.gan-inline-warning {
+  align-self: stretch;
+  border: 1px solid rgba(255, 214, 0, 0.5);
+  border-radius: 0.7rem;
+  background: rgba(255, 214, 0, 0.09);
+  color: #ffd600;
+  font-weight: 900;
+  padding: 0.9rem 1rem;
+  text-shadow: 0 0 10px rgba(255, 214, 0, 0.22);
+}
+
+.gan-productivity-chart {
+  border: 1px solid rgba(154, 255, 0, 0.16);
+  border-radius: 0.85rem;
+  background: rgba(3, 8, 11, 0.32);
+  display: grid;
+  gap: 0.75rem;
+  grid-template-rows: minmax(0, 1fr) auto;
+  padding: 0.75rem;
+}
+
+.gan-chart-tooltip {
+  border: 1px solid rgba(154, 255, 0, 0.36);
+  border-radius: 0.65rem;
+  backdrop-filter: blur(8px);
+  background: rgba(8, 16, 23, 0.86);
+  color: #dce5ef;
+  display: grid;
+  font-size: 0.68rem;
+  gap: 0.13rem;
+  line-height: 1.15;
+  max-width: min(220px, 72vw);
+  padding: 0.48rem 0.58rem;
+  pointer-events: none;
+  white-space: normal;
+}
+
+.gan-chart-tooltip strong {
+  color: #9aff00;
+  font-size: 0.74rem;
+}
+
+.gan-chart-tooltip small {
+  color: #a7b3c2;
+  font-size: 0.62rem;
+  line-height: 1.18;
+  overflow-wrap: anywhere;
+}
+
+.gan-chart-legend {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1rem;
+  justify-content: center;
+  padding: 0.1rem 0.25rem 0.25rem;
+}
+
+.gan-chart-legend span {
+  align-items: center;
+  color: #c7ddff;
+  display: inline-flex;
+  font-size: 0.82rem;
+  font-weight: 800;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+.gan-chart-dot {
+  border: 1.5px solid #f6f8fb;
+  border-radius: 999px;
+  display: inline-block;
+  height: 0.72rem;
+  width: 0.72rem;
+}
+
+.gan-chart-dot.estado-sin-programacion {
+  background: #6ea8ff;
+  box-shadow: 0 0 10px rgba(110, 168, 255, 0.36);
+}
+
+.gan-chart-dot.estado-vigente {
+  background: #9aff00;
+  box-shadow: 0 0 10px rgba(154, 255, 0, 0.36);
+}
+
+.gan-chart-dot.estado-proxima {
+  background: #ffd600;
+  box-shadow: 0 0 10px rgba(255, 214, 0, 0.36);
+}
+
+.gan-chart-dot.estado-vencida {
+  background: #ff3b3b;
+  box-shadow: 0 0 10px rgba(255, 59, 59, 0.36);
+}
+
+.gan-projection-grid,
+.gan-profit-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.gan-economics-form {
+  margin-top: 0.85rem;
+}
+
+.gan-pdf-heading {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.gan-productivity-calendar {
+  --gan-productivity-calendar-columns: minmax(0, 0.72fr) minmax(0, 0.68fr) minmax(0, 0.84fr) minmax(0, 0.84fr) minmax(0, 0.78fr) minmax(0, 0.76fr) minmax(0, 0.72fr) minmax(0, 0.92fr) minmax(0, 1.08fr);
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .gan-pesajes-table {
@@ -2620,6 +3515,10 @@ header nav > div[role='navigation']::-webkit-scrollbar {
   overflow-x: auto;
 }
 
+.gan-pesajes-table.gan-productivity-calendar {
+  overflow-x: hidden;
+}
+
 .gan-pesajes-head,
 .gan-pesajes-row {
   display: grid;
@@ -2627,6 +3526,58 @@ header nav > div[role='navigation']::-webkit-scrollbar {
   min-width: 760px;
   gap: 0.75rem;
   align-items: center;
+}
+
+.gan-productivity-calendar .gan-pesajes-head,
+.gan-productivity-calendar .gan-pesajes-row {
+  grid-template-columns: var(--gan-productivity-calendar-columns);
+  min-width: 0;
+  width: 100%;
+}
+
+.gan-productivity-calendar .gan-pesajes-head {
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 0 0.9rem 0.55rem;
+  text-align: center;
+}
+
+.gan-productivity-calendar .gan-pesajes-head span {
+  display: block;
+  min-width: 0;
+}
+
+.gan-productivity-calendar .gan-pesajes-row {
+  min-height: 5.55rem;
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+  text-align: center;
+}
+
+.gan-productivity-calendar .gan-pesajes-row > span,
+.gan-productivity-calendar .gan-pesajes-row > strong {
+  align-items: center;
+  display: grid;
+  justify-items: center;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.gan-productivity-calendar .gan-pesajes-row .gan-date-cell {
+  white-space: nowrap;
+  word-break: keep-all;
+  overflow-wrap: normal;
+}
+
+.gan-productivity-calendar .gan-pesajes-row .gan-alert-pill {
+  justify-self: center;
+  min-width: 7.4rem;
+  padding-left: 0.85rem;
+  padding-right: 0.85rem;
+}
+
+.gan-productivity-calendar .gan-pesajes-row small {
+  text-align: left;
 }
 
 .gan-pesajes-head {
@@ -2658,6 +3609,54 @@ header nav > div[role='navigation']::-webkit-scrollbar {
   margin-top: 1rem;
 }
 
+.gan-vaccine-calendar {
+  --gan-vaccine-calendar-columns: 118px minmax(120px, 0.85fr) minmax(170px, 1.2fr) minmax(128px, 0.85fr) minmax(156px, 0.95fr) minmax(190px, 1fr);
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 1rem;
+  overflow-x: auto;
+}
+
+.gan-vaccine-calendar-head,
+.gan-vaccine-calendar-row {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: var(--gan-vaccine-calendar-columns);
+  min-width: 980px;
+  width: 100%;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.85rem 1rem;
+}
+
+.gan-vaccine-calendar-head {
+  color: #a7b3c2;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.gan-vaccine-calendar-row {
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.035);
+  color: #dce5ef;
+  min-height: 5.6rem;
+  text-align: center;
+}
+
+.gan-vaccine-calendar-row strong {
+  color: #f6f8fb;
+}
+
+.gan-vaccine-calendar-row > span,
+.gan-vaccine-calendar-row > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .gan-vaccine-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -2672,42 +3671,182 @@ header nav > div[role='navigation']::-webkit-scrollbar {
 .gan-vaccine-row div {
   display: grid;
   gap: 0.25rem;
+  min-width: 0;
 }
 
 .gan-vaccine-row strong {
   color: #f6f8fb;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.gan-vaccine-title {
+  align-items: center;
+  display: inline-flex;
+  gap: 0.35rem;
+}
+
+.gan-vaccine-title.estado-vigente {
+  color: #9aff00;
+  text-shadow: 0 0 10px rgba(154, 255, 0, 0.3);
+}
+
+.gan-vaccine-title.estado-proxima {
+  color: #ffd600;
+  text-shadow: 0 0 10px rgba(255, 214, 0, 0.3);
+}
+
+.gan-vaccine-title.estado-vencida {
+  color: #ff3b3b;
+  text-shadow: 0 0 10px rgba(255, 59, 59, 0.3);
+}
+
+.gan-vaccine-title.estado-sin-programacion {
+  color: #cbd5e1;
 }
 
 .gan-vaccine-row span,
 .gan-vaccine-row small {
   color: #a7b3c2;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.gan-vaccine-row span:has(+ span) {
+  min-width: 0;
 }
 
 .gan-vaccine-row small {
   grid-column: 1 / -1;
 }
 
-.gan-alert-pill {
-  border: 1px solid rgba(255, 255, 255, 0.11);
+.gan-countdown-stack {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  justify-content: center;
+}
+
+.gan-countdown-pill {
+  align-items: center;
+  border: 1.5px solid rgba(255, 255, 255, 0.12);
   border-radius: 999px;
-  padding: 0.35rem 0.65rem;
+  display: inline-flex;
+  font-size: 0.78rem;
+  font-weight: 900;
+  gap: 0.25rem;
+  justify-content: center;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 0.35rem 0.7rem;
+  white-space: nowrap;
+}
+
+.gan-countdown-pill.estado-vigente {
+  background: rgba(154, 255, 0, 0.12);
+  border-color: rgba(154, 255, 0, 0.82);
+  box-shadow: 0 0 12px rgba(154, 255, 0, 0.16);
+  color: #9aff00;
+}
+
+.gan-countdown-pill.estado-proxima {
+  background: rgba(255, 214, 0, 0.12);
+  border-color: rgba(255, 214, 0, 0.82);
+  box-shadow: 0 0 12px rgba(255, 214, 0, 0.16);
+  color: #ffd600;
+}
+
+.gan-countdown-pill.estado-vencida {
+  background: rgba(255, 59, 59, 0.12);
+  border-color: rgba(255, 59, 59, 0.82);
+  box-shadow: 0 0 12px rgba(255, 59, 59, 0.16);
+  color: #ff3b3b;
+}
+
+.gan-countdown-pill.estado-sin-programacion {
+  background: rgba(15, 23, 42, 0.78);
+  border-color: rgba(148, 163, 184, 0.52);
+  color: #cbd5e1;
+}
+
+.gan-pdf-button {
+  justify-self: start;
+  margin-top: 0.65rem;
+}
+
+.gan-alert-pill {
+  align-items: center;
+  border: 2px solid rgba(255, 255, 255, 0.11);
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.9rem;
+  font-weight: 800;
+  justify-content: center;
+  justify-self: center;
+  min-height: 42px;
+  min-width: 165px;
+  padding: 0.58rem 1rem;
+  text-align: center;
   color: #dce5ef;
   white-space: nowrap;
 }
 
-.gan-alert-pill.is-ok {
-  border-color: rgba(156, 255, 26, 0.35);
-  color: #9cff1a;
+.gan-alert-pill.estado-vigente,
+.gan-filter-row button.estado-vigente {
+  background: rgba(154, 255, 0, 0.14);
+  border-color: rgba(154, 255, 0, 0.92);
+  box-shadow: 0 0 16px rgba(154, 255, 0, 0.2);
+  color: #9aff00;
 }
 
-.gan-alert-pill.is-warning {
-  border-color: rgba(255, 214, 102, 0.35);
-  color: #ffd666;
+.gan-alert-pill.estado-proxima,
+.gan-filter-row button.estado-proxima {
+  background: rgba(255, 214, 0, 0.14);
+  border-color: rgba(255, 214, 0, 0.92);
+  box-shadow: 0 0 16px rgba(255, 214, 0, 0.18);
+  color: #ffd600;
 }
 
-.gan-alert-pill.is-danger {
-  border-color: rgba(255, 120, 120, 0.35);
-  color: #ff9b9b;
+.gan-alert-pill.estado-vencida,
+.gan-filter-row button.estado-vencida {
+  background: rgba(255, 59, 59, 0.14);
+  border-color: rgba(255, 59, 59, 0.9);
+  box-shadow: 0 0 16px rgba(255, 59, 59, 0.18);
+  color: #ff3b3b;
+}
+
+.gan-alert-pill.estado-sin-programacion,
+.gan-filter-row button.estado-sin-programacion {
+  background: rgba(15, 23, 42, 0.78);
+  border-color: rgba(148, 163, 184, 0.62);
+  box-shadow: none;
+  color: #cbd5e1;
+}
+
+.gan-filter-row button.is-active.estado-vigente,
+.gan-filter-row button.estado-vigente:hover {
+  background: rgba(154, 255, 0, 0.2);
+  box-shadow: 0 0 20px rgba(154, 255, 0, 0.28);
+}
+
+.gan-filter-row button.is-active.estado-proxima,
+.gan-filter-row button.estado-proxima:hover {
+  background: rgba(255, 214, 0, 0.2);
+  box-shadow: 0 0 20px rgba(255, 214, 0, 0.25);
+}
+
+.gan-filter-row button.is-active.estado-vencida,
+.gan-filter-row button.estado-vencida:hover {
+  background: rgba(255, 59, 59, 0.2);
+  box-shadow: 0 0 20px rgba(255, 59, 59, 0.25);
+}
+
+.gan-filter-row button.is-active.estado-sin-programacion,
+.gan-filter-row button.estado-sin-programacion:hover,
+.gan-filter-row button.is-active.estado-todas,
+.gan-filter-row button.estado-todas:hover {
+  background: rgba(148, 163, 184, 0.22);
 }
 
 .gan-qr-grid {
@@ -2840,6 +3979,28 @@ header nav > div[role='navigation']::-webkit-scrollbar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .gan-health-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .gan-productivity-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow-x: visible;
+  }
+
+  .gan-dashboard-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .gan-projection-grid,
+  .gan-profit-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .gan-animal-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .gan-content {
     min-width: 0;
   }
@@ -2880,16 +4041,151 @@ header nav > div[role='navigation']::-webkit-scrollbar {
     grid-template-columns: 1fr;
   }
 
+  .gan-health-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .gan-productivity-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .gan-dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .gan-projection-grid,
+  .gan-profit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .gan-animal-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .gan-feature-alert {
+    align-items: flex-start;
+    gap: 0.8rem;
+  }
+
+  .gan-feature-icon {
+    flex-basis: 2.4rem;
+    font-size: 1.55rem;
+    height: 2.4rem;
+    width: 2.4rem;
+  }
+
+  .gan-health-summary .gan-metric .gan-card-icon {
+    font-size: clamp(1.9rem, 9vw, 2.3rem);
+  }
+
+  .gan-metric {
+    min-height: 9.2rem;
+    padding: 0.9rem;
+  }
+
+  .gan-metric > span {
+    gap: 0.55rem;
+  }
+
+  .gan-metric-title {
+    min-height: 4.2rem;
+  }
+
+  .gan-metric strong {
+    font-size: 1.25rem;
+    margin-top: 0.45rem;
+  }
+
   .gan-weight-chart {
-    height: 260px;
+    height: 330px;
+  }
+
+  .gan-pdf-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .gan-productivity-calendar {
+    overflow: visible;
+  }
+
+  .gan-productivity-calendar .gan-pesajes-head {
+    display: none;
+  }
+
+  .gan-productivity-calendar .gan-pesajes-row {
+    grid-template-columns: 1fr;
+    min-width: 0;
+    padding: 1rem;
+  }
+
+  .gan-productivity-calendar .gan-pesajes-row > span,
+  .gan-productivity-calendar .gan-pesajes-row > strong {
+    display: grid;
+    gap: 0.25rem;
+  }
+
+  .gan-productivity-calendar .gan-pesajes-row > span::before,
+  .gan-productivity-calendar .gan-pesajes-row > strong::before {
+    color: #7f8ea3;
+    content: attr(data-label);
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
   }
 
   .gan-vaccine-row {
     grid-template-columns: 1fr;
   }
 
+  .gan-vaccine-calendar {
+    overflow: visible;
+  }
+
+  .gan-vaccine-calendar-head {
+    display: none;
+  }
+
+  .gan-vaccine-calendar-row {
+    grid-template-columns: 1fr;
+    min-width: 0;
+    padding: 1rem;
+    text-align: left;
+  }
+
+  .gan-vaccine-calendar-row > span,
+  .gan-vaccine-calendar-row > strong {
+    display: grid;
+    gap: 0.25rem;
+  }
+
+  .gan-vaccine-calendar-row > span::before,
+  .gan-vaccine-calendar-row > strong::before {
+    color: #7f8ea3;
+    content: attr(data-label);
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
   .gan-alert-pill {
     justify-self: start;
+    max-width: 100%;
+    min-width: 0;
+    white-space: normal;
+  }
+
+  .gan-countdown-stack {
+    align-items: flex-start;
+    justify-content: flex-start;
+  }
+
+  .gan-countdown-pill {
+    white-space: normal;
+  }
+
+  .gan-pdf-button {
+    width: 100%;
   }
 
   .gan-ficha-tabs a,

@@ -2,13 +2,9 @@ import { Html5Qrcode } from 'html5-qrcode';
 import { Camera, Square } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { StatusMessage } from '../components/FormField.jsx';
+import { normalizeQrCode } from './normalizeQrCode.js';
 
 const scannerId = 'agx-html5-qr-reader';
-
-function extractAgxCode(value) {
-  const match = String(value || '').match(/AGX-\d+/i);
-  return match ? match[0].toUpperCase() : String(value || '').trim().toUpperCase();
-}
 
 export default function QrScanner({ onCode }) {
   const scannerRef = useRef(null);
@@ -32,15 +28,15 @@ export default function QrScanner({ onCode }) {
         { facingMode: 'environment' },
         { fps: 10, qrbox: { width: 250, height: 250 } },
         async (decodedText) => {
-          const code = extractAgxCode(decodedText);
+          const code = normalizeQrCode(decodedText);
           await scanner.stop();
           setActive(false);
           onCode(code);
         },
       );
       setActive(true);
-    } catch (err) {
-      setError(err.message || 'No se pudo activar la cámara.');
+    } catch {
+      setError('No se pudo acceder a la cámara. Verifica permisos del navegador.');
     }
   };
 

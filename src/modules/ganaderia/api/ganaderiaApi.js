@@ -1,17 +1,53 @@
-const API_BASE = import.meta.env.VITE_AGX_API_URL || 'http://127.0.0.1:3001/api';
+const CONFIGURED_API_BASE = import.meta.env.VITE_AGX_API_URL || 'http://127.0.0.1:3001/api';
+
+function normalizeApiBase(value) {
+  return String(value || '').trim().replace(/\/$/, '');
+}
+
+function runtimeApiBase() {
+  if (typeof window === 'undefined') return '';
+
+  const params = new URLSearchParams(window.location.search);
+  const urlParam = params.get('agx_api_url') || params.get('apiUrl');
+
+  if (urlParam) {
+    const normalized = normalizeApiBase(urlParam);
+    window.localStorage?.setItem('agx_api_url', normalized);
+    return normalized;
+  }
+
+  return normalizeApiBase(window.localStorage?.getItem('agx_api_url'));
+}
+
+function apiBaseCandidates() {
+  const candidates = [runtimeApiBase(), normalizeApiBase(CONFIGURED_API_BASE)];
+
+  if (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+    candidates.push('http://127.0.0.1:3001/api');
+  }
+
+  return [...new Set(candidates.filter(Boolean))];
+}
 
 async function request(path, options = {}) {
   let response;
-  try {
-    response = await fetch(`${API_BASE}${path}`, {
+  for (const apiBase of apiBaseCandidates()) {
+    try {
+      response = await fetch(`${apiBase}${path}`, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
         ...options.headers,
       },
-    });
-  } catch {
-    throw new Error('No se pudo conectar con la API de AgroGenomaX. Verifica que el backend esté disponible.');
+      });
+      break;
+    } catch {
+      response = null;
+    }
+  }
+
+  if (!response) {
+    throw new Error('No se pudo conectar con la API de AgroGenomaX. Verifica que el backend o túnel esté disponible.');
   }
 
   const contentType = response.headers.get('content-type') || '';
@@ -27,7 +63,8 @@ async function request(path, options = {}) {
 export function isCloudflareWithoutLocalApi() {
   if (typeof window === 'undefined') return false;
   const isCloudflareHost = window.location.hostname.endsWith('.pages.dev');
-  const apiIsLocal = API_BASE.includes('127.0.0.1') || API_BASE.includes('localhost');
+  const apiBase = normalizeApiBase(CONFIGURED_API_BASE);
+  const apiIsLocal = apiBase.includes('127.0.0.1') || apiBase.includes('localhost');
   return isCloudflareHost && apiIsLocal;
 }
 

@@ -5,11 +5,8 @@ import AnimalInitialForm from '../animales/AnimalInitialForm.jsx';
 import { ganaderiaApi } from '../api/ganaderiaApi.js';
 import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
+import { normalizeQrCode } from './normalizeQrCode.js';
 import QrScanner from './QrScanner.jsx';
-
-function normalizeCode(value) {
-  return String(value || '').trim().toUpperCase();
-}
 
 export default function QrEntryPage({ mode = 'manual' }) {
   const { codigo } = useParams();
@@ -20,12 +17,13 @@ export default function QrEntryPage({ mode = 'manual' }) {
   const [loading, setLoading] = useState(false);
 
   const lookup = async (value) => {
-    const code = normalizeCode(value);
+    const code = normalizeQrCode(value);
     if (!code) {
       setError('Ingresa o escanea un código QR.');
       return;
     }
 
+    setManualCode(code);
     setLoading(true);
     setError('');
     setQrState(null);
@@ -40,7 +38,7 @@ export default function QrEntryPage({ mode = 'manual' }) {
       setQrState({ ...result, codigo: code });
     } catch (err) {
       const message = err.message.includes('404') || err.message.toLowerCase().includes('not found')
-        ? 'QR no registrado en AgroGenomaX'
+        ? 'QR no registrado en AgroGenomaX.'
         : err.message;
       setError(message);
     } finally {
@@ -75,7 +73,7 @@ export default function QrEntryPage({ mode = 'manual' }) {
               <input
                 value={manualCode}
                 onChange={(event) => setManualCode(event.target.value)}
-                placeholder="AGX-XXXXXX"
+                placeholder="AGX-000006"
               />
             </FormField>
             <button className="gan-submit" type="submit" disabled={loading}>
