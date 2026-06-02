@@ -18,6 +18,16 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/agx-icon-180-v3.png" />
     <title>AgroGenomaX | Inteligencia territorial ganadera</title>
   </head>
+<script>
+  if (window.location.hostname === "agrogenomax.pages.dev") {
+    window.location.replace(
+      "https://www.agrogenomax.com" +
+      window.location.pathname +
+      window.location.search +
+      window.location.hash
+    );
+  }
+</script>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
