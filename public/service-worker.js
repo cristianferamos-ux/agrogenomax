@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'agrogenomax-pwa-v17-api-clean-utf8';
+const CACHE_VERSION = 'agrogenomax-pwa-v18-qr-api-network-first';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -47,6 +47,11 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
 
   const requestUrl = new URL(request.url);
+
+  if (requestUrl.origin === self.location.origin && requestUrl.pathname.startsWith('/api/')) {
+    event.respondWith(fetch(request));
+    return;
+  }
 
   if (request.mode === 'navigate') {
     event.respondWith(
