@@ -2,7 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const root = process.cwd();
-const targets = ['src', 'server', 'public', '.tools'];
+const targets = ['src', 'server', 'public', 'functions', '.tools'];
 const ignoredDirs = new Set(['node_modules', 'dist', 'template_extract']);
 const ignoredExts = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.pdf', '.exe', '.log']);
 const mojibakePattern = /[\u00c3\u00c2\ufffd]/;
