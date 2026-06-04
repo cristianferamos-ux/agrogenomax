@@ -486,7 +486,7 @@ export default function AnimalVacunacionesTab({ animalId }) {
           <main>
             <section class="header">
               <div>
-                <div class="brand">Agro<span>Genoma</span>X</div>
+                <div class="brand">Agro<span>Genoma</span>X By CRH</div>
                 <h1>Historial Sanitario</h1>
               </div>
               <div class="generated">Fecha de generación<br /><strong>${escapeHtml(generatedAt)}</strong></div>
@@ -599,7 +599,7 @@ export default function AnimalVacunacionesTab({ animalId }) {
     document.body.appendChild(link);
     link.click();
     link.remove();
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1500);
       setStatus('Historial sanitario descargado en PDF.');
     } catch (err) {
       setError(err.message || 'No se pudo generar el PDF sanitario.');

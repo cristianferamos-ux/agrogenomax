@@ -320,11 +320,12 @@ function Header() {
     <header className="fixed inset-x-0 top-0 z-50 border-b border-white/10 bg-void/70 backdrop-blur-2xl">
       <nav className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5 lg:flex-nowrap lg:px-8 lg:py-4">
         <a href="#inicio" className="group flex min-w-0 shrink-0 items-center gap-3" aria-label="AgroGenomaX inicio">
-          <span className="grid h-10 w-10 place-items-center rounded-md border border-neon/35 bg-neon/[0.08] shadow-neon transition group-hover:border-aqua/60">
-            <Dna className="h-5 w-5 text-neon" />
+          <span className="app-brand-mark">
+            <img src="/agx-report-logo-round.jpeg" alt="" />
           </span>
-          <span className="font-display text-base font-bold tracking-[0.06em] sm:text-lg sm:tracking-[0.08em]">
-            Agro<span className="text-neon">Genoma</span><span className="text-aqua">X</span>
+          <span className="flex min-w-0 flex-col font-display text-base font-bold leading-tight tracking-[0.06em] sm:text-lg sm:tracking-[0.08em]">
+            <span>Agro<span className="text-neon">Genoma</span><span className="text-aqua">X</span></span>
+            <span className="text-[0.62rem] font-bold uppercase tracking-[0.22em] text-aqua sm:text-[0.68rem]">By CRH</span>
           </span>
         </a>
         <div
@@ -485,7 +486,7 @@ function HeroLogoShowcase({ className = '' }) {
       <div className="brand-scanline" />
       <div className="brand-glow brand-glow-green" />
       <div className="brand-glow brand-glow-blue" />
-      <img src="/agrogenomax-brand.jpeg" alt="Logo AgroGenomaX" className="brand-logo-hero" />
+      <img src="/logo-agrogenomax-by-crh.png" alt="Logo AgroGenomaX by CRH" className="brand-logo-hero" />
       <div className="brand-status">
         <span>AgroGenomaX identity</span>
         <strong>Inteligencia que garantiza resultados eficientes</strong>

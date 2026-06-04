@@ -43,6 +43,11 @@ export default function GanaderiaHome() {
           <strong>Ficha Animal</strong>
           <span>Buscar QR para abrir la ficha.</span>
         </Link>
+        <Link to="/ganaderia/animales" className="gan-card">
+          <ShieldPlus className="h-6 w-6" />
+          <strong>Tratamientos</strong>
+          <span>Buscar QR para abrir la historia clínica.</span>
+        </Link>
       </div>
     </div>
   );

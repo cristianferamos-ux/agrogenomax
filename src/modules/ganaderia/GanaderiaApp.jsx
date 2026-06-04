@@ -1,7 +1,10 @@
 import { Route, Routes, useLocation, useParams } from 'react-router-dom';
 import GanaderiaHome from './GanaderiaHome.jsx';
 import AnimalFichaBasica from './animales/AnimalFichaBasica.jsx';
+import AnimalGeneticaTab from './animales/AnimalGeneticaTab.jsx';
 import AnimalPesajesTab from './animales/AnimalPesajesTab.jsx';
+import AnimalReproduccionTab from './animales/AnimalReproduccionTab.jsx';
+import AnimalTratamientosTab from './animales/AnimalTratamientosTab.jsx';
 import AnimalVacunacionesTab from './animales/AnimalVacunacionesTab.jsx';
 import GanaderiaBackLink from './components/GanaderiaBackLink.jsx';
 import GanaderiaShell from './components/GanaderiaShell.jsx';
@@ -68,7 +71,31 @@ export default function GanaderiaApp() {
               </AnimalSubmodulePage>
             }
           />
+          <Route
+            path="animal/:id/tratamientos"
+            element={
+              <AnimalSubmodulePage title="Tratamientos">
+                <AnimalTratamientosTab />
+              </AnimalSubmodulePage>
+            }
+          />
+          <Route
+            path="animal/:id/reproduccion"
+            element={
+              <AnimalSubmodulePage title="REPRODUCCIÓN">
+                <AnimalReproduccionTab />
+              </AnimalSubmodulePage>
+            }
+          />
           <Route path="proximamente/:modulo" element={<ComingSoon title="Módulo no disponible todavía" />} />
+          <Route
+            path="animal/:id/genetica"
+            element={
+              <AnimalSubmodulePage title="Genética">
+                <AnimalGeneticaTab />
+              </AnimalSubmodulePage>
+            }
+          />
         </Routes>
       )}
     </GanaderiaShell>

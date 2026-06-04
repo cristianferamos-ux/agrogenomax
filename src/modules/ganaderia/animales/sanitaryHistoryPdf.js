@@ -1,5 +1,6 @@
 const PAGE = { width: 612, height: 792 };
 const MARGIN = 42;
+const FOOTER_SAFE_Y = 132;
 const FONT = {
   regular: 'F1',
   bold: 'F2',
@@ -26,6 +27,20 @@ function auditValue(value) {
 
 function isMissing(value) {
   return auditValue(value) === 'NO REGISTRADO';
+}
+
+function estimatePdfTextWidth(value, size) {
+  const text = clean(value, '');
+  const units = Array.from(text).reduce((sum, char) => {
+    if (char === ' ') return sum + 0.28;
+    if ('.,:;|!/\\'.includes(char)) return sum + 0.22;
+    if ('ilIjtfr'.includes(char)) return sum + 0.28;
+    if ('mwMW@'.includes(char)) return sum + 0.78;
+    if (/[A-ZÁÉÍÓÚÑ]/.test(char)) return sum + 0.62;
+    if (/[0-9]/.test(char)) return sum + 0.56;
+    return sum + 0.5;
+  }, 0);
+  return units * size;
 }
 
 function safeFilePart(value) {
@@ -123,7 +138,31 @@ function getImageSize(src) {
 
 async function loadLogo() {
   try {
-    const src = '/agx-report-logo-round.jpeg';
+    const src = '/agx-report-logo-white.jpeg';
+    const [response, size] = await Promise.all([fetch(src), getImageSize(src)]);
+    if (!response.ok) return null;
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    return { bytes, ...size };
+  } catch {
+    return null;
+  }
+}
+
+async function loadBrandWordmark() {
+  try {
+    const src = '/agx-pdf-wordmark-color-vivid.jpeg';
+    const [response, size] = await Promise.all([fetch(src), getImageSize(src)]);
+    if (!response.ok) return null;
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    return { bytes, ...size };
+  } catch {
+    return null;
+  }
+}
+
+async function loadFooterWordmark() {
+  try {
+    const src = '/agx-pdf-footer-logo.jpeg';
     const [response, size] = await Promise.all([fetch(src), getImageSize(src)]);
     if (!response.ok) return null;
     const bytes = new Uint8Array(await response.arrayBuffer());
@@ -155,6 +194,10 @@ class PdfBuilder {
     this.totalPages = '__TOTAL_PAGES__';
     this.logoObjectId = null;
     this.logo = null;
+    this.brandObjectId = null;
+    this.brand = null;
+    this.footerBrandObjectId = null;
+    this.footerBrand = null;
     this.qrObjectId = null;
     this.qr = null;
     this.authUrl = '';
@@ -175,6 +218,12 @@ class PdfBuilder {
     );
   }
 
+  centeredText(value, centerX, y, size = 10, font = FONT.regular, color = [0.06, 0.09, 0.12]) {
+    const text = clean(value, '');
+    const estimatedHalfWidth = estimatePdfTextWidth(text, size) / 2;
+    this.text(text, centerX - estimatedHalfWidth, y, size, font, color);
+  }
+
   line(x1, y1, x2, y2, color = [0.6, 1, 0], width = 1) {
     this.command(`${color.join(' ')} RG ${width} w ${x1} ${y1} m ${x2} ${y2} l S`);
   }
@@ -193,27 +242,27 @@ class PdfBuilder {
     return lines.length * leading;
   }
 
-  footer() {
+  legacyFooter() {
     this.line(MARGIN, 34, PAGE.width - MARGIN, 34, [0.86, 0.89, 0.93], 0.8);
-    this.text('AgroGenomaX \x96 Inteligencia que garantiza rentabilidad y sostenibilidad por metro cuadrado.', MARGIN, 20, 7.8, FONT.bold, [0.06, 0.09, 0.12]);
+    this.text('AgroGenomaX - Inteligencia que garantiza rentabilidad y sostenibilidad por metro cuadrado', MARGIN, 20, 7.8, FONT.bold, [0.06, 0.09, 0.12]);
     this.text(`Página ${this.pageNumber} de ${this.totalPages}`, PAGE.width - 96, 20, 8, FONT.regular, [0.32, 0.38, 0.45]);
   }
 
-  header(title, generatedAt) {
+  legacyHeader(title, generatedAt) {
     this.pageNumber += 1;
     this.y = PAGE.height - MARGIN;
     if (this.logoObjectId && this.logo) {
-      const logoW = 72;
+      const logoW = 64;
       const logoH = (this.logo.height / this.logo.width) * logoW;
       this.command(`q ${logoW} 0 0 ${logoH.toFixed(2)} ${MARGIN} ${(this.y - logoH + 4).toFixed(2)} cm /ImLogo Do Q`);
       this.text('AgroGenomaX', MARGIN + 88, this.y - 12, 23, FONT.bold, [0.06, 0.09, 0.12]);
     } else {
       this.text('AgroGenomaX', MARGIN, this.y - 10, 24, FONT.bold, [0.06, 0.09, 0.12]);
     }
-    this.text(title, MARGIN + 88, this.y - 32, 13, FONT.bold, [0.0, 0.52, 0.64]);
-    this.text(`Generado: ${generatedAt}`, MARGIN + 88, this.y - 48, 8, FONT.regular, [0.32, 0.38, 0.45]);
-    this.text('AgroGenomaX BioTech', MARGIN + 88, this.y - 62, 8.8, FONT.bold, [0.0, 0.52, 0.64]);
-    this.drawWrapped('Sistema Inteligente de Gestión Ganadera, Trazabilidad y Cumplimiento Sanitario', MARGIN + 88, this.y - 75, 62, 7.4, FONT.bold, [0.06, 0.09, 0.12], 9);
+    this.text(title, MARGIN + 88, this.y - 28, 13, FONT.bold, [0.0, 0.52, 0.64]);
+    this.text(`Generado: ${generatedAt}`, MARGIN + 88, this.y - 44, 8, FONT.regular, [0.32, 0.38, 0.45]);
+    this.text('AgroGenomaX BioTech', MARGIN + 88, this.y - 58, 8.8, FONT.bold, [0.0, 0.52, 0.64]);
+    this.drawWrapped('Sistema Inteligente de Gestión Ganadera, Trazabilidad, Cumplimiento Sanitario y Ambiental', MARGIN + 88, this.y - 70, 70, 7.4, FONT.bold, [0.06, 0.09, 0.12], 9);
     this.drawWrapped('Plataforma de gestión productiva, ambiental y agropecuaria.', MARGIN + 88, this.y - 96, 62, 7.4, FONT.regular, [0.32, 0.38, 0.45], 9);
 
     if (this.qrObjectId && this.qr) {
@@ -241,11 +290,63 @@ class PdfBuilder {
     this.header(title, generatedAt);
   }
 
+  footer() {
+    this.line(MARGIN, 48, PAGE.width - MARGIN, 48, [0.86, 0.89, 0.93], 0.8);
+    if (this.footerBrandObjectId && this.footerBrand) {
+      const brandW = 88;
+      const brandH = (this.footerBrand.height / this.footerBrand.width) * brandW;
+      this.command(`q ${brandW} 0 0 ${brandH.toFixed(2)} ${MARGIN} 7 cm /ImFooterBrand Do Q`);
+      const footerCenterX = (MARGIN + 100 + PAGE.width - 122) / 2;
+      this.centeredText('Inteligencia que garantiza rentabilidad y sostenibilidad por metro cuadrado', footerCenterX, 30, 7.3, FONT.bold, [0.06, 0.09, 0.12]);
+      this.centeredText('www.agrogenomax.com', footerCenterX, 19, 7.3, FONT.bold, [0.06, 0.09, 0.12]);
+    } else {
+      this.text('AgroGenomaX by CRH | Ganadería Inteligente', MARGIN, 22, 7.3, FONT.bold, [0.06, 0.09, 0.12]);
+    }
+    this.text(`Página ${this.pageNumber} de ${this.totalPages}`, PAGE.width - 96, 20, 8, FONT.regular, [0.32, 0.38, 0.45]);
+  }
+
+  header(title, generatedAt) {
+    this.pageNumber += 1;
+    this.y = PAGE.height - MARGIN;
+    const textX = this.logoObjectId && this.logo ? MARGIN + 88 : MARGIN;
+    if (this.logoObjectId && this.logo) {
+      const logoW = 72;
+      const logoH = (this.logo.height / this.logo.width) * logoW;
+      this.command(`q ${logoW} 0 0 ${logoH.toFixed(2)} ${MARGIN} ${(this.y - logoH + 4).toFixed(2)} cm /ImLogo Do Q`);
+    }
+    if (this.brandObjectId && this.brand) {
+      const brandW = 236;
+      const brandH = (this.brand.height / this.brand.width) * brandW;
+      const brandX = (PAGE.width - brandW) / 2;
+      this.command(`q ${brandW} 0 0 ${brandH.toFixed(2)} ${brandX.toFixed(2)} ${(this.y - 20).toFixed(2)} cm /ImBrand Do Q`);
+    }
+    this.text(title, textX, this.y - 30, 11.5, FONT.bold, [0.0, 0.52, 0.64]);
+    this.text(`Generado: ${generatedAt}`, textX, this.y - 44, 7.2, FONT.regular, [0.32, 0.38, 0.45]);
+    this.text('AgroGenomaX BioTech', textX, this.y - 57, 7.8, FONT.bold, [0.0, 0.52, 0.64]);
+    this.drawWrapped('Sistema Inteligente de Gestión Ganadera, Trazabilidad, Cumplimiento Sanitario y Ambiental', textX, this.y - 69, 70, 6.7, FONT.bold, [0.06, 0.09, 0.12], 8);
+
+    if (this.qrObjectId && this.qr) {
+      const qrSize = 58;
+      const qrX = PAGE.width - MARGIN - qrSize;
+      const qrY = this.y - qrSize + 6;
+      this.rect(qrX - 10, qrY - 28, qrSize + 20, qrSize + 35, [0.0, 0.52, 0.64], [1, 1, 1], 1);
+      this.command(`q ${qrSize} 0 0 ${qrSize} ${qrX} ${qrY} cm /ImQr Do Q`);
+      this.text('Escanear QR para', qrX - 4, qrY - 11, 5.3, FONT.bold, [0.06, 0.09, 0.12]);
+      this.text('validar autenticidad', qrX - 5, qrY - 18, 5.3, FONT.bold, [0.06, 0.09, 0.12]);
+    } else {
+      this.drawWrapped('Validación: escanear QR para validar autenticidad', PAGE.width - 166, this.y - 28, 26, 7, FONT.bold, [0.06, 0.09, 0.12], 8);
+    }
+
+    this.line(MARGIN, this.y - 116, PAGE.width - MARGIN, this.y - 116, [0.6, 1, 0], 2.5);
+    this.y -= 142;
+  }
+
   ensureSpace(height, title, generatedAt) {
-    if (this.y - height < 58) this.newPage(title, generatedAt);
+    if (this.y - height < FOOTER_SAFE_Y) this.newPage(title, generatedAt);
   }
 
   sectionTitle(value, options = {}) {
+    this.ensureSpace(22 + (options.minFollowingContent ?? 118), 'HISTORIAL SANITARIO', this.generatedAt);
     const label = options.uppercase === false ? value : value.toUpperCase();
     this.text(label, MARGIN, this.y, 10, FONT.bold, [0.0, 0.52, 0.64]);
     this.line(MARGIN, this.y - 5, PAGE.width - MARGIN, this.y - 5, [0.86, 0.89, 0.93], 0.7);
@@ -331,10 +432,23 @@ class PdfBuilder {
   async build({ animal, resumen, estadoGeneral, vacunaciones, generatedAt }) {
     this.generatedAt = generatedAt;
     this.authUrl = animal.authUrl || `https://agrogenomax.pages.dev/qr/${encodeURIComponent(animal.qr || '')}`;
-    this.logo = await loadLogo();
+    const [logo, brand, footerBrand] = await Promise.all([loadLogo(), loadBrandWordmark(), loadFooterWordmark()]);
+    this.logo = logo;
+    this.brand = brand;
+    this.footerBrand = footerBrand;
     if (this.logo) {
       this.logoObjectId = this.addObject(
         `<< /Type /XObject /Subtype /Image /Width ${this.logo.width} /Height ${this.logo.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${this.logo.bytes.length} >>\nstream\n${binaryFromBytes(this.logo.bytes)}\nendstream`,
+      );
+    }
+    if (this.brand) {
+      this.brandObjectId = this.addObject(
+        `<< /Type /XObject /Subtype /Image /Width ${this.brand.width} /Height ${this.brand.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${this.brand.bytes.length} >>\nstream\n${binaryFromBytes(this.brand.bytes)}\nendstream`,
+      );
+    }
+    if (this.footerBrand) {
+      this.footerBrandObjectId = this.addObject(
+        `<< /Type /XObject /Subtype /Image /Width ${this.footerBrand.width} /Height ${this.footerBrand.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${this.footerBrand.bytes.length} >>\nstream\n${binaryFromBytes(this.footerBrand.bytes)}\nendstream`,
       );
     }
     this.qr = await loadQrCode(this.authUrl);
@@ -436,6 +550,8 @@ class PdfBuilder {
       const contentId = this.addObject(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
       const xObjects = [];
       if (this.logoObjectId) xObjects.push(`/ImLogo ${this.logoObjectId} 0 R`);
+      if (this.brandObjectId) xObjects.push(`/ImBrand ${this.brandObjectId} 0 R`);
+      if (this.footerBrandObjectId) xObjects.push(`/ImFooterBrand ${this.footerBrandObjectId} 0 R`);
       if (this.qrObjectId) xObjects.push(`/ImQr ${this.qrObjectId} 0 R`);
       const xObject = xObjects.length ? `/XObject << ${xObjects.join(' ')} >>` : '';
       const pageId = this.addObject(

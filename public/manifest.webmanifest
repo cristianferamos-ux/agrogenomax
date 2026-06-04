@@ -1,7 +1,7 @@
 {
-  "name": "AgroGenomaX",
-  "short_name": "AgroGenomaX",
-  "description": "Plataforma de inteligencia territorial ganadera, trazabilidad bovina, GIS y monitoreo satelital.",
+  "name": "AgroGenomaX By CRH",
+  "short_name": "AGX By CRH",
+  "description": "Plataforma BioTech de inteligencia ganadera, genética, nutrición, sanidad, diagnóstico, rentabilidad y trazabilidad territorial.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

@@ -125,9 +125,15 @@ export default function AnimalFichaBasica() {
           <Link to={`/ganaderia/animal/${id}/vacunaciones`}>
             Vacunaciones
           </Link>
-          <button type="button" disabled>Tratamientos</button>
-          <button type="button" disabled>Reproduccion</button>
-          <button type="button" disabled>Genetica</button>
+          <Link to={`/ganaderia/animal/${id}/tratamientos`}>
+            Tratamientos
+          </Link>
+          <Link to={`/ganaderia/animal/${id}/reproduccion`}>
+            Reproducción
+          </Link>
+          <Link to={`/ganaderia/animal/${id}/genetica`}>
+            Genética
+          </Link>
           <button type="button" disabled>Historial QR</button>
         </div>
 
