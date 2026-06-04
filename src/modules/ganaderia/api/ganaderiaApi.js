@@ -1,65 +1,116 @@
-const CONFIGURED_API_BASE = import.meta.env.VITE_AGX_API_URL || 'http://127.0.0.1:3001/api';
+const CONFIGURED_API_BASE = import.meta.env.VITE_API_URL || import.meta.env.VITE_AGX_API_URL || '';
+const LOCAL_API_BASE = 'http://127.0.0.1:3001/api';
 
 function normalizeApiBase(value) {
   return String(value || '').trim().replace(/\/$/, '');
 }
 
-function runtimeApiBase() {
+function isLocalHostname() {
+  if (typeof window === 'undefined') return false;
+  return ['localhost', '127.0.0.1'].includes(window.location.hostname);
+}
+
+function isLocalApiBase(value) {
+  const apiBase = normalizeApiBase(value);
+  return apiBase.includes('127.0.0.1') || apiBase.includes('localhost');
+}
+
+function runtimeApiBaseFromQuery() {
   if (typeof window === 'undefined') return '';
 
   const params = new URLSearchParams(window.location.search);
   const urlParam = params.get('agx_api_url') || params.get('apiUrl');
 
-  if (urlParam) {
-    const normalized = normalizeApiBase(urlParam);
-    window.localStorage?.setItem('agx_api_url', normalized);
-    return normalized;
-  }
+  if (!urlParam) return '';
 
+  const normalized = normalizeApiBase(urlParam);
+  window.localStorage?.setItem('agx_api_url', normalized);
+  return normalized;
+}
+
+function runtimeApiBaseFromStorage() {
+  if (typeof window === 'undefined') return '';
   return normalizeApiBase(window.localStorage?.getItem('agx_api_url'));
 }
 
 function apiBaseCandidates() {
-  const candidates = [runtimeApiBase(), '/api'];
+  const configuredApiBase = normalizeApiBase(CONFIGURED_API_BASE);
+  const queryApiBase = runtimeApiBaseFromQuery();
+  const storageApiBase = runtimeApiBaseFromStorage();
+  const candidates = [];
 
-  if (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)) {
-    candidates.push('http://127.0.0.1:3001/api');
+  if (queryApiBase) {
+    candidates.push(queryApiBase);
   }
 
-  candidates.push(normalizeApiBase(CONFIGURED_API_BASE));
+  if (!isLocalHostname()) {
+    candidates.push('/api');
+  }
+
+  if (configuredApiBase && (isLocalHostname() || !isLocalApiBase(configuredApiBase))) {
+    candidates.push(configuredApiBase);
+  }
+
+  if (isLocalHostname()) {
+    candidates.push(LOCAL_API_BASE, '/api');
+  }
+
+  if (storageApiBase && storageApiBase !== queryApiBase && (isLocalHostname() || !isLocalApiBase(storageApiBase))) {
+    candidates.push(storageApiBase);
+  }
 
   return [...new Set(candidates.filter(Boolean))];
 }
 
+function logApiAttempt(url) {
+  if (typeof console !== 'undefined') {
+    console.info(`[AgroGenomaX API] Consultando: ${url}`);
+  }
+}
+
+function logApiFallback(url, reason) {
+  if (typeof console !== 'undefined') {
+    console.warn(`[AgroGenomaX API] Falló ${url}: ${reason}`);
+  }
+}
+
 async function request(path, options = {}) {
   for (const apiBase of apiBaseCandidates()) {
+    const url = `${apiBase}${path}`;
     let response;
 
     try {
-      response = await fetch(`${apiBase}${path}`, {
+      logApiAttempt(url);
+      response = await fetch(url, {
         ...options,
         headers: {
           'Content-Type': 'application/json',
           ...options.headers,
         },
       });
-    } catch {
+    } catch (error) {
+      logApiFallback(url, error.message || 'sin respuesta de red');
       continue;
     }
 
     const contentType = response.headers.get('content-type') || '';
     if (!contentType.includes('application/json')) {
+      logApiFallback(url, `respuesta no JSON (${contentType || 'sin Content-Type'})`);
       continue;
     }
 
     const payload = await response.json();
 
     if ([502, 503, 504].includes(response.status)) {
+      logApiFallback(url, `HTTP ${response.status}`);
       continue;
     }
 
     if (!response.ok) {
-      throw new Error(payload?.error || `Error ${response.status}`);
+      const error = new Error(payload?.error || `Error ${response.status}`);
+      error.status = response.status;
+      error.payload = payload;
+      throw error;
     }
 
     return payload;
@@ -72,8 +123,7 @@ export function isCloudflareWithoutLocalApi() {
   if (typeof window === 'undefined') return false;
   const isCloudflareHost = window.location.hostname.endsWith('.pages.dev');
   const apiBase = normalizeApiBase(CONFIGURED_API_BASE);
-  const apiIsLocal = apiBase.includes('127.0.0.1') || apiBase.includes('localhost');
-  return isCloudflareHost && apiIsLocal;
+  return isCloudflareHost && isLocalApiBase(apiBase);
 }
 
 export const ganaderiaApi = {

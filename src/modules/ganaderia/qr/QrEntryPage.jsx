@@ -30,14 +30,26 @@ export default function QrEntryPage({ mode = 'manual' }) {
 
     try {
       const result = await ganaderiaApi.lookupQr(code);
+
+      if (!result.exists) {
+        setError('QR no registrado en AgroGenomaX.');
+        return;
+      }
+
       const animalId = result.animal?.id || result.animal?.animal_id;
       if (result.assigned && animalId) {
         navigate(`/ganaderia/animal/${animalId}`);
         return;
       }
+
+      if (result.assigned && !animalId) {
+        setError('QR encontrado y asignado, pero no tiene animal disponible.');
+        return;
+      }
+
       setQrState({ ...result, codigo: code });
     } catch (err) {
-      const message = err.message.includes('404') || err.message.toLowerCase().includes('not found')
+      const message = err.status === 404 || err.message.includes('404') || err.message.toLowerCase().includes('not found')
         ? 'QR no registrado en AgroGenomaX.'
         : err.message;
       setError(message);
