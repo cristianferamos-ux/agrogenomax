@@ -20,44 +20,52 @@ function runtimeApiBase() {
 }
 
 function apiBaseCandidates() {
-  const candidates = [runtimeApiBase(), normalizeApiBase(CONFIGURED_API_BASE)];
+  const candidates = [runtimeApiBase(), '/api'];
 
   if (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)) {
     candidates.push('http://127.0.0.1:3001/api');
   }
 
+  candidates.push(normalizeApiBase(CONFIGURED_API_BASE));
+
   return [...new Set(candidates.filter(Boolean))];
 }
 
 async function request(path, options = {}) {
-  let response;
   for (const apiBase of apiBaseCandidates()) {
+    let response;
+
     try {
       response = await fetch(`${apiBase}${path}`, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...options.headers,
+        },
       });
-      break;
     } catch {
-      response = null;
+      continue;
     }
+
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      continue;
+    }
+
+    const payload = await response.json();
+
+    if ([502, 503, 504].includes(response.status)) {
+      continue;
+    }
+
+    if (!response.ok) {
+      throw new Error(payload?.error || `Error ${response.status}`);
+    }
+
+    return payload;
   }
 
-  if (!response) {
-    throw new Error('No se pudo conectar con la API de AgroGenomaX. Verifica que el backend o túnel esté disponible.');
-  }
-
-  const contentType = response.headers.get('content-type') || '';
-  const payload = contentType.includes('application/json') ? await response.json() : null;
-
-  if (!response.ok) {
-    throw new Error(payload?.error || `Error ${response.status}`);
-  }
-
-  return payload;
+  throw new Error('No se pudo conectar con la API de AgroGenomaX. Verifica que el backend o túnel esté disponible.');
 }
 
 export function isCloudflareWithoutLocalApi() {

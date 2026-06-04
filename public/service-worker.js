@@ -1,9 +1,17 @@
-const CACHE_VERSION = 'agrogenomax-pwa-v7';
+const CACHE_VERSION = 'agrogenomax-pwa-v17-api-clean-utf8';
 const APP_SHELL = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
-  '/agrogenomax-brand.jpeg',
+  '/logo-agrogenomax-by-crh.png',
+  '/agx-report-logo-round.jpeg',
+  '/agx-report-logo-white.jpeg',
+  '/agx-pdf-header-footer.jpeg',
+  '/agx-pdf-wordmark.jpeg',
+  '/agx-pdf-wordmark-color.jpeg',
+  '/agx-pdf-wordmark-color-vivid.jpeg',
+  '/agx-pdf-wordmark-bw.jpeg',
+  '/agx-pdf-footer-logo.jpeg',
   '/icons/agx-favicon-32-v3.png',
   '/icons/agx-favicon-48-v3.png',
   '/icons/agx-icon-180-v3.png',
