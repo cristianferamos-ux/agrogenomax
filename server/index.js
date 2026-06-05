@@ -1,7 +1,6 @@
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
-import path from 'node:path';
 import { errorHandler, notFound } from './middleware/errors.js';
 import animalesRouter from './routes/animales.js';
 import healthRouter from './routes/health.js';
@@ -35,10 +34,8 @@ app.use('/api', razasRouter);
 app.use('/api', pesajesRouter);
 app.use('/api', vacunacionesRouter);
 
-const distDir = path.join(process.cwd(), 'dist');
-app.use(express.static(distDir));
-app.get(/^(?!\/api).*/, (_req, res) => {
-  res.sendFile(path.join(distDir, 'index.html'));
+app.get('/', (_req, res) => {
+  res.json({ ok: true, service: 'AgroGenomaX API' });
 });
 
 app.use(notFound);
