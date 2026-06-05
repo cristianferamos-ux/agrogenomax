@@ -9,6 +9,8 @@ import potrerosRouter from './routes/potreros.js';
 import prediosRouter from './routes/predios.js';
 import qrRouter from './routes/qr.js';
 import razasRouter from './routes/razas.js';
+import reproduccionRouter from './routes/reproduccion.js';
+import tratamientosRouter from './routes/tratamientos.js';
 import vacunacionesRouter from './routes/vacunaciones.js';
 
 dotenv.config({ path: '.env', quiet: true });
@@ -24,6 +26,10 @@ app.use(
 );
 app.use(express.json({ limit: '2mb' }));
 
+app.get('/', (_req, res) => {
+  res.json({ ok: true, service: 'AgroGenomaX API' });
+});
+
 app.use('/api/health', healthRouter);
 app.use('/api/predios', prediosRouter);
 app.use('/api/potreros', potrerosRouter);
@@ -33,10 +39,8 @@ app.use('/api/razas', razasRouter);
 app.use('/api', razasRouter);
 app.use('/api', pesajesRouter);
 app.use('/api', vacunacionesRouter);
-
-app.get('/', (_req, res) => {
-  res.json({ ok: true, service: 'AgroGenomaX API' });
-});
+app.use('/api', tratamientosRouter);
+app.use('/api', reproduccionRouter);
 
 app.use(notFound);
 app.use(errorHandler);
