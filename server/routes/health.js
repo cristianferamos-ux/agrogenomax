@@ -1,10 +1,14 @@
 import { Router } from 'express';
-import { query, schema } from '../db.js';
 
 const router = Router();
 
-router.get('/', async (_req, res, next) => {
+router.get('/', (_req, res) => {
+  res.json({ ok: true, service: 'api', status: 'running' });
+});
+
+router.get('/db', async (_req, res, next) => {
   try {
+    const { query, schema } = await import('../db.js');
     await query('select 1');
     res.json({ ok: true, database: 'connected', schema });
   } catch (error) {
