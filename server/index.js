@@ -16,7 +16,7 @@ dotenv.config({ path: '.env', quiet: true });
 dotenv.config({ path: 'server/.env', quiet: true });
 
 const app = express();
-const port = Number(process.env.PORT || 3001);
+const PORT = process.env.PORT || 3000;
 
 app.use(
   cors({
@@ -44,6 +44,6 @@ app.get(/^(?!\/api).*/, (_req, res) => {
 app.use(notFound);
 app.use(errorHandler);
 
-app.listen(port, () => {
-  console.log(`AgroGenomaX API escuchando en http://127.0.0.1:${port}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`AgroGenomaX API running on port ${PORT}`);
 });
