@@ -3,27 +3,26 @@ import { getColumns, idColumnFor, pickColumn, pool, query, tableName } from '../
 
 const router = Router();
 
-const qrCodeCandidates = ['codigo', 'codigo_qr', 'code'];
 const qrAnimalCandidates = ['animal_id', 'id_animal'];
 const qrStatusCandidates = ['estado', 'status'];
+const qrCodeColumn = 'codigo_qr';
 
 async function findQrByCode(codigo, client = null) {
   const columns = await getColumns('qr_codes');
-  const codeColumn = pickColumn(columns, qrCodeCandidates);
 
-  if (!codeColumn) {
-    throw Object.assign(new Error('La tabla agx.qr_codes no tiene una columna codigo/codigo_qr/code.'), {
+  if (!columns.has(qrCodeColumn)) {
+    throw Object.assign(new Error('La tabla agx.qr_codes no tiene la columna codigo_qr.'), {
       status: 500,
     });
   }
 
   const runner = client || { query };
   const result = await runner.query(
-    `select * from ${tableName('qr_codes')} where "${codeColumn}" = $1 limit 1`,
+    `select * from ${tableName('qr_codes')} q where q."${qrCodeColumn}" = $1 limit 1`,
     [codigo],
   );
 
-  return { qr: result.rows[0] || null, columns, codeColumn };
+  return { qr: result.rows[0] || null, columns };
 }
 
 async function findAnimalForQr(qr, qrColumns, client = null) {
@@ -92,18 +91,21 @@ router.post('/importar', async (req, res, next) => {
     }
 
     const columns = await getColumns('qr_codes');
-    const codeColumn = pickColumn(columns, qrCodeCandidates);
     const statusColumn = pickColumn(columns, qrStatusCandidates);
     const rows = [];
 
+    if (!columns.has(qrCodeColumn)) {
+      throw Object.assign(new Error('La tabla agx.qr_codes no tiene la columna codigo_qr.'), { status: 500 });
+    }
+
     for (const codigo of items) {
       const params = statusColumn ? [codigo, 'libre'] : [codigo];
-      const columnsSql = statusColumn ? `"${codeColumn}", "${statusColumn}"` : `"${codeColumn}"`;
+      const columnsSql = statusColumn ? `"${qrCodeColumn}", "${statusColumn}"` : `"${qrCodeColumn}"`;
       const valuesSql = statusColumn ? '$1, $2' : '$1';
       const result = await query(
         `insert into ${tableName('qr_codes')} (${columnsSql})
          values (${valuesSql})
-         on conflict ("${codeColumn}") do update set "${codeColumn}" = excluded."${codeColumn}"
+         on conflict ("${qrCodeColumn}") do update set "${qrCodeColumn}" = excluded."${qrCodeColumn}"
          returning *`,
         params,
       );
