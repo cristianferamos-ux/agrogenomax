@@ -33,7 +33,7 @@ async function findAnimalForQr(qr, qrColumns, client = null) {
   const runner = client || { query };
 
   if (qrAnimalColumn && qr[qrAnimalColumn]) {
-    const result = await runner.query(`select * from ${tableName('animales')} where id = $1 limit 1`, [
+    const result = await runner.query(`select * from ${tableName('animales')} where "animal_id" = $1 limit 1`, [
       qr[qrAnimalColumn],
     ]);
     if (result.rows[0]) return result.rows[0];
@@ -55,10 +55,11 @@ async function findAnimalForQr(qr, qrColumns, client = null) {
 
 router.get('/:codigo', async (req, res, next) => {
   try {
-    const { qr, columns } = await findQrByCode(req.params.codigo);
+    const codigo = String(req.params.codigo || '').trim().toUpperCase();
+    const { qr, columns } = await findQrByCode(codigo);
 
     if (!qr) {
-      res.status(404).json({ exists: false, codigo: req.params.codigo });
+      res.status(404).json({ exists: false, codigo });
       return;
     }
 
@@ -73,6 +74,12 @@ router.get('/:codigo', async (req, res, next) => {
       animal,
     });
   } catch (error) {
+    console.error('QR route error', {
+      codigo: String(req.params.codigo || '').trim().toUpperCase(),
+      message: error?.message,
+      status: error?.status,
+      stack: error?.stack,
+    });
     next(error);
   }
 });
@@ -126,7 +133,7 @@ router.post('/asociar', async (req, res, next) => {
     }
 
     const existingAnimal = await findAnimalForQr(qr, columns, client);
-    if (existingAnimal && String(existingAnimal.id) !== String(animal_id)) {
+    if (existingAnimal && String(existingAnimal.animal_id) !== String(animal_id)) {
       throw Object.assign(new Error('Este QR ya está asociado a otro animal.'), { status: 409 });
     }
 
