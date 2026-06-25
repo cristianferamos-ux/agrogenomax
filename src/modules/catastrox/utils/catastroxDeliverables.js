@@ -965,22 +965,39 @@ function buildDiagnosticPageCanvas(predio) {
 }
 
 function drawDistanceLabels(context, placements) {
-  context.strokeStyle = '#6b7280';
   context.fillStyle = '#334155';
   context.lineWidth = 0.8;
   setFont(context, 8, 400);
+  let guideLinesRendered = 0;
   placements.forEach((placement) => {
-    context.beginPath();
-    context.moveTo(placement.midX, placement.midY);
-    context.lineTo(placement.labelCenterX, placement.labelCenterY);
-    context.stroke();
+    if (placement?.status === 'hidden') return;
+    const guideLine = placement?.guideLine;
+    if (
+      guideLine &&
+      Number.isFinite(guideLine.x1) &&
+      Number.isFinite(guideLine.y1) &&
+      Number.isFinite(guideLine.x2) &&
+      Number.isFinite(guideLine.y2)
+    ) {
+      context.strokeStyle = '#9ca3af';
+      context.lineWidth = 0.75;
+      context.beginPath();
+      context.moveTo(guideLine.x1, guideLine.y1);
+      context.lineTo(guideLine.x2, guideLine.y2);
+      context.stroke();
+      guideLinesRendered += 1;
+    }
     context.fillStyle = 'rgba(255,255,255,0.92)';
     context.fillRect(placement.rect.x - 2, placement.rect.y - 1, placement.rect.width + 4, placement.rect.height + 2);
     context.strokeStyle = '#cbd5e1';
+    context.lineWidth = 0.8;
     context.strokeRect(placement.rect.x - 2, placement.rect.y - 1, placement.rect.width + 4, placement.rect.height + 2);
     context.fillStyle = '#334155';
     context.fillText(placement.text, placement.rect.x, placement.rect.y + 10);
   });
+  if (placements?.auditReport) {
+    placements.auditReport.guideLinesRendered = guideLinesRendered;
+  }
 }
 
 function drawSimpleTable(context, zone, title, headers, columnXs, rows) {
@@ -1129,6 +1146,174 @@ function buildReferenceTableRows(referenceRows, referenceSegments) {
   }));
 }
 
+function medianValue(values) {
+  if (!Array.isArray(values) || !values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[middle];
+}
+
+function recoverLongVisibleSpanCandidates(allVisibleCandidates, visibleCandidates, presentationRing, officialRing) {
+  const presentationOpenRing = Array.isArray(presentationRing) ? presentationRing.slice(0, -1) : [];
+  const officialOpenRing = Array.isArray(officialRing) ? officialRing.slice(0, -1) : [];
+  if (
+    !Array.isArray(allVisibleCandidates) ||
+    !Array.isArray(visibleCandidates) ||
+    visibleCandidates.length < 3 ||
+    allVisibleCandidates.length <= visibleCandidates.length ||
+    presentationOpenRing.length < 4 ||
+    officialOpenRing.length < 4
+  ) {
+    return {
+      visibleCandidates,
+      report: {
+        recoveredCount: 0,
+        recoveredSpanCount: 0,
+        recoveredOriginalIndices: [],
+      },
+    };
+  }
+
+  const initialIndexSet = new Set(visibleCandidates.map((entry) => entry.displayRingIndex));
+  const officialCumulative = cumulativeDistances(officialOpenRing);
+  const localPresentationRing = projectRingToLocalMeters(presentationOpenRing);
+  const currentVisibleSpans = visibleCandidates.map((entry, index) => {
+    const next = visibleCandidates[(index + 1) % visibleCandidates.length];
+    return ringDistanceForward(officialCumulative, officialOpenRing, entry.originalIndex, next.originalIndex);
+  });
+  const medianVisibleSpan = medianValue(currentVisibleSpans);
+  const recoveredByGap = new Map();
+
+  const isForwardIndexBetween = (startIndex, endIndex, candidateIndex) => {
+    if (startIndex < endIndex) return candidateIndex > startIndex && candidateIndex < endIndex;
+    return candidateIndex > startIndex || candidateIndex < endIndex;
+  };
+
+  const buildGapKey = (startIndex, endIndex) => `${startIndex}:${endIndex}`;
+
+  visibleCandidates.forEach((entry, index) => {
+    const next = visibleCandidates[(index + 1) % visibleCandidates.length];
+    const spanLength = ringDistanceForward(officialCumulative, officialOpenRing, entry.originalIndex, next.originalIndex);
+    const hiddenCandidates = allVisibleCandidates.filter(
+      (candidate) =>
+        !initialIndexSet.has(candidate.displayRingIndex) &&
+        isForwardIndexBetween(entry.displayRingIndex, next.displayRingIndex, candidate.displayRingIndex),
+    );
+    if (hiddenCandidates.length < 3) return;
+
+    const startLocal = localPresentationRing[entry.displayRingIndex];
+    const endLocal = localPresentationRing[next.displayRingIndex];
+    if (!startLocal || !endLocal) return;
+
+    const evaluatedHiddenCandidates = hiddenCandidates
+      .map((candidate) => {
+        const pointLocal = localPresentationRing[candidate.displayRingIndex];
+        if (!pointLocal) return null;
+        const distanceFromStart = ringDistanceForward(
+          officialCumulative,
+          officialOpenRing,
+          entry.originalIndex,
+          candidate.originalIndex,
+        );
+        const distanceToEnd = ringDistanceForward(
+          officialCumulative,
+          officialOpenRing,
+          candidate.originalIndex,
+          next.originalIndex,
+        );
+        const balance = Math.min(distanceFromStart, distanceToEnd) / Math.max(spanLength, 1);
+        const deviationToChord = perpendicularDistanceMeters(pointLocal, startLocal, endLocal);
+        const importance =
+          (candidate.turnDeg || 0) * 12 +
+          deviationToChord * 2.1 +
+          balance * 280 +
+          ((candidate.deviation || 0) * 0.5) +
+          (candidate.structuralBreak ? 180 : 0) +
+          (candidate.protectedPoint ? 90 : 0) +
+          (candidate.mandatory ? 90 : 0);
+        return {
+          ...candidate,
+          distanceFromStart,
+          distanceToEnd,
+          balance,
+          deviationToChord,
+          importance,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => {
+        if (b.importance !== a.importance) return b.importance - a.importance;
+        return a.distanceFromStart - b.distanceFromStart;
+      });
+
+    if (!evaluatedHiddenCandidates.length) return;
+
+    const maxDeviationToChord = Math.max(...evaluatedHiddenCandidates.map((candidate) => candidate.deviationToChord || 0), 0);
+    const structuralHiddenCandidates = evaluatedHiddenCandidates.filter(
+      (candidate) =>
+        candidate.structuralBreak ||
+        candidate.protectedPoint ||
+        candidate.mandatory ||
+        candidate.rdpDominant ||
+        (candidate.turnDeg || 0) >= 62 ||
+        (candidate.deviationToChord || 0) >= 100,
+    );
+    const hasLongGap =
+      spanLength >= Math.max(medianVisibleSpan * 2.4, 900) ||
+      (hiddenCandidates.length >= 5 && spanLength >= Math.max(medianVisibleSpan * 1.9, 700) && maxDeviationToChord >= 140);
+    const requiresUniformRecovery =
+      hasLongGap &&
+      structuralHiddenCandidates.length >= 3 &&
+      spanLength >= Math.max(medianVisibleSpan * 2.8, 1200);
+    if (!requiresUniformRecovery) return;
+
+    recoveredByGap.set(
+      buildGapKey(entry.displayRingIndex, next.displayRingIndex),
+      structuralHiddenCandidates
+        .sort((a, b) => a.distanceFromStart - b.distanceFromStart)
+        .map((candidate) => ({
+          ...candidate,
+          recoveredLongGap: true,
+          displayReasons: Array.from(
+            new Set([...(candidate.displayReasons || candidate.reasons || []), 'recuperacion_uniforme_de_tramo_estructural', 'lectura_humana_poligono']),
+          ),
+        })),
+    );
+  });
+
+  if (!recoveredByGap.size) {
+    return {
+      visibleCandidates,
+      report: {
+        recoveredCount: 0,
+        recoveredSpanCount: 0,
+        recoveredOriginalIndices: [],
+      },
+    };
+  }
+
+  const nextVisibleCandidates = [];
+  visibleCandidates.forEach((entry, index) => {
+    const next = visibleCandidates[(index + 1) % visibleCandidates.length];
+    nextVisibleCandidates.push(entry);
+    const gapRecovered = recoveredByGap.get(buildGapKey(entry.displayRingIndex, next.displayRingIndex));
+    if (gapRecovered?.length) nextVisibleCandidates.push(...gapRecovered);
+  });
+
+  return {
+    visibleCandidates: nextVisibleCandidates,
+    report: {
+      recoveredCount: nextVisibleCandidates.length - visibleCandidates.length,
+      recoveredSpanCount: recoveredByGap.size,
+      recoveredOriginalIndices: nextVisibleCandidates
+        .filter((candidate) => candidate.recoveredLongGap)
+        .map((candidate) => candidate.originalIndex),
+    },
+  };
+}
+
 function buildLayoutData(predio, options = {}) {
   const previewMapRect = insetRect(SATELLITE_LAYOUT.mapArea, 10);
   const presentationRing = predio.displayRing?.length ? predio.displayRing : predio.ring;
@@ -1140,7 +1325,7 @@ function buildLayoutData(predio, options = {}) {
   const selection = selectVisibleReferencePoints(presentationRing, options);
   const candidates = selection.selectedCandidates;
   const reducedVisibleCandidates = reducePointsForVisualClarity(candidates, presentationRing, mapState, previewMapRect, options);
-  const visibleCandidates = reducedVisibleCandidates.map((entry) => {
+  const mapVisibleCandidate = (entry) => {
     const displayRingIndex = entry.index;
     const originalIndex =
       typeof entry.index === 'number'
@@ -1155,12 +1340,21 @@ function buildLayoutData(predio, options = {}) {
       displayReason: displayMeta?.reason || displayMeta?.reasons?.[0] || null,
       displayReasons: displayMeta?.reasons || [],
     };
-  });
+  };
+  const mappedCandidates = candidates.map(mapVisibleCandidate);
+  const mappedReducedVisibleCandidates = reducedVisibleCandidates.map(mapVisibleCandidate);
+  const visibleRecovery = recoverLongVisibleSpanCandidates(
+    mappedCandidates,
+    mappedReducedVisibleCandidates,
+    presentationRing,
+    predio.ring,
+  );
+  const visibleCandidates = visibleRecovery.visibleCandidates;
   const referencePoints = visibleCandidates.map((entry) => ({
     point: entry.point,
     originalIndex: entry.originalIndex,
     reason: entry.displayReason,
-    reasons: entry.displayReasons,
+    reasons: entry.displayReasons?.length ? entry.displayReasons : entry.reasons || [],
   }));
   const referenceRows = buildReferenceRows(referencePoints);
   const referenceSegments = buildReferenceSegments(predio.ring, referencePoints);
@@ -1232,6 +1426,9 @@ function buildLayoutData(predio, options = {}) {
     totalVisiblePoints: visibleCandidates.length,
     structuralPoints,
     eliminatedByProximity: reducedVisibleCandidates.removedByProximity || 0,
+    recoveredLongVisibleSpans: visibleRecovery.report.recoveredSpanCount,
+    recoveredLongVisibleVertices: visibleRecovery.report.recoveredCount,
+    recoveredLongVisibleOriginalIndices: visibleRecovery.report.recoveredOriginalIndices,
     sideSummary,
     hardValidationStatus,
     visualQualityStatus,
