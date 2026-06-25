@@ -7,7 +7,8 @@
     "dev": "vite --host 127.0.0.1",
     "dev:server": "node server/index.js",
     "build": "node .tools/check-encoding.mjs && vite build",
-    "preview": "vite preview --host 127.0.0.1"
+    "preview": "vite preview --host 127.0.0.1",
+    "catastrox:regression": "node scripts/catastrox/regression/validate-v7-regression.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.0",
