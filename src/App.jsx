@@ -33,6 +33,7 @@ import { motion } from 'framer-motion';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
 import GanaderiaApp from './modules/ganaderia/GanaderiaApp.jsx';
+import CatastroXApp from './modules/catastrox/CatastroXApp.jsx';
 
 const GisMap = lazy(() => import('./components/GisMap.jsx'));
 
@@ -256,6 +257,7 @@ function App() {
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/ganaderia/*" element={<GanaderiaApp />} />
+        <Route path="/catastrox/*" element={<CatastroXApp />} />
         <Route path="/qr/:codigo" element={<GanaderiaApp />} />
       </Routes>
     </BrowserRouter>
@@ -1422,3 +1424,6 @@ function Footer() {
 }
 
 export default App;
+
+
+

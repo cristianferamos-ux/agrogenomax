@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import express from 'express';
 import { errorHandler, notFound } from './middleware/errors.js';
 import animalesRouter from './routes/animales.js';
+import catastroxRouter from './routes/catastrox.js';
 import healthRouter from './routes/health.js';
 import pesajesRouter from './routes/pesajes.js';
 import potrerosRouter from './routes/potreros.js';
@@ -31,6 +32,7 @@ app.get('/', (_req, res) => {
 });
 
 app.use('/api/health', healthRouter);
+app.use('/api/catastrox', catastroxRouter);
 app.use('/api/predios', prediosRouter);
 app.use('/api/potreros', potrerosRouter);
 app.use('/api/qr', qrRouter);
@@ -48,3 +50,4 @@ app.use(errorHandler);
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`AgroGenomaX API running on port ${PORT}`);
 });
+

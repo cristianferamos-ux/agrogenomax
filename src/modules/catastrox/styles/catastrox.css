@@ -1,0 +1,731 @@
+.catastrox-shell {
+  min-height: 100vh;
+  overflow-x: hidden;
+  background:
+    radial-gradient(circle at 12% 12%, rgba(156, 255, 26, 0.12), transparent 28rem),
+    radial-gradient(circle at 88% 16%, rgba(0, 216, 255, 0.12), transparent 30rem),
+    linear-gradient(180deg, #020508 0%, #07100c 48%, #020508 100%);
+  color: #f7fbff;
+}
+
+.catastrox-header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem clamp(1rem, 4vw, 3rem);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(2, 5, 8, 0.9);
+  backdrop-filter: blur(18px);
+}
+
+.catastrox-back,
+.catastrox-brand,
+.catastrox-header nav,
+.catastrox-header nav a {
+  display: flex;
+  align-items: center;
+}
+
+.catastrox-back,
+.catastrox-header nav a {
+  gap: 0.45rem;
+  color: #c9d8ea;
+  font-weight: 800;
+  text-decoration: none;
+  transition: color 180ms ease, background 180ms ease;
+}
+
+.catastrox-back:hover,
+.catastrox-header nav a:hover {
+  color: #9cff1a;
+}
+
+.catastrox-brand {
+  justify-self: center;
+  gap: 0.7rem;
+  text-decoration: none;
+}
+
+.catastrox-brand span {
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 1px solid rgba(156, 255, 26, 0.46);
+  border-radius: 999px;
+  background: rgba(156, 255, 26, 0.12);
+  color: #9cff1a;
+  font-weight: 950;
+}
+
+.catastrox-brand strong {
+  color: #ffffff;
+  font-family: Space Grotesk, Inter, sans-serif;
+  font-size: 1.1rem;
+}
+
+.catastrox-wordmark {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.catastrox-wordmark-x {
+  color: #00d8ff;
+}
+
+.catastrox-hero-wordmark {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: baseline;
+  gap: 0;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.catastrox-header nav {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.8rem;
+}
+
+.catastrox-header nav a {
+  padding: 0.6rem 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+}
+
+.catastrox-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.catastrox-page,
+.catastrox-hero,
+.catastrox-grid {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: clamp(1rem, 4vw, 3rem);
+}
+
+.catastrox-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.catastrox-page-actions-shell {
+  padding-top: 0;
+}
+
+.catastrox-page-title,
+.catastrox-section-heading {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.catastrox-eyebrow,
+.catastrox-section-heading span,
+.catastrox-page-title span,
+.catastrox-plan > span {
+  color: #00d8ff;
+  font-size: 0.78rem;
+  font-weight: 950;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.catastrox-hero h1,
+.catastrox-page-title h1,
+.catastrox-section-heading h2,
+.catastrox-card h2,
+.catastrox-plan h3,
+.catastrox-fiscal-alert h2,
+.catastrox-inline-panel strong,
+.catastrox-success strong {
+  margin: 0;
+  font-family: Space Grotesk, Inter, sans-serif;
+  line-height: 1.05;
+}
+
+.catastrox-page-title h1 {
+  font-size: clamp(2.2rem, 5vw, 4.6rem);
+}
+
+.catastrox-page-title p,
+.catastrox-copy,
+.catastrox-note,
+.catastrox-success span {
+  margin: 0;
+  color: #c9d8ea;
+  line-height: 1.7;
+}
+
+.catastrox-hero {
+  display: grid;
+  gap: 1.2rem;
+  grid-template-columns: minmax(0, 1.05fr) minmax(280px, 0.95fr);
+  min-height: calc(100vh - 5rem);
+  padding-top: clamp(2rem, 7vw, 5rem);
+}
+
+.catastrox-hero > div:first-child,
+.catastrox-hero-visual,
+.catastrox-card,
+.catastrox-plan,
+.catastrox-fiscal-alert,
+.catastrox-map,
+.catastrox-inline-panel {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 1.1rem;
+  background:
+    radial-gradient(circle at 12% 18%, rgba(156, 255, 26, 0.1), transparent 34%),
+    linear-gradient(145deg, rgba(8, 18, 17, 0.94), rgba(4, 10, 12, 0.96));
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.32);
+}
+
+.catastrox-hero > div:first-child,
+.catastrox-card,
+.catastrox-plan,
+.catastrox-fiscal-alert {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  padding: clamp(1rem, 2.5vw, 1.5rem);
+}
+
+.catastrox-hero > div:first-child {
+  align-content: center;
+  gap: 1.1rem;
+  padding: clamp(1.4rem, 4vw, 3rem);
+}
+
+.catastrox-hero h1 {
+  font-size: clamp(3rem, 6vw, 5.6rem);
+  line-height: 0.98;
+}
+
+.catastrox-hero p {
+  margin: 0;
+  color: #c9d8ea;
+  font-size: clamp(1rem, 1.5vw, 1.18rem);
+  line-height: 1.7;
+}
+
+.catastrox-hero strong {
+  color: #9cff1a;
+  font-size: clamp(1.15rem, 2vw, 1.65rem);
+}
+
+.catastrox-hero-visual {
+  position: relative;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 0.85rem;
+  min-height: 420px;
+  overflow: hidden;
+  padding: 2rem;
+  text-align: center;
+}
+
+.catastrox-hero-visual::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0.7;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 42px 42px;
+}
+
+.catastrox-hero-visual > * {
+  position: relative;
+  z-index: 1;
+}
+
+.catastrox-hero-visual svg {
+  color: #9cff1a;
+  filter: drop-shadow(0 0 22px rgba(156, 255, 26, 0.32));
+}
+
+.catastrox-hero-visual strong {
+  color: #ffffff;
+  font-size: clamp(1.4rem, 3vw, 2.6rem);
+}
+
+.catastrox-hero-visual small {
+  max-width: 28rem;
+  color: #a9b7c8;
+}
+
+.catastrox-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.catastrox-two-col {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr);
+}
+
+.catastrox-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.catastrox-action-row.is-full,
+.catastrox-field.is-full,
+.catastrox-search .catastrox-section-heading,
+.catastrox-form .catastrox-section-heading,
+.catastrox-search .catastrox-button,
+.catastrox-form .catastrox-button,
+.catastrox-success {
+  grid-column: 1 / -1;
+}
+
+.catastrox-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 3rem;
+  padding: 0.8rem 1.2rem;
+  border: 1px solid rgba(156, 255, 26, 0.34);
+  border-radius: 999px;
+  background: #9cff1a;
+  color: #020508;
+  cursor: pointer;
+  font-weight: 950;
+  text-decoration: none;
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, opacity 180ms ease;
+}
+
+.catastrox-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 24px rgba(156, 255, 26, 0.28);
+}
+
+.catastrox-button:disabled {
+  opacity: 0.65;
+  cursor: progress;
+}
+
+.catastrox-button.is-secondary {
+  background: rgba(0, 216, 255, 0.08);
+  border-color: rgba(0, 216, 255, 0.38);
+  color: #00d8ff;
+}
+
+.catastrox-button.is-ghost {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #f7fbff;
+}
+
+.catastrox-button.is-danger {
+  background: rgba(255, 59, 59, 0.14);
+  border-color: rgba(255, 59, 59, 0.58);
+  color: #ff8080;
+}
+
+.catastrox-card.is-danger,
+.catastrox-plan.is-red,
+.catastrox-fiscal-alert {
+  border-color: rgba(255, 59, 59, 0.34);
+}
+
+.catastrox-plan.is-gold {
+  border-color: rgba(255, 214, 0, 0.34);
+}
+
+.catastrox-plan strong {
+  color: #9cff1a;
+  font-family: Space Grotesk, Inter, sans-serif;
+  font-size: clamp(1.55rem, 3vw, 2.3rem);
+}
+
+.catastrox-plan.is-gold strong {
+  color: #ffd600;
+}
+
+.catastrox-list,
+.catastrox-plan ul,
+.catastrox-fiscal-alert ul {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0;
+  padding-left: 1.1rem;
+  color: #d8e4f2;
+  line-height: 1.55;
+}
+
+.catastrox-status {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 0.5rem;
+  padding: 0.65rem 0.95rem;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  font-weight: 950;
+}
+
+.catastrox-status.is-success {
+  background: rgba(156, 255, 26, 0.12);
+  border-color: rgba(156, 255, 26, 0.5);
+  color: #9cff1a;
+}
+
+.catastrox-status.is-warning {
+  background: rgba(255, 214, 0, 0.12);
+  border-color: rgba(255, 214, 0, 0.5);
+  color: #ffd600;
+}
+
+.catastrox-status.is-danger {
+  background: rgba(255, 59, 59, 0.14);
+  border-color: rgba(255, 59, 59, 0.58);
+  color: #ff6262;
+}
+
+.catastrox-summary-grid,
+.catastrox-table {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.catastrox-summary-grid div,
+.catastrox-table div,
+.catastrox-inline-panel {
+  min-width: 0;
+}
+
+.catastrox-summary-grid div,
+.catastrox-table div {
+  display: grid;
+  gap: 0.35rem;
+  padding: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.catastrox-summary-grid span,
+.catastrox-table span,
+.catastrox-map-label small {
+  color: #9db7d4;
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.catastrox-summary-grid strong,
+.catastrox-table strong {
+  color: #ffffff;
+  font-size: clamp(1rem, 2vw, 1.3rem);
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.catastrox-summary-item.is-code strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-size: clamp(0.92rem, 1.7vw, 1.08rem);
+  line-height: 1.45;
+}
+
+.catastrox-map {
+  position: relative;
+  min-height: 520px;
+  display: grid;
+  overflow: hidden;
+  border-color: rgba(0, 216, 255, 0.24);
+  background:
+    radial-gradient(circle at 20% 30%, rgba(156, 255, 26, 0.16), transparent 18rem),
+    radial-gradient(circle at 78% 72%, rgba(0, 216, 255, 0.14), transparent 18rem),
+    #05100d;
+}
+
+.catastrox-map.has-footer {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.catastrox-search-stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.catastrox-map-instructions {
+  gap: 0.85rem;
+}
+
+.catastrox-leaflet-map {
+  width: 100%;
+  min-height: 520px;
+}
+
+.catastrox-leaflet-map.leaflet-container {
+  background: #05100d;
+}
+
+.catastrox-map-canvas {
+  position: relative;
+  min-height: 520px;
+}
+
+.catastrox-map-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 450;
+  display: grid;
+  place-items: center;
+  gap: 0.5rem;
+  background: rgba(2, 5, 8, 0.42);
+  color: #f7fbff;
+  pointer-events: none;
+}
+
+.catastrox-map.is-success {
+  border-color: rgba(156, 255, 26, 0.35);
+}
+
+.catastrox-map.is-warning {
+  border-color: rgba(255, 214, 0, 0.35);
+}
+
+.catastrox-map.is-danger {
+  border-color: rgba(255, 59, 59, 0.42);
+}
+
+.catastrox-map-grid {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.catastrox-map-polygon {
+  position: absolute;
+  inset: 18% 14% 22% 18%;
+  display: grid;
+  place-items: center;
+  clip-path: polygon(18% 8%, 88% 18%, 84% 76%, 28% 92%, 8% 48%);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(0, 216, 255, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 28px rgba(0, 216, 255, 0.16);
+}
+
+.catastrox-map.is-success .catastrox-map-polygon {
+  background: rgba(156, 255, 26, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 28px rgba(156, 255, 26, 0.16);
+}
+
+.catastrox-map.is-warning .catastrox-map-polygon {
+  background: rgba(255, 214, 0, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 28px rgba(255, 214, 0, 0.16);
+}
+
+.catastrox-map.is-danger .catastrox-map-polygon {
+  background: rgba(255, 59, 59, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 28px rgba(255, 59, 59, 0.18);
+}
+
+.catastrox-map-polygon span {
+  padding: 0.7rem 1rem;
+  border-radius: 999px;
+  background: rgba(2, 5, 8, 0.84);
+  color: #ffffff;
+  font-weight: 900;
+}
+
+.catastrox-map-label {
+  position: relative;
+  display: grid;
+  gap: 0.35rem;
+  padding: 1rem 1.1rem 1.15rem;
+  min-width: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(2, 5, 8, 0.96);
+  overflow: visible;
+}
+
+.catastrox-map-label strong {
+  font-size: 1.15rem;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.catastrox-map-label small {
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.catastrox-field {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.catastrox-field span {
+  color: #b7c9dd;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.catastrox-field input,
+.catastrox-field select,
+.catastrox-field textarea {
+  width: 100%;
+  min-height: 3rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.05);
+  color: #ffffff;
+  outline: none;
+}
+
+.catastrox-field textarea {
+  resize: vertical;
+  min-height: 8rem;
+}
+
+.catastrox-field input:focus,
+.catastrox-field select:focus,
+.catastrox-field textarea:focus {
+  border-color: rgba(0, 216, 255, 0.42);
+  box-shadow: 0 0 0 3px rgba(0, 216, 255, 0.12);
+}
+
+.catastrox-search,
+.catastrox-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.catastrox-inline-panel {
+  display: grid;
+  gap: 0.7rem;
+  padding: 1rem 1.1rem;
+  border-color: rgba(0, 216, 255, 0.22);
+  background:
+    radial-gradient(circle at 10% 10%, rgba(0, 216, 255, 0.1), transparent 30%),
+    rgba(255, 255, 255, 0.04);
+}
+
+.catastrox-note {
+  color: #ffd600;
+  font-weight: 800;
+}
+
+.catastrox-disclaimer {
+  padding: 1rem 1.1rem;
+  border: 1px solid rgba(255, 214, 0, 0.25);
+  border-radius: 1rem;
+  background: rgba(255, 214, 0, 0.08);
+  color: #ffeaa3;
+  line-height: 1.65;
+}
+
+.catastrox-success {
+  display: grid;
+  gap: 0.35rem;
+  padding: 1rem;
+  border: 1px solid rgba(156, 255, 26, 0.28);
+  border-radius: 0.95rem;
+  background: rgba(156, 255, 26, 0.1);
+}
+
+.catastrox-success strong {
+  color: #9cff1a;
+}
+
+@media (max-width: 980px) {
+  .catastrox-header {
+    grid-template-columns: 1fr;
+    justify-items: start;
+  }
+
+  .catastrox-brand {
+    justify-self: start;
+  }
+
+  .catastrox-header nav {
+    justify-content: flex-start;
+  }
+
+  .catastrox-hero,
+  .catastrox-two-col,
+  .catastrox-search,
+  .catastrox-form {
+    grid-template-columns: 1fr;
+  }
+
+  .catastrox-hero-wordmark {
+    white-space: normal;
+  }
+
+  .catastrox-map,
+  .catastrox-leaflet-map {
+    min-height: 440px;
+  }
+
+  .catastrox-map-canvas {
+    min-height: 440px;
+  }
+}
+
+@media (max-width: 640px) {
+  .catastrox-page,
+  .catastrox-hero,
+  .catastrox-grid {
+    padding: 1rem;
+  }
+
+  .catastrox-button,
+  .catastrox-header nav a {
+    width: 100%;
+  }
+
+  .catastrox-action-row,
+  .catastrox-page-actions {
+    align-items: stretch;
+  }
+
+  .catastrox-map {
+    min-height: 360px;
+  }
+
+  .catastrox-leaflet-map {
+    min-height: 360px;
+  }
+
+  .catastrox-map-canvas {
+    min-height: 360px;
+  }
+
+  .catastrox-summary-grid,
+  .catastrox-table {
+    grid-template-columns: 1fr;
+  }
+}
