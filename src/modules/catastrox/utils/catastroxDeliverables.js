@@ -365,38 +365,58 @@ async function ensurePdfFontsLoaded() {
   if (typeof document === 'undefined' || typeof FontFace === 'undefined') return;
   if (!fontLoadPromise) {
     fontLoadPromise = (async () => {
-      const responses = await Promise.all(
+      const fetchResults = await Promise.all(
         PDF_FONT_DEFINITIONS.map(async ({ url, weight }) => {
-          const response = await fetch(url);
-          if (!response.ok) {
-            if (response.status === 404) {
-              return { missing: true, url, weight };
+          try {
+            const response = await fetch(url);
+
+            if (!response.ok) {
+              return { missing: true, url, weight, reason: `HTTP ${response.status}` };
             }
-            throw new Error(`No se pudo cargar la fuente ${url} (HTTP ${response.status})`);
+
+            return { missing: false, url, weight, buffer: await response.arrayBuffer() };
+          } catch (error) {
+            return {
+              missing: true,
+              url,
+              weight,
+              reason: error?.message || 'fetch failed',
+            };
           }
-          return { missing: false, url, weight, buffer: await response.arrayBuffer() };
         }),
       );
 
-      const missingFonts = responses.filter((entry) => entry.missing);
+      const loadResults = await Promise.all(
+        fetchResults.map(async (entry) => {
+          if (entry.missing) return entry;
+
+          try {
+            const face = new FontFace(CUSTOM_PDF_FONT_FAMILY, entry.buffer, { weight: entry.weight, style: 'normal' });
+            await face.load();
+            document.fonts.add(face);
+            return { missing: false, url: entry.url, weight: entry.weight };
+          } catch (error) {
+            return {
+              missing: true,
+              url: entry.url,
+              weight: entry.weight,
+              reason: error?.message || 'FontFace.load failed',
+            };
+          }
+        }),
+      );
+
+      const missingFonts = loadResults.filter((entry) => entry.missing);
       if (missingFonts.length) {
         activePdfFontStack = PDF_FONT_FALLBACK_STACK;
         if (!pdfFontFallbackWarningIssued) {
           pdfFontFallbackWarningIssued = true;
           console.warn(
-            `[CatastroX] Fuentes PDF personalizadas no disponibles (${missingFonts.map((entry) => entry.url).join(', ')}). Se usara el fallback del entorno: ${PDF_FONT_FALLBACK_STACK}.`,
+            `[CatastroX] Fuentes PDF personalizadas no disponibles (${missingFonts.map((entry) => `${entry.url}: ${entry.reason || 'sin detalle'}`).join(', ')}). Se usara el fallback del entorno: ${PDF_FONT_FALLBACK_STACK}.`,
           );
         }
         return;
       }
-
-      await Promise.all(
-        responses.map(async ({ weight, buffer }) => {
-          const face = new FontFace(CUSTOM_PDF_FONT_FAMILY, buffer, { weight, style: 'normal' });
-          await face.load();
-          document.fonts.add(face);
-        }),
-      );
 
       await document.fonts.ready;
       activePdfFontStack = `"${CUSTOM_PDF_FONT_FAMILY}", ${PDF_FONT_FALLBACK_STACK}`;
