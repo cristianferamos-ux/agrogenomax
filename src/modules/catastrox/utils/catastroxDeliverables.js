@@ -1524,7 +1524,7 @@ function buildLayoutData(predio, options = {}) {
   console.table(selectionReport.secondarySilhouetteCandidates);
 
   if (selectionReport.hardValidationStatus !== 'OK') {
-    throw new Error(`La selecciÃ³n cartogrÃ¡fica de puntos visibles fallÃ³ la validaciÃ³n para ${predio.codigoPredial}.`);
+    throw new Error(`La selección cartográfica de puntos visibles falló la validación para ${predio.codigoPredial}.`);
   }
 
   return { mapState, referencePoints, referenceRows, referenceSegments, selectionReport };
