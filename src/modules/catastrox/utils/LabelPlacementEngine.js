@@ -101,7 +101,7 @@ function buildLabelModel(segment, segmentIndex, current, next, center, options) 
   };
 }
 
-export function buildDistanceLabelPlacements(projectedRefs, referenceSegments, mapZone, polygonPoints = [], blockedRects = []) {
+export function buildDistanceLabelPlacements(projectedRefs, referenceSegments, mapZone, polygonPoints = [], blockedRects = [], options = {}) {
   if (!projectedRefs.length) {
     const emptyPlacements = [];
     emptyPlacements.auditReport = {
@@ -119,8 +119,6 @@ export function buildDistanceLabelPlacements(projectedRefs, referenceSegments, m
     };
     return emptyPlacements;
   }
-
-  const options = arguments[5] || {};
   const center = polygonPoints.length ? ringCentroid(polygonPoints) : ringCentroid(projectedRefs);
   const placements = [];
   const auditReport = {
