@@ -11,6 +11,8 @@ const DEFAULT_SEGMENT_CLASS_THRESHOLDS = {
   mediumMinPx: 70,
   shortMinPx: 36,
 };
+const DEFAULT_EDGE_FALLBACK_RADII = [48, 64, 80, 88, 96];
+const DEFAULT_EDGE_FALLBACK_ANGLE_OFFSETS = [0, -15, 15, -30, 30, -45, 45, -60, 60, -75, 75, -90, 90, -120, 120, -150, 150, 180];
 
 function rectsOverlap(a, b, padding = 0) {
   return !(
@@ -51,6 +53,163 @@ function resolveSegmentPriority(segmentClass, lengthPx) {
     micro: 100,
   };
   return (basePriorityByClass[segmentClass] || 0) + Math.round(lengthPx);
+}
+
+function normalizeAngleDegrees(angle) {
+  const normalized = angle % 360;
+  return normalized < 0 ? normalized + 360 : normalized;
+}
+
+function determineNearestMapEdge(midX, midY, mapZone) {
+  const distances = {
+    left: Math.abs(midX - mapZone.x),
+    right: Math.abs(mapZone.x + mapZone.width - midX),
+    top: Math.abs(midY - mapZone.y),
+    bottom: Math.abs(mapZone.y + mapZone.height - midY),
+  };
+  return Object.entries(distances).sort((a, b) => a[1] - b[1])[0]?.[0] || 'right';
+}
+
+function buildEdgeFallbackAngles(midX, midY, mapZone, center, options = {}) {
+  const nearestEdge = determineNearestMapEdge(midX, midY, mapZone);
+  const inwardBaseAngles = {
+    left: 0,
+    right: 180,
+    top: 90,
+    bottom: 270,
+  };
+  const edgeBaseAngle = inwardBaseAngles[nearestEdge] ?? 180;
+  const offsets = options.edgeFallbackAngleOffsets || DEFAULT_EDGE_FALLBACK_ANGLE_OFFSETS;
+  const mapCenterX = mapZone.x + mapZone.width / 2;
+  const mapCenterY = mapZone.y + mapZone.height / 2;
+  const mapCenterAngle = normalizeAngleDegrees((Math.atan2(mapCenterY - midY, mapCenterX - midX) * 180) / Math.PI);
+  const polygonCenterAngle = normalizeAngleDegrees((Math.atan2(center[1] - midY, center[0] - midX) * 180) / Math.PI);
+  const angleSet = new Set();
+  const orderedAngles = [];
+
+  const pushAngle = (angle) => {
+    const normalized = normalizeAngleDegrees(angle);
+    if (!angleSet.has(normalized)) {
+      angleSet.add(normalized);
+      orderedAngles.push(normalized);
+    }
+  };
+
+  pushAngle(edgeBaseAngle);
+  pushAngle(mapCenterAngle);
+  pushAngle(polygonCenterAngle);
+  offsets.forEach((offset) => pushAngle(edgeBaseAngle + offset));
+  offsets.forEach((offset) => pushAngle(mapCenterAngle + offset));
+  offsets.forEach((offset) => pushAngle(polygonCenterAngle + offset));
+
+  return orderedAngles;
+}
+
+function evaluateLabelCandidate({
+  textWidth,
+  textHeight,
+  labelCenterX,
+  labelCenterY,
+  mapZone,
+  polygonPoints,
+  placements,
+  blockedRects,
+  radius = 0,
+  candidateStrategy = 'primary-offset',
+}) {
+  const rect = {
+    x: labelCenterX - textWidth / 2,
+    y: labelCenterY - textHeight / 2,
+    width: textWidth,
+    height: textHeight,
+  };
+  const inside =
+    rect.x >= mapZone.x &&
+    rect.y >= mapZone.y &&
+    rect.x + rect.width <= mapZone.x + mapZone.width &&
+    rect.y + rect.height <= mapZone.y + mapZone.height;
+  const overlapsPlacements = placements.filter((entry) => rectsOverlap(rect, entry.rect, 6));
+  const overlapsBlocked = blockedRects.filter((blockedRect) => rectsOverlap(rect, blockedRect, 6));
+  const outsidePolygon = !pointInPolygon([labelCenterX, labelCenterY], polygonPoints);
+  const collisionScore =
+    (inside ? 0 : 1000) +
+    overlapsPlacements.length * 200 +
+    overlapsBlocked.length * 200 +
+    (outsidePolygon ? 0 : 50) +
+    radius;
+
+  return {
+    rect,
+    labelCenterX,
+    labelCenterY,
+    inside,
+    overlapsPlacements,
+    overlapsBlocked,
+    outsidePolygon,
+    collisionScore,
+    candidateStrategy,
+    radius,
+  };
+}
+
+function shouldTryEdgeFallback(baseAttemptStats) {
+  return (
+    baseAttemptStats.outsideMapFailures > 0 &&
+    baseAttemptStats.outsideMapFailures >= baseAttemptStats.insidePolygonFailures &&
+    baseAttemptStats.outsideMapFailures >= baseAttemptStats.collisionFailures
+  );
+}
+
+function buildEdgeAngularFallbackCandidate({
+  model,
+  center,
+  mapZone,
+  polygonPoints,
+  placements,
+  blockedRects,
+  options = {},
+}) {
+  const radii = options.edgeFallbackRadii || DEFAULT_EDGE_FALLBACK_RADII;
+  const angles = buildEdgeFallbackAngles(model.midX, model.midY, mapZone, center, options);
+  let bestCandidate = null;
+
+  for (const angle of angles) {
+    const radians = (angle * Math.PI) / 180;
+    for (const radius of radii) {
+      const labelCenterX = model.midX + Math.cos(radians) * radius;
+      const labelCenterY = model.midY + Math.sin(radians) * radius;
+      const candidate = evaluateLabelCandidate({
+        textWidth: model.textWidth,
+        textHeight: model.textHeight,
+        labelCenterX,
+        labelCenterY,
+        mapZone,
+        polygonPoints,
+        placements,
+        blockedRects,
+        radius,
+        candidateStrategy: 'edge-angular-fallback',
+      });
+
+      if (!candidate.inside) continue;
+      if (candidate.overlapsPlacements.length || candidate.overlapsBlocked.length) continue;
+
+      if (
+        !bestCandidate ||
+        candidate.collisionScore < bestCandidate.collisionScore ||
+        (candidate.collisionScore === bestCandidate.collisionScore &&
+          candidate.outsidePolygon &&
+          !bestCandidate.outsidePolygon)
+      ) {
+        bestCandidate = {
+          ...candidate,
+          angleDeg: angle,
+        };
+      }
+    }
+  }
+
+  return bestCandidate;
 }
 
 function buildLabelModel(segment, segmentIndex, current, next, center, options) {
@@ -132,6 +291,8 @@ export function buildDistanceLabelPlacements(projectedRefs, referenceSegments, m
     microSegmentsDetected: 0,
     collisionsDetected: 0,
     collisionsResolved: 0,
+    edgeFallbacksApplied: 0,
+    outsideMapRecoveries: 0,
     warnings: [],
   };
 
@@ -150,6 +311,11 @@ export function buildDistanceLabelPlacements(projectedRefs, referenceSegments, m
     let offset = 34;
     let best = null;
     let collisionDetectedForSegment = false;
+    const baseAttemptStats = {
+      outsideMapFailures: 0,
+      insidePolygonFailures: 0,
+      collisionFailures: 0,
+    };
     for (let attempt = 0; attempt < 10; attempt += 1) {
       const radialMagnitude = Math.hypot(midX - center[0], midY - center[1]) || 1;
       const candidateNormals = [
@@ -165,36 +331,64 @@ export function buildDistanceLabelPlacements(projectedRefs, referenceSegments, m
         const uy = dirY / mag;
         const labelCenterX = midX + ux * offset;
         const labelCenterY = midY + uy * offset;
-        const rect = {
-          x: labelCenterX - textWidth / 2,
-          y: labelCenterY - textHeight / 2,
-          width: textWidth,
-          height: textHeight,
-        };
-        const inside =
-          rect.x >= mapZone.x &&
-          rect.y >= mapZone.y &&
-          rect.x + rect.width <= mapZone.x + mapZone.width &&
-          rect.y + rect.height <= mapZone.y + mapZone.height;
-        const overlapsPlacements = placements.some((entry) => rectsOverlap(rect, entry.rect, 6));
-        const overlapsBlocked = blockedRects.some((blockedRect) => rectsOverlap(rect, blockedRect, 6));
-        const collides = overlapsPlacements || overlapsBlocked;
-        const outsidePolygon = !pointInPolygon([labelCenterX, labelCenterY], polygonPoints);
+        const candidate = evaluateLabelCandidate({
+          textWidth,
+          textHeight,
+          labelCenterX,
+          labelCenterY,
+          mapZone,
+          polygonPoints,
+          placements,
+          blockedRects,
+          radius: offset,
+        });
+        const collides = candidate.overlapsPlacements.length > 0 || candidate.overlapsBlocked.length > 0;
+        if (!candidate.inside) {
+          baseAttemptStats.outsideMapFailures += 1;
+        }
+        if (!candidate.outsidePolygon) {
+          baseAttemptStats.insidePolygonFailures += 1;
+        }
         if (collides) {
           collisionDetectedForSegment = true;
+          baseAttemptStats.collisionFailures += 1;
         }
-        if (inside && !collides && outsidePolygon) {
+        if (candidate.inside && !collides && candidate.outsidePolygon) {
           best = {
-            rect,
-            labelCenterX,
-            labelCenterY,
-            collisionScore: collides ? 1 : 0,
+            rect: candidate.rect,
+            labelCenterX: candidate.labelCenterX,
+            labelCenterY: candidate.labelCenterY,
+            collisionScore: candidate.collisionScore,
+            candidateStrategy: candidate.candidateStrategy,
           };
           break;
         }
       }
       if (best) break;
       offset += 18;
+    }
+
+    if (!best && shouldTryEdgeFallback(baseAttemptStats)) {
+      const fallbackCandidate = buildEdgeAngularFallbackCandidate({
+        model,
+        center,
+        mapZone,
+        polygonPoints,
+        placements,
+        blockedRects,
+        options,
+      });
+      if (fallbackCandidate) {
+        best = {
+          rect: fallbackCandidate.rect,
+          labelCenterX: fallbackCandidate.labelCenterX,
+          labelCenterY: fallbackCandidate.labelCenterY,
+          collisionScore: fallbackCandidate.collisionScore,
+          candidateStrategy: fallbackCandidate.candidateStrategy,
+        };
+        auditReport.edgeFallbacksApplied += 1;
+        auditReport.outsideMapRecoveries += 1;
+      }
     }
 
     if (best) {
@@ -219,6 +413,7 @@ export function buildDistanceLabelPlacements(projectedRefs, referenceSegments, m
         hiddenReason: null,
         guideLine: null,
         rotationDeg: 0,
+        candidateStrategy: best.candidateStrategy || 'primary-offset',
       });
       auditReport.totalPlaced += 1;
       auditReport.placedOffset += 1;
