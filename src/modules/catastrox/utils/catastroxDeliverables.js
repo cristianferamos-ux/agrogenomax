@@ -60,7 +60,16 @@ const TABLE_LAYOUT = {
   footer: { x: 24, y: 582, width: 744, height: 14 },
 };
 
+const CUSTOM_PDF_FONT_FAMILY = 'CatastroXArial';
+const PDF_FONT_FALLBACK_STACK = 'Arial, sans-serif';
+const PDF_FONT_DEFINITIONS = [
+  { family: CUSTOM_PDF_FONT_FAMILY, url: '/fonts/catastrox/arial.ttf', weight: '400' },
+  { family: CUSTOM_PDF_FONT_FAMILY, url: '/fonts/catastrox/arialbd.ttf', weight: '700' },
+];
+
 let fontLoadPromise = null;
+let activePdfFontStack = `"${CUSTOM_PDF_FONT_FAMILY}", ${PDF_FONT_FALLBACK_STACK}`;
+let pdfFontFallbackWarningIssued = false;
 
 function cleanText(value, fallback = '') {
   if (value === null || value === undefined) return fallback;
@@ -356,25 +365,41 @@ async function ensurePdfFontsLoaded() {
   if (typeof document === 'undefined' || typeof FontFace === 'undefined') return;
   if (!fontLoadPromise) {
     fontLoadPromise = (async () => {
-      const definitions = [
-        { family: 'CatastroXArial', url: '/fonts/catastrox/arial.ttf', weight: '400' },
-        { family: 'CatastroXArial', url: '/fonts/catastrox/arialbd.ttf', weight: '700' },
-      ];
-
-      await Promise.all(
-        definitions.map(async ({ family, url, weight }) => {
+      const responses = await Promise.all(
+        PDF_FONT_DEFINITIONS.map(async ({ url, weight }) => {
           const response = await fetch(url);
           if (!response.ok) {
-            throw new Error(`No se pudo cargar la fuente ${url}`);
+            if (response.status === 404) {
+              return { missing: true, url, weight };
+            }
+            throw new Error(`No se pudo cargar la fuente ${url} (HTTP ${response.status})`);
           }
-          const buffer = await response.arrayBuffer();
-          const face = new FontFace(family, buffer, { weight, style: 'normal' });
+          return { missing: false, url, weight, buffer: await response.arrayBuffer() };
+        }),
+      );
+
+      const missingFonts = responses.filter((entry) => entry.missing);
+      if (missingFonts.length) {
+        activePdfFontStack = PDF_FONT_FALLBACK_STACK;
+        if (!pdfFontFallbackWarningIssued) {
+          pdfFontFallbackWarningIssued = true;
+          console.warn(
+            `[CatastroX] Fuentes PDF personalizadas no disponibles (${missingFonts.map((entry) => entry.url).join(', ')}). Se usara el fallback del entorno: ${PDF_FONT_FALLBACK_STACK}.`,
+          );
+        }
+        return;
+      }
+
+      await Promise.all(
+        responses.map(async ({ weight, buffer }) => {
+          const face = new FontFace(CUSTOM_PDF_FONT_FAMILY, buffer, { weight, style: 'normal' });
           await face.load();
           document.fonts.add(face);
         }),
       );
 
       await document.fonts.ready;
+      activePdfFontStack = `"${CUSTOM_PDF_FONT_FAMILY}", ${PDF_FONT_FALLBACK_STACK}`;
     })();
   }
 
@@ -396,7 +421,7 @@ function createPageCanvas() {
 }
 
 function setFont(context, size, weight = 400) {
-  context.font = `${weight} ${size}px "CatastroXArial", Arial, sans-serif`;
+  context.font = `${weight} ${size}px ${activePdfFontStack}`;
 }
 
 function drawWrappedText(context, text, x, y, maxWidth, lineHeight, color = '#0f172a', weight = 400, size = 10) {
@@ -1499,10 +1524,109 @@ function buildLayoutData(predio, options = {}) {
   console.table(selectionReport.secondarySilhouetteCandidates);
 
   if (selectionReport.hardValidationStatus !== 'OK') {
-    throw new Error(`La selecciÃ³n cartogrÃ¡fica de puntos visibles fallÃ³ la validaciÃ³n para ${predio.codigoPredial}.`);
+    throw new Error(`La selección cartográfica de puntos visibles falló la validación para ${predio.codigoPredial}.`);
   }
 
   return { mapState, referencePoints, referenceRows, referenceSegments, selectionReport };
+}
+
+function buildTechnicalLayoutSnapshot(predio, layoutData) {
+  const { mapState, referencePoints, referenceSegments, selectionReport } = layoutData;
+  const mapRect = insetRect(TECHNICAL_LAYOUT.mapArea, 14);
+  const baseProjected = projectRingToViewport(
+    predio.displayRing?.length ? predio.displayRing : predio.ring,
+    mapState,
+    mapRect.width,
+    mapRect.height,
+  );
+  const transform = createFitTransform(baseProjected, mapRect, 30);
+  const projected = applyFitTransform(baseProjected, transform);
+  const baseProjectedRefs = referencePoints.map((entry) =>
+    projectPointToViewport(entry.point || entry, mapState, mapRect.width, mapRect.height),
+  );
+  const projectedRefs = applyFitTransform(baseProjectedRefs, transform);
+  const pointPlacements = buildVisiblePointPlacements(projectedRefs, mapRect, projected);
+  const distancePlacements = buildDistanceLabelPlacements(
+    projectedRefs,
+    referenceSegments,
+    mapRect,
+    projected,
+    pointPlacements.map((placement) => placement.rect),
+  );
+  const visibleDistancePlacements = distancePlacements
+    .map((placement, segmentIndex) => ({ placement, segmentIndex }))
+    .filter(({ placement }) => placement.status !== 'hidden');
+  const labelOverlapPairs = [];
+
+  for (let left = 0; left < visibleDistancePlacements.length; left += 1) {
+    for (let right = left + 1; right < visibleDistancePlacements.length; right += 1) {
+      if (
+        rectsOverlap(
+          visibleDistancePlacements[left].placement.rect,
+          visibleDistancePlacements[right].placement.rect,
+          2,
+        )
+      ) {
+        labelOverlapPairs.push([
+          `${referenceSegments[visibleDistancePlacements[left].segmentIndex].from}-${referenceSegments[visibleDistancePlacements[left].segmentIndex].to}`,
+          `${referenceSegments[visibleDistancePlacements[right].segmentIndex].from}-${referenceSegments[visibleDistancePlacements[right].segmentIndex].to}`,
+        ]);
+      }
+    }
+  }
+
+  const labelsInsidePolygon = visibleDistancePlacements.flatMap(({ placement, segmentIndex }) =>
+    pointInPolygon([placement.labelCenterX, placement.labelCenterY], projected)
+      ? [`${referenceSegments[segmentIndex].from}-${referenceSegments[segmentIndex].to}`]
+      : [],
+  );
+  const labelsOverPoints = visibleDistancePlacements.flatMap(({ placement, segmentIndex }) =>
+    pointPlacements.some((pointPlacement) => rectsOverlap(placement.rect, pointPlacement.rect, 2))
+      ? [`${referenceSegments[segmentIndex].from}-${referenceSegments[segmentIndex].to}`]
+      : [],
+  );
+  const northPoints = referencePoints
+    .map((_, index) => `P${index + 1}`)
+    .filter((label) => /^P(1[3-9]|20)$/.test(label));
+  const guideSegments = visibleDistancePlacements.flatMap(({ placement, segmentIndex }) =>
+    placement.guideLine
+      ? [{
+          segment: `${referenceSegments[segmentIndex].from}-${referenceSegments[segmentIndex].to}`,
+          reason: placement.guideLine.reason,
+        }]
+      : [],
+  );
+  const p3p4Index = referenceSegments.findIndex((segment) => `${segment.from}-${segment.to}` === 'P3-P4');
+  const p3p4Placement = p3p4Index >= 0 ? distancePlacements[p3p4Index] : null;
+
+  return {
+    mapRect,
+    projected,
+    projectedRefs,
+    pointPlacements,
+    distancePlacements,
+    regressionMetrics: {
+      totalRequested: distancePlacements.auditReport.totalRequested,
+      totalPlaced: distancePlacements.auditReport.totalPlaced,
+      totalHidden: distancePlacements.auditReport.totalHidden,
+      guideLinesSuggested: distancePlacements.auditReport.guideLinesSuggested,
+      guideLinesRendered: guideSegments.length,
+      guideLineReasons: distancePlacements.auditReport.guideLineReasons,
+      totalVisiblePoints: selectionReport.totalVisiblePoints,
+      recoveredLongVisibleVertices: selectionReport.recoveredLongVisibleVertices || 0,
+      recoveredLongVisibleSpans: selectionReport.recoveredLongVisibleSpans || 0,
+      northPoints,
+      p3p4Recovered: Boolean(
+        p3p4Placement &&
+        p3p4Placement.status === 'placed' &&
+        p3p4Placement.candidateStrategy === 'edge-angular-fallback',
+      ),
+      labelOverlapCount: labelOverlapPairs.length,
+      labelsInsidePolygonCount: labelsInsidePolygon.length,
+      labelsOverPointCount: labelsOverPoints.length,
+      collisionsResolved: distancePlacements.auditReport.collisionsResolved,
+    },
+  };
 }
 
 async function buildSatellitePageCanvas(predio, layoutData, pageLabel = '1 de 3') {
@@ -2036,6 +2160,18 @@ export async function buildDeliverableDebugSummary(source) {
     kmlBytes: textEncoder.encode(buildKmlText(predio)).length,
     kmzBytes: buildKmzBytes(predio).length,
     shpZipBytes: buildShpZipBytes(predio).length,
-    fontFamily: 'CatastroXArial',
+    fontFamily: activePdfFontStack,
+  };
+}
+
+export function buildCatastroXRegressionSnapshot(source) {
+  const predio = normalizePredioForDeliverables(source);
+  const layoutData = buildLayoutData(predio);
+  const technicalSnapshot = buildTechnicalLayoutSnapshot(predio, layoutData);
+  return {
+    code: fileSafeCode(predio),
+    predio,
+    layoutData,
+    regressionMetrics: technicalSnapshot.regressionMetrics,
   };
 }
