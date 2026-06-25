@@ -1505,6 +1505,105 @@ function buildLayoutData(predio, options = {}) {
   return { mapState, referencePoints, referenceRows, referenceSegments, selectionReport };
 }
 
+function buildTechnicalLayoutSnapshot(predio, layoutData) {
+  const { mapState, referencePoints, referenceSegments, selectionReport } = layoutData;
+  const mapRect = insetRect(TECHNICAL_LAYOUT.mapArea, 14);
+  const baseProjected = projectRingToViewport(
+    predio.displayRing?.length ? predio.displayRing : predio.ring,
+    mapState,
+    mapRect.width,
+    mapRect.height,
+  );
+  const transform = createFitTransform(baseProjected, mapRect, 30);
+  const projected = applyFitTransform(baseProjected, transform);
+  const baseProjectedRefs = referencePoints.map((entry) =>
+    projectPointToViewport(entry.point || entry, mapState, mapRect.width, mapRect.height),
+  );
+  const projectedRefs = applyFitTransform(baseProjectedRefs, transform);
+  const pointPlacements = buildVisiblePointPlacements(projectedRefs, mapRect, projected);
+  const distancePlacements = buildDistanceLabelPlacements(
+    projectedRefs,
+    referenceSegments,
+    mapRect,
+    projected,
+    pointPlacements.map((placement) => placement.rect),
+  );
+  const visibleDistancePlacements = distancePlacements
+    .map((placement, segmentIndex) => ({ placement, segmentIndex }))
+    .filter(({ placement }) => placement.status !== 'hidden');
+  const labelOverlapPairs = [];
+
+  for (let left = 0; left < visibleDistancePlacements.length; left += 1) {
+    for (let right = left + 1; right < visibleDistancePlacements.length; right += 1) {
+      if (
+        rectsOverlap(
+          visibleDistancePlacements[left].placement.rect,
+          visibleDistancePlacements[right].placement.rect,
+          2,
+        )
+      ) {
+        labelOverlapPairs.push([
+          `${referenceSegments[visibleDistancePlacements[left].segmentIndex].from}-${referenceSegments[visibleDistancePlacements[left].segmentIndex].to}`,
+          `${referenceSegments[visibleDistancePlacements[right].segmentIndex].from}-${referenceSegments[visibleDistancePlacements[right].segmentIndex].to}`,
+        ]);
+      }
+    }
+  }
+
+  const labelsInsidePolygon = visibleDistancePlacements.flatMap(({ placement, segmentIndex }) =>
+    pointInPolygon([placement.labelCenterX, placement.labelCenterY], projected)
+      ? [`${referenceSegments[segmentIndex].from}-${referenceSegments[segmentIndex].to}`]
+      : [],
+  );
+  const labelsOverPoints = visibleDistancePlacements.flatMap(({ placement, segmentIndex }) =>
+    pointPlacements.some((pointPlacement) => rectsOverlap(placement.rect, pointPlacement.rect, 2))
+      ? [`${referenceSegments[segmentIndex].from}-${referenceSegments[segmentIndex].to}`]
+      : [],
+  );
+  const northPoints = referencePoints
+    .map((_, index) => `P${index + 1}`)
+    .filter((label) => /^P(1[3-9]|20)$/.test(label));
+  const guideSegments = visibleDistancePlacements.flatMap(({ placement, segmentIndex }) =>
+    placement.guideLine
+      ? [{
+          segment: `${referenceSegments[segmentIndex].from}-${referenceSegments[segmentIndex].to}`,
+          reason: placement.guideLine.reason,
+        }]
+      : [],
+  );
+  const p3p4Index = referenceSegments.findIndex((segment) => `${segment.from}-${segment.to}` === 'P3-P4');
+  const p3p4Placement = p3p4Index >= 0 ? distancePlacements[p3p4Index] : null;
+
+  return {
+    mapRect,
+    projected,
+    projectedRefs,
+    pointPlacements,
+    distancePlacements,
+    regressionMetrics: {
+      totalRequested: distancePlacements.auditReport.totalRequested,
+      totalPlaced: distancePlacements.auditReport.totalPlaced,
+      totalHidden: distancePlacements.auditReport.totalHidden,
+      guideLinesSuggested: distancePlacements.auditReport.guideLinesSuggested,
+      guideLinesRendered: guideSegments.length,
+      guideLineReasons: distancePlacements.auditReport.guideLineReasons,
+      totalVisiblePoints: selectionReport.totalVisiblePoints,
+      recoveredLongVisibleVertices: selectionReport.recoveredLongVisibleVertices || 0,
+      recoveredLongVisibleSpans: selectionReport.recoveredLongVisibleSpans || 0,
+      northPoints,
+      p3p4Recovered: Boolean(
+        p3p4Placement &&
+        p3p4Placement.status === 'placed' &&
+        p3p4Placement.candidateStrategy === 'edge-angular-fallback',
+      ),
+      labelOverlapCount: labelOverlapPairs.length,
+      labelsInsidePolygonCount: labelsInsidePolygon.length,
+      labelsOverPointCount: labelsOverPoints.length,
+      collisionsResolved: distancePlacements.auditReport.collisionsResolved,
+    },
+  };
+}
+
 async function buildSatellitePageCanvas(predio, layoutData, pageLabel = '1 de 3') {
   const { canvas, context } = createPageCanvas();
   const validator = createLayoutValidator(SATELLITE_LAYOUT);
@@ -2037,5 +2136,17 @@ export async function buildDeliverableDebugSummary(source) {
     kmzBytes: buildKmzBytes(predio).length,
     shpZipBytes: buildShpZipBytes(predio).length,
     fontFamily: 'CatastroXArial',
+  };
+}
+
+export function buildCatastroXRegressionSnapshot(source) {
+  const predio = normalizePredioForDeliverables(source);
+  const layoutData = buildLayoutData(predio);
+  const technicalSnapshot = buildTechnicalLayoutSnapshot(predio, layoutData);
+  return {
+    code: fileSafeCode(predio),
+    predio,
+    layoutData,
+    regressionMetrics: technicalSnapshot.regressionMetrics,
   };
 }
