@@ -260,6 +260,102 @@ function buildLabelModel(segment, segmentIndex, current, next, center, options) 
   };
 }
 
+function isValidRect(rect) {
+  return !!(
+    rect &&
+    Number.isFinite(rect.x) &&
+    Number.isFinite(rect.y) &&
+    Number.isFinite(rect.width) &&
+    Number.isFinite(rect.height) &&
+    rect.width > 0 &&
+    rect.height > 0
+  );
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function bumpGuideLineReason(auditReport, reason) {
+  if (!reason) return;
+  auditReport.guideLineReasons[reason] = (auditReport.guideLineReasons[reason] || 0) + 1;
+}
+
+function shouldSuggestGuideLine(model, placement, options = {}) {
+  if (!model || !placement || placement.status === 'hidden') return false;
+  if (placement.candidateStrategy !== 'edge-angular-fallback') return false;
+  if (model.segmentClass !== 'short' && model.segmentClass !== 'micro') return false;
+
+  const dx = (placement.labelCenterX ?? 0) - model.midX;
+  const dy = (placement.labelCenterY ?? 0) - model.midY;
+  const displacementPx = Math.hypot(dx, dy);
+
+  return displacementPx > 64;
+}
+
+function buildGuideLineForPlacement(model, placement, options = {}) {
+  if (!model || !placement || placement.status === 'hidden') {
+    return {
+      guideLine: null,
+      skipped: true,
+      reason: 'hidden',
+    };
+  }
+  if (!isValidRect(placement.rect)) {
+    return {
+      guideLine: null,
+      skipped: true,
+      reason: 'invalid-rect',
+    };
+  }
+
+  const anchorOnSegment = {
+    x: model.midX,
+    y: model.midY,
+  };
+  const anchorOnLabel = {
+    x: clamp(anchorOnSegment.x, placement.rect.x, placement.rect.x + placement.rect.width),
+    y: clamp(anchorOnSegment.y, placement.rect.y, placement.rect.y + placement.rect.height),
+  };
+  const lengthPx = Math.hypot(
+    anchorOnLabel.x - anchorOnSegment.x,
+    anchorOnLabel.y - anchorOnSegment.y
+  );
+
+  if (lengthPx < 10) {
+    return {
+      guideLine: null,
+      skipped: true,
+      reason: 'too-short',
+    };
+  }
+  if (lengthPx > 110) {
+    return {
+      guideLine: null,
+      skipped: true,
+      reason: 'too-long',
+    };
+  }
+
+  const reason = `${placement.candidateStrategy}-${model.segmentClass}-displaced`;
+  return {
+    guideLine: {
+      x1: anchorOnSegment.x,
+      y1: anchorOnSegment.y,
+      x2: anchorOnLabel.x,
+      y2: anchorOnLabel.y,
+      anchorOnSegment,
+      anchorOnLabel,
+      reason,
+      lengthPx,
+      auditOnly: true,
+      rendered: false,
+    },
+    skipped: false,
+    reason,
+  };
+}
+
 export function buildDistanceLabelPlacements(projectedRefs, referenceSegments, mapZone, polygonPoints = [], blockedRects = [], options = {}) {
   if (!projectedRefs.length) {
     const emptyPlacements = [];
@@ -274,6 +370,10 @@ export function buildDistanceLabelPlacements(projectedRefs, referenceSegments, m
       microSegmentsDetected: 0,
       collisionsDetected: 0,
       collisionsResolved: 0,
+      guideLinesSuggested: 0,
+      guideLinesRendered: 0,
+      guideLinesSkipped: 0,
+      guideLineReasons: {},
       warnings: referenceSegments.length ? ['no_projected_reference_points'] : [],
     };
     return emptyPlacements;
@@ -293,6 +393,10 @@ export function buildDistanceLabelPlacements(projectedRefs, referenceSegments, m
     collisionsResolved: 0,
     edgeFallbacksApplied: 0,
     outsideMapRecoveries: 0,
+    guideLinesSuggested: 0,
+    guideLinesRendered: 0,
+    guideLinesSkipped: 0,
+    guideLineReasons: {},
     warnings: [],
   };
 
@@ -392,11 +496,7 @@ export function buildDistanceLabelPlacements(projectedRefs, referenceSegments, m
     }
 
     if (best) {
-      if (collisionDetectedForSegment) {
-        auditReport.collisionsDetected += 1;
-        auditReport.collisionsResolved += 1;
-      }
-      placements.push({
+      const placement = {
         text,
         midX,
         midY,
@@ -414,7 +514,25 @@ export function buildDistanceLabelPlacements(projectedRefs, referenceSegments, m
         guideLine: null,
         rotationDeg: 0,
         candidateStrategy: best.candidateStrategy || 'primary-offset',
-      });
+      };
+
+      if (shouldSuggestGuideLine(model, placement, options)) {
+        const guideLineResult = buildGuideLineForPlacement(model, placement, options);
+        if (guideLineResult.skipped) {
+          auditReport.guideLinesSkipped += 1;
+          bumpGuideLineReason(auditReport, guideLineResult.reason);
+        } else {
+          placement.guideLine = guideLineResult.guideLine;
+          auditReport.guideLinesSuggested += 1;
+          bumpGuideLineReason(auditReport, guideLineResult.reason);
+        }
+      }
+
+      if (collisionDetectedForSegment) {
+        auditReport.collisionsDetected += 1;
+        auditReport.collisionsResolved += 1;
+      }
+      placements.push(placement);
       auditReport.totalPlaced += 1;
       auditReport.placedOffset += 1;
     } else {
