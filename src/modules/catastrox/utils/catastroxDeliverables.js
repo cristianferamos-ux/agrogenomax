@@ -2,6 +2,7 @@ const textEncoder = new TextEncoder();
 
 import { buildDisplayRingFromOriginalRing } from './CartographicPresentationEngine.js';
 import { buildReferenceRows, buildReferenceSegments } from './DistanceEngine.js';
+import { buildDistanceLabelPlacements } from './LabelPlacementEngine.js';
 import {
   applyFitTransform,
   buildVisiblePointProjection,
@@ -961,86 +962,6 @@ function buildDiagnosticPageCanvas(predio) {
   );
 
   return canvas;
-}
-
-function buildDistanceLabelPlacements(projectedRefs, referenceSegments, mapZone, polygonPoints = [], blockedRects = []) {
-  if (!projectedRefs.length) return [];
-  const center = polygonPoints.length ? ringCentroid(polygonPoints) : ringCentroid(projectedRefs);
-  const placements = [];
-
-  referenceSegments.forEach((segment, index) => {
-    const current = projectedRefs[index];
-    const next = projectedRefs[(index + 1) % projectedRefs.length];
-    if (!current || !next) return;
-
-    const text = `${Math.round(segment.distance)} m`;
-    const textWidth = Math.max(34, text.length * 5);
-    const textHeight = 14;
-    const midX = (current[0] + next[0]) / 2;
-    const midY = (current[1] + next[1]) / 2;
-    const dx = next[0] - current[0];
-    const dy = next[1] - current[1];
-    const segmentLength = Math.hypot(dx, dy) || 1;
-    let nx = -dy / segmentLength;
-    let ny = dx / segmentLength;
-    const toCenterX = midX - center[0];
-    const toCenterY = midY - center[1];
-    if (nx * toCenterX + ny * toCenterY < 0) {
-      nx *= -1;
-      ny *= -1;
-    }
-
-    let offset = 34;
-    let best = null;
-    for (let attempt = 0; attempt < 10; attempt += 1) {
-      const candidateNormals = [
-        [nx, ny],
-        [nx * 0.88 + (midX - center[0]) / (Math.hypot(midX - center[0], midY - center[1]) || 1) * 0.12,
-         ny * 0.88 + (midY - center[1]) / (Math.hypot(midX - center[0], midY - center[1]) || 1) * 0.12],
-      ];
-      for (const [dirX, dirY] of candidateNormals) {
-        const mag = Math.hypot(dirX, dirY) || 1;
-        const ux = dirX / mag;
-        const uy = dirY / mag;
-        const labelCenterX = midX + ux * offset;
-        const labelCenterY = midY + uy * offset;
-        const rect = {
-          x: labelCenterX - textWidth / 2,
-          y: labelCenterY - textHeight / 2,
-          width: textWidth,
-          height: textHeight,
-        };
-        const inside =
-          rect.x >= mapZone.x &&
-          rect.y >= mapZone.y &&
-          rect.x + rect.width <= mapZone.x + mapZone.width &&
-          rect.y + rect.height <= mapZone.y + mapZone.height;
-        const collides =
-          placements.some((entry) => rectsOverlap(rect, entry.rect, 6)) ||
-          blockedRects.some((blockedRect) => rectsOverlap(rect, blockedRect, 6));
-        const outsidePolygon = !pointInPolygon([labelCenterX, labelCenterY], polygonPoints);
-        if (inside && !collides && outsidePolygon) {
-          best = { rect, labelCenterX, labelCenterY };
-          break;
-        }
-      }
-      if (best) break;
-      offset += 18;
-    }
-
-    if (best) {
-      placements.push({
-        text,
-        midX,
-        midY,
-        labelCenterX: best.labelCenterX,
-        labelCenterY: best.labelCenterY,
-        rect: best.rect,
-      });
-    }
-  });
-
-  return placements;
 }
 
 function drawDistanceLabels(context, placements) {
