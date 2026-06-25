@@ -11,6 +11,7 @@ const DEFAULT_SEGMENT_CLASS_THRESHOLDS = {
   mediumMinPx: 70,
   shortMinPx: 36,
 };
+const GUIDE_LINE_MIN_CENTER_DISPLACEMENT_PX = 40;
 const DEFAULT_EDGE_FALLBACK_RADII = [48, 64, 80, 88, 96];
 const DEFAULT_EDGE_FALLBACK_ANGLE_OFFSETS = [0, -15, 15, -30, 30, -45, 45, -60, 60, -75, 75, -90, 90, -120, 120, -150, 150, 180];
 
@@ -290,7 +291,7 @@ function shouldSuggestGuideLine(model, placement, options = {}) {
   const dy = (placement.labelCenterY ?? 0) - model.midY;
   const displacementPx = Math.hypot(dx, dy);
 
-  return displacementPx > 64;
+  return displacementPx > GUIDE_LINE_MIN_CENTER_DISPLACEMENT_PX;
 }
 
 function buildGuideLineForPlacement(model, placement, options = {}) {
