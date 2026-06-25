@@ -55,9 +55,11 @@ npm run catastrox:regression
 
 Este comando falla por defecto si la generación PDF reporta error.
 
-## Si falta la fuente PDF
+## Fuentes PDF
 
-Si el único problema es la ausencia de `/fonts/catastrox/arial.ttf` o fuentes relacionadas, en PowerShell puedes permitir ese error explícitamente:
+Si faltan `/fonts/catastrox/arial.ttf` o `/fonts/catastrox/arialbd.ttf`, CatastroX usa un fallback seguro del entorno (`Arial, sans-serif`) y deja una advertencia diagnóstica en consola. Ese caso ya no requiere `CATASTROX_ALLOW_PDF_ERROR=1`.
+
+`CATASTROX_ALLOW_PDF_ERROR=1` queda reservado para depuración cuando exista otro `pdfError` que quieras tolerar explícitamente:
 
 ```powershell
 $env:CATASTROX_ALLOW_PDF_ERROR="1"

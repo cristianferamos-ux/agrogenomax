@@ -60,7 +60,16 @@ const TABLE_LAYOUT = {
   footer: { x: 24, y: 582, width: 744, height: 14 },
 };
 
+const CUSTOM_PDF_FONT_FAMILY = 'CatastroXArial';
+const PDF_FONT_FALLBACK_STACK = 'Arial, sans-serif';
+const PDF_FONT_DEFINITIONS = [
+  { family: CUSTOM_PDF_FONT_FAMILY, url: '/fonts/catastrox/arial.ttf', weight: '400' },
+  { family: CUSTOM_PDF_FONT_FAMILY, url: '/fonts/catastrox/arialbd.ttf', weight: '700' },
+];
+
 let fontLoadPromise = null;
+let activePdfFontStack = `"${CUSTOM_PDF_FONT_FAMILY}", ${PDF_FONT_FALLBACK_STACK}`;
+let pdfFontFallbackWarningIssued = false;
 
 function cleanText(value, fallback = '') {
   if (value === null || value === undefined) return fallback;
@@ -356,25 +365,41 @@ async function ensurePdfFontsLoaded() {
   if (typeof document === 'undefined' || typeof FontFace === 'undefined') return;
   if (!fontLoadPromise) {
     fontLoadPromise = (async () => {
-      const definitions = [
-        { family: 'CatastroXArial', url: '/fonts/catastrox/arial.ttf', weight: '400' },
-        { family: 'CatastroXArial', url: '/fonts/catastrox/arialbd.ttf', weight: '700' },
-      ];
-
-      await Promise.all(
-        definitions.map(async ({ family, url, weight }) => {
+      const responses = await Promise.all(
+        PDF_FONT_DEFINITIONS.map(async ({ url, weight }) => {
           const response = await fetch(url);
           if (!response.ok) {
-            throw new Error(`No se pudo cargar la fuente ${url}`);
+            if (response.status === 404) {
+              return { missing: true, url, weight };
+            }
+            throw new Error(`No se pudo cargar la fuente ${url} (HTTP ${response.status})`);
           }
-          const buffer = await response.arrayBuffer();
-          const face = new FontFace(family, buffer, { weight, style: 'normal' });
+          return { missing: false, url, weight, buffer: await response.arrayBuffer() };
+        }),
+      );
+
+      const missingFonts = responses.filter((entry) => entry.missing);
+      if (missingFonts.length) {
+        activePdfFontStack = PDF_FONT_FALLBACK_STACK;
+        if (!pdfFontFallbackWarningIssued) {
+          pdfFontFallbackWarningIssued = true;
+          console.warn(
+            `[CatastroX] Fuentes PDF personalizadas no disponibles (${missingFonts.map((entry) => entry.url).join(', ')}). Se usara el fallback del entorno: ${PDF_FONT_FALLBACK_STACK}.`,
+          );
+        }
+        return;
+      }
+
+      await Promise.all(
+        responses.map(async ({ weight, buffer }) => {
+          const face = new FontFace(CUSTOM_PDF_FONT_FAMILY, buffer, { weight, style: 'normal' });
           await face.load();
           document.fonts.add(face);
         }),
       );
 
       await document.fonts.ready;
+      activePdfFontStack = `"${CUSTOM_PDF_FONT_FAMILY}", ${PDF_FONT_FALLBACK_STACK}`;
     })();
   }
 
@@ -396,7 +421,7 @@ function createPageCanvas() {
 }
 
 function setFont(context, size, weight = 400) {
-  context.font = `${weight} ${size}px "CatastroXArial", Arial, sans-serif`;
+  context.font = `${weight} ${size}px ${activePdfFontStack}`;
 }
 
 function drawWrappedText(context, text, x, y, maxWidth, lineHeight, color = '#0f172a', weight = 400, size = 10) {
@@ -2135,7 +2160,7 @@ export async function buildDeliverableDebugSummary(source) {
     kmlBytes: textEncoder.encode(buildKmlText(predio)).length,
     kmzBytes: buildKmzBytes(predio).length,
     shpZipBytes: buildShpZipBytes(predio).length,
-    fontFamily: 'CatastroXArial',
+    fontFamily: activePdfFontStack,
   };
 }
 
