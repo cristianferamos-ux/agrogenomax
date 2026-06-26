@@ -469,6 +469,148 @@ function drawWrappedText(context, text, x, y, maxWidth, lineHeight, color = '#0f
   return { lines, height: lines.length * lineHeight };
 }
 
+function chunkArray(values, chunkSize) {
+  if (!Array.isArray(values) || chunkSize <= 0) return [];
+  const chunks = [];
+  for (let index = 0; index < values.length; index += chunkSize) {
+    chunks.push(values.slice(index, index + chunkSize));
+  }
+  return chunks;
+}
+
+function buildTechnicalSidePanelRects(referenceCount = 0, segmentCount = 0) {
+  const panel = TECHNICAL_LAYOUT.rightPanel;
+  const gap = 12;
+  const canShowReferences = referenceCount > 0 && referenceCount <= 12;
+  const infoHeight = 170;
+  const distanceHeight = segmentCount > 18 ? 176 : 156;
+  const guideHeight = canShowReferences ? panel.height - infoHeight - distanceHeight - gap * 2 : 0;
+
+  return {
+    infoRect: { x: panel.x, y: panel.y, width: panel.width, height: infoHeight },
+    noteRect: { x: panel.x, y: panel.y + infoHeight + gap, width: panel.width, height: distanceHeight },
+    guideRect: canShowReferences
+      ? { x: panel.x, y: panel.y + infoHeight + gap + distanceHeight + gap, width: panel.width, height: guideHeight }
+      : null,
+  };
+}
+
+function drawVisibleReferencesPanel(context, rect, referenceRows) {
+  drawPanel(context, rect, 'REFERENCIAS VISIBLES');
+  const bodyX = rect.x + 12;
+  const bodyY = rect.y + 42;
+  const bodyWidth = rect.width - 24;
+  const labels = referenceRows.map((row) => row.point).filter(Boolean);
+  const labelGroups = chunkArray(labels, labels.length >= 18 ? 4 : labels.length >= 10 ? 5 : 6);
+
+  const intro = drawWrappedText(
+    context,
+    `${labels.length} puntos visibles en este plano técnico.`,
+    bodyX,
+    bodyY,
+    bodyWidth,
+    12,
+    '#243446',
+    700,
+    9.4,
+  );
+
+  let cursorY = bodyY + intro.height + 8;
+  labelGroups.forEach((group) => {
+    setFont(context, 8.7, 700);
+    context.fillStyle = '#0f172a';
+    context.fillText(group.join(', '), bodyX, cursorY);
+    cursorY += 12;
+  });
+
+  cursorY += 4;
+  drawWrappedText(
+    context,
+    'La tabla ejecutiva consolida longitudes y coordenadas del recorrido oficial.',
+    bodyX,
+    cursorY,
+    bodyWidth,
+    11,
+    '#52637d',
+    400,
+    8.6,
+  );
+}
+
+function formatLinearMeters(value) {
+  return `${formatNumber(value)} m.l.`;
+}
+
+function drawDistanceTablePanel(context, rect, referenceSegments) {
+  drawPanel(context, rect, 'TABLA DE DISTANCIAS');
+  const bodyX = rect.x + 10;
+  const bodyY = rect.y + 38;
+  const bodyWidth = rect.width - 20;
+  const columnGap = 8;
+  const rowHeight = 11;
+  const maxRowsPerColumn = Math.max(6, Math.floor((rect.height - 50) / rowHeight));
+  const useTwoColumns = referenceSegments.length > maxRowsPerColumn;
+  const columnCount = useTwoColumns ? 2 : 1;
+  const columnWidth = (bodyWidth - columnGap * (columnCount - 1)) / columnCount;
+  const visibleCapacity = maxRowsPerColumn * columnCount;
+  const visibleSegments = referenceSegments.slice(0, visibleCapacity);
+  const segmentColumns = chunkArray(
+    visibleSegments,
+    Math.ceil(visibleSegments.length / columnCount),
+  );
+
+  segmentColumns.forEach((columnSegments, columnIndex) => {
+    const columnX = bodyX + columnIndex * (columnWidth + columnGap);
+    context.fillStyle = '#52637d';
+    setFont(context, 7.2, 700);
+    context.fillText('Tramo', columnX, bodyY);
+    context.fillText('Distancia', columnX + columnWidth * 0.42, bodyY);
+    context.strokeStyle = '#d6dfef';
+    context.beginPath();
+    context.moveTo(columnX, bodyY + 4);
+    context.lineTo(columnX + columnWidth, bodyY + 4);
+    context.stroke();
+
+    let cursorY = bodyY + 16;
+    columnSegments.forEach((segment) => {
+      context.fillStyle = '#0f172a';
+      setFont(context, 7.1, 700);
+      context.fillText(`${segment.from}-${segment.to}`, columnX, cursorY);
+      drawWrappedText(
+        context,
+        formatLinearMeters(segment.distance),
+        columnX + columnWidth * 0.42,
+        cursorY,
+        columnWidth * 0.58,
+        10,
+        '#243446',
+        400,
+        7.1,
+      );
+      cursorY += rowHeight;
+    });
+  });
+
+  if (referenceSegments.length > visibleCapacity) {
+    drawWrappedText(
+      context,
+      'La tabla ejecutiva presenta el recorrido completo.',
+      bodyX,
+      rect.y + rect.height - 12,
+      bodyWidth,
+      10,
+      '#52637d',
+      400,
+      7.8,
+    );
+  }
+}
+
+function resolvePlanLayoutOptions(predio, options = {}) {
+  const { preferDenseVisiblePoints: _preferDenseVisiblePoints, ...rest } = options;
+  return rest;
+}
+
 function drawHeader(context, predio, pageLabel, title, layout) {
   const zone = layout.header;
   context.strokeStyle = '#c9d6ea';
@@ -634,8 +776,8 @@ function buildVisiblePointPlacements(projectedPoints, mapZone, polygonPoints = [
 
   projectedPoints.forEach(([x, y], index) => {
     const baseAngle = Math.atan2(y - center[1], x - center[0]);
-    const angleOffsets = [0, -0.6, 0.6, -1.05, 1.05, Math.PI];
-    const distanceOffsets = [0, 18, 28, 38, 48];
+    const angleOffsets = [0, -0.32, 0.32, -0.64, 0.64, -0.96, 0.96, -1.28, 1.28, Math.PI];
+    const distanceOffsets = [18, 26, 34, 42, 52, 62, 72, 0];
     let best = null;
 
     for (const distance of distanceOffsets) {
@@ -643,14 +785,14 @@ function buildVisiblePointPlacements(projectedPoints, mapZone, polygonPoints = [
         const angle = baseAngle + angleOffset;
         const circleX = x + Math.cos(angle) * distance;
         const circleY = y + Math.sin(angle) * distance;
-        const rect = { x: circleX - 9, y: circleY - 9, width: 18, height: 18 };
+        const rect = { x: circleX - 8, y: circleY - 8, width: 16, height: 16 };
         const inside =
-          rect.x >= mapZone.x + 2 &&
-          rect.y >= mapZone.y + 2 &&
-          rect.x + rect.width <= mapZone.x + mapZone.width - 2 &&
-          rect.y + rect.height <= mapZone.y + mapZone.height - 2;
-        const overlapsPoint = placements.some((placement) => rectsOverlap(rect, placement.rect, 6));
-        const overlapsBlocked = blockedRects.some((blockedRect) => rectsOverlap(rect, blockedRect, 6));
+          rect.x >= mapZone.x + 3 &&
+          rect.y >= mapZone.y + 3 &&
+          rect.x + rect.width <= mapZone.x + mapZone.width - 3 &&
+          rect.y + rect.height <= mapZone.y + mapZone.height - 3;
+        const overlapsPoint = placements.some((placement) => rectsOverlap(rect, placement.rect, 3));
+        const overlapsBlocked = blockedRects.some((blockedRect) => rectsOverlap(rect, blockedRect, 4));
         if (inside && !overlapsPoint && !overlapsBlocked) {
           best = {
             anchorX: x,
@@ -658,7 +800,7 @@ function buildVisiblePointPlacements(projectedPoints, mapZone, polygonPoints = [
             circleX,
             circleY,
             rect,
-            showGuide: distance >= 14,
+            showGuide: distance >= 12,
           };
           break;
         }
@@ -691,7 +833,17 @@ function buildVisiblePointPlacements(projectedPoints, mapZone, polygonPoints = [
   return placements;
 }
 
-function drawVisiblePoints(context, projectedPoints, placements = null) {
+function drawVisiblePoints(context, projectedPoints, placements = null, options = {}) {
+  const {
+    radius = 7.25,
+    lineWidth = 1.5,
+    fontSize = 7.1,
+    fillStyle = '#ffffff',
+    strokeStyle = '#0a2e73',
+    textColor = '#0a2e73',
+    guideColor = '#9aa7bc',
+    guideLineWidth = 0.8,
+  } = options;
   const finalPlacements =
     placements ||
     projectedPoints.map(([x, y]) => ({
@@ -707,22 +859,22 @@ function drawVisiblePoints(context, projectedPoints, placements = null) {
     const { anchorX, anchorY, circleX: x, circleY: y, showGuide, hidden } = placement;
     if (hidden) return;
     if (showGuide) {
-      context.strokeStyle = '#9aa7bc';
-      context.lineWidth = 0.8;
+      context.strokeStyle = guideColor;
+      context.lineWidth = guideLineWidth;
       context.beginPath();
       context.moveTo(anchorX, anchorY);
       context.lineTo(x, y);
       context.stroke();
     }
-    context.fillStyle = '#ffffff';
-    context.strokeStyle = '#0a2e73';
-    context.lineWidth = 1.5;
+    context.fillStyle = fillStyle;
+    context.strokeStyle = strokeStyle;
+    context.lineWidth = lineWidth;
     context.beginPath();
-    context.arc(x, y, 8, 0, Math.PI * 2);
+    context.arc(x, y, radius, 0, Math.PI * 2);
     context.fill();
     context.stroke();
-    context.fillStyle = '#0a2e73';
-    setFont(context, 7.5, 700);
+    context.fillStyle = textColor;
+    setFont(context, fontSize, 700);
     const label = `P${index + 1}`;
     const textWidth = context.measureText(label).width;
     context.fillText(label, x - textWidth / 2, y + 3);
@@ -1009,10 +1161,22 @@ function buildDiagnosticPageCanvas(predio) {
   return canvas;
 }
 
-function drawDistanceLabels(context, placements) {
-  context.fillStyle = '#334155';
-  context.lineWidth = 0.8;
-  setFont(context, 8, 400);
+function drawDistanceLabels(context, placements, options = {}) {
+  const {
+    fontSize = 8,
+    textColor = '#334155',
+    fillStyle = 'rgba(255,255,255,0.92)',
+    strokeStyle = '#cbd5e1',
+    lineWidth = 0.8,
+    guideColor = '#9ca3af',
+    guideLineWidth = 0.75,
+    boxPaddingX = 2,
+    boxPaddingY = 1,
+    showBorder = true,
+  } = options;
+  context.fillStyle = textColor;
+  context.lineWidth = lineWidth;
+  setFont(context, fontSize, 400);
   let guideLinesRendered = 0;
   placements.forEach((placement) => {
     if (placement?.status === 'hidden') return;
@@ -1024,25 +1188,256 @@ function drawDistanceLabels(context, placements) {
       Number.isFinite(guideLine.x2) &&
       Number.isFinite(guideLine.y2)
     ) {
-      context.strokeStyle = '#9ca3af';
-      context.lineWidth = 0.75;
+      context.strokeStyle = guideColor;
+      context.lineWidth = guideLineWidth;
       context.beginPath();
       context.moveTo(guideLine.x1, guideLine.y1);
       context.lineTo(guideLine.x2, guideLine.y2);
       context.stroke();
       guideLinesRendered += 1;
     }
-    context.fillStyle = 'rgba(255,255,255,0.92)';
-    context.fillRect(placement.rect.x - 2, placement.rect.y - 1, placement.rect.width + 4, placement.rect.height + 2);
-    context.strokeStyle = '#cbd5e1';
-    context.lineWidth = 0.8;
-    context.strokeRect(placement.rect.x - 2, placement.rect.y - 1, placement.rect.width + 4, placement.rect.height + 2);
-    context.fillStyle = '#334155';
+    context.fillStyle = fillStyle;
+    context.fillRect(
+      placement.rect.x - boxPaddingX,
+      placement.rect.y - boxPaddingY,
+      placement.rect.width + boxPaddingX * 2,
+      placement.rect.height + boxPaddingY * 2,
+    );
+    if (showBorder) {
+      context.strokeStyle = strokeStyle;
+      context.lineWidth = lineWidth;
+      context.strokeRect(
+        placement.rect.x - boxPaddingX,
+        placement.rect.y - boxPaddingY,
+        placement.rect.width + boxPaddingX * 2,
+        placement.rect.height + boxPaddingY * 2,
+      );
+    }
+    context.fillStyle = textColor;
     context.fillText(placement.text, placement.rect.x, placement.rect.y + 10);
   });
   if (placements?.auditReport) {
     placements.auditReport.guideLinesRendered = guideLinesRendered;
   }
+}
+
+function buildTechnicalPageDistancePlacements(placements, pointPlacements, mapRect) {
+  const accepted = [];
+  const blockedRects = pointPlacements
+    .filter((placement) => !placement.hidden)
+    .map((placement) => placement.rect);
+
+  const candidates = placements
+    .map((placement, index) => {
+      const centerDistance =
+        Number.isFinite(placement?.labelCenterX) &&
+        Number.isFinite(placement?.labelCenterY) &&
+        Number.isFinite(placement?.midX) &&
+        Number.isFinite(placement?.midY)
+          ? Math.hypot(placement.labelCenterX - placement.midX, placement.labelCenterY - placement.midY)
+          : Number.POSITIVE_INFINITY;
+      const guideLength = Number.isFinite(placement?.guideLine?.lengthPx) ? placement.guideLine.lengthPx : 0;
+      const strategyPenalty =
+        placement?.candidateStrategy === 'primary-offset' ? 0 :
+        placement?.candidateStrategy === 'secondary-offset' ? 8 :
+        placement?.candidateStrategy === 'edge-angular-fallback' ? 14 :
+        20;
+      return {
+        placement,
+        index,
+        centerDistance,
+        guideLength,
+        score: centerDistance + guideLength * 0.55 + strategyPenalty,
+      };
+    })
+    .filter(({ placement }) =>
+      placement?.status !== 'hidden' &&
+      placement?.rect &&
+      Number.isFinite(placement.rect.x) &&
+      Number.isFinite(placement.rect.y) &&
+      Number.isFinite(placement.rect.width) &&
+      Number.isFinite(placement.rect.height),
+    )
+    .sort((left, right) => left.score - right.score);
+
+  candidates.forEach((entry) => {
+    const { placement, centerDistance, guideLength } = entry;
+    const rect = placement.rect;
+    const inside =
+      rect.x >= mapRect.x + 2 &&
+      rect.y >= mapRect.y + 2 &&
+      rect.x + rect.width <= mapRect.x + mapRect.width - 2 &&
+      rect.y + rect.height <= mapRect.y + mapRect.height - 2;
+    if (!inside) return;
+    if (centerDistance > 116 && guideLength > 112) return;
+    if (blockedRects.some((blockedRect) => rectsOverlap(rect, blockedRect, 2))) return;
+    if (accepted.some((acceptedPlacement) => rectsOverlap(rect, acceptedPlacement.rect, 2))) return;
+    accepted.push(placement);
+    blockedRects.push(rect);
+  });
+
+  const acceptedIndices = new Set(accepted.map((placement) => placements.indexOf(placement)));
+  return placements.map((placement, index) =>
+    acceptedIndices.has(index) ? placement : { ...placement, status: 'hidden' },
+  );
+}
+
+function getCompassRoseRect(x, y) {
+  return { x: x - 30, y: y - 30, width: 60, height: 60 };
+}
+
+function normalizeDimensionAngle(angle) {
+  let next = angle;
+  if (next > Math.PI / 2) next -= Math.PI;
+  if (next < -Math.PI / 2) next += Math.PI;
+  return next;
+}
+
+function buildRotatedRect(centerX, centerY, width, height, angle) {
+  const cos = Math.abs(Math.cos(angle));
+  const sin = Math.abs(Math.sin(angle));
+  const boundWidth = width * cos + height * sin;
+  const boundHeight = width * sin + height * cos;
+  return {
+    x: centerX - boundWidth / 2,
+    y: centerY - boundHeight / 2,
+    width: boundWidth,
+    height: boundHeight,
+  };
+}
+
+function buildTechnicalSegmentDimensionPlacements(
+  context,
+  projectedRefs,
+  referenceSegments,
+  polygonPoints,
+  pointPlacements,
+  mapRect,
+  reservedRects = [],
+) {
+  setFont(context, 7.2, 400);
+  const blockedRects = [
+    ...pointPlacements.filter((placement) => !placement.hidden).map((placement) => placement.rect),
+    ...reservedRects,
+  ];
+  const placements = [];
+  let omittedCount = 0;
+
+  referenceSegments.forEach((segment, index) => {
+    const start = projectedRefs[index];
+    const end = projectedRefs[(index + 1) % projectedRefs.length];
+    if (!start || !end) {
+      omittedCount += 1;
+      return;
+    }
+
+    const dx = end[0] - start[0];
+    const dy = end[1] - start[1];
+    const length = Math.hypot(dx, dy);
+    if (!Number.isFinite(length) || length < 10) {
+      omittedCount += 1;
+      return;
+    }
+
+    const text = `${formatNumber(segment.distance)} m`;
+    const textWidth = context.measureText(text).width;
+    const textHeight = 8;
+    const angle = normalizeDimensionAngle(Math.atan2(dy, dx));
+    const tangent = { x: dx / length, y: dy / length };
+    const normals = [
+      { x: -tangent.y, y: tangent.x },
+      { x: tangent.y, y: -tangent.x },
+    ];
+    const midpoint = { x: (start[0] + end[0]) / 2, y: (start[1] + end[1]) / 2 };
+    const exteriorFirst =
+      !pointInPolygon([midpoint.x + normals[0].x * 12, midpoint.y + normals[0].y * 12], polygonPoints);
+    const orderedNormals = exteriorFirst ? normals : [normals[1], normals[0]];
+    const alongOffsets = [0, -12, 12, -22, 22];
+    const normalOffsets = length < 34 ? [24, 32, 40] : length < 72 ? [18, 24, 32] : [14, 20, 28];
+    let best = null;
+
+    orderedNormals.forEach((normal, normalIndex) => {
+      normalOffsets.forEach((normalOffset) => {
+        alongOffsets.forEach((alongOffset) => {
+          const centerX = midpoint.x + tangent.x * alongOffset + normal.x * normalOffset;
+          const centerY = midpoint.y + tangent.y * alongOffset + normal.y * normalOffset;
+          const maskWidth = textWidth + 4;
+          const maskHeight = textHeight + 2;
+          const rect = buildRotatedRect(centerX, centerY, maskWidth, maskHeight, angle);
+          const inside =
+            rect.x >= mapRect.x + 3 &&
+            rect.y >= mapRect.y + 3 &&
+            rect.x + rect.width <= mapRect.x + mapRect.width - 3 &&
+            rect.y + rect.height <= mapRect.y + mapRect.height - 3;
+          if (!inside) return;
+    if (blockedRects.some((blockedRect) => rectsOverlap(rect, blockedRect, 3))) return;
+    if (placements.some((placement) => rectsOverlap(rect, placement.rect, 4))) return;
+
+          const centerInsidePolygon = pointInPolygon([centerX, centerY], polygonPoints);
+          const useGuide = normalOffset >= 20 || length < 42;
+          const score =
+            normalOffset +
+            Math.abs(alongOffset) * 0.5 +
+            (centerInsidePolygon ? 10 : 0) +
+            normalIndex * 4;
+          if (!best || score < best.score) {
+            best = {
+              text,
+              angle,
+              centerX,
+              centerY,
+              maskWidth,
+              maskHeight,
+              rect,
+              score,
+              guideLine: useGuide
+                ? {
+                    x1: midpoint.x + normal.x * 4,
+                    y1: midpoint.y + normal.y * 4,
+                    x2: centerX - normal.x * (textHeight * 0.25),
+                    y2: centerY - normal.y * (textHeight * 0.25),
+                  }
+                : null,
+            };
+          }
+        });
+      });
+    });
+
+    if (!best) {
+      omittedCount += 1;
+      return;
+    }
+
+    placements.push(best);
+    blockedRects.push(best.rect);
+  });
+
+  return { placements, omittedCount };
+}
+
+function drawTechnicalSegmentDimensions(context, placements) {
+  placements.forEach((placement) => {
+    if (placement?.guideLine) {
+      context.strokeStyle = '#b7c0cd';
+      context.lineWidth = 0.5;
+      context.beginPath();
+      context.moveTo(placement.guideLine.x1, placement.guideLine.y1);
+      context.lineTo(placement.guideLine.x2, placement.guideLine.y2);
+      context.stroke();
+    }
+
+    context.save();
+    context.translate(placement.centerX, placement.centerY);
+    context.rotate(placement.angle);
+    context.fillStyle = 'rgba(255,255,255,0.74)';
+    context.fillRect(-placement.maskWidth / 2, -placement.maskHeight / 2, placement.maskWidth, placement.maskHeight);
+    context.fillStyle = '#64748b';
+    setFont(context, 6.8, 400);
+    const textWidth = context.measureText(placement.text).width;
+    context.fillText(placement.text, -textWidth / 2, 3);
+    context.restore();
+  });
 }
 
 function drawSimpleTable(context, zone, title, headers, columnXs, rows) {
@@ -1673,7 +2068,16 @@ async function buildSatellitePageCanvas(predio, layoutData, pageLabel = '1 de 3'
 
   const projectedRefs = buildVisiblePointProjection(referencePoints, mapState, mapRect);
   const pointPlacements = buildVisiblePointPlacements(projectedRefs, mapRect, projected);
-  drawVisiblePoints(context, projectedRefs, pointPlacements);
+  drawVisiblePoints(context, projectedRefs, pointPlacements, {
+    radius: 6.1,
+    lineWidth: 1.15,
+    fontSize: 6.2,
+    fillStyle: 'rgba(255,255,255,0.88)',
+    strokeStyle: '#0a2e73',
+    textColor: '#0a2e73',
+    guideColor: 'rgba(154,167,188,0.78)',
+    guideLineWidth: 0.65,
+  });
   drawCompassRose(context, mapRect.x + 54, mapRect.y + 54, false);
   const satelliteScaleAnchor = chooseScaleBarAnchor(mapRect, projected, projectedRefs, pointPlacements, false);
   drawScaleBar(context, satelliteScaleAnchor.x, satelliteScaleAnchor.y, 800);
@@ -1724,15 +2128,15 @@ async function buildSatellitePageCanvas(predio, layoutData, pageLabel = '1 de 3'
 
 async function buildTechnicalPagesCanvases(predio, layoutData, technicalPageLabel = '2 de 3') {
   const { mapState, referencePoints, referenceRows, referenceSegments } = layoutData;
+  const expandedMapArea = { x: 24, y: 108, width: 744, height: 450 };
   const { canvas, context } = createPageCanvas();
-  const validator = createLayoutValidator(TECHNICAL_LAYOUT);
-  const mapRect = insetRect(TECHNICAL_LAYOUT.mapArea, 14);
+  const validator = createLayoutValidator({ ...TECHNICAL_LAYOUT, mapArea: expandedMapArea });
+  const mapRect = insetRect(expandedMapArea, 16);
 
   validator.add('header', TECHNICAL_LAYOUT.header, 'header');
-  validator.add('mapArea', TECHNICAL_LAYOUT.mapArea, 'mapArea');
-  validator.add('rightPanel', TECHNICAL_LAYOUT.rightPanel, 'rightPanel');
-  validator.add('bottomPanel', TECHNICAL_LAYOUT.bottomPanel, 'bottomPanel');
-  validator.validateNoOverlap(['mapArea', 'rightPanel', 'bottomPanel']);
+  validator.add('mapArea', expandedMapArea, 'mapArea');
+  validator.add('footer', TECHNICAL_LAYOUT.footer, 'footer');
+  validator.validateNoOverlap(['mapArea', 'footer']);
 
   drawHeader(context, predio, technicalPageLabel, 'PLANO PREDIAL CATASTROX', TECHNICAL_LAYOUT);
 
@@ -1743,23 +2147,42 @@ async function buildTechnicalPagesCanvases(predio, layoutData, technicalPageLabe
   const projectedRefs = applyFitTransform(baseProjectedRefs, transform);
 
   context.fillStyle = '#ffffff';
-  context.fillRect(TECHNICAL_LAYOUT.mapArea.x, TECHNICAL_LAYOUT.mapArea.y, TECHNICAL_LAYOUT.mapArea.width, TECHNICAL_LAYOUT.mapArea.height);
+  context.fillRect(expandedMapArea.x, expandedMapArea.y, expandedMapArea.width, expandedMapArea.height);
   context.strokeStyle = '#d6dfef';
-  context.strokeRect(TECHNICAL_LAYOUT.mapArea.x, TECHNICAL_LAYOUT.mapArea.y, TECHNICAL_LAYOUT.mapArea.width, TECHNICAL_LAYOUT.mapArea.height);
+  context.strokeRect(expandedMapArea.x, expandedMapArea.y, expandedMapArea.width, expandedMapArea.height);
   context.strokeStyle = '#c9d6ea';
   context.strokeRect(mapRect.x, mapRect.y, mapRect.width, mapRect.height);
-
-  setFont(context, 11, 700);
+  setFont(context, 10.5, 700);
   context.fillStyle = '#0a2e73';
-  context.fillText('PLANO TÉCNICO - GEOMETRÍA DEL PREDIO', TECHNICAL_LAYOUT.mapArea.x + 16, TECHNICAL_LAYOUT.mapArea.y + 24);
+  context.fillText('PLANO TÉCNICO • GEOMETRÍA DEL PREDIO', TECHNICAL_LAYOUT.header.x + 16, TECHNICAL_LAYOUT.header.y + 76);
 
   drawPolygonOverlay(context, projected, { stroke: '#1170cf', fill: null, lineWidth: 2 });
   const pointPlacements = buildVisiblePointPlacements(projectedRefs, mapRect, projected);
-  const distancePlacements = buildDistanceLabelPlacements(projectedRefs, referenceSegments, mapRect, projected, pointPlacements.map((placement) => placement.rect));
-  drawDistanceLabels(context, distancePlacements);
+  const compassCenter = { x: mapRect.x + 52, y: mapRect.y + 54 };
+  const preliminaryScaleAnchor = chooseScaleBarAnchor(mapRect, projected, projectedRefs, pointPlacements, true);
+  const footerRect = {
+    x: TECHNICAL_LAYOUT.footer.x + 8,
+    y: TECHNICAL_LAYOUT.footer.y - 2,
+    width: TECHNICAL_LAYOUT.footer.width - 16,
+    height: 20,
+  };
+  const technicalDimensionResult = buildTechnicalSegmentDimensionPlacements(
+    context,
+    projectedRefs,
+    referenceSegments,
+    projected,
+    pointPlacements,
+    mapRect,
+    [
+      getCompassRoseRect(compassCenter.x, compassCenter.y),
+      getScaleBarRect(preliminaryScaleAnchor.x, preliminaryScaleAnchor.y, true),
+      footerRect,
+    ],
+  );
+  drawTechnicalSegmentDimensions(context, technicalDimensionResult.placements);
   drawVisiblePoints(context, projectedRefs, pointPlacements);
-  drawCompassRose(context, mapRect.x + 52, mapRect.y + 54, true);
-  const technicalScaleAnchor = chooseScaleBarAnchor(mapRect, projected, projectedRefs, [...distancePlacements, ...pointPlacements], true);
+  drawCompassRose(context, compassCenter.x, compassCenter.y, true);
+  const technicalScaleAnchor = chooseScaleBarAnchor(mapRect, projected, projectedRefs, [...technicalDimensionResult.placements, ...pointPlacements], true);
   drawScaleBar(context, technicalScaleAnchor.x, technicalScaleAnchor.y, 800, { compact: true });
 
   console.log('CatastroX visible point quality report', {
@@ -1767,46 +2190,19 @@ async function buildTechnicalPagesCanvases(predio, layoutData, technicalPageLabe
     puntosConEtiquetaDesplazada: pointPlacements.displacedCount || 0,
     puntosConLineaGuia: pointPlacements.guideCount || 0,
     etiquetasOcultadasPorColision: pointPlacements.hiddenCount || 0,
+    cotasDibujadas: technicalDimensionResult.placements.length,
+    cotasOmitidasPorColision: technicalDimensionResult.omittedCount,
   });
-
-  const infoRect = { x: TECHNICAL_LAYOUT.rightPanel.x, y: TECHNICAL_LAYOUT.rightPanel.y, width: TECHNICAL_LAYOUT.rightPanel.width, height: 194 };
-  const noteRect = { x: TECHNICAL_LAYOUT.rightPanel.x, y: TECHNICAL_LAYOUT.rightPanel.y + 206, width: TECHNICAL_LAYOUT.rightPanel.width, height: 114 };
-  const guideRect = { x: TECHNICAL_LAYOUT.rightPanel.x, y: TECHNICAL_LAYOUT.rightPanel.y + 332, width: TECHNICAL_LAYOUT.rightPanel.width, height: 118 };
-  [infoRect, noteRect, guideRect].forEach((rect, index) => validator.add(`right-${index}`, rect, 'rightPanel'));
-
-  drawPanel(context, infoRect, 'INFORMACIÓN TÉCNICA');
-  drawKeyValueRows(context, infoRect.x + 12, infoRect.y + 42, infoRect.width - 24, [
-    { label: 'Municipio', value: predio.municipio },
-    { label: 'Departamento', value: predio.departamento },
-    { label: 'Área total', value: `${formatNumber(predio.areaHa)} ha` },
-    { label: 'Perímetro', value: `${formatNumber(predio.perimetroM)} m` },
-    { label: 'Datum', value: 'WGS 84' },
-  ], { labelSize: 8.8, valueSize: 10.5, labelGap: 11, rowGap: 22, lineHeight: 11 });
-
-  drawPanel(context, noteRect, 'LECTURA TÉCNICA');
   drawWrappedText(
     context,
-    'La geometría técnica conserva el contorno completo del predio y la misma orientación de la consulta original. Los puntos P1 a Pn se distribuyen para facilitar lectura sin saturar el plano.',
-    noteRect.x + 12,
-    noteRect.y + 42,
-    noteRect.width - 24,
-    13,
-    '#243446',
+    'CatastroX realiza análisis técnico sobre información geográfica y catastral pública disponible. Este documento no reemplaza certificados oficiales del IGAC, gestor catastral, oficina de registro ni autoridad competente.',
+    TECHNICAL_LAYOUT.footer.x + 16,
+    TECHNICAL_LAYOUT.footer.y - 16,
+    TECHNICAL_LAYOUT.footer.width - 32,
+    10,
+    '#334155',
     400,
-    9.6,
-  );
-
-  drawPanel(context, guideRect, 'REFERENCIAS VISIBLES');
-  drawWrappedText(
-    context,
-    `Puntos visibles: ${referenceRows.map((row) => row.point).join(', ')}. Las longitudes completas entre tramos y las coordenadas consolidadas se presentan en la tabla ejecutiva.`,
-    guideRect.x + 12,
-    guideRect.y + 42,
-    guideRect.width - 24,
-    13,
-    '#243446',
-    400,
-    9.5,
+    8,
   );
 
   const tableCanvases = buildExecutiveTablePagesCanvases(predio, referenceRows, referenceSegments);
@@ -1843,7 +2239,7 @@ export async function buildPlanPdfBytes(source) {
   await ensurePdfFontsLoaded();
   const predio = normalizePredioForDeliverables(source);
   const attemptBuild = async (layoutOptions = {}) => {
-    const layoutData = buildLayoutData(predio, layoutOptions);
+    const layoutData = buildLayoutData(predio, resolvePlanLayoutOptions(predio, layoutOptions));
     const availableRows = Math.max(1, Math.floor((TABLE_LAYOUT.mapArea.height - 54) / 20));
     const totalTablePages = Math.ceil(layoutData.referenceRows.length / availableRows);
     const totalPages = 2 + totalTablePages;
@@ -1872,7 +2268,7 @@ export async function buildPlanPdfBytes(source) {
     return await attemptBuild();
   } catch (error) {
     console.warn('CatastroX PDF plano reintentando con composición segura', error);
-    return attemptBuild({ maxVisiblePoints: 24, minVisiblePoints: 12 });
+    return attemptBuild({ maxVisiblePoints: 24, minVisiblePoints: 12, preferDenseVisiblePoints: false });
   }
 }
 
@@ -2155,7 +2551,7 @@ export function downloadShpZip(source) {
 
 export async function buildDeliverableDebugSummary(source) {
   const predio = normalizePredioForDeliverables(source);
-  const layoutData = buildLayoutData(predio);
+  const layoutData = buildLayoutData(predio, resolvePlanLayoutOptions(predio));
   let planPdfBytes = 0;
   let diagnosticPdfBytes = 0;
   try {
