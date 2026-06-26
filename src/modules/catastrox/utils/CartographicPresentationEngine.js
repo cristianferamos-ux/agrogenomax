@@ -33,6 +33,37 @@ function registerDisplayVertex(keptVertices, index, point, reason, bucket = 'oth
   }
 }
 
+function sanitizeOpenRingForDisplay(openRing, options = {}) {
+  if (openRing.length <= 2) {
+    return openRing.map((point, index) => ({ point, originalIndex: index }));
+  }
+
+  const localRing = projectRingToLocalMeters(openRing);
+  const localBounds = getPointBounds(localRing);
+  const diagonalMeters = Math.hypot(localBounds.width, localBounds.height) || 1;
+  const duplicateThresholdMeters = options.displayDuplicateThresholdMeters ?? Math.max(diagonalMeters * 0.0007, 0.12);
+  const sanitized = [{ point: openRing[0], originalIndex: 0 }];
+
+  for (let index = 1; index < openRing.length; index += 1) {
+    const current = localRing[index];
+    const previousKept = localRing[sanitized[sanitized.length - 1].originalIndex];
+    const distance = Math.hypot(current[0] - previousKept[0], current[1] - previousKept[1]);
+    if (distance < duplicateThresholdMeters) continue;
+    sanitized.push({ point: openRing[index], originalIndex: index });
+  }
+
+  if (sanitized.length >= 3) {
+    const first = localRing[sanitized[0].originalIndex];
+    const last = localRing[sanitized[sanitized.length - 1].originalIndex];
+    const closureDistance = Math.hypot(first[0] - last[0], first[1] - last[1]);
+    if (closureDistance < duplicateThresholdMeters) {
+      sanitized.pop();
+    }
+  }
+
+  return sanitized;
+}
+
 export function buildDisplayRingFromOriginalRing(originalRing, options = {}) {
   const normalizedRing = normalizeRing(originalRing);
   const openRing = normalizedRing.slice(0, -1);
@@ -51,13 +82,17 @@ export function buildDisplayRingFromOriginalRing(originalRing, options = {}) {
     };
   }
 
-  if (openRing.length <= 4) {
-    const displayVertices = openRing.map((point, index) => ({
-      point,
-      originalIndex: index,
+  const sanitizedVertices = sanitizeOpenRingForDisplay(openRing, options);
+  const sanitizedOpenRing = sanitizedVertices.map((entry) => entry.point);
+
+  if (sanitizedOpenRing.length <= 4) {
+    const displayVertices = sanitizedVertices.map((entry) => ({
+      point: entry.point,
+      originalIndex: entry.originalIndex,
       reasons: ['geometria_minima'],
       reason: 'geometria_minima',
       keepType: 'corner',
+      structuralBreak: true,
     }));
     return {
       displayRing: normalizeRing(displayVertices.map((entry) => entry.point)),
@@ -65,16 +100,18 @@ export function buildDisplayRingFromOriginalRing(originalRing, options = {}) {
       report: {
         totalOriginalVertices: openRing.length,
         totalDisplayVertices: displayVertices.length,
-        removedByCollinearity: 0,
+        removedByCollinearity: Math.max(openRing.length - displayVertices.length, 0),
         keptByCornerBreak: displayVertices.length,
         keptByCurve: 0,
-        reductionPercent: 0,
+        reductionPercent: openRing.length > 0
+          ? Number((((openRing.length - displayVertices.length) / openRing.length) * 100).toFixed(2))
+          : 0,
       },
     };
   }
 
-  const localRing = projectRingToLocalMeters(openRing);
-  const bounds = getRingBounds(openRing);
+  const localRing = projectRingToLocalMeters(sanitizedOpenRing);
+  const bounds = getRingBounds(sanitizedOpenRing);
   const localBounds = getPointBounds(localRing);
   const diagonalMeters = Math.hypot(localBounds.width, localBounds.height) || 1;
   const coarseTolerance = options.displayCoarseToleranceMeters ?? Math.max(diagonalMeters * 0.016, 0.7);
@@ -89,7 +126,13 @@ export function buildDisplayRingFromOriginalRing(originalRing, options = {}) {
   const subtleSimplified = simplifyRingIndices(localRing, subtleTolerance);
   const keptVertices = new Map();
 
-  registerDisplayVertex(keptVertices, 0, openRing[0], 'inicio_poligono', 'corner');
+  registerDisplayVertex(
+    keptVertices,
+    sanitizedVertices[0].originalIndex,
+    sanitizedVertices[0].point,
+    'inicio_poligono',
+    'corner',
+  );
 
   const extremeSelectors = [
     { label: 'extremo_oeste', value: bounds.minLng, axis: 0 },
@@ -101,23 +144,31 @@ export function buildDisplayRingFromOriginalRing(originalRing, options = {}) {
   extremeSelectors.forEach(({ label, value, axis }) => {
     let bestIndex = 0;
     let bestDelta = Number.POSITIVE_INFINITY;
-    openRing.forEach((point, index) => {
+    sanitizedVertices.forEach((entry, index) => {
+      const point = entry.point;
       const delta = Math.abs(point[axis] - value);
       if (delta < bestDelta) {
         bestDelta = delta;
         bestIndex = index;
       }
     });
-    registerDisplayVertex(keptVertices, bestIndex, openRing[bestIndex], label, 'extreme');
+    registerDisplayVertex(
+      keptVertices,
+      sanitizedVertices[bestIndex].originalIndex,
+      sanitizedVertices[bestIndex].point,
+      label,
+      'extreme',
+    );
   });
 
-  for (let index = 0; index < openRing.length; index += 1) {
-    const prevIndex = (index - 1 + openRing.length) % openRing.length;
-    const nextIndex = (index + 1) % openRing.length;
+  for (let index = 0; index < sanitizedOpenRing.length; index += 1) {
+    const prevIndex = (index - 1 + sanitizedOpenRing.length) % sanitizedOpenRing.length;
+    const nextIndex = (index + 1) % sanitizedOpenRing.length;
     const prev = localRing[prevIndex];
     const current = localRing[index];
     const next = localRing[nextIndex];
-    const point = openRing[index];
+    const point = sanitizedOpenRing[index];
+    const originalIndex = sanitizedVertices[index].originalIndex;
     const turnDeg = turnDegrees(prev, current, next);
     const changeDeg = Math.abs(180 - turnDeg);
     const deviation = perpendicularDistanceMeters(current, prev, next);
@@ -140,9 +191,9 @@ export function buildDisplayRingFromOriginalRing(originalRing, options = {}) {
       );
 
     if (strongBreak) {
-      registerDisplayVertex(keptVertices, index, point, 'quiebre_direccion', 'corner');
+      registerDisplayVertex(keptVertices, originalIndex, point, 'quiebre_direccion', 'corner');
       if (localScale >= diagonalMeters * 0.035) {
-        registerDisplayVertex(keptVertices, index, point, 'sostiene_silueta', 'corner');
+        registerDisplayVertex(keptVertices, originalIndex, point, 'sostiene_silueta', 'corner');
       }
       continue;
     }
@@ -152,7 +203,7 @@ export function buildDisplayRingFromOriginalRing(originalRing, options = {}) {
         coarseKept ? 'curva_representativa' :
         mediumKept ? 'transicion_suave' :
         'silueta_representativa';
-      registerDisplayVertex(keptVertices, index, point, curveReason, 'curve');
+      registerDisplayVertex(keptVertices, originalIndex, point, curveReason, 'curve');
     }
   }
 
@@ -161,6 +212,7 @@ export function buildDisplayRingFromOriginalRing(originalRing, options = {}) {
     .map((entry) => ({
       ...entry,
       reason: entry.reasons[0] || 'preservacion_de_forma',
+      structuralBreak: entry.keepType === 'corner' || entry.keepType === 'extreme',
     }));
 
   const displayRing = normalizeRing(displayVertices.map((entry) => entry.point));

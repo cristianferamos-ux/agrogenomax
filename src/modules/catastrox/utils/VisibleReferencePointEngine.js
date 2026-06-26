@@ -21,6 +21,11 @@ function determineTargetVisiblePoints(vertexCount, averageTurn) {
   return 30;
 }
 
+function resolveMaxVisiblePoints(openRingLength, options = {}) {
+  const requested = options.maxVisiblePoints ?? openRingLength;
+  return Math.min(openRingLength, Math.max(6, requested));
+}
+
 function primaryCardinalSideForEngine(candidate) {
   const distances = [
     ['west', candidate.normX ?? 0.5],
@@ -249,7 +254,7 @@ export function selectVisibleReferencePoints(ring, options = {}) {
         totalRealVertices: openRing.length,
         totalCandidatesDetected: selectedCandidates.length,
         totalVisiblePoints: selectedCandidates.length,
-        maxAllowed: Math.min(Math.max(6, options.maxVisiblePoints ?? 30), 30),
+        maxAllowed: resolveMaxVisiblePoints(openRing.length, options),
         forcedByExtremes: Math.min(openRing.length, 4),
         forcedByAngularChange: 0,
         selectedBySimplification: 0,
@@ -267,7 +272,7 @@ export function selectVisibleReferencePoints(ring, options = {}) {
   const localRing = projectRingToLocalMeters(openRing);
   const cumulative = cumulativeDistances(openRing);
   const totalPerimeter = cumulative[cumulative.length - 1] + haversineMeters(openRing[openRing.length - 1], openRing[0]);
-  const requestedMax = Math.max(6, options.maxVisiblePoints ?? 40);
+  const requestedMax = resolveMaxVisiblePoints(openRing.length, options);
   const bounds = getRingBounds(openRing);
   const localBounds = getPointBounds(localRing);
   const diagonalMeters = Math.hypot(localBounds.width, localBounds.height) || 1;
@@ -346,7 +351,7 @@ export function selectVisibleReferencePoints(ring, options = {}) {
   });
 
   const averageTurn = scored.reduce((sum, candidate) => sum + candidate.turnDeg, 0) / scored.length;
-  const targetCount = Math.min(Math.min(requestedMax, 30), determineTargetVisiblePoints(openRing.length, averageTurn));
+  const targetCount = Math.min(requestedMax, determineTargetVisiblePoints(openRing.length, averageTurn));
   const minPerimeterSpacing = totalPerimeter / Math.max(targetCount * 1.65, 1);
   const minStraightSpacingMeters = diagonalMeters / Math.max(targetCount * 1.28, 1);
   const adaptiveMaxSegmentLength = Math.min(totalPerimeter * 0.18, (totalPerimeter / Math.max(targetCount, 1)) * 1.75);
@@ -635,7 +640,7 @@ export function selectVisibleReferencePoints(ring, options = {}) {
   const insertLongSegmentPoints = () => {
     let changed = false;
     let guard = 0;
-    while (selected.length < Math.min(requestedMax, 30) && guard < 60) {
+    while (selected.length < requestedMax && guard < 60) {
       guard += 1;
       selected.sort((a, b) => a.index - b.index);
       let longest = null;
@@ -720,7 +725,7 @@ export function selectVisibleReferencePoints(ring, options = {}) {
     totalPerimeter,
     diagonalMeters,
     selected,
-    maxVisiblePoints: Math.min(requestedMax, 30),
+    maxVisiblePoints: requestedMax,
   });
   selected.length = 0;
   secondarySilhouette.selected.forEach((entry) => selected.push(entry));
@@ -737,7 +742,7 @@ export function selectVisibleReferencePoints(ring, options = {}) {
   const refineVisibleSilhouette = () => {
     let changed = false;
     let guard = 0;
-    while (selected.length < Math.min(requestedMax, 30) && guard < 80) {
+    while (selected.length < requestedMax && guard < 80) {
       guard += 1;
       selected.sort((a, b) => a.index - b.index);
       let bestGapChoice = null;
@@ -816,7 +821,7 @@ export function selectVisibleReferencePoints(ring, options = {}) {
 
   refineVisibleSilhouette();
   selected.sort((a, b) => a.index - b.index);
-  const selectedCandidates = selected.slice(0, Math.min(requestedMax, 30));
+  const selectedCandidates = selected.slice(0, requestedMax);
   let longestFinalSegment = 0;
   let unresolvedLongSegments = 0;
   for (let index = 0; index < selectedCandidates.length; index += 1) {
@@ -841,7 +846,7 @@ export function selectVisibleReferencePoints(ring, options = {}) {
       totalRealVertices: openRing.length,
       totalCandidatesDetected: scoredWithPeaks.length,
       totalVisiblePoints: selectedCandidates.length,
-      maxAllowed: Math.min(requestedMax, 30),
+      maxAllowed: requestedMax,
       targetPointCount: targetCount,
       perimeterTotal: totalPerimeter,
       maxSegmentLength,
@@ -861,7 +866,7 @@ export function selectVisibleReferencePoints(ring, options = {}) {
       longestSegmentBeforeRefinement: longestBeforeRefinement,
       longestFinalSegment,
       unresolvedLongSegments,
-      validation: unresolvedLongSegments === 0 && selectedCandidates.length <= 30 ? 'OK' : 'ERROR',
+      validation: unresolvedLongSegments === 0 ? 'OK' : 'ERROR',
       reasons: selectedCandidates.map((candidate, idx) => ({
         point: `P${idx + 1}`,
         ringIndex: candidate.index,
@@ -933,6 +938,7 @@ export function reducePointsForVisualClarity(referenceCandidates, ring, mapState
       }
       if (collisionPair) break;
     }
+    if (!collisionPair) break;
 
     const sideCounts = current.reduce((acc, entry) => {
       const side = getPrimarySide(entry);
@@ -973,6 +979,7 @@ export function reducePointsForVisualClarity(referenceCandidates, ring, mapState
         weakestIndex = index;
       }
     }
+    if (weakestIndex === null) break;
     current.splice(weakestIndex, 1);
   }
 
