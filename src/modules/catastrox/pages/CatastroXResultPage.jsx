@@ -3,8 +3,14 @@ import { Link, useParams } from 'react-router-dom';
 import CatastroXDisclaimer from '../components/CatastroXDisclaimer.jsx';
 import CatastroXMockMap from '../components/CatastroXMockMap.jsx';
 import CatastroXPageActions from '../components/CatastroXPageActions.jsx';
+import CatastroXPlanCard from '../components/CatastroXPlanCard.jsx';
 import CatastroXResultSummary from '../components/CatastroXResultSummary.jsx';
 import CatastroXWhatsAppCTA from '../components/CatastroXWhatsAppCTA.jsx';
+import {
+  formatCatastroxPackagePrice,
+  getCatastroxPackageRoute,
+  getCatastroxPackages,
+} from '../config/catastroxPackages.js';
 import { getCatastroXCommercialStatus } from '../config/catastroxContact.js';
 import { CATASTROX_STATUS } from '../data/catastroxMockData.js';
 import { resolveLookupForRoute } from '../services/catastroxApi.js';
@@ -129,6 +135,7 @@ export default function CatastroXResultPage() {
   const isTechnicalReview =
     !found || isTechnicalReviewStatus(effectiveStatus) || isTechnicalReviewStatus(predio.estado);
   const specialCopy = buildSpecialCopy({ status: effectiveStatus, municipio, departamento, found });
+  const packages = getCatastroxPackages();
 
   return (
     <section className="catastrox-page">
@@ -137,14 +144,14 @@ export default function CatastroXResultPage() {
         <h1>{found && !isTechnicalReview ? 'Predio identificado' : specialCopy.title}</h1>
         <p>
           {found && !isTechnicalReview
-            ? 'Su consulta gratuita confirma la ubicación básica del predio. Si desea conocer el número de hectáreas, el perímetro y los códigos prediales, puede desbloquear la información predial.'
+            ? 'Su predio fue identificado. Para conocer el área, descargar el plano digital o usar los archivos en Google Earth, seleccione un paquete.'
             : specialCopy.description}
         </p>
       </div>
       <CatastroXPageActions
         actions={[
           { label: 'Volver a buscar', to: '/catastrox/buscar', tone: 'ghost' },
-          ...(found && !isTechnicalReview ? [{ label: 'Ver planes', to: '/catastrox/planes', tone: 'secondary' }] : []),
+          ...(found && !isTechnicalReview ? [{ label: 'Ver paquetes', to: '/catastrox/planes', tone: 'secondary' }] : []),
           { label: 'Volver a CatastroX', to: '/catastrox', tone: 'ghost' },
         ]}
       />
@@ -155,9 +162,9 @@ export default function CatastroXResultPage() {
             <article className="catastrox-card">
               <div className="catastrox-section-heading">
                 <span>Información bloqueada</span>
-                <h2>Datos disponibles al activar un plan</h2>
+                <h2>Datos disponibles al activar un paquete</h2>
               </div>
-              <p className="catastrox-copy">Información disponible al activar un plan.</p>
+              <p className="catastrox-copy">Las descargas reales solo se desbloquean después del pago aprobado del paquete seleccionado.</p>
               <div className="catastrox-summary-grid">
                 {LOCKED_ITEMS.map((item) => (
                   <div key={item} className="catastrox-summary-item">
@@ -193,18 +200,30 @@ export default function CatastroXResultPage() {
       {found && !isTechnicalReview ? (
         <article className="catastrox-card">
           <div className="catastrox-section-heading">
-            <span>Desbloquear información</span>
-            <h2>¿Desea conocer el número de hectáreas del predio?</h2>
+            <span>Paquetes disponibles</span>
+            <h2>Elija el paquete que desea comprar</h2>
           </div>
           <p className="catastrox-copy">
-            Usted puede desbloquear el área total, el perímetro, el código predial, el código anterior y las entregas digitales disponibles para su consulta.
+            El flujo comercial es simple: identifique el predio, elija un paquete, apruebe el pago con Wompi y luego descargue únicamente los archivos incluidos en su compra.
           </p>
+          <div className="catastrox-grid">
+            {packages.map((pkg) => (
+              <CatastroXPlanCard
+                key={pkg.id}
+                title={pkg.title}
+                subtitle={pkg.label}
+                price={formatCatastroxPackagePrice(pkg.priceCop)}
+                description={pkg.description}
+                to={getCatastroxPackageRoute(pkg.id, routeId)}
+                tone={pkg.tone}
+                features={pkg.features}
+                ctaLabel={`Comprar ${pkg.label}`}
+              />
+            ))}
+          </div>
           <div className="catastrox-action-row">
-            <Link className="catastrox-button" to={`/catastrox/basico/${routeId}`}>
-              Desbloquear información predial <ArrowRight size={18} />
-            </Link>
             <Link className="catastrox-button is-secondary" to="/catastrox/planes">
-              Comparar planes
+              Comparar paquetes
             </Link>
           </div>
         </article>

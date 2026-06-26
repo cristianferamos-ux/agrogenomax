@@ -11,7 +11,7 @@ export default function CatastroXHomePage() {
         <CatastroXPageActions
           actions={[
             { label: 'Buscar predio', to: '/catastrox/buscar' },
-            { label: 'Planes', to: '/catastrox/planes', tone: 'secondary' },
+            { label: 'Paquetes', to: '/catastrox/planes', tone: 'secondary' },
             { label: 'Regularización', to: '/catastrox/regularizacion', tone: 'danger' },
             { label: 'Volver a AgroGenomaX', to: '/', tone: 'ghost' },
           ]}
@@ -38,11 +38,11 @@ export default function CatastroXHomePage() {
             <h2>El resultado gratuito abre la ruta correcta para su predio</h2>
           </div>
           <p className="catastrox-copy">
-            CatastroX primero le muestra un resultado gratuito. Después, si usted necesita mayor detalle, puede desbloquear la información predial con el Plan Básico, el Plan Plus o el Plan Premium.
+            CatastroX primero le muestra un resultado gratuito. Después, si usted necesita mayor detalle, puede desbloquear la información predial con el paquete básico, el paquete plus o el paquete profesional.
           </p>
           <ul className="catastrox-list">
-            <li>Sin mostrar planes como acción principal en casos especiales.</li>
-            <li>Con información sensible bloqueada hasta activar un plan.</li>
+            <li>Sin mostrar paquetes como acción principal en casos especiales.</li>
+            <li>Con información sensible bloqueada hasta aprobar el pago del paquete.</li>
             <li>Con acompañamiento técnico cuando la situación requiera revisión especializada.</li>
           </ul>
           <Link className="catastrox-button is-secondary" to="/catastrox/buscar">

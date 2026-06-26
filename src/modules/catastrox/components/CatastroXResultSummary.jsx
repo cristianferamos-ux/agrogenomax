@@ -33,8 +33,8 @@ export default function CatastroXResultSummary({ predio, mode = 'free' }) {
   return (
     <section className="catastrox-card">
       <div className="catastrox-section-heading">
-        <span>{mode === 'free' ? 'Resultado gratuito' : 'Diagnóstico predial'}</span>
-        <h2>{mode === 'free' ? 'Resumen inicial de su consulta' : 'Información habilitada por su plan'}</h2>
+        <span>{mode === 'free' ? 'Resultado gratuito' : 'Paquete habilitado'}</span>
+        <h2>{mode === 'free' ? 'Resumen inicial de su consulta' : 'Información habilitada por su paquete'}</h2>
       </div>
       <CatastroXStatusBadge status={predio.estado} />
       <div className="catastrox-summary-grid">

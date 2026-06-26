@@ -2502,6 +2502,171 @@ export function buildShpZipBytes(source) {
   ]);
 }
 
+function dxfSafeText(value) {
+  return cleanText(value).replace(/\r?\n/g, ' ').replace(/\^/g, '');
+}
+
+function dxfPair(code, value) {
+  return `${code}\n${value}\n`;
+}
+
+function dxfPointEntity(layer, x, y) {
+  return [
+    dxfPair(0, 'POINT'),
+    dxfPair(8, layer),
+    dxfPair(10, x),
+    dxfPair(20, y),
+    dxfPair(30, 0),
+  ].join('');
+}
+
+function dxfCircleEntity(layer, x, y, radius) {
+  return [
+    dxfPair(0, 'CIRCLE'),
+    dxfPair(8, layer),
+    dxfPair(10, x),
+    dxfPair(20, y),
+    dxfPair(30, 0),
+    dxfPair(40, radius),
+  ].join('');
+}
+
+function dxfTextEntity(layer, x, y, height, text, rotation = 0) {
+  return [
+    dxfPair(0, 'TEXT'),
+    dxfPair(8, layer),
+    dxfPair(10, x),
+    dxfPair(20, y),
+    dxfPair(30, 0),
+    dxfPair(40, height),
+    dxfPair(1, dxfSafeText(text)),
+    dxfPair(50, rotation),
+  ].join('');
+}
+
+function buildDxfLayerTable(layerNames) {
+  const layerEntries = layerNames
+    .map((layerName) =>
+      [
+        dxfPair(0, 'LAYER'),
+        dxfPair(2, layerName),
+        dxfPair(70, 0),
+        dxfPair(62, 7),
+        dxfPair(6, 'CONTINUOUS'),
+      ].join(''),
+    )
+    .join('');
+
+  return [
+    dxfPair(0, 'TABLE'),
+    dxfPair(2, 'LAYER'),
+    dxfPair(70, layerNames.length),
+    layerEntries,
+    dxfPair(0, 'ENDTAB'),
+  ].join('');
+}
+
+function buildDxfPolylineEntity(layer, ring) {
+  const pairs = [
+    dxfPair(0, 'LWPOLYLINE'),
+    dxfPair(8, layer),
+    dxfPair(90, ring.length),
+    dxfPair(70, 1),
+  ];
+
+  ring.forEach(([lng, lat]) => {
+    pairs.push(dxfPair(10, lng));
+    pairs.push(dxfPair(20, lat));
+  });
+
+  return pairs.join('');
+}
+
+function buildDxfInfoEntities(predio, bbox, spanLng, spanLat) {
+  const textHeight = Math.max(spanLat * 0.03, 0.00008);
+  const lineGap = textHeight * 1.8;
+  const startX = bbox[2] + spanLng * 0.06;
+  const startY = bbox[3];
+  const infoLines = [
+    `CODIGO PREDIAL: ${predio.codigoPredial}`,
+    `MUNICIPIO: ${predio.municipio}`,
+    `DEPARTAMENTO: ${predio.departamento}`,
+    `AREA: ${formatNumber(predio.areaHa)} ha`,
+    `PERIMETRO: ${formatNumber(predio.perimetroM)} m`,
+    'SISTEMA DE REFERENCIA: WGS84 GEOGRAFICO',
+  ];
+
+  return infoLines
+    .map((line, index) => dxfTextEntity('CATASTROX_INFO', startX, startY - lineGap * index, textHeight, line))
+    .join('');
+}
+
+function buildDxfWarningEntities(bbox, spanLng, spanLat) {
+  const textHeight = Math.max(spanLat * 0.024, 0.000065);
+  const lineGap = textHeight * 1.7;
+  const startX = bbox[0];
+  const startY = bbox[1] - spanLat * 0.09;
+  const lines = [
+    'Coordenadas en WGS84 geograficas. Para uso profesional proyectar al sistema oficial correspondiente.',
+    'CatastroX realiza analisis tecnico sobre informacion geografica y catastral publica disponible.',
+    'Este documento no reemplaza certificados oficiales del IGAC, gestor catastral, oficina de registro ni autoridad competente.',
+  ];
+
+  return lines
+    .map((line, index) => dxfTextEntity('CATASTROX_ADVERTENCIA', startX, startY - lineGap * index, textHeight, line))
+    .join('');
+}
+
+export function buildDxfText(source) {
+  const predio = normalizePredioForDeliverables(source);
+  if (!predio.ring.length) {
+    throw new Error('El predio no tiene geometria disponible para generar DXF.');
+  }
+
+  const layoutData = buildLayoutData(predio, resolvePlanLayoutOptions(predio));
+  const { referencePoints = [], referenceRows = [] } = layoutData;
+  const ring = predio.ring;
+  const bbox = getRingBounds(ring);
+  const spanLng = Math.max((bbox.maxLng || 0) - (bbox.minLng || 0), 0.0001);
+  const spanLat = Math.max((bbox.maxLat || 0) - (bbox.minLat || 0), 0.0001);
+  const vertexRadius = Math.max(Math.min(spanLng, spanLat) * 0.015, 0.00004);
+  const labelOffsetX = spanLng * 0.02;
+  const labelOffsetY = spanLat * 0.02;
+  const labelHeight = Math.max(spanLat * 0.028, 0.00007);
+
+  const vertexEntities = referencePoints
+    .map((entry, index) => {
+      const point = entry.point || entry;
+      const label = referenceRows[index]?.point || `P${index + 1}`;
+      if (!Array.isArray(point) || point.length < 2) return '';
+      return [
+        dxfPointEntity('CATASTROX_VERTICES', point[0], point[1]),
+        dxfCircleEntity('CATASTROX_VERTICES', point[0], point[1], vertexRadius),
+        dxfTextEntity('CATASTROX_ETIQUETAS', point[0] + labelOffsetX, point[1] + labelOffsetY, labelHeight, label),
+      ].join('');
+    })
+    .join('');
+
+  const sections = [
+    '0\nSECTION\n2\nHEADER\n0\nENDSEC\n',
+    `0\nSECTION\n2\nTABLES\n${buildDxfLayerTable([
+      'CATASTROX_POLIGONO',
+      'CATASTROX_VERTICES',
+      'CATASTROX_ETIQUETAS',
+      'CATASTROX_INFO',
+      'CATASTROX_ADVERTENCIA',
+    ])}0\nENDSEC\n`,
+    `0\nSECTION\n2\nENTITIES\n${buildDxfPolylineEntity('CATASTROX_POLIGONO', ring)}${vertexEntities}${buildDxfInfoEntities(
+      predio,
+      [bbox.minLng, bbox.minLat, bbox.maxLng, bbox.maxLat],
+      spanLng,
+      spanLat,
+    )}${buildDxfWarningEntities([bbox.minLng, bbox.minLat, bbox.maxLng, bbox.maxLat], spanLng, spanLat)}0\nENDSEC\n0\nEOF\n`,
+  ];
+
+  return sections.join('');
+}
+
 function downloadBytes(bytes, filename, mimeType) {
   const blob = new Blob([bytes], { type: mimeType });
   const href = URL.createObjectURL(blob);
@@ -2549,6 +2714,11 @@ export function downloadShpZip(source) {
   downloadBytes(buildShpZipBytes(predio), `${fileSafeCode(predio)}.zip`, 'application/zip');
 }
 
+export function downloadDxf(source) {
+  const predio = normalizePredioForDeliverables(source);
+  downloadBytes(textEncoder.encode(buildDxfText(predio)), `${fileSafeCode(predio)}.dxf`, 'application/dxf');
+}
+
 export async function buildDeliverableDebugSummary(source) {
   const predio = normalizePredioForDeliverables(source);
   const layoutData = buildLayoutData(predio, resolvePlanLayoutOptions(predio));
@@ -2576,6 +2746,7 @@ export async function buildDeliverableDebugSummary(source) {
     kmlBytes: textEncoder.encode(buildKmlText(predio)).length,
     kmzBytes: buildKmzBytes(predio).length,
     shpZipBytes: buildShpZipBytes(predio).length,
+    dxfBytes: textEncoder.encode(buildDxfText(predio)).length,
     fontFamily: activePdfFontStack,
   };
 }

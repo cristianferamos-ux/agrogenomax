@@ -17,7 +17,7 @@ export default function CatastroXLayout() {
         <nav>
           <Link to="/catastrox">Volver a CatastroX</Link>
           <Link to="/catastrox/buscar">Buscar predio</Link>
-          <Link to="/catastrox/planes">Planes</Link>
+          <Link to="/catastrox/planes">Paquetes</Link>
           <Link to="/catastrox/regularizacion">Regularización</Link>
           <Link to="/">Volver a AgroGenomaX</Link>
         </nav>
