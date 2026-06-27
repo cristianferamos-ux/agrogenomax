@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ArrowRight, CheckCircle2, Wallet } from 'lucide-react';
+import { ArrowRight, Wallet } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import CatastroXDisclaimer from '../components/CatastroXDisclaimer.jsx';
 import CatastroXDownloadMock from '../components/CatastroXDownloadMock.jsx';
@@ -13,11 +13,13 @@ import {
   getCatastroxPackage,
 } from '../config/catastroxPackages.js';
 import { CATASTROX_STATUS } from '../data/catastroxMockData.js';
-import { resolveLookupForRoute } from '../services/catastroxApi.js';
+import { resolveLookupForRoute, saveLastLookup } from '../services/catastroxApi.js';
 import {
-  canSimulateCatastroxPayment,
+  getApprovedPurchaseRecordByKeys,
   getPackageRank,
+  getLookupPurchaseKey,
   getPurchasedPackageForLookup,
+  readCatastroxLocalStorageJson,
   getUnlockedDownloadsForPackage,
   isPackageUnlockedForLookup,
   markPackageAsPaid,
@@ -87,6 +89,63 @@ function buildDownloadsForPackage(packageId) {
   });
 }
 
+function hasWompiIframe() {
+  if (typeof document === 'undefined') {
+    return false;
+  }
+
+  return Array.from(document.querySelectorAll('iframe')).some((iframe) => {
+    const src = iframe.getAttribute('src') || '';
+    return src.includes('checkout.wompi.co') || src.includes('wompi.co/p/');
+  });
+}
+
+function waitForWompiIframe({ timeoutMs = 8000, intervalMs = 150 } = {}) {
+  return new Promise((resolve) => {
+    const startedAt = Date.now();
+
+    const timer = window.setInterval(() => {
+      if (hasWompiIframe()) {
+        window.clearInterval(timer);
+        resolve(true);
+        return;
+      }
+
+      if (Date.now() - startedAt >= timeoutMs) {
+        window.clearInterval(timer);
+        resolve(false);
+      }
+    }, intervalMs);
+  });
+}
+
+function buildCheckoutContextStorageKeys({ purchaseKey, routeId, predioId }) {
+  return [
+    purchaseKey ? `catastrox:checkout-context:${purchaseKey}` : null,
+    routeId ? `catastrox:checkout-context:${routeId}` : null,
+    predioId ? `catastrox:checkout-context:${predioId}` : null,
+  ].filter(Boolean);
+}
+
+function saveCheckoutRecoveryContext(context) {
+  if (typeof window === 'undefined') return;
+
+  for (const storageKey of buildCheckoutContextStorageKeys(context)) {
+    window.localStorage.setItem(storageKey, JSON.stringify(context));
+  }
+}
+
+function readCheckoutRecoveryContext({ purchaseKey, routeId, predioId }) {
+  for (const storageKey of buildCheckoutContextStorageKeys({ purchaseKey, routeId, predioId })) {
+    const context = readCatastroxLocalStorageJson(storageKey);
+    if (context) {
+      return context;
+    }
+  }
+
+  return null;
+}
+
 export default function CatastroXPackagePage({ packageId }) {
   const { id } = useParams();
   const lookup = resolveLookupForRoute(id);
@@ -101,20 +160,48 @@ export default function CatastroXPackagePage({ packageId }) {
   }
 
   if (!lookup) {
+    const routeId = String(id || '').trim();
+    const predioId = routeId.startsWith('real-') ? routeId.replace(/^real-/, '') : routeId;
+    const purchaseKey = routeId ? `catastrox_purchase_${routeId}` : '';
+    const recoveryContext = readCheckoutRecoveryContext({ purchaseKey, routeId, predioId });
+    const approvedPurchase = getApprovedPurchaseRecordByKeys({
+      purchaseKey,
+      routeId,
+      predioId,
+      codigoPredial: recoveryContext?.codigoPredial || '',
+    });
+    const verifyUrl =
+      `/catastrox/pagos/wompi/verificar?packageId=${encodeURIComponent(packageId)}` +
+      `&purchaseKey=${encodeURIComponent(recoveryContext?.purchaseKey || purchaseKey)}` +
+      `&routeId=${encodeURIComponent(recoveryContext?.routeId || routeId)}` +
+      `&predioId=${encodeURIComponent(recoveryContext?.predioId || predioId)}` +
+      `&codigoPredial=${encodeURIComponent(recoveryContext?.codigoPredial || '')}`;
+    const fallbackActions = approvedPurchase?.paid
+      ? [
+          { label: 'Buscar predio', to: '/catastrox/buscar', tone: 'secondary' },
+          recoveryContext?.resultPath
+            ? { label: 'Volver al resultado', to: recoveryContext.resultPath, tone: 'ghost' }
+            : null,
+          { label: 'Verificar pago', to: verifyUrl, tone: 'ghost' },
+        ].filter(Boolean)
+      : [
+          { label: 'Buscar predio', to: '/catastrox/buscar', tone: 'secondary' },
+          { label: 'Ver paquetes', to: '/catastrox/planes', tone: 'ghost' },
+          { label: 'Volver a CatastroX', to: '/catastrox', tone: 'ghost' },
+        ];
+
     return (
       <section className="catastrox-page">
         <div className="catastrox-page-title">
           <span>{pkg.label}</span>
           <h1>No hay una consulta activa para este predio</h1>
-          <p>Vuelva a buscar su predio para habilitar la compra de este paquete.</p>
+          <p>
+            {approvedPurchase?.paid
+              ? 'Pago aprobado registrado. Falta cargar nuevamente la consulta del predio para generar los archivos.'
+              : 'Vuelva a buscar su predio para habilitar la compra de este paquete.'}
+          </p>
         </div>
-        <CatastroXPageActions
-          actions={[
-            { label: 'Buscar predio', to: '/catastrox/buscar', tone: 'secondary' },
-            { label: 'Ver paquetes', to: '/catastrox/planes', tone: 'ghost' },
-            { label: 'Volver a CatastroX', to: '/catastrox', tone: 'ghost' },
-          ]}
-        />
+        <CatastroXPageActions actions={fallbackActions} />
       </section>
     );
   }
@@ -132,7 +219,13 @@ export default function CatastroXPackagePage({ packageId }) {
   const unlockedPackage = purchasedPackage ? getCatastroxPackage(purchasedPackage.packageId) : null;
   const packageCopy = PACKAGE_PAGE_COPY[packageId];
   const requiresAdvisor = REQUIRES_ADVISOR_STATES.has(predio.estado);
-  const canSimulate = canSimulateCatastroxPayment();
+  const purchaseKey = getLookupPurchaseKey(lookup);
+  const manualVerifyUrl =
+    `/catastrox/pagos/wompi/verificar?packageId=${encodeURIComponent(packageId)}` +
+    `&purchaseKey=${encodeURIComponent(purchaseKey)}` +
+    `&routeId=${encodeURIComponent(routeId)}` +
+    `&predioId=${encodeURIComponent(predio.id || '')}` +
+    `&codigoPredial=${encodeURIComponent(predio.codigoPredial || predio.codigo || '')}`;
 
   const navigationActions = useMemo(() => {
     const actions = [
@@ -144,40 +237,125 @@ export default function CatastroXPackagePage({ packageId }) {
   }, [routeId]);
 
   const handleStartCheckout = async () => {
+    let opened = false;
+    const watchdog = window.setTimeout(() => {
+      if (!opened) {
+        setIsStartingCheckout(false);
+        setPendingPackageId(null);
+        setCheckoutState({
+          status: 'error',
+          message: 'Wompi tardo demasiado en abrir. Revise bloqueadores, consola del navegador o intente nuevamente.',
+        });
+      }
+    }, 20000);
+
     try {
       setIsStartingCheckout(true);
       setPendingPackageId(packageId);
-      const result = await startPackageCheckout({ packageId, lookup });
-      setCheckoutState(result);
-      if (result.status === 'redirect' && result.checkoutUrl) {
-        window.location.assign(result.checkoutUrl);
-      }
-      if (result.status === 'already_paid') {
-        setPurchaseVersion((value) => value + 1);
-      }
+      setCheckoutState(null);
+      saveCheckoutRecoveryContext({
+        packageId,
+        packageSlug: pkg.routeSlug,
+        purchaseKey,
+        routeId,
+        predioId: predio.id || '',
+        codigoPredial: predio.codigoPredial || predio.codigo || '',
+        returnPath: `/catastrox/${pkg.routeSlug}/${routeId || predio.id}`,
+        resultPath: routeId ? `/catastrox/resultado/${routeId}` : null,
+        createdAt: new Date().toISOString(),
+        predioSnapshot: lookup,
+      });
+      saveLastLookup(lookup);
+      const checkoutResult = await startPackageCheckout({
+        packageId,
+        lookup,
+        onCheckoutStart: (state) => setCheckoutState(state),
+        onOpened: ({ checkout }) => {
+          opened = true;
+          window.clearTimeout(watchdog);
+          setIsStartingCheckout(false);
+          setCheckoutState({
+            status: 'wompi_started',
+            message: 'Wompi fue abierto. Complete el pago para habilitar sus descargas.',
+            reference: checkout.reference,
+          });
+        },
+        onApproved: ({ transaction, checkout }) => {
+          setIsStartingCheckout(false);
+          setPendingPackageId(null);
+
+          const approvedPurchase = markPackageAsPaid({
+            lookup,
+            packageId: checkout.packageId || packageId,
+            transactionId: transaction?.id || `wompi-${Date.now()}`,
+            reference: transaction?.reference || checkout.reference || null,
+            mode: 'wompi-sandbox',
+          });
+
+          setCheckoutState({
+            status: 'approved',
+            message: 'Pago aprobado. Descargas habilitadas para este predio.',
+            purchase: approvedPurchase,
+            reference: transaction?.reference || checkout.reference,
+          });
+          setPurchaseVersion((value) => value + 1);
+        },
+        onRejected: ({ transaction, checkout, mappedResult }) => {
+          setIsStartingCheckout(false);
+          setPendingPackageId(null);
+
+          if (!transaction) {
+            setCheckoutState({
+              status: 'cancelled',
+              message: 'La ventana de Wompi fue cerrada o no retorno una transaccion aprobada.',
+              reference: checkout?.reference,
+            });
+            return;
+          }
+
+          setCheckoutState({
+            status: mappedResult?.status || 'failed',
+            message: `Pago no aprobado por Wompi. Estado: ${transaction.status || 'sin estado'}.`,
+            reference: transaction?.reference || checkout?.reference,
+          });
+        },
+        onError: (error) => {
+          window.clearTimeout(watchdog);
+          setIsStartingCheckout(false);
+          setPendingPackageId(null);
+          setCheckoutState({
+            status: 'error',
+            message: error?.message || 'No fue posible abrir Wompi.',
+          });
+        },
+      });
+
+      setIsStartingCheckout(false);
+
+      waitForWompiIframe().then((found) => {
+        if (found) {
+          setIsStartingCheckout(false);
+          setCheckoutState((currentState) => ({
+            ...(currentState || {}),
+            status: 'wompi_started',
+            message: 'Wompi esta abierto. Complete el pago para habilitar sus descargas.',
+            reference: currentState?.reference || checkoutResult?.checkout?.reference || null,
+          }));
+        }
+      });
     } catch (error) {
+      window.clearTimeout(watchdog);
+      console.error('[CatastroX Wompi] checkout failed', error);
+      setPendingPackageId(null);
       setCheckoutState({
         status: 'error',
-        message: error instanceof Error ? error.message : 'No fue posible iniciar el pago.',
+        message: error?.message || 'No fue posible abrir Wompi.',
       });
     } finally {
-      setIsStartingCheckout(false);
+      if (!opened) {
+        setIsStartingCheckout(false);
+      }
     }
-  };
-
-  const handleSimulatePayment = () => {
-    const simulated = markPackageAsPaid({
-      lookup,
-      packageId,
-      transactionId: `sim-${Date.now()}`,
-    });
-    setPendingPackageId(null);
-    setCheckoutState({
-      status: 'approved',
-      message: 'Pago aprobado en modo local de prueba.',
-      purchase: simulated,
-    });
-    setPurchaseVersion((value) => value + 1);
   };
 
   const includedMessage =
@@ -257,10 +435,12 @@ export default function CatastroXPackagePage({ packageId }) {
           {checkoutState?.message ? (
             <div className={checkoutState.status === 'error' ? 'catastrox-inline-panel' : 'catastrox-success'}>
               <strong>
-                {checkoutState.status === 'simulation_available'
-                  ? 'Modo local de pruebas'
-                  : checkoutState.status === 'pending_configuration'
-                    ? 'Wompi listo para integración'
+                {checkoutState.status === 'wompi_started'
+                  ? 'Pago iniciado con Wompi'
+                  : checkoutState.status === 'pending'
+                    ? 'Pago pendiente'
+                    : checkoutState.status === 'failed' || checkoutState.status === 'cancelled'
+                      ? 'Pago no aprobado'
                     : checkoutState.status === 'error'
                       ? 'No fue posible iniciar el pago'
                       : 'Estado del pago'}
@@ -268,18 +448,19 @@ export default function CatastroXPackagePage({ packageId }) {
               <span>{checkoutState.message}</span>
             </div>
           ) : null}
+          {checkoutState?.status === 'wompi_started' ? (
+            <div className="catastrox-inline-panel">
+              <strong>Verificacion manual disponible</strong>
+              <span>Si Wompi te deja en la pagina del comprobante, copia el ID de la URL y verifica tu pago aqui.</span>
+              <Link className="catastrox-button is-ghost" to={manualVerifyUrl}>
+                Verificar pago manualmente <ArrowRight size={18} />
+              </Link>
+            </div>
+          ) : null}
           {pendingPackageId === packageId && checkoutState?.status !== 'approved' ? (
             <p className="catastrox-copy">
               Antes del pago aprobado no se habilitan descargas reales.
             </p>
-          ) : null}
-          {canSimulate && checkoutState?.status === 'simulation_available' ? (
-            <div className="catastrox-action-row">
-              <button type="button" className="catastrox-button is-secondary" onClick={handleSimulatePayment}>
-                <CheckCircle2 size={18} />
-                Simular pago aprobado
-              </button>
-            </div>
           ) : null}
         </section>
       ) : (

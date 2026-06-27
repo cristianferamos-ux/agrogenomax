@@ -11,6 +11,8 @@ import CatastroXPremiumPage from './pages/CatastroXPremiumPage.jsx';
 import CatastroXRegularizationPage from './pages/CatastroXRegularizationPage.jsx';
 import CatastroXResultPage from './pages/CatastroXResultPage.jsx';
 import CatastroXSearchPage from './pages/CatastroXSearchPage.jsx';
+import CatastroXWompiReturnPage from './pages/CatastroXWompiReturnPage.jsx';
+import CatastroXWompiVerifyPage from './pages/CatastroXWompiVerifyPage.jsx';
 
 export default function CatastroXApp() {
   return (
@@ -23,6 +25,8 @@ export default function CatastroXApp() {
         <Route path="basico/:id" element={<CatastroXBasicPage />} />
         <Route path="plus/:id" element={<CatastroXPlusPage />} />
         <Route path="premium/:id" element={<CatastroXPremiumPage />} />
+        <Route path="pagos/wompi/retorno" element={<CatastroXWompiReturnPage />} />
+        <Route path="pagos/wompi/verificar" element={<CatastroXWompiVerifyPage />} />
         <Route path="predio-fiscal/:id" element={<CatastroXFiscalPage />} />
         <Route path="calculadora" element={<CatastroXCalculatorPage />} />
         <Route path="regularizacion" element={<CatastroXRegularizationPage />} />

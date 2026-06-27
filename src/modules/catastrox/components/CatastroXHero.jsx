@@ -1,10 +1,10 @@
-import { ArrowRight, MapPinned } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export default function CatastroXHero() {
   return (
-    <section className="catastrox-hero">
-      <div>
+    <section className="catastrox-hero catastrox-hero-single">
+      <div className="catastrox-hero-main">
         <span className="catastrox-eyebrow">Identificación predial inteligente</span>
         <h1 className="catastrox-hero-wordmark">
           <span>Catastro</span><span className="catastrox-wordmark-x">X</span>
@@ -21,14 +21,6 @@ export default function CatastroXHero() {
             Conocer cómo funciona
           </Link>
         </div>
-      </div>
-      <div className="catastrox-hero-visual">
-        <MapPinned size={72} />
-        <span>IGAC Abril 2026</span>
-        <strong>Caquetá listo para navegación predial</strong>
-        <small>
-          Vista preliminar preparada para ubicar su predio, revisar el estado general y activar el siguiente paso adecuado.
-        </small>
       </div>
     </section>
   );

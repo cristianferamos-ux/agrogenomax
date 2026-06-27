@@ -97,8 +97,6 @@ export default function CatastroXResultPage() {
   const { id } = useParams();
   const lookup = resolveLookupForRoute(id);
 
-  console.log('lookup result', lookup);
-
   if (!lookup) {
     return (
       <section className="catastrox-page">

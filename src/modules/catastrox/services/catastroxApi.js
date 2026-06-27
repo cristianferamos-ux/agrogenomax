@@ -17,6 +17,16 @@ export class CatastroxApiError extends Error {
   }
 }
 
+function isLookupNotFoundPayload(payload) {
+  if (!payload || typeof payload !== 'object') return false;
+  if (payload.found === false) return true;
+  return typeof payload.status === 'string' && [
+    'NO_PREDIO_INDIVIDUALIZADO',
+    'SIN_COBERTURA_CATASTRAL',
+    'PENDIENTE_VALIDACION',
+  ].includes(payload.status);
+}
+
 function normalizeApiBase(value) {
   return String(value || '').trim().replace(/\/$/, '');
 }
@@ -350,9 +360,19 @@ export async function lookupPredio({ lat, lng }) {
     const payload = contentType.includes('application/json') ? await response.json() : null;
 
     if (response.status === 404) {
-      const notFoundLookup = buildNotFoundLookup(coords, payload);
-      persistLookupResult(notFoundLookup);
-      return notFoundLookup;
+      if (isLookupNotFoundPayload(payload)) {
+        const notFoundLookup = buildNotFoundLookup(coords, payload);
+        persistLookupResult(notFoundLookup);
+        return notFoundLookup;
+      }
+
+      lastError = new CatastroxApiError('El servicio catastral no respondió con un resultado válido.', {
+        code: 'ENDPOINT_NOT_FOUND',
+        status: response.status,
+        url,
+        payload,
+      });
+      continue;
     }
 
     if (!response.ok) {

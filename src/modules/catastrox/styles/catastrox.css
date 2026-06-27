@@ -687,6 +687,18 @@
   color: #9cff1a;
 }
 
+iframe[src*="checkout.wompi.co"],
+iframe[src*="wompi.co/p/"] {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: 2147483647 !important;
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
 @media (max-width: 980px) {
   .catastrox-header {
     grid-template-columns: 1fr;

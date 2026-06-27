@@ -1,4 +1,9 @@
 import { Router } from 'express';
+import {
+  CATASTROX_COVERAGE_STATUS,
+  estimateMunicipalCoverageByPoint,
+  getMunicipalCoverageByCode,
+} from '../data/catastroxCoberturaMunicipal.js';
 import { query } from '../db.js';
 
 const router = Router();
@@ -35,6 +40,82 @@ function normalizeMunicipioRow(row) {
     municipio: toNullableString(row.mpnombre),
     departamento: toNullableString(row.depto),
     gestorCatastral: toNullableString(row.gestor),
+  };
+}
+
+function resolveCoverageStatus({ municipio, lat, lng }) {
+  const coverageByCode = getMunicipalCoverageByCode(municipio?.codigoMunicipio);
+  return coverageByCode || estimateMunicipalCoverageByPoint(lat, lng);
+}
+
+function buildNotFoundResponse({ queryPoint, municipio, coverage }) {
+  const estadoCobertura = coverage?.estadoCobertura || CATASTROX_COVERAGE_STATUS.PENDIENTE_VALIDACION;
+
+  if (estadoCobertura === CATASTROX_COVERAGE_STATUS.CUBIERTO_IGAC) {
+    return {
+      statusCode: 404,
+      body: {
+        found: false,
+        status: 'NO_PREDIO_INDIVIDUALIZADO',
+        queryPoint,
+        municipio: coverage?.municipio || municipio?.municipio,
+        departamento: coverage?.departamento || municipio?.departamento,
+        gestor: coverage?.gestorCatastral || municipio?.gestorCatastral,
+        message:
+          'La coordenada cae dentro de una zona con cobertura disponible, pero no devolvió un predio individualizado con la geometría cargada actualmente.',
+        coverage: {
+          codigoMunicipio: coverage?.codigoMunicipio || municipio?.codigoMunicipio,
+          municipio: coverage?.municipio || municipio?.municipio,
+          departamento: coverage?.departamento || municipio?.departamento,
+          gestorCatastral: coverage?.gestorCatastral || municipio?.gestorCatastral,
+          estadoCobertura,
+        },
+      },
+    };
+  }
+
+  if (estadoCobertura === CATASTROX_COVERAGE_STATUS.GESTOR_DIFERENTE) {
+    return {
+      statusCode: 404,
+      body: {
+        found: false,
+        status: 'SIN_COBERTURA_CATASTRAL',
+        queryPoint,
+        municipio: coverage?.municipio || municipio?.municipio,
+        departamento: coverage?.departamento || municipio?.departamento,
+        gestor: coverage?.gestorCatastral || municipio?.gestorCatastral,
+        message:
+          'No se encontró información predial individualizada para esta ubicación en la cobertura catastral cargada actualmente.',
+        coverage: {
+          codigoMunicipio: coverage?.codigoMunicipio || municipio?.codigoMunicipio,
+          municipio: coverage?.municipio || municipio?.municipio,
+          departamento: coverage?.departamento || municipio?.departamento,
+          gestorCatastral: coverage?.gestorCatastral || municipio?.gestorCatastral,
+          estadoCobertura,
+        },
+      },
+    };
+  }
+
+  return {
+    statusCode: 404,
+    body: {
+      found: false,
+      status: 'PENDIENTE_VALIDACION',
+      queryPoint,
+      municipio: coverage?.municipio || municipio?.municipio || null,
+      departamento: coverage?.departamento || municipio?.departamento || null,
+      gestor: coverage?.gestorCatastral || municipio?.gestorCatastral || null,
+      message:
+        'La cobertura municipal de esta coordenada debe validarse antes de clasificar el caso con la información geográfica cargada actualmente.',
+      coverage: {
+        codigoMunicipio: coverage?.codigoMunicipio || municipio?.codigoMunicipio || null,
+        municipio: coverage?.municipio || municipio?.municipio || null,
+        departamento: coverage?.departamento || municipio?.departamento || null,
+        gestorCatastral: coverage?.gestorCatastral || municipio?.gestorCatastral || null,
+        estadoCobertura,
+      },
+    },
   };
 }
 
@@ -86,6 +167,26 @@ router.post('/lookup', async (req, res, next) => {
       `with punto as (
          select ST_SetSRID(ST_MakePoint($1, $2), 4326) as geom
        ),
+       catastro as (
+         select
+           c.id,
+           c.codigo,
+           c.codigo_anterior,
+           c.codigo_municipio,
+           c.codigo_departamento,
+           c.shape_area,
+           c.shape_length,
+           ST_Multi(
+             ST_CollectionExtract(
+               case
+                 when ST_IsValid(c.geom) then c.geom
+                 else ST_MakeValid(c.geom)
+               end,
+               3
+             )
+           ) as lookup_geom
+         from gis.catastro_caqueta c
+       ),
        predio as (
          select
            c.id,
@@ -95,9 +196,20 @@ router.post('/lookup', async (req, res, next) => {
            c.codigo_departamento,
            c.shape_area,
            c.shape_length,
-           ST_AsGeoJSON(c.geom)::json as geometry
-         from gis.catastro_caqueta c, punto p
-         where ST_Contains(c.geom, p.geom)
+           ST_AsGeoJSON(c.lookup_geom)::json as geometry
+         from catastro c, punto p
+         where c.lookup_geom is not null
+           and not ST_IsEmpty(c.lookup_geom)
+           and (
+             ST_Covers(c.lookup_geom, p.geom)
+             or ST_Intersects(c.lookup_geom, p.geom)
+           )
+         order by
+           case
+             when ST_Covers(c.lookup_geom, p.geom) then 0
+             else 1
+           end,
+           c.shape_area asc nulls last
          limit 1
        ),
        municipio as (
@@ -152,23 +264,15 @@ router.post('/lookup', async (req, res, next) => {
     const municipio = await findMunicipioByPoint(lng, lat);
 
     if (municipio) {
-      res.status(404).json({
-        found: false,
-        status: 'SIN_COBERTURA_CATASTRAL',
-        queryPoint: buildQueryPoint(lat, lng),
-        municipio: municipio.municipio,
-        departamento: municipio.departamento,
-        gestor: municipio.gestorCatastral,
-        message:
-          'No se encontró información predial individualizada para esta ubicación en la cobertura catastral cargada actualmente.',
-        coverage: {
-          codigoMunicipio: municipio.codigoMunicipio,
-          municipio: municipio.municipio,
-          departamento: municipio.departamento,
-          gestorCatastral: municipio.gestorCatastral,
-          estadoCobertura: 'GESTOR_DIFERENTE',
-        },
+      const queryPoint = buildQueryPoint(lat, lng);
+      const coverage = resolveCoverageStatus({ municipio, lat, lng });
+      const response = buildNotFoundResponse({
+        queryPoint,
+        municipio,
+        coverage,
       });
+
+      res.status(response.statusCode).json(response.body);
       return;
     }
 
