@@ -4,7 +4,7 @@ import {
   estimateMunicipalCoverageByPoint,
   getMunicipalCoverageByCode,
 } from '../data/catastroxCoberturaMunicipal.js';
-import { query } from '../db.js';
+import { catastroxQuery as query } from '../catastroxDb.js';
 
 const router = Router();
 
