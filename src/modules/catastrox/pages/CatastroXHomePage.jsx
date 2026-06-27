@@ -21,7 +21,7 @@ export default function CatastroXHomePage() {
         <article className="catastrox-card">
           <div className="catastrox-section-heading">
             <span>Resultado gratuito</span>
-            <h2>Primero ubique su predio y confirme la información básica</h2>
+            <h2>Primero identifique su predio y confirme la información básica</h2>
           </div>
           <ul className="catastrox-list">
             <li>Ubique su predio.</li>
@@ -35,7 +35,7 @@ export default function CatastroXHomePage() {
         <article className="catastrox-card">
           <div className="catastrox-section-heading">
             <span>Cómo funciona</span>
-            <h2>El resultado gratuito abre la ruta correcta para su predio</h2>
+            <h2>Conozca cómo funciona antes de elegir un paquete</h2>
           </div>
           <p className="catastrox-copy">
             CatastroX primero le muestra un resultado gratuito. Después, si usted necesita mayor detalle, puede desbloquear la información predial con el paquete básico, el paquete plus o el paquete profesional.
@@ -47,18 +47,6 @@ export default function CatastroXHomePage() {
           </ul>
           <Link className="catastrox-button is-secondary" to="/catastrox/buscar">
             Conocer cómo funciona <ArrowRight size={18} />
-          </Link>
-        </article>
-        <article className="catastrox-card is-danger">
-          <div className="catastrox-section-heading">
-            <span>Acompañamiento técnico</span>
-            <h2>Si su caso requiere revisión, un asesor le orienta</h2>
-          </div>
-          <p className="catastrox-copy">
-            Cuando el predio presente cobertura incompleta, falta de individualización o una revisión especial por gran extensión, la ruta recomendada es conversar con un asesor.
-          </p>
-          <Link className="catastrox-button is-danger" to="/catastrox/regularizacion">
-            Solicitar orientación <ArrowRight size={18} />
           </Link>
         </article>
       </section>

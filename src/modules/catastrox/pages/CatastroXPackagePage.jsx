@@ -9,7 +9,6 @@ import CatastroXResultSummary from '../components/CatastroXResultSummary.jsx';
 import CatastroXWhatsAppCTA from '../components/CatastroXWhatsAppCTA.jsx';
 import {
   CATASTROX_PACKAGE_IDS,
-  doesCatastroxPackageSatisfy,
   formatCatastroxPackagePrice,
   getCatastroxPackage,
 } from '../config/catastroxPackages.js';
@@ -17,7 +16,10 @@ import { CATASTROX_STATUS } from '../data/catastroxMockData.js';
 import { resolveLookupForRoute } from '../services/catastroxApi.js';
 import {
   canSimulateCatastroxPayment,
+  getPackageRank,
   getPurchasedPackageForLookup,
+  getUnlockedDownloadsForPackage,
+  isPackageUnlockedForLookup,
   markPackageAsPaid,
   startPackageCheckout,
 } from '../services/catastroxPaymentService.js';
@@ -90,6 +92,7 @@ export default function CatastroXPackagePage({ packageId }) {
   const lookup = resolveLookupForRoute(id);
   const pkg = getCatastroxPackage(packageId);
   const [checkoutState, setCheckoutState] = useState(null);
+  const [pendingPackageId, setPendingPackageId] = useState(null);
   const [, setPurchaseVersion] = useState(0);
   const [isStartingCheckout, setIsStartingCheckout] = useState(false);
 
@@ -118,11 +121,15 @@ export default function CatastroXPackagePage({ packageId }) {
 
   const predio = lookup.predio;
   const routeId = predio.routeId || predio.id;
-  const currentPurchase = getPurchasedPackageForLookup(routeId);
-  const effectivePurchase =
-    currentPurchase && doesCatastroxPackageSatisfy(packageId, currentPurchase.packageId) ? currentPurchase : null;
-  const unlockedPackage = effectivePurchase ? getCatastroxPackage(effectivePurchase.packageId) : null;
-  const visibleDownloads = unlockedPackage ? buildDownloadsForPackage(unlockedPackage.id) : [];
+  const purchasedPackage = getPurchasedPackageForLookup(lookup);
+  const paidRank = getPackageRank(purchasedPackage?.packageId);
+  const currentRank = getPackageRank(packageId);
+  const isPaid = isPackageUnlockedForLookup({ lookup, packageId });
+  const visibleDownloads = buildDownloadsForPackage(packageId).filter((download) =>
+    getUnlockedDownloadsForPackage({ lookup, packageId }).includes(download.id),
+  );
+  const hasHigherPackage = paidRank > currentRank;
+  const unlockedPackage = purchasedPackage ? getCatastroxPackage(purchasedPackage.packageId) : null;
   const packageCopy = PACKAGE_PAGE_COPY[packageId];
   const requiresAdvisor = REQUIRES_ADVISOR_STATES.has(predio.estado);
   const canSimulate = canSimulateCatastroxPayment();
@@ -139,6 +146,7 @@ export default function CatastroXPackagePage({ packageId }) {
   const handleStartCheckout = async () => {
     try {
       setIsStartingCheckout(true);
+      setPendingPackageId(packageId);
       const result = await startPackageCheckout({ packageId, lookup });
       setCheckoutState(result);
       if (result.status === 'redirect' && result.checkoutUrl) {
@@ -159,10 +167,11 @@ export default function CatastroXPackagePage({ packageId }) {
 
   const handleSimulatePayment = () => {
     const simulated = markPackageAsPaid({
-      routeId,
+      lookup,
       packageId,
       transactionId: `sim-${Date.now()}`,
     });
+    setPendingPackageId(null);
     setCheckoutState({
       status: 'approved',
       message: 'Pago aprobado en modo local de prueba.',
@@ -170,6 +179,13 @@ export default function CatastroXPackagePage({ packageId }) {
     });
     setPurchaseVersion((value) => value + 1);
   };
+
+  const includedMessage =
+    hasHigherPackage && unlockedPackage
+      ? packageId === CATASTROX_PACKAGE_IDS.BASICO
+        ? `Este paquete está incluido en el ${unlockedPackage.label} activo para este predio. Este paquete incluye el PDF.`
+        : `Este paquete está incluido en el ${unlockedPackage.label} activo para este predio.`
+      : null;
 
   if (requiresAdvisor) {
     return (
@@ -203,7 +219,7 @@ export default function CatastroXPackagePage({ packageId }) {
       </div>
       <CatastroXPageActions actions={navigationActions} />
       <div className="catastrox-two-col">
-        <CatastroXResultSummary predio={predio} mode={effectivePurchase ? 'paid' : 'free'} />
+        <CatastroXResultSummary predio={predio} mode={isPaid ? 'paid' : 'free'} />
         <CatastroXMockMap predio={predio} />
       </div>
 
@@ -220,7 +236,7 @@ export default function CatastroXPackagePage({ packageId }) {
         </ul>
       </section>
 
-      {!effectivePurchase ? (
+      {!isPaid ? (
         <section className="catastrox-card">
           <div className="catastrox-section-heading">
             <span>Pago</span>
@@ -252,6 +268,11 @@ export default function CatastroXPackagePage({ packageId }) {
               <span>{checkoutState.message}</span>
             </div>
           ) : null}
+          {pendingPackageId === packageId && checkoutState?.status !== 'approved' ? (
+            <p className="catastrox-copy">
+              Antes del pago aprobado no se habilitan descargas reales.
+            </p>
+          ) : null}
           {canSimulate && checkoutState?.status === 'simulation_available' ? (
             <div className="catastrox-action-row">
               <button type="button" className="catastrox-button is-secondary" onClick={handleSimulatePayment}>
@@ -265,25 +286,18 @@ export default function CatastroXPackagePage({ packageId }) {
         <section className="catastrox-card">
           <div className="catastrox-section-heading">
             <span>Descargas habilitadas</span>
-            <h2>{unlockedPackage.label} aprobado</h2>
+            <h2>{pkg.label} habilitado</h2>
           </div>
           <div className="catastrox-success">
             <strong>Pago aprobado</strong>
             <span>
-              Se desbloquearon las descargas del {unlockedPackage.label.toLowerCase()} para esta consulta.
+              {includedMessage || `Se habilitaron las descargas de ${pkg.label.toLowerCase()} para este predio.`}
             </span>
           </div>
           <div className="catastrox-action-row">
-            {visibleDownloads.map((item) =>
-              item.pending ? (
-                <button key={item.id} type="button" className="catastrox-button is-ghost" disabled>
-                  <Lock size={18} />
-                  {item.label}
-                </button>
-              ) : (
-                <CatastroXDownloadMock key={item.id} label={item.label} onClick={() => item.action(lookup)} />
-              ),
-            )}
+            {visibleDownloads.map((item) => (
+              <CatastroXDownloadMock key={item.id} label={item.label} onClick={() => item.action(lookup)} />
+            ))}
           </div>
         </section>
       )}

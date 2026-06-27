@@ -178,6 +178,12 @@
   padding-top: clamp(2rem, 7vw, 5rem);
 }
 
+.catastrox-hero-single {
+  grid-template-columns: minmax(0, 920px);
+  justify-content: center;
+  min-height: auto;
+}
+
 .catastrox-hero > div:first-child,
 .catastrox-hero-visual,
 .catastrox-card,
@@ -207,6 +213,11 @@
   align-content: center;
   gap: 1.1rem;
   padding: clamp(1.4rem, 4vw, 3rem);
+}
+
+.catastrox-hero-main {
+  justify-self: center;
+  width: 100%;
 }
 
 .catastrox-hero h1 {
@@ -279,6 +290,7 @@
   display: grid;
   gap: 1rem;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr);
+  align-items: stretch;
 }
 
 .catastrox-action-row {
@@ -456,6 +468,7 @@
   position: relative;
   min-height: 520px;
   display: grid;
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
   border-color: rgba(0, 216, 255, 0.24);
   background:
@@ -473,13 +486,26 @@
   gap: 1rem;
 }
 
+.catastrox-search-toolbar {
+  display: grid;
+  gap: 1rem;
+}
+
+.catastrox-search-toolbar-row {
+  display: grid;
+  grid-template-columns: minmax(220px, auto) repeat(2, minmax(180px, 1fr)) minmax(200px, auto);
+  gap: 0.85rem;
+  align-items: end;
+}
+
 .catastrox-map-instructions {
   gap: 0.85rem;
 }
 
 .catastrox-leaflet-map {
   width: 100%;
-  min-height: 520px;
+  height: 100%;
+  min-height: 0;
 }
 
 .catastrox-leaflet-map.leaflet-container {
@@ -488,7 +514,8 @@
 
 .catastrox-map-canvas {
   position: relative;
-  min-height: 520px;
+  min-height: 0;
+  height: 100%;
 }
 
 .catastrox-map-loading {
@@ -562,7 +589,7 @@
   position: relative;
   display: grid;
   gap: 0.35rem;
-  padding: 1rem 1.1rem 1.15rem;
+  padding: 0.9rem 1.1rem 1rem;
   min-width: 0;
   border-top: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(2, 5, 8, 0.96);
@@ -677,7 +704,8 @@
   .catastrox-hero,
   .catastrox-two-col,
   .catastrox-search,
-  .catastrox-form {
+  .catastrox-form,
+  .catastrox-search-toolbar-row {
     grid-template-columns: 1fr;
   }
 

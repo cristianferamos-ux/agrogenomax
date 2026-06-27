@@ -11,6 +11,13 @@ import {
 } from 'react-leaflet';
 import { CATASTROX_STATUS } from '../data/catastroxMockData.js';
 
+const COLOMBIA_CENTER = [4.5709, -74.2973];
+const COLOMBIA_ZOOM = 3;
+const SEARCH_OVERVIEW_BOUNDS = [
+  [-20, -110],
+  [24, -34],
+];
+
 function getMapTone(status) {
   if (
     status === CATASTROX_STATUS.FISCAL ||
@@ -57,7 +64,24 @@ function SearchMapViewport({ activePosition }) {
   const map = useMap();
 
   useEffect(() => {
-    if (!activePosition) return;
+    if (!activePosition) {
+      const syncOverview = () => {
+        map.invalidateSize(false);
+        map.fitBounds(SEARCH_OVERVIEW_BOUNDS, { padding: [8, 8], animate: false });
+        map.setView(COLOMBIA_CENTER, Math.min(map.getZoom(), COLOMBIA_ZOOM), { animate: false });
+      };
+
+      syncOverview();
+      const timeoutId = window.setTimeout(syncOverview, 0);
+      return () => window.clearTimeout(timeoutId);
+    }
+
+    const lat = Number(activePosition[0]);
+    const lng = Number(activePosition[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return;
+    }
+
     map.flyTo(activePosition, Math.max(map.getZoom(), 16), { duration: 1.1 });
   }, [activePosition, map]);
 
@@ -149,17 +173,24 @@ export default function CatastroXMap({
   onCoordinateSelect,
   predio,
 }) {
+  const searchSelectedPoint = mode === 'search' ? buildLatLng(coordinates) : null;
   const markerPosition =
-    buildLatLng(predio?.queryPoint) ||
-    buildLatLng(coordinates) ||
-    (predio ? [predio.referencePoint.lat, predio.referencePoint.lng] : [1.331245, -75.87211]);
+    mode === 'search'
+      ? searchSelectedPoint
+      : buildLatLng(predio?.queryPoint) || (predio ? [predio.referencePoint.lat, predio.referencePoint.lng] : null);
   const viewportPosition =
-    buildLatLng(coordinates) ||
-    buildLatLng(predio?.queryPoint) ||
-    (predio ? [predio.referencePoint.lat, predio.referencePoint.lng] : [1.331245, -75.87211]);
+    mode === 'search'
+      ? searchSelectedPoint
+      : buildLatLng(predio?.queryPoint) || (predio ? [predio.referencePoint.lat, predio.referencePoint.lng] : COLOMBIA_CENTER);
   const polygonGeoJson = predio?.polygonGeoJson ?? null;
   const [mapReady, setMapReady] = useState(false);
   const mapLabel = getResultMapLabel(predio);
+  const mapInstanceKey =
+    mode === 'search'
+      ? coordinates?.lat && coordinates?.lng
+        ? `search-${coordinates.lat}-${coordinates.lng}`
+        : 'search-colombia-default'
+      : `result-${predio?.routeId || predio?.id || 'predio'}`;
 
   const polygonStyle = useMemo(() => {
     if (
@@ -201,8 +232,9 @@ export default function CatastroXMap({
     <div className={`catastrox-map ${getMapTone(predio?.estado)} ${mode === 'result' ? 'has-footer' : ''}`}>
       <div className="catastrox-map-canvas">
         <MapContainer
+          key={mapInstanceKey}
           center={viewportPosition}
-          zoom={mode === 'search' ? 14 : 15}
+          zoom={mode === 'search' ? COLOMBIA_ZOOM : 15}
           scrollWheelZoom
           className="catastrox-leaflet-map"
           whenReady={() => setMapReady(true)}
