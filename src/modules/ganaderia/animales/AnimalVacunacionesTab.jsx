@@ -3,8 +3,17 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { ganaderiaApi } from '../api/ganaderiaApi.js';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
-import { formatDateDisplay, normalizeDateValue } from '../utils/dateFormat.js';
+import { formatDateDisplay } from '../utils/dateFormat.js';
 import { createSanitaryHistoryPdfBlob, sanitaryHistoryFileName } from './sanitaryHistoryPdf.js';
+import {
+  todayISO as todayLocal,
+  daysUntil,
+  vaccinationStatus,
+  remainingDaysLabel,
+  alertClass,
+  sanitaryGeneralStatus,
+  complianceClass,
+} from '../engine/sanidad.js';
 
 const LABORATORIOS = [
   'Vecol',
@@ -33,12 +42,6 @@ const DOSIS = [
 
 const FILTERS = ['Todas', 'Vigente', 'Próxima a vencer', 'Vencida', 'Sin programación'];
 
-function todayLocal() {
-  const now = new Date();
-  const timezoneOffset = now.getTimezoneOffset() * 60000;
-  return new Date(now.getTime() - timezoneOffset).toISOString().slice(0, 10);
-}
-
 function emptyForm() {
   return {
     catalogo_vacuna_id: '',
@@ -58,44 +61,6 @@ function emptyForm() {
 
 function formatDate(value) {
   return formatDateDisplay(value, '—');
-}
-
-function parseDate(value) {
-  const date = normalizeDateValue(value);
-  if (!date) return null;
-  return new Date(`${date}T00:00:00`);
-}
-
-function daysUntil(value) {
-  const date = parseDate(value);
-  if (!date) return null;
-  const today = new Date(`${todayLocal()}T00:00:00`);
-  return Math.ceil((date.getTime() - today.getTime()) / 86400000);
-}
-
-function vaccinationStatus(vacunacion) {
-  const days = daysUntil(vacunacion.proxima_aplicacion || vacunacion.fecha_proxima);
-
-  if (days === null) return 'Sin programación';
-  if (days < 0) return 'Vencida';
-  if (days <= 30) return 'Próxima a vencer';
-  return 'Vigente';
-}
-
-function remainingDaysLabel(vacunacion) {
-  const days = daysUntil(vacunacion.proxima_aplicacion || vacunacion.fecha_proxima);
-
-  if (days === null) return 'Sin programación';
-  if (days === 0) return 'Vence hoy';
-  if (days < 0) return `Vencida hace ${Math.abs(days)} días`;
-  return `Vence en ${days} días`;
-}
-
-function alertClass(alerta) {
-  if (alerta === 'Vencida') return 'estado-vencida';
-  if (alerta === 'Próxima a vencer') return 'estado-proxima';
-  if (alerta === 'Vigente') return 'estado-vigente';
-  return 'estado-sin-programacion';
 }
 
 function vaccineLabel(row) {
@@ -151,48 +116,6 @@ function animalAgeLabel(animal) {
 
 function resolveOptionValue(selected, manual) {
   return selected === 'Otro' ? manual.trim() : selected;
-}
-
-function sanitaryGeneralStatus(resumen) {
-  if (resumen.vencidas > 0) {
-    return {
-      label: 'Crítico',
-      icon: '🔴',
-      className: 'estado-vencida',
-      description: 'Existe al menos una vacuna vencida.',
-    };
-  }
-
-  if (resumen.proximas > 0) {
-    return {
-      label: 'Atención',
-      icon: '🟡',
-      className: 'estado-proxima',
-      description: 'Existe al menos una vacuna próxima a vencer.',
-    };
-  }
-
-  if (resumen.vencidas === 0 && resumen.proximas === 0 && resumen.total > 0 && resumen.vigentes === resumen.total) {
-    return {
-      label: 'Excelente',
-      icon: '🟢',
-      className: 'estado-vigente',
-      description: 'Todas las vacunas programadas están vigentes.',
-    };
-  }
-
-  return {
-    label: 'Sin programación',
-    icon: '⚪',
-    className: 'estado-sin-programacion',
-    description: 'No hay próximas aplicaciones programadas.',
-  };
-}
-
-function complianceClass(resumen) {
-  if (resumen.vencidas > 0) return 'estado-vencida';
-  if (resumen.proximas > 0) return 'estado-proxima';
-  return 'estado-vigente';
 }
 
 function statusIcon(estado) {

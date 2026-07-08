@@ -4,6 +4,9 @@ import { Link, useParams } from 'react-router-dom';
 import { ganaderiaApi } from '../api/ganaderiaApi.js';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
 import { formatDateDisplay } from '../utils/dateFormat.js';
+import { obtenerEdadMeses } from '../engine/edad.js';
+import { categoriaBasePorEdadSexo, normalizeSex } from '../engine/categoria.js';
+import { formatComposicionRacial } from '../engine/genetica.js';
 
 const fields = [
   ['codigo_interno', 'Codigo interno'],
@@ -34,61 +37,6 @@ function valueOf(animal, field) {
 
 function valueFrom(animal, keys) {
   return keys.map((key) => animal?.[key]).find((value) => value !== undefined && value !== null && value !== '') || '';
-}
-
-function formatPercent(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? `${number.toLocaleString('es-CO', { maximumFractionDigits: 2 })}%` : '--';
-}
-
-function todayLocal() {
-  const now = new Date();
-  const timezoneOffset = now.getTimezoneOffset() * 60000;
-  return new Date(now.getTime() - timezoneOffset).toISOString().slice(0, 10);
-}
-
-function ageMonths(animal) {
-  const directRaw = valueFrom(animal, ['edad_meses', 'edadMeses', 'age_months']);
-  const direct = Number(directRaw);
-  if (directRaw !== '' && Number.isFinite(direct)) return Math.floor(direct);
-
-  const rawDate = valueOf(animal, 'fecha_nacimiento');
-  if (!rawDate) return NaN;
-
-  const birth = new Date(`${String(rawDate).slice(0, 10)}T00:00:00`);
-  const analysisDate = valueFrom(animal, ['fecha_analisis', 'updated_at', 'created_at']) || todayLocal();
-  const today = new Date(`${String(analysisDate).slice(0, 10)}T00:00:00`);
-  if (Number.isNaN(birth.getTime())) return NaN;
-
-  let months = (today.getFullYear() - birth.getFullYear()) * 12 + today.getMonth() - birth.getMonth();
-  if (today.getDate() < birth.getDate()) months -= 1;
-  return months >= 0 ? months : NaN;
-}
-
-function categoryFor(animal, months) {
-  if (!Number.isFinite(months)) return 'Categoria no determinada';
-  const sex = String(valueOf(animal, 'sexo')).toLowerCase();
-
-  if (sex === 'hembra') {
-    if (months < 8) return 'Ternera lactante';
-    if (months < 12) return 'Ternera desteta';
-    if (months < 24) return 'Novilla de levante';
-    if (months < 36) return 'Novilla de desarrollo';
-    return 'Vaca adulta';
-  }
-
-  if (sex === 'macho') {
-    if (months < 8) return 'Ternero lactante';
-    if (months < 12) return 'Ternero desteto';
-    if (months < 24) return 'Novillo de levante';
-    if (months < 36) return 'Novillo de desarrollo';
-    return 'Toro adulto';
-  }
-
-  if (months < 8) return 'Cria lactante';
-  if (months < 24) return 'Levante';
-  if (months < 36) return 'Desarrollo';
-  return 'Adulto';
 }
 
 function isCommaDecimalInput(value) {
@@ -163,10 +111,9 @@ export default function AnimalFichaBasica() {
     return <div className="gan-panel">Cargando ficha animal...</div>;
   }
 
-  const currentAgeMonths = ageMonths(animal);
-  const breedComposition = razas.length
-    ? razas.map((raza) => `${raza.nombre_raza || `Raza ${raza.raza_id}`} ${formatPercent(raza.porcentaje)}`).join(' / ')
-    : 'Sin composicion racial registrada';
+  const currentAgeMonths = obtenerEdadMeses(animal);
+  const breedComposition = formatComposicionRacial(razas);
+  const sexoNormalizado = normalizeSex(valueOf(animal, 'sexo'));
   const identityRows = [
     ['QR asociado', valueFrom(animal, ['codigo_qr']) || 'Sin QR asignado'],
     ['Codigo interno', valueOf(animal, 'codigo_interno') || 'Sin codigo interno'],
@@ -176,7 +123,7 @@ export default function AnimalFichaBasica() {
     ['Raza principal', valueFrom(animal, ['raza_principal']) || razas[0]?.nombre_raza || 'Sin raza registrada'],
     ['Composicion racial', breedComposition],
     ['Edad actual', Number.isFinite(currentAgeMonths) ? `${currentAgeMonths} meses` : 'No registrada'],
-    ['Categoria actual', categoryFor(animal, currentAgeMonths)],
+    ['Categoria actual', categoriaBasePorEdadSexo(currentAgeMonths, sexoNormalizado)],
   ];
 
   return (

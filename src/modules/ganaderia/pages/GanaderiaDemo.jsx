@@ -38,6 +38,10 @@ const tabs = [
   { id: 'reportes', label: 'Reportes', icon: FileBarChart },
 ];
 
+function formatKg(value) {
+  return Number.isFinite(value) ? value.toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
+}
+
 function formatFecha(iso) {
   const date = new Date(iso);
   const dd = String(date.getDate()).padStart(2, '0');
@@ -273,6 +277,10 @@ function FichaTab({ caso, casoActivo }) {
           <strong>{identidad.categoria}</strong>
         </div>
         <div className="gan-demo-ficha-row">
+          <span>Etapa (motor común)</span>
+          <strong>{isCoronado ? caso.pesajes[caso.pesajes.length - 1]?.categoria_evaluada : identidad.categoriaEtapa}</strong>
+        </div>
+        <div className="gan-demo-ficha-row">
           <span>Estado productivo</span>
           <strong>{identidad.estadoProductivo}</strong>
         </div>
@@ -387,9 +395,11 @@ function PesajesTab({ caso, casoActivo }) {
           {caso.pesajes.map((checkpoint) => (
             <div key={checkpoint.etapa} className="gan-demo-table-row">
               <strong>{checkpoint.etapa}</strong>
-              <span>{checkpoint.mesesEdad} meses — {formatFecha(checkpoint.fecha)}</span>
-              <span>{checkpoint.pesoKg} kg</span>
-              <span>{checkpoint.gdpKgDia === null ? '—' : `${checkpoint.gdpKgDia} kg/día`}</span>
+              <span>{formatFecha(checkpoint.fecha_pesaje)} — {checkpoint.categoria_evaluada}</span>
+              <span>{checkpoint.peso_kg} kg</span>
+              <span className={checkpoint.estado_productivo_class}>
+                {checkpoint.ganancia_diaria_kg === null ? '—' : `${formatKg(checkpoint.ganancia_diaria_kg)} kg/día · ${checkpoint.estado_productivo}`}
+              </span>
             </div>
           ))}
         </div>
@@ -406,7 +416,7 @@ function PesajesTab({ caso, casoActivo }) {
           <CheckCircle2 size={18} />
           <p>{caso.analisisPesajes.evidenciaRecuperacion}</p>
         </div>
-        <p className="gan-demo-note">Ganancia diaria promedio general (nacimiento a hoy): {caso.analisisPesajes.gdpGeneralKgDia} kg/día.</p>
+        <p className="gan-demo-note">Ganancia diaria promedio general (nacimiento a hoy): {formatKg(caso.analisisPesajes.gdpGeneralKgDia)} kg/día.</p>
       </section>
     );
   }
@@ -454,7 +464,7 @@ function SanidadTab({ caso }) {
       </div>
       <div className="gan-demo-alert-box is-positive">
         <CheckCircle2 size={18} />
-        <p>Estado sanitario general: {caso.estadoSanitario}.</p>
+        <p>Estado sanitario general: {caso.estadoSanitario}</p>
       </div>
     </section>
   );

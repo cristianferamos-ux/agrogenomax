@@ -1,3 +1,12 @@
+// Datos demo de Coronado y Esperanza. A partir de esta fase, edad, categoria, GDP/umbrales
+// y estado sanitario se calculan con el mismo motor comun que usa la cuenta real
+// (src/modules/ganaderia/engine/), no con formulas propias de la demo.
+import { obtenerEdadMeses } from '../engine/edad.js';
+import { clasificarCategoriaPorEdadSexo } from '../engine/categoria.js';
+import { enrichRows, calcularGDP, calcularTendenciaPesajes, classifyProductivity, obtenerUmbralesGDP, thresholdText } from '../engine/pesajes.js';
+import { daysUntil, vaccinationStatus, sanitaryGeneralStatus } from '../engine/sanidad.js';
+import { formatComposicionRacial } from '../engine/genetica.js';
+
 const STORAGE_KEY = 'agx_ganaderia_demo_v2';
 
 function monthsAgo(n) {
@@ -17,7 +26,12 @@ function round1(value) {
 }
 
 function round2(value) {
-  return Math.round(value * 100) / 100;
+  return Number.isFinite(value) ? Math.round(value * 100) / 100 : value;
+}
+
+// Formato es-CO (coma decimal) para texto narrativo, consistente con el resto de la demo.
+function formatKgCO(value) {
+  return Number.isFinite(value) ? value.toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
 }
 
 function promedio(values) {
@@ -27,53 +41,65 @@ function promedio(values) {
 
 /**
  * Checkpoints de peso de Coronado: nacimiento -> destete -> levante -> alerta -> recuperación.
- * La ganancia diaria promedio (GDP) de cada tramo se calcula a partir de los mismos
- * checkpoints para que la alerta de desaceleración (15-18 meses) sea siempre consistente
- * con los pesos declarados, sin duplicar el número en dos lugares distintos.
+ * Los pesos son la narrativa aprobada (no cambian). Lo que sí cambia en esta fase: GDP,
+ * categoría por checkpoint y estado productivo (Excelente/Aceptable/Crítico) ya no se
+ * inventan a mano — se calculan con engine/pesajes.enrichRows, el mismo motor y los mismos
+ * umbrales por categoría que usa AnimalPesajesTab.jsx en la cuenta real.
  */
-function buildCoronadoPesajes() {
-  const checkpoints = [
+function buildCoronado() {
+  const razas = [{ nombre_raza: 'Brahman Rojo', porcentaje: 100 }];
+  const identidadBase = {
+    nombre: 'Coronado',
+    codigoInterno: 'DEMO-BR-001',
+    qrCodigo: 'AGX-DEMO-000001',
+    sexo: 'Macho',
+    raza: 'Brahman Rojo puro',
+    composicionRacial: formatComposicionRacial(razas),
+    fechaNacimiento: monthsAgo(20),
+    categoria: 'Extra',
+    pesoActualKg: 540,
+    estadoComercial: 'Listo para comercialización',
+    estadoProductivo: 'Finalización / Comercialización',
+    predioReferencia: 'Predio El Roble (demo)',
+    potreroReferencia: 'Potrero 2 (demo)',
+  };
+  identidadBase.edadMeses = obtenerEdadMeses({ fecha_nacimiento: identidadBase.fechaNacimiento });
+
+  const checkpointsRaw = [
     { etapa: 'Nacimiento', mesesEdad: 0, pesoKg: 34 },
     { etapa: 'Destete', mesesEdad: 8, pesoKg: 220 },
     { etapa: 'Levante', mesesEdad: 12, pesoKg: 340 },
     { etapa: 'Levante avanzado', mesesEdad: 15, pesoKg: 410 },
-    { etapa: 'Alerta de desaceleración', mesesEdad: 18, pesoKg: 470 },
+    { etapa: 'Seguimiento de crecimiento', mesesEdad: 18, pesoKg: 470 },
     { etapa: 'Actual', mesesEdad: 20, pesoKg: 540 },
   ];
 
-  return checkpoints.map((checkpoint, index) => {
-    const fecha = monthsAgo(20 - checkpoint.mesesEdad);
-    if (index === 0) {
-      return { ...checkpoint, fecha, gdpKgDia: null };
-    }
-    const anterior = checkpoints[index - 1];
-    const diasPeriodo = (checkpoint.mesesEdad - anterior.mesesEdad) * 30;
-    const gdpKgDia = round2((checkpoint.pesoKg - anterior.pesoKg) / diasPeriodo);
-    return { ...checkpoint, fecha, gdpKgDia };
-  });
-}
+  const pesajeRows = checkpointsRaw.map((checkpoint, index) => ({
+    etapa: checkpoint.etapa,
+    fecha_pesaje: monthsAgo(20 - checkpoint.mesesEdad),
+    peso_kg: checkpoint.pesoKg,
+    es_peso_nacimiento: index === 0,
+  }));
 
-function buildCoronado() {
-  const pesajes = buildCoronadoPesajes();
-  const gdpGeneral = round2((540 - 34) / (20 * 30));
+  // Mismo motor que la cuenta real: calcula peso anterior, dias entre pesajes, GDP,
+  // categoria evaluada en cada fecha y estado productivo segun el umbral de esa categoria.
+  const pesajes = enrichRows(pesajeRows, null, null, identidadBase);
+
+  const primerosSeis = pesajes[0];
+  const ultimoPesaje = pesajes[pesajes.length - 1];
+  const penultimoPesaje = pesajes[pesajes.length - 2];
+  const gdpGeneralKgDia = round2(calcularGDP(ultimoPesaje.peso_kg, primerosSeis.peso_kg, 20 * 30));
+  const umbralesActuales = obtenerUmbralesGDP(ultimoPesaje.categoria_evaluada);
+  const estadoActual = classifyProductivity(
+    ultimoPesaje.ganancia_diaria_kg,
+    ultimoPesaje.diferencia_kg,
+    pesajes.filter((row) => Number.isFinite(row.ganancia_diaria_kg)).length >= 2,
+    umbralesActuales,
+  );
+  const tendencia = calcularTendenciaPesajes(pesajes);
 
   return {
-    identidad: {
-      nombre: 'Coronado',
-      codigoInterno: 'DEMO-BR-001',
-      qrCodigo: 'AGX-DEMO-000001',
-      sexo: 'Macho',
-      raza: 'Brahman Rojo puro',
-      composicionRacial: 'Brahman Rojo 100%',
-      fechaNacimiento: monthsAgo(20),
-      edadMeses: 20,
-      categoria: 'Extra',
-      pesoActualKg: 540,
-      estadoComercial: 'Listo para comercialización',
-      estadoProductivo: 'Finalización / Comercialización',
-      predioReferencia: 'Predio El Roble (demo)',
-      potreroReferencia: 'Potrero 2 (demo)',
-    },
+    identidad: identidadBase,
     genealogia: {
       padre: 'Duque de Oro',
       razaPadre: 'Brahman Rojo puro',
@@ -90,11 +116,13 @@ function buildCoronado() {
     },
     pesajes,
     analisisPesajes: {
-      gdpGeneralKgDia: gdpGeneral,
-      interpretacion: 'Crecimiento sostenido con una desaceleración real entre los 15 y los 18 meses.',
-      alerta: 'Desaceleración de crecimiento detectada entre los 15 y los 18 meses (0,67 kg/día, por debajo del promedio esperado de 0,85 kg/día).',
-      recomendacion: 'Revisar carga parasitaria y calidad de pastoreo en el potrero asignado.',
-      evidenciaRecuperacion: 'Entre los 18 y los 20 meses la ganancia diaria subió a 1,17 kg/día tras el tratamiento antiparasitario aplicado a los 16 meses.',
+      gdpGeneralKgDia,
+      interpretacion: `Categoría evaluada actual: ${ultimoPesaje.categoria_evaluada}. Umbral aplicado: ${thresholdText(umbralesActuales)}.`,
+      alerta: `Punto de seguimiento a los ${checkpointsRaw[4].mesesEdad} meses: ${formatKgCO(penultimoPesaje.ganancia_diaria_kg)} kg/día — estado "${penultimoPesaje.estado_productivo}" para su categoría de ese momento (${penultimoPesaje.categoria_evaluada}).`,
+      recomendacion: penultimoPesaje.estado_productivo_class === 'estado-vencida'
+        ? 'Revisar carga parasitaria y calidad de pastoreo en el potrero asignado.'
+        : 'Ganancia dentro de rango esperado para la categoría; mantener el plan de manejo actual.',
+      evidenciaRecuperacion: `A los ${checkpointsRaw[5].mesesEdad} meses la ganancia diaria es de ${formatKgCO(ultimoPesaje.ganancia_diaria_kg)} kg/día — estado "${estadoActual.label}" (tendencia reciente: ${tendencia.tendencia}).`,
     },
     sanidad: [
       { etapa: 'Nacimiento', mesesEdad: 0, evento: 'Registro de calostro y cura de ombligo' },
@@ -108,7 +136,7 @@ function buildCoronado() {
     tratamientoDestacado: {
       etapa: '16 meses',
       descripcion: 'Tratamiento antiparasitario por carga parasitaria moderada.',
-      vinculadoA: 'Alerta de desaceleración de crecimiento (15–18 meses).',
+      vinculadoA: 'Seguimiento de crecimiento (15–18 meses).',
       nota: 'Aplicado según indicación del médico veterinario a cargo. Este entorno demo no registra dosis, vías de aplicación ni nombres comerciales de medicamentos.',
     },
     reproduccion: {
@@ -136,7 +164,7 @@ function buildCoronado() {
         'Categoría: Extra',
         'Pureza racial: 100% Brahman Rojo',
         'Genealogía documentada (origen por IATF)',
-        'Tendencia de crecimiento reciente: recuperación confirmada tras la alerta',
+        `Estado productivo actual: ${estadoActual.label} (motor común de pesajes)`,
       ],
     },
   };
@@ -175,21 +203,61 @@ function buildEsperanza() {
   const promedioSemanal = round1(promedio(produccionDiaria.filter((r) => r.diasAtras <= 6).map((r) => r.litros)));
   const promedioLactanciaHistorico = round1(2700 / 150);
 
+  const identidadBase = {
+    nombre: 'Esperanza',
+    codigoInterno: 'DEMO-GF-002',
+    qrCodigo: 'AGX-DEMO-000002',
+    sexo: 'Hembra',
+    raza: 'Girolando F1',
+    composicionRacial: '50% Holstein x 50% Gyr',
+    fechaNacimiento: monthsAgo(40),
+    edadAproximada: '≈ 3,3 años',
+    categoria: 'Vaca adulta en producción',
+    estadoProductivo: 'En lactancia — día aproximado 150',
+    predioReferencia: 'Predio El Roble (demo)',
+    potreroReferencia: 'Potrero 2 (demo) — antes en Potrero 1 (demo)',
+  };
+  identidadBase.edadMeses = obtenerEdadMeses({ fecha_nacimiento: identidadBase.fechaNacimiento });
+  // Categoría contextual del motor común (misma fuente que ficha/pesajes de la cuenta real).
+  identidadBase.categoriaEtapa = clasificarCategoriaPorEdadSexo(
+    { sexo: identidadBase.sexo, estado_reproductivo: 'lactante' },
+    new Date().toISOString(),
+    false,
+    identidadBase.fechaNacimiento,
+  );
+
+  // Vacunas con fechas reales para que el estado (Vigente/Próxima a vencer/Vencida) salga
+  // del mismo criterio real (engine/sanidad), no de un texto "Al día" escrito a mano.
+  const vacunasBase = [
+    { evento: 'Aftosa', fecha_aplicacion: monthsAgo(2), proxima_aplicacion: null, diasProxima: 120 },
+    { evento: 'Desparasitación', fecha_aplicacion: monthsAgo(1), proxima_aplicacion: null, diasProxima: 60 },
+  ];
+  const hoy = new Date();
+  const vacunasActivas = vacunasBase.map((vacuna) => {
+    const proxima = new Date(hoy);
+    proxima.setDate(proxima.getDate() + vacuna.diasProxima);
+    const proximaISO = proxima.toISOString();
+    return {
+      evento: vacuna.evento,
+      proxima_aplicacion: proximaISO,
+      estado: vaccinationStatus({ proxima_aplicacion: proximaISO }),
+      diasParaVencer: daysUntil(proximaISO),
+    };
+  });
+  const vacunaHistorica = {
+    evento: 'Brucelosis',
+    estado: 'Registro histórico de novilla (no se repite en animales adultos)',
+  };
+  const resumenSanitario = {
+    total: vacunasActivas.length,
+    vigentes: vacunasActivas.filter((v) => v.estado === 'Vigente').length,
+    proximas: vacunasActivas.filter((v) => v.estado === 'Próxima a vencer').length,
+    vencidas: vacunasActivas.filter((v) => v.estado === 'Vencida').length,
+  };
+  const estadoSanitarioGeneral = sanitaryGeneralStatus(resumenSanitario);
+
   return {
-    identidad: {
-      nombre: 'Esperanza',
-      codigoInterno: 'DEMO-GF-002',
-      qrCodigo: 'AGX-DEMO-000002',
-      sexo: 'Hembra',
-      raza: 'Girolando F1',
-      composicionRacial: '50% Holstein x 50% Gyr',
-      fechaNacimiento: monthsAgo(40),
-      edadAproximada: '≈ 3,3 años',
-      categoria: 'Vaca adulta en producción',
-      estadoProductivo: 'En lactancia — día aproximado 150',
-      predioReferencia: 'Predio El Roble (demo)',
-      potreroReferencia: 'Potrero 2 (demo) — antes en Potrero 1 (demo)',
-    },
+    identidad: identidadBase,
     genealogia: {
       madre: 'Gitana',
       razaMadre: 'Gyr pura',
@@ -229,12 +297,8 @@ function buildEsperanza() {
       valor: '3,0 / 5',
       interpretacion: 'Recupera condición corporal postparto mientras sostiene producción — señal de balance nutricional adecuado.',
     },
-    sanidad: [
-      { evento: 'Aftosa', estado: 'Al día (refuerzo semestral)' },
-      { evento: 'Brucelosis', estado: 'Registro histórico de novilla (no se repite en animales adultos)' },
-      { evento: 'Desparasitación', estado: 'Periódica, al día' },
-    ],
-    estadoSanitario: 'Al día, con un evento clínico resuelto',
+    sanidad: [...vacunasActivas, vacunaHistorica],
+    estadoSanitario: `${estadoSanitarioGeneral.label} — ${estadoSanitarioGeneral.description}`,
     tratamientoDestacado: {
       descripcion: 'Mastitis subclínica leve — detectada y tratada, resuelta.',
       nota: 'Caso clínico común, sin complicaciones. Este entorno demo no registra dosis, vías de aplicación ni nombres comerciales de medicamentos.',
