@@ -547,7 +547,7 @@ export default function AnimalReproduccionTab() {
     }
   }, [allowedMethods, eventForm.metodo_reproductivo]);
 
-  const submitEvent = (event) => {
+  const submitEvent = async (event) => {
     event.preventDefault();
     setStatus('');
     setError('');
@@ -555,20 +555,28 @@ export default function AnimalReproduccionTab() {
       setError('La fecha del evento reproductivo es obligatoria.');
       return;
     }
-    setEvents((current) => [{ ...eventForm, persisted: false, evento_id: `REP-${new Date().getFullYear()}-${String(current.length + 1).padStart(6, '0')}` }, ...current]);
-    setEventForm({ ...initialEventForm, tipo_evento: context.allowedEvents[0] || 'Evaluación reproductiva', metodo_reproductivo: allowedMethods[0] || '' });
-    setStatus('Evento reproductivo agregado a la vista local del módulo. Listo para conectar a API en fase posterior.');
+    try {
+      await ganaderiaApi.createReproduccion({
+        animal_id: id,
+        fecha: eventForm.fecha,
+        tipo_evento: eventForm.tipo_evento,
+        estado: eventForm.resultado,
+        diagnostico: eventForm.resultado,
+        metodo: eventForm.metodo_reproductivo,
+        observaciones: eventForm.observaciones,
+      });
+      const updated = await ganaderiaApi.listAnimalReproduccion(id);
+      setEvents((updated || []).map(normalizeReproductiveEvent));
+      setEventForm({ ...initialEventForm, tipo_evento: context.allowedEvents[0] || 'Evaluación reproductiva', metodo_reproductivo: allowedMethods[0] || '' });
+      setStatus('Evento reproductivo guardado correctamente en la trazabilidad del animal.');
+    } catch (err) {
+      setError(err.message || 'No fue posible guardar el evento reproductivo en PostgreSQL/API.');
+    }
   };
 
   const addEvidence = () => {
-    if (!evidenceName.trim()) {
-      setError('Ingresa el nombre de la evidencia reproductiva.');
-      return;
-    }
-    setEvidences((current) => [{ evidencia_id: `EVD-${current.length + 1}`, nombre: evidenceName, fecha: today() }, ...current]);
-    setEvidenceName('');
     setError('');
-    setStatus('Evidencia reproductiva agregada al archivo local.');
+    setStatus('Evidencias reproductivas pendientes de soporte PostgreSQL/API.');
   };
 
   if (!animal && !error) return <div className="gan-panel">Cargando módulo de reproducción...</div>;
@@ -783,18 +791,8 @@ export default function AnimalReproduccionTab() {
           <span className="gan-eyebrow">Motor de eventos reproductivos</span>
           <h3>Registrar evento reproductivo</h3>
         </div>
-        <form className="gan-form" onSubmit={(event) => {
-          event.preventDefault();
-          setStatus('');
-          setError('');
-          if (!eventForm.fecha) {
-            setError('La fecha del evento reproductivo es obligatoria.');
-            return;
-          }
-          setEvents((current) => [{ ...eventForm, persisted: false, evento_id: `REP-${new Date().getFullYear()}-${String(current.length + 1).padStart(6, '0')}` }, ...current]);
-          setEventForm({ ...initialEventForm, tipo_evento: context.allowedEvents[0] || 'Evaluación reproductiva', metodo_reproductivo: allowedMethods[0] || '' });
-          setStatus('Evento reproductivo agregado a la vista local del módulo. Listo para conectar a API en fase posterior.');
-        }}>
+        <p className="gan-empty-text">Se guarda trazabilidad reproductiva básica soportada por PostgreSQL/API. Campos avanzados quedan pendientes de soporte.</p>
+        <form className="gan-form" onSubmit={submitEvent}>
           <FormField label="Tipo evento">
             <select value={eventForm.tipo_evento} onChange={(event) => setEventForm((current) => ({ ...current, tipo_evento: event.target.value }))}>
               {context.allowedEvents.map((type) => <option key={type}>{type}</option>)}
@@ -807,21 +805,21 @@ export default function AnimalReproduccionTab() {
           </FormField>
           <FormField label="Fecha"><input type="date" value={eventForm.fecha} onChange={(event) => setEventForm((current) => ({ ...current, fecha: event.target.value }))} /></FormField>
           <FormField label="Resultado"><input value={eventForm.resultado} onChange={(event) => setEventForm((current) => ({ ...current, resultado: event.target.value }))} placeholder="Resultado del evento" /></FormField>
-          <FormField label="Responsable"><input value={eventForm.responsable} onChange={(event) => setEventForm((current) => ({ ...current, responsable: event.target.value }))} /></FormField>
-          <FormField label="Costo reproductivo"><input inputMode="numeric" value={eventForm.costo} onChange={(event) => setEventForm((current) => ({ ...current, costo: event.target.value }))} placeholder="0" /></FormField>
+          <FormField label="Responsable"><input value={eventForm.responsable} disabled placeholder="Campo pendiente de soporte PostgreSQL/API." onChange={(event) => setEventForm((current) => ({ ...current, responsable: event.target.value }))} /></FormField>
+          <FormField label="Costo reproductivo"><input inputMode="numeric" value={eventForm.costo} disabled placeholder="Campo pendiente de soporte PostgreSQL/API." onChange={(event) => setEventForm((current) => ({ ...current, costo: event.target.value }))} /></FormField>
           {eventForm.tipo_evento === 'Prueba andrológica' ? (
             <>
-              <FormField label="Circunferencia escrotal"><input value={eventForm.circunferencia_escrotal} onChange={(event) => setEventForm((current) => ({ ...current, circunferencia_escrotal: event.target.value }))} /></FormField>
-              <FormField label="Motilidad"><input value={eventForm.motilidad} onChange={(event) => setEventForm((current) => ({ ...current, motilidad: event.target.value }))} /></FormField>
-              <FormField label="Concentración"><input value={eventForm.concentracion} onChange={(event) => setEventForm((current) => ({ ...current, concentracion: event.target.value }))} /></FormField>
-              <FormField label="Morfología"><input value={eventForm.morfologia} onChange={(event) => setEventForm((current) => ({ ...current, morfologia: event.target.value }))} /></FormField>
+              <FormField label="Circunferencia escrotal"><input value={eventForm.circunferencia_escrotal} disabled placeholder="Campo pendiente de soporte PostgreSQL/API." onChange={(event) => setEventForm((current) => ({ ...current, circunferencia_escrotal: event.target.value }))} /></FormField>
+              <FormField label="Motilidad"><input value={eventForm.motilidad} disabled placeholder="Campo pendiente de soporte PostgreSQL/API." onChange={(event) => setEventForm((current) => ({ ...current, motilidad: event.target.value }))} /></FormField>
+              <FormField label="Concentración"><input value={eventForm.concentracion} disabled placeholder="Campo pendiente de soporte PostgreSQL/API." onChange={(event) => setEventForm((current) => ({ ...current, concentracion: event.target.value }))} /></FormField>
+              <FormField label="Morfología"><input value={eventForm.morfologia} disabled placeholder="Campo pendiente de soporte PostgreSQL/API." onChange={(event) => setEventForm((current) => ({ ...current, morfologia: event.target.value }))} /></FormField>
             </>
           ) : null}
           {eventForm.tipo_evento === 'Diagnóstico gestación' ? (
             <>
-              <FormField label="Método"><input value={eventForm.metodo_gestacion} onChange={(event) => setEventForm((current) => ({ ...current, metodo_gestacion: event.target.value }))} /></FormField>
-              <FormField label="Días de gestación"><input inputMode="numeric" value={eventForm.dias_gestacion} onChange={(event) => setEventForm((current) => ({ ...current, dias_gestacion: event.target.value }))} /></FormField>
-              <FormField label="Veterinario responsable"><input value={eventForm.veterinario_responsable} onChange={(event) => setEventForm((current) => ({ ...current, veterinario_responsable: event.target.value }))} /></FormField>
+              <FormField label="Método"><input value={eventForm.metodo_gestacion} disabled placeholder="Campo pendiente de soporte PostgreSQL/API." onChange={(event) => setEventForm((current) => ({ ...current, metodo_gestacion: event.target.value }))} /></FormField>
+              <FormField label="Días de gestación"><input inputMode="numeric" value={eventForm.dias_gestacion} disabled placeholder="Campo pendiente de soporte PostgreSQL/API." onChange={(event) => setEventForm((current) => ({ ...current, dias_gestacion: event.target.value }))} /></FormField>
+              <FormField label="Veterinario responsable"><input value={eventForm.veterinario_responsable} disabled placeholder="Campo pendiente de soporte PostgreSQL/API." onChange={(event) => setEventForm((current) => ({ ...current, veterinario_responsable: event.target.value }))} /></FormField>
             </>
           ) : null}
           <FormField label="Observaciones"><textarea value={eventForm.observaciones} onChange={(event) => setEventForm((current) => ({ ...current, observaciones: event.target.value }))} /></FormField>
@@ -880,25 +878,17 @@ export default function AnimalReproduccionTab() {
           <span className="gan-eyebrow">Archivo reproductivo</span>
           <h3>Subir evidencia</h3>
         </div>
+        <p className="gan-empty-text">Evidencias reproductivas pendientes de soporte PostgreSQL/API.</p>
         <div className="repro-evidence-uploader">
           <FormField label="Tipo evidencia">
-            <select>
+            <select disabled>
               {evidenceTypes.map((type) => <option key={type}>{type}</option>)}
             </select>
           </FormField>
           <FormField label="Nombre o referencia">
-            <input value={evidenceName} onChange={(event) => setEvidenceName(event.target.value)} placeholder="Ej. Ecografía control" />
+            <input value={evidenceName} disabled onChange={(event) => setEvidenceName(event.target.value)} placeholder="Campo pendiente de soporte PostgreSQL/API." />
           </FormField>
-          <button className="gan-secondary-button" type="button" onClick={() => {
-            if (!evidenceName.trim()) {
-              setError('Ingresa el nombre de la evidencia reproductiva.');
-              return;
-            }
-            setEvidences((current) => [{ evidencia_id: `EVD-${current.length + 1}`, nombre: evidenceName, fecha: today() }, ...current]);
-            setEvidenceName('');
-            setError('');
-            setStatus('Evidencia reproductiva agregada al archivo local.');
-          }}>
+          <button className="gan-secondary-button" type="button" onClick={addEvidence}>
             <FilePlus2 className="h-4 w-4" /> Seleccionar archivo
           </button>
         </div>
