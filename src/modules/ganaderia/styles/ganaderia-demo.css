@@ -1,0 +1,219 @@
+.gan-demo-notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: fit-content;
+  border: 1px solid rgba(255, 193, 7, 0.4);
+  border-radius: 999px;
+  background: rgba(255, 193, 7, 0.1);
+  color: #ffcf4d;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 0.5rem 0.9rem;
+}
+
+.gan-demo-notice.is-compact {
+  font-size: 0.72rem;
+  padding: 0.35rem 0.7rem;
+}
+
+button.gan-dash-sidebar-link {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+}
+
+.gan-demo-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.9rem;
+  align-items: end;
+  border: 1px solid rgba(57, 255, 20, 0.14);
+  border-radius: 0.8rem;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 1.2rem;
+  margin-bottom: 1.6rem;
+}
+
+.gan-demo-form label {
+  display: grid;
+  gap: 0.35rem;
+  color: #9fb3a8;
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.gan-demo-form input,
+.gan-demo-form select {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.5rem;
+  background: #0b1510;
+  color: #e7f5ec;
+  padding: 0.6rem 0.7rem;
+  font-size: 0.86rem;
+  font-family: inherit;
+}
+
+.gan-demo-form input:focus,
+.gan-demo-form select:focus {
+  outline: 2px solid rgba(57, 255, 20, 0.5);
+  outline-offset: 1px;
+}
+
+.gan-demo-form button {
+  height: fit-content;
+}
+
+.gan-demo-list-title {
+  margin: 0 0 0.9rem;
+  color: #ffffff;
+  font-family: Space Grotesk, Inter, sans-serif;
+  font-size: 1rem;
+}
+
+.gan-demo-table {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.gan-demo-table-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.9rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.55rem;
+  background: rgba(255, 255, 255, 0.015);
+  padding: 0.7rem 0.9rem;
+  font-size: 0.85rem;
+}
+
+.gan-demo-table-row strong {
+  color: #ffffff;
+  min-width: 8rem;
+}
+
+.gan-demo-table-row span {
+  color: #9fb3a8;
+}
+
+.gan-demo-empty {
+  color: #7a8a80;
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.gan-demo-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.4rem;
+  margin-top: 1.6rem;
+}
+
+.gan-demo-columns h3 {
+  margin: 0 0 0.7rem;
+  color: #ffffff;
+  font-size: 0.95rem;
+}
+
+.gan-demo-qr-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  gap: 1rem;
+}
+
+.gan-demo-qr-card {
+  display: grid;
+  justify-items: center;
+  gap: 0.6rem;
+  border: 1px solid rgba(57, 255, 20, 0.2);
+  border-radius: 0.8rem;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 1.2rem;
+  text-align: center;
+}
+
+.gan-demo-qr-pattern {
+  width: 6rem;
+  height: 6rem;
+  border-radius: 0.4rem;
+  background:
+    repeating-conic-gradient(#39ff14 0% 25%, #0b1510 0% 50%) 0 0 / 1.2rem 1.2rem;
+  border: 2px solid rgba(57, 255, 20, 0.6);
+  box-shadow: 0 0 20px rgba(57, 255, 20, 0.3);
+}
+
+.gan-demo-qr-card strong {
+  color: #ffffff;
+  font-size: 0.9rem;
+}
+
+.gan-demo-qr-card code {
+  color: #7cff00;
+  font-size: 0.78rem;
+}
+
+.gan-demo-select-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin-bottom: 1.4rem;
+  color: #9fb3a8;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.gan-demo-select-inline select {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.5rem;
+  background: #0b1510;
+  color: #e7f5ec;
+  padding: 0.5rem 0.7rem;
+  font-family: inherit;
+}
+
+.gan-demo-ficha {
+  border: 1px solid rgba(57, 255, 20, 0.18);
+  border-radius: 0.8rem;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 1.4rem;
+}
+
+.gan-demo-ficha-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.gan-demo-ficha-head strong {
+  color: #ffffff;
+  font-size: 1.05rem;
+}
+
+.gan-demo-ficha-head span {
+  color: #9fb3a8;
+  font-size: 0.82rem;
+  align-self: center;
+}
+
+.gan-demo-report-text {
+  max-width: 34rem;
+  margin: 0 0 1.2rem;
+  color: #b7c7bd;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+@media (max-width: 700px) {
+  .gan-demo-columns {
+    grid-template-columns: 1fr;
+  }
+}

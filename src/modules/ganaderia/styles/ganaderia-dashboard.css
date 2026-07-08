@@ -1,0 +1,552 @@
+.gan-dash-shell {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  min-height: 100vh;
+  background: #020807;
+  color: #e7f5ec;
+  font-family: Inter, sans-serif;
+}
+
+.gan-dash-sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  overflow-y: auto;
+  border-right: 1px solid rgba(57, 255, 20, 0.18);
+  background: linear-gradient(180deg, #06110c, #020807);
+  padding: 1.6rem 1rem;
+}
+
+.gan-dash-sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0 0.4rem;
+  color: #a8ff2a;
+  font-weight: 800;
+  font-size: 0.95rem;
+}
+
+.gan-dash-sidebar-links {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.gan-dash-sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 0.55rem;
+  color: #9fb3a8;
+  font-size: 0.88rem;
+  font-weight: 650;
+  text-decoration: none;
+  transition: background 160ms ease, color 160ms ease, box-shadow 160ms ease;
+}
+
+.gan-dash-sidebar-link:hover {
+  background: rgba(57, 255, 20, 0.08);
+  color: #e7f5ec;
+}
+
+.gan-dash-sidebar-link.is-active {
+  background: linear-gradient(90deg, #39ff14, #7cff00);
+  color: #04170a;
+  font-weight: 800;
+  box-shadow: 0 0 22px rgba(57, 255, 20, 0.45);
+}
+
+.gan-dash-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1.8rem;
+  min-width: 0;
+  padding: 1.8rem clamp(1.2rem, 3vw, 2.6rem) 3.5rem;
+}
+
+.gan-dash-back {
+  width: fit-content;
+  color: #9fb3a8;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.gan-dash-back:hover {
+  color: #a8ff2a;
+}
+
+.gan-dash-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1.2rem;
+  padding-bottom: 1.4rem;
+  border-bottom: 1px solid rgba(57, 255, 20, 0.16);
+}
+
+.gan-dash-badge {
+  display: inline-block;
+  margin-bottom: 0.7rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid rgba(57, 255, 20, 0.5);
+  border-radius: 999px;
+  background: rgba(57, 255, 20, 0.12);
+  color: #7cff00;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.gan-dash-header h1 {
+  margin: 0;
+  color: #ffffff;
+  font-family: Space Grotesk, Inter, sans-serif;
+  font-size: clamp(1.6rem, 2.6vw, 2.1rem);
+}
+
+.gan-dash-header p {
+  margin: 0.5rem 0 0;
+  max-width: 34rem;
+  color: #b7c7bd;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.gan-dash-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+}
+
+.gan-dash-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 0.75rem 1.3rem;
+  font-weight: 800;
+  font-size: 0.9rem;
+  text-decoration: none;
+  transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.gan-dash-btn:hover {
+  transform: translateY(-2px);
+}
+
+.gan-dash-btn.is-primary {
+  background: linear-gradient(90deg, #39ff14, #7cff00);
+  color: #04170a;
+  box-shadow: 0 0 26px rgba(57, 255, 20, 0.45);
+}
+
+.gan-dash-btn.is-primary:hover {
+  box-shadow: 0 0 42px rgba(57, 255, 20, 0.65);
+}
+
+.gan-dash-btn.is-outline {
+  border-color: rgba(57, 255, 20, 0.5);
+  background: rgba(57, 255, 20, 0.06);
+  color: #a8ff2a;
+}
+
+.gan-dash-btn.is-outline:hover {
+  background: rgba(57, 255, 20, 0.14);
+  box-shadow: 0 0 22px rgba(57, 255, 20, 0.3);
+}
+
+.gan-dash-section h2 {
+  margin: 0 0 1rem;
+  color: #ffffff;
+  font-family: Space Grotesk, Inter, sans-serif;
+  font-size: 1.15rem;
+}
+
+.gan-dash-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.gan-dash-metric-card {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  border: 1px solid rgba(57, 255, 20, 0.16);
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.02);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.3);
+  padding: 1.1rem;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.gan-dash-metric-card:hover {
+  border-color: rgba(57, 255, 20, 0.5);
+  box-shadow: 0 0 28px rgba(57, 255, 20, 0.28);
+  transform: translateY(-2px);
+}
+
+.gan-dash-metric-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 2.7rem;
+  height: 2.7rem;
+  border: 1px solid rgba(57, 255, 20, 0.35);
+  border-radius: 0.6rem;
+  background: rgba(57, 255, 20, 0.12);
+  color: #7cff00;
+}
+
+.gan-dash-metric-card strong {
+  display: block;
+  color: #ffffff;
+  font-family: Space Grotesk, Inter, sans-serif;
+  font-size: 1.35rem;
+}
+
+.gan-dash-metric-card span {
+  display: block;
+  margin-top: 0.15rem;
+  color: #9fb3a8;
+  font-size: 0.78rem;
+}
+
+.gan-dash-quick-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.gan-dash-quick-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 1.1rem;
+  text-decoration: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.gan-dash-quick-card:hover {
+  border-color: rgba(57, 255, 20, 0.55);
+  box-shadow: 0 0 28px rgba(57, 255, 20, 0.32);
+  transform: translateY(-3px);
+}
+
+.gan-dash-quick-icon {
+  display: grid;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 0.55rem;
+  background: rgba(57, 255, 20, 0.1);
+  color: #a8ff2a;
+}
+
+.gan-dash-quick-card strong {
+  color: #ffffff;
+  font-size: 0.95rem;
+}
+
+.gan-dash-quick-card p {
+  margin: 0;
+  color: #9fb3a8;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.gan-dash-columns {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 1.4rem;
+  align-items: start;
+}
+
+.gan-dash-alert-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.gan-dash-alert-card {
+  display: flex;
+  gap: 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 3px solid rgba(57, 255, 20, 0.5);
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 0.9rem 1rem;
+}
+
+.gan-dash-alert-icon {
+  flex: 0 0 auto;
+  margin-top: 0.1rem;
+  color: #7cff00;
+}
+
+.gan-dash-alert-body {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.gan-dash-alert-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.gan-dash-alert-head strong {
+  color: #ffffff;
+  font-size: 0.9rem;
+}
+
+.gan-dash-priority {
+  flex: 0 0 auto;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.gan-dash-priority.is-high {
+  border: 1px solid rgba(255, 77, 77, 0.4);
+  background: rgba(255, 77, 77, 0.16);
+  color: #ff8a8a;
+}
+
+.gan-dash-priority.is-medium {
+  border: 1px solid rgba(255, 193, 7, 0.4);
+  background: rgba(255, 193, 7, 0.14);
+  color: #ffcf4d;
+}
+
+.gan-dash-priority.is-low {
+  border: 1px solid rgba(57, 255, 20, 0.35);
+  background: rgba(57, 255, 20, 0.12);
+  color: #7cff00;
+}
+
+.gan-dash-alert-date {
+  color: #9fb3a8;
+  font-size: 0.76rem;
+}
+
+.gan-dash-alert-action {
+  color: #a8ff2a;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.gan-dash-activity-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.6rem;
+  overflow: hidden;
+}
+
+.gan-dash-activity-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.gan-dash-activity-item:last-child {
+  border-bottom: 0;
+}
+
+.gan-dash-activity-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 999px;
+  background: rgba(57, 255, 20, 0.1);
+  color: #7cff00;
+}
+
+.gan-dash-activity-item div {
+  display: grid;
+  flex: 1;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.gan-dash-activity-item strong {
+  color: #ffffff;
+  font-size: 0.85rem;
+}
+
+.gan-dash-activity-item span {
+  color: #9fb3a8;
+  font-size: 0.76rem;
+}
+
+.gan-dash-activity-item time {
+  flex: 0 0 auto;
+  color: #7a8a80;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.gan-dash-productivity-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.gan-dash-productivity-card {
+  border: 1px solid rgba(57, 255, 20, 0.16);
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 1.1rem;
+}
+
+.gan-dash-productivity-card span {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: #9fb3a8;
+  font-size: 0.78rem;
+}
+
+.gan-dash-productivity-card strong {
+  display: block;
+  margin-bottom: 0.6rem;
+  color: #ffffff;
+  font-family: Space Grotesk, Inter, sans-serif;
+  font-size: 1.3rem;
+}
+
+.gan-dash-productivity-bar {
+  height: 0.4rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.gan-dash-productivity-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #39ff14, #a8ff2a);
+  box-shadow: 0 0 12px rgba(57, 255, 20, 0.5);
+}
+
+.gan-dash-empty {
+  display: grid;
+  justify-items: center;
+  gap: 0.8rem;
+  border: 1px dashed rgba(57, 255, 20, 0.35);
+  border-radius: 0.9rem;
+  background: rgba(57, 255, 20, 0.03);
+  padding: 3rem 1.5rem;
+  text-align: center;
+}
+
+.gan-dash-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 3.4rem;
+  height: 3.4rem;
+  border-radius: 999px;
+  background: rgba(57, 255, 20, 0.12);
+  color: #7cff00;
+}
+
+.gan-dash-empty h3 {
+  margin: 0;
+  color: #ffffff;
+  font-size: 1.1rem;
+}
+
+.gan-dash-empty p {
+  margin: 0;
+  max-width: 24rem;
+  color: #9fb3a8;
+  font-size: 0.88rem;
+}
+
+@media (max-width: 1080px) {
+  .gan-dash-metrics-grid,
+  .gan-dash-quick-grid,
+  .gan-dash-productivity-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .gan-dash-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .gan-dash-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .gan-dash-sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 0;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid rgba(57, 255, 20, 0.18);
+    padding: 0.8rem 1rem;
+    scrollbar-width: none;
+  }
+
+  .gan-dash-sidebar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .gan-dash-sidebar-brand {
+    display: none;
+  }
+
+  .gan-dash-sidebar-links {
+    display: flex;
+    flex-direction: row;
+    gap: 0.4rem;
+  }
+
+  .gan-dash-sidebar-link {
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 600px) {
+  .gan-dash-metrics-grid,
+  .gan-dash-quick-grid,
+  .gan-dash-productivity-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .gan-dash-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
