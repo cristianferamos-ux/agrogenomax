@@ -154,13 +154,15 @@ function daysBetween(startValue, endValue) {
 }
 
 function ageMonths(animal) {
-  const direct = Number(valueOf(animal, ['edad_meses']));
-  if (Number.isFinite(direct) && direct >= 0) return Math.round(direct);
+  const directRaw = valueOf(animal, ['edad_meses']);
+  const direct = Number(directRaw);
+  if (String(directRaw || '').trim() !== '' && Number.isFinite(direct) && direct >= 0) return Math.round(direct);
   const birth = getBirthDate(animal);
   const days = daysBetween(birth, today());
   if (Number.isFinite(days) && days >= 0) return Math.floor(days / 30.44);
-  const age = Number(valueOf(animal, ['edad']));
-  if (Number.isFinite(age) && age >= 0) return age > 60 ? Math.floor(age / 30.44) : Math.round(age);
+  const ageRaw = valueOf(animal, ['edad']);
+  const age = Number(ageRaw);
+  if (String(ageRaw || '').trim() !== '' && Number.isFinite(age) && age >= 0) return age > 60 ? Math.floor(age / 30.44) : Math.round(age);
   return null;
 }
 
@@ -259,21 +261,22 @@ function lastByDate(rows) {
   return [...rows].sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')))[0] || null;
 }
 
+function normalizeReproductiveEvent(row) {
+  return {
+    ...row,
+    persisted: true,
+    tipo_evento: row.tipo_evento || row.evento || row.estado || 'Evento reproductivo',
+    metodo_reproductivo: row.metodo_reproductivo || row.metodo || '',
+    resultado: row.resultado || row.estado || row.diagnostico || '',
+    responsable: row.responsable || '',
+    costo: row.costo || 0,
+    observaciones: row.observaciones || '',
+  };
+}
+
 function resolveReproStatus(sex, months, events) {
   const last = lastByDate(events);
-  if (!last) {
-    if (sex === 'Macho') {
-      if (Number.isFinite(months) && months < 18) return 'En desarrollo';
-      if (Number.isFinite(months) && months <= 24) return 'Apto con seguimiento';
-      return 'Apto como reproductor';
-    }
-    if (sex === 'Hembra') {
-      if (Number.isFinite(months) && months < 15) return 'Sin iniciar';
-      if (Number.isFinite(months) && months <= 18) return 'Apta con seguimiento';
-      return 'Apta';
-    }
-    return 'No aplica';
-  }
+  if (!last) return 'Sin eventos registrados';
   const type = String(last.tipo_evento || '').toLowerCase();
   const result = String(last.resultado || '').toLowerCase();
   if (sex === 'Macho') {
@@ -391,7 +394,7 @@ function calculateMetrics(context, events) {
     }
   }
   const ranking = !Number.isFinite(index) ? 'Índice no disponible' : index >= 95 ? 'AGX-A+' : index >= 85 ? 'AGX-A' : index >= 70 ? 'AGX-B' : 'AGX-C';
-  return { servicios, montas, partos, abortos, preneces, costo, eficiencia, evaluacionesSeminales, intervaloPartos, diasAbiertos, index, ranking, hasEnoughIndexData };
+  return { servicios, montas, partos, abortos, preneces, costo, eficiencia, evaluacionesSeminales, intervaloPartos, diasAbiertos, index, ranking, hasEnoughIndexData, eventCount: events.length };
 }
 
 function maturityScore(context, metrics, vacunaciones) {
@@ -415,6 +418,7 @@ function maturityText(score, context) {
 }
 
 function getDecision(context, metrics) {
+  if (!metrics.eventCount) return { state: 'SIN EVENTOS REGISTRADOS', action: 'No clasificar', next: 'Registrar evento real' };
   if (context.sex === 'Macho') {
     if (Number.isFinite(context.ageMonths) && context.ageMonths < 18) return { state: 'EN DESARROLLO', action: 'Esperar', next: 'Control a 18 meses' };
     if (Number.isFinite(context.ageMonths) && context.ageMonths <= 24) return { state: 'USO CONTROLADO', action: 'Evaluar', next: 'Prueba andrológica' };
@@ -503,20 +507,23 @@ export default function AnimalReproduccionTab() {
       ganaderiaApi.getAnimalRazas(id),
       ganaderiaApi.listAnimalPesajesEvolucion(id),
       ganaderiaApi.listAnimalVacunaciones(id),
+      ganaderiaApi.listAnimalReproduccion(id),
     ]).then((results) => {
       if (!mounted) return;
-      const [animalResult, razasResult, pesajesResult, vacunasResult] = results;
+      const [animalResult, razasResult, pesajesResult, vacunasResult, reproduccionResult] = results;
       if (animalResult.status === 'fulfilled') setAnimal(animalResult.value);
       else setError(animalResult.reason?.message || 'No se pudo cargar el animal.');
       if (razasResult.status === 'fulfilled') setRazas(razasResult.value || []);
       if (pesajesResult.status === 'fulfilled') setPesajes(pesajesResult.value || []);
       if (vacunasResult.status === 'fulfilled') setVacunaciones(vacunasResult.value || []);
+      if (reproduccionResult.status === 'fulfilled') setEvents((reproduccionResult.value || []).map(normalizeReproductiveEvent));
     });
     return () => { mounted = false; };
   }, [id]);
 
-  const context = useMemo(() => getReproductiveContext(animal, events), [animal, events]);
-  const metrics = useMemo(() => calculateMetrics(context, events), [context, events]);
+  const realEvents = useMemo(() => events.filter((event) => event.persisted), [events]);
+  const context = useMemo(() => getReproductiveContext(animal, realEvents), [animal, realEvents]);
+  const metrics = useMemo(() => calculateMetrics(context, realEvents), [context, realEvents]);
   const decision = getDecision(context, metrics);
   const lastEvent = lastByDate(events);
   const raza = razas.map((row) => row.nombre_raza || row.raza || row.nombre).filter(Boolean).join(' / ') || valueOf(animal, ['raza', 'nombre_raza']) || '--';
@@ -548,7 +555,7 @@ export default function AnimalReproduccionTab() {
       setError('La fecha del evento reproductivo es obligatoria.');
       return;
     }
-    setEvents((current) => [{ ...eventForm, evento_id: `REP-${new Date().getFullYear()}-${String(current.length + 1).padStart(6, '0')}` }, ...current]);
+    setEvents((current) => [{ ...eventForm, persisted: false, evento_id: `REP-${new Date().getFullYear()}-${String(current.length + 1).padStart(6, '0')}` }, ...current]);
     setEventForm({ ...initialEventForm, tipo_evento: context.allowedEvents[0] || 'Evaluación reproductiva', metodo_reproductivo: allowedMethods[0] || '' });
     setStatus('Evento reproductivo agregado a la vista local del módulo. Listo para conectar a API en fase posterior.');
   };
@@ -593,24 +600,29 @@ export default function AnimalReproduccionTab() {
       const qrCode = animalQrLabel(animal);
       const maturityLabel = maturityText(maturity, context);
       const maturityToneForReport = maturity >= 76 ? 'success' : maturity >= 41 ? 'warning' : 'danger';
-      const indicatorItems = isMale
+      const hasRealEvents = realEvents.length > 0;
+      const indicatorItems = !hasRealEvents
         ? [
+            { label: 'Estado reproductivo registrado', value: 'No registrado' },
+            { label: 'Eventos reproductivos', value: 'No se registran eventos reproductivos para este animal.' },
+            { label: 'Información no registrada', value: 'Sin diagnósticos, servicios, preñez, embriones ni evidencias reales.' },
+          ]
+        : isMale
+          ? [
             { label: 'Servicios/montas', value: String(metrics.servicios) },
-            { label: 'Método reproductivo', value: events[0]?.metodo_reproductivo || eventForm.metodo_reproductivo || 'No registrado' },
+            { label: 'Método reproductivo', value: realEvents[0]?.metodo_reproductivo || 'No registrado' },
             { label: 'Evaluación andrológica', value: metrics.evaluacionesSeminales ? 'Registrada' : 'No registrada' },
             { label: 'Calidad seminal', value: metrics.evaluacionesSeminales ? 'En seguimiento' : 'Sin datos' },
             { label: 'Potencial reproductivo', value: Number.isFinite(metrics.index) ? metrics.ranking : 'En evaluación' },
             { label: 'Aptitud reproductiva', value: decision.state, tone: statusTone(decision.state) },
           ]
-        : [
+          : [
             { label: 'Servicios', value: String(metrics.servicios) },
             { label: 'Preñeces', value: String(metrics.preneces) },
             { label: 'Partos', value: String(metrics.partos) },
             { label: 'Abortos', value: String(metrics.abortos), tone: metrics.abortos > 0 ? 'danger' : 'info' },
             { label: 'Días abiertos', value: Number.isFinite(metrics.diasAbiertos) ? `${metrics.diasAbiertos} días` : '--' },
             { label: 'Intervalo entre partos', value: Number.isFinite(metrics.intervaloPartos) ? `${metrics.intervaloPartos} días` : '--' },
-            { label: 'Aptitud receptora', value: embryoIndicator(embryoProbability), tone: embryoTone },
-            { label: 'Aptitud donadora', value: embryoIndicator(embryoProbability), tone: embryoTone },
           ];
       const report = {
         generatedAt: new Date().toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }),
@@ -623,17 +635,17 @@ export default function AnimalReproduccionTab() {
           categoria: context.category,
         },
         estado: {
-          estado: context.reproductiveStatus,
+          estado: hasRealEvents ? context.reproductiveStatus : 'No registrado',
           edadReproductiva,
           madurez: `${maturity}% - ${maturityLabel}`,
           madurezTone: maturityToneForReport,
-          decision: decision.state,
-          proximoPaso: decision.next,
+          decision: hasRealEvents ? decision.state : 'Sin decisión reproductiva registrada',
+          proximoPaso: hasRealEvents ? decision.next : 'Registrar eventos reproductivos reales',
           rol: context.reproductiveRole,
           tone: statusTone(context.reproductiveStatus),
         },
         indicadores: indicatorItems,
-        eventos: events.map((event) => ({
+        eventos: realEvents.map((event) => ({
           fecha: formatDate(event.fecha),
           tipo: event.tipo_evento || '--',
           metodo: event.metodo_reproductivo || '--',
@@ -643,26 +655,18 @@ export default function AnimalReproduccionTab() {
           observaciones: event.observaciones || '--',
           tone: statusTone(event.resultado || event.tipo_evento),
         })),
-        evidencias: evidences.map((evidence) => ({
-          tipo: evidence.tipo || 'Evidencia reproductiva',
-          nombre: evidence.nombre || '--',
-          fecha: formatDate(evidence.fecha),
-          observacion: evidence.observacion || '--',
-        })),
+        evidencias: [],
         analisis: [
-          { label: 'Cruce productivo', value: gdpText },
-          { label: 'Cruce sanitario', value: 'Pendiente de endpoint integrado.' },
-          { label: 'Vacunación', value: vacunaciones.length ? `${vacunaciones.length} registros disponibles.` : 'Sin registros.' },
-          { label: 'Reproducción', value: `${events.length} eventos registrados.` },
+          { label: 'Datos reales del animal', value: `${ageText} - ${context.category}` },
+          { label: 'Estado reproductivo registrado', value: hasRealEvents ? context.reproductiveStatus : 'No registrado' },
+          { label: 'Información no registrada', value: hasRealEvents ? `${realEvents.length} eventos registrados.` : 'No se registran eventos reproductivos para este animal.' },
         ],
-        descendencia: isMale ? maleDescendanceCards.map((card) => ({ label: card.label, value: card.value, tone: 'info' })) : [],
+        descendencia: [],
         ranking: {
           indice: indexValue,
           clasificacion: metrics.hasEnoughIndexData ? metrics.ranking : 'Sin clasificación',
           tendencia: metrics.hasEnoughIndexData ? (metrics.index >= 90 ? 'Mejorando' : metrics.index >= 70 ? 'Estable' : 'Empeorando') : 'Sin datos',
-          explicacion: isMale
-            ? 'Edad, servicios, evaluación andrológica, sanidad, descendencia y genética.'
-            : 'Preñeces, partos, días abiertos, servicios por preñez, abortos, sanidad y condición productiva.',
+          explicacion: hasRealEvents ? 'Cálculo basado únicamente en eventos reproductivos reales registrados.' : 'Sin eventos reproductivos reales para calcular ranking.',
         },
       };
       const blob = await createReproductiveReportPdfBlob(report);
@@ -705,7 +709,7 @@ export default function AnimalReproduccionTab() {
         <KpiCard icon={Dna} label="Potencial" value={Number.isFinite(metrics.index) ? metrics.ranking : 'En evaluación'} detail={metrics.hasEnoughIndexData ? 'Clasificación AGX' : 'Sin datos suficientes'} />
         <KpiCard icon={DollarSign} label="Inversión" value={formatMoney(metrics.costo)} detail={metrics.costo ? 'Costo reproductivo' : 'Sin eventos registrados'} />
         <KpiCard icon={TrendingUp} label="Aptitud" value={decision.state} detail={decision.next} tone={statusTone(decision.state)} />
-        {isFemale ? <KpiCard icon={ShieldCheck} label="Aptitud TE" value={embryoIndicator(embryoProbability)} detail="Receptora / donadora" tone={embryoTone} /> : null}
+        {isFemale && realEvents.length ? <KpiCard icon={ShieldCheck} label="Aptitud TE" value={embryoIndicator(embryoProbability)} detail="Transferencia embrionaria registrada" tone={embryoTone} /> : null}
       </section>
 
       <section className={`gan-panel repro-maturity-panel ${statusClass(maturityText(maturity, context))}`}>
@@ -747,7 +751,7 @@ export default function AnimalReproduccionTab() {
         </div>
       </section>
 
-      {isFemale ? (
+      {isFemale && realEvents.length ? (
         <section className="gan-panel repro-embryo-panel">
           <div className="gan-section-heading">
             <span className="gan-eyebrow">Gestión de embriones</span>
@@ -787,7 +791,7 @@ export default function AnimalReproduccionTab() {
             setError('La fecha del evento reproductivo es obligatoria.');
             return;
           }
-          setEvents((current) => [{ ...eventForm, evento_id: `REP-${new Date().getFullYear()}-${String(current.length + 1).padStart(6, '0')}` }, ...current]);
+          setEvents((current) => [{ ...eventForm, persisted: false, evento_id: `REP-${new Date().getFullYear()}-${String(current.length + 1).padStart(6, '0')}` }, ...current]);
           setEventForm({ ...initialEventForm, tipo_evento: context.allowedEvents[0] || 'Evaluación reproductiva', metodo_reproductivo: allowedMethods[0] || '' });
           setStatus('Evento reproductivo agregado a la vista local del módulo. Listo para conectar a API en fase posterior.');
         }}>
@@ -840,7 +844,7 @@ export default function AnimalReproduccionTab() {
             <SummaryCard label="Resultado económico" value="EN EVALUACIÓN" tone="warning" />
           </div>
         ) : (
-          <p className="gan-empty-text">No existen eventos reproductivos registrados.</p>
+          <p className="gan-empty-text">No se registran eventos reproductivos para este animal.</p>
         )}
       </section>
 
@@ -852,7 +856,7 @@ export default function AnimalReproduccionTab() {
         <div className="repro-compact-timeline">
           <div><span className="dot is-done" /> <strong>Nacimiento</strong> <em>{formatDate(getBirthDate(animal))}</em></div>
           <div className="line">↓</div>
-          {events.length ? events.slice().sort((a, b) => String(a.fecha).localeCompare(String(b.fecha))).map((event) => (
+          {realEvents.length ? realEvents.slice().sort((a, b) => String(a.fecha).localeCompare(String(b.fecha))).map((event) => (
             <div key={event.evento_id}><span className={`dot ${statusClass(event.resultado || event.tipo_evento)}`} /> <strong>{event.tipo_evento}</strong> <em>{formatDate(event.fecha)}</em></div>
           )) : <div><span className="dot" /> <strong>Sin eventos registrados</strong></div>}
         </div>
@@ -867,7 +871,7 @@ export default function AnimalReproduccionTab() {
           <SummaryCard label="GDP" value={gdpText} />
           <SummaryCard label="Sanidad" value="Pendiente de endpoint integrado" />
           <SummaryCard label="Vacunación" value={vacunaciones.length ? `${vacunaciones.length} registros disponibles` : 'Sin registros'} />
-          <SummaryCard label="Reproducción" value={`${events.length} eventos registrados`} />
+          <SummaryCard label="Reproducción" value={`${realEvents.length} eventos registrados`} />
         </div>
       </section>
 

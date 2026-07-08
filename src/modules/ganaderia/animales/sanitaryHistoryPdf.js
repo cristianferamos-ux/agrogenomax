@@ -504,7 +504,7 @@ class PdfBuilder {
     this.sectionTitle('Vacunaciones registradas');
     if (!vacunaciones.length) {
       this.rect(MARGIN, this.y - 42, PAGE.width - MARGIN * 2, 42, [0.72, 0.77, 0.82], [0.98, 0.99, 1]);
-      this.text('No existen vacunaciones registradas para este animal.', MARGIN + 14, this.y - 25, 10, FONT.bold, [0.32, 0.38, 0.45]);
+      this.text('No se registran vacunaciones para este animal.', MARGIN + 14, this.y - 25, 10, FONT.bold, [0.32, 0.38, 0.45]);
       this.y -= 58;
     }
     vacunaciones.forEach((vacuna) => this.drawVaccineCard(vacuna, generatedAt));

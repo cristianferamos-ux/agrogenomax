@@ -142,7 +142,18 @@ router.get('/:id', async (req, res, next) => {
   try {
     const columns = await getColumns('animales');
     const idColumn = idColumnFor('animales', columns);
-    const result = await query(`select * from ${tableName('animales')} where "${idColumn}" = $1 limit 1`, [req.params.id]);
+    const result = await query(
+      `select
+          a.*,
+          p.nombre_predio,
+          po.nombre as nombre_potrero
+         from ${tableName('animales')} a
+         left join ${tableName('predios')} p on p.predio_id = a.predio_id
+         left join ${tableName('potreros')} po on po.potrero_id = a.potrero_id
+        where a."${idColumn}" = $1
+        limit 1`,
+      [req.params.id],
+    );
     if (!result.rows[0]) {
       res.status(404).json({ error: 'Animal no encontrado' });
       return;

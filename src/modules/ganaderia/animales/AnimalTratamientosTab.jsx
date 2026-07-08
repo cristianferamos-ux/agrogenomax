@@ -88,50 +88,6 @@ const caseStatuses = [
   'Fallecido',
 ];
 
-const mockTreatments = [
-  {
-    tratamiento_id: 'mock-1',
-    fecha_inicio: '2026-05-20',
-    fecha_finalizacion: '2026-05-25',
-    motivo: 'Cojera leve',
-    diagnostico: 'Inflamación podal',
-    sintomas: 'Apoyo irregular y sensibilidad al caminar',
-    estado_caso: 'Seguimiento',
-    nombre_comercial: 'Antiinflamatorio bovino',
-    principio_activo: 'Meloxicam',
-    laboratorio: 'Registro temporal',
-    lote: 'TEMP-001',
-    fecha_vencimiento: '2027-12-31',
-    dosis: 'Según criterio profesional',
-    unidad: 'ml',
-    via_aplicacion: 'Subcutánea',
-    frecuencia: 'Cada 24 horas',
-    duracion_dias: '3',
-    retiro_carne_dias: '8',
-    retiro_leche_dias: '3',
-    fecha_fin_retiro_carne: '2026-06-02',
-    fecha_fin_retiro_leche: '2026-05-28',
-    costo_medicamento: '85000',
-    costo_veterinario: '120000',
-    costo_mano_obra: '30000',
-    otros_costos: '0',
-    profesional: 'No registrado',
-    profesion: 'No registrada',
-    matricula: 'No registrada',
-    entidad: 'No registrada',
-    observaciones: 'Dato temporal de visualización. No guardado en PostgreSQL.',
-    evidencias: [
-      {
-        evidencia_id: 'ev-mock-1',
-        nombre: 'Registro fotográfico de apoyo irregular',
-        tipo: 'Foto de lesión',
-        fecha: '2026-05-20',
-        observacion: 'Evidencia local temporal.',
-      },
-    ],
-  },
-];
-
 function valueOf(row, aliases) {
   return aliases.map((key) => row?.[key]).find((value) => value !== undefined && value !== null && value !== '') || '';
 }
@@ -726,7 +682,7 @@ function openClinicalPrint({ animal, razas, rows, resumen, alerts, impact, clini
       <p><b>Estado clínico</b><span class="metric">${safe(resumen.estado)}</span></p><p><b>Eventos sanitarios</b><span class="metric">${safe(resumen.total)}</span></p><p><b>Costo sanitario</b><span class="metric">${safe(formatMoney(resumen.costo))}</span></p>
       <p><b>Riesgo</b>${safe(resumen.riesgo.label)}</p><p><b>Índice sanitario</b>${safe(`${resumen.indiceSanitario}/100`)}</p><p><b>Duración clínica</b>${safe(resumen.duracion?.days ?? '--')} días</p>
     </div></section>
-    <section class="panel"><h2>Historial clínico</h2>${rowsHtml || '<p>No existen tratamientos registrados.</p>'}</section>
+    <section class="panel"><h2>Historial clínico</h2>${rowsHtml || '<p>No se registran tratamientos clínicos para este animal.</p>'}</section>
     <section class="panel"><h2>Restricción comercial temporal</h2>${resumen.retiroActivo ? `<div class="grid"><p><b>Estado comercial</b>NO APTO TEMPORALMENTE</p><p><b>Restricción carne</b>${safe(resumen.carne.label === 'Activo' ? 'Retiro de carne activo' : 'Sin restricción')}</p><p><b>Liberación carne</b>${safe(resumen.carne.release || '--')}</p><p><b>Tiempo restante carne</b>${safe(resumen.carne.countdown || '--')}</p><p><b>Restricción leche</b>${safe(resumen.leche.label === 'Activo' ? 'Retiro de leche activo' : 'Sin restricción')}</p><p><b>Liberación leche</b>${safe(resumen.leche.release || '--')}</p></div>` : '<p><b>Estado comercial</b>APTO</p><p>Sin restricciones sanitarias activas.</p>'}</section>
     <section class="panel"><h2>Impacto productivo</h2><p>${impact ? `GDP previo: ${safe(formatMetric(impact.gdpBefore, ' kg/día'))}<br>GDP posterior: ${safe(formatMetric(impact.gdpAfter, ' kg/día'))}<br>Variación: ${safe(impactLabel(impact))}` : 'Sin datos suficientes de pesajes para estimar impacto productivo.'}</p></section>
     <section class="panel"><h2>Impacto económico sanitario</h2><p>Costo sanitario total: ${safe(formatMoney(economia.costoTratamiento))}<br>Recuperación productiva: ${safe(economia.recuperacionProductiva === null ? '--' : formatMetric(economia.recuperacionProductiva, ' kg/día'))}<br>Valor recuperado estimado: ${safe(economia.valorRecuperado === null ? '--' : formatMoney(economia.valorRecuperado))}<br>Pérdida productiva estimada: ${safe(economia.perdidaProductiva === null ? '--' : formatMoney(economia.perdidaProductiva))}<br>Pérdida evitada estimada: ${safe(economia.perdidaEvitada === null ? '--' : formatMoney(economia.perdidaEvitada))}<br>Retorno sanitario: ${safe(Number.isFinite(economia.retorno) ? `${formatMetric(economia.retorno, 'x')}` : '--')}<br>Resultado económico sanitario: ${safe(economicStatus.label)}</p><p>${safe(economicStatus.text)}</p><p>${safe(economia.message)}</p></section>
@@ -759,10 +715,10 @@ export default function AnimalTratamientosTab({ animalId }) {
   const [animal, setAnimal] = useState(null);
   const [razas, setRazas] = useState([]);
   const [pesajes, setPesajes] = useState([]);
-  const [tratamientos, setTratamientos] = useState(mockTreatments);
+  const [tratamientos, setTratamientos] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [evidenceForm, setEvidenceForm] = useState(emptyEvidence);
-  const [evidencias, setEvidencias] = useState(mockTreatments.flatMap((row) => row.evidencias || []));
+  const [evidencias, setEvidencias] = useState([]);
   const [precioKg, setPrecioKg] = useState('');
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
@@ -773,11 +729,14 @@ export default function AnimalTratamientosTab({ animalId }) {
       ganaderiaApi.getAnimal(resolvedAnimalId),
       ganaderiaApi.getAnimalRazas(resolvedAnimalId).catch(() => []),
       ganaderiaApi.listAnimalPesajesEvolucion(resolvedAnimalId).catch(() => []),
+      ganaderiaApi.listAnimalTratamientos(resolvedAnimalId).catch(() => []),
     ])
-      .then(([animalRow, razaRows, pesajeRows]) => {
+      .then(([animalRow, razaRows, pesajeRows, tratamientoRows]) => {
         setAnimal(animalRow);
         setRazas(razaRows || []);
         setPesajes(pesajeRows || []);
+        setTratamientos(tratamientoRows || []);
+        setEvidencias([]);
       })
       .catch((err) => setError(err.message));
   }, [resolvedAnimalId]);

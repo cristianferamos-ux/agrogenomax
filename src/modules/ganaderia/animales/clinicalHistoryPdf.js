@@ -272,6 +272,43 @@ class PdfBuilder {
     this.text(`Página ${this.pageNumber} de ${this.totalPages}`, PAGE.width - 96, 20, 8, FONT.regular, [0.32, 0.38, 0.45]);
   }
 
+  output() {
+    this.totalPages = String(this.pages.length);
+    this.pages = this.pages.map((page) => page.replace(/__TOTAL_PAGES__/g, this.totalPages));
+
+    const fontRegular = this.addObject('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
+    const fontBold = this.addObject('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
+    const pageIds = [];
+    const pagesRootId = this.objects.length + this.pages.length * 2 + 1;
+    this.pages.forEach((content) => {
+      const contentId = this.addObject(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
+      const xObjects = [];
+      if (this.logoObjectId) xObjects.push(`/ImLogo ${this.logoObjectId} 0 R`);
+      if (this.brandObjectId) xObjects.push(`/ImBrand ${this.brandObjectId} 0 R`);
+      if (this.footerBrandObjectId) xObjects.push(`/ImFooterBrand ${this.footerBrandObjectId} 0 R`);
+      if (this.qrObjectId) xObjects.push(`/ImQr ${this.qrObjectId} 0 R`);
+      const xObject = xObjects.length ? `/XObject << ${xObjects.join(' ')} >>` : '';
+      const pageId = this.addObject(`<< /Type /Page /Parent ${pagesRootId} 0 R /MediaBox [0 0 ${PAGE.width} ${PAGE.height}] /Resources << /Font << /F1 ${fontRegular} 0 R /F2 ${fontBold} 0 R >> ${xObject} >> /Contents ${contentId} 0 R >>`);
+      pageIds.push(pageId);
+    });
+    const pagesId = this.addObject(`<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(' ')}] /Count ${pageIds.length} >>`);
+    const catalogId = this.addObject(`<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
+
+    const parts = ['%PDF-1.4\n%\xE2\xE3\xCF\xD3\n'];
+    const offsets = [0];
+    this.objects.forEach((object, index) => {
+      offsets.push(parts.join('').length);
+      parts.push(`${index + 1} 0 obj\n${object}\nendobj\n`);
+    });
+    const xrefOffset = parts.join('').length;
+    parts.push(`xref\n0 ${this.objects.length + 1}\n0000000000 65535 f \n`);
+    offsets.slice(1).forEach((offset) => parts.push(`${String(offset).padStart(10, '0')} 00000 n \n`));
+    parts.push(`trailer\n<< /Size ${this.objects.length + 1} /Root ${catalogId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
+
+    const bytes = new Uint8Array(parts.join('').split('').map((char) => char.charCodeAt(0) & 0xff));
+    return new Blob([bytes], { type: 'application/pdf' });
+  }
+
   header() {
     this.pageNumber += 1;
     this.y = PAGE.height - MARGIN;
@@ -462,9 +499,35 @@ class PdfBuilder {
       'Análisis generado con datos registrados en AgroGenomaX. La validación clínica final debe realizarse bajo criterio profesional veterinario.',
     ], report.clinical.className);
 
+    const hasTreatments = report.tratamientos.length > 0;
+
     this.sectionTitle('Historial clínico');
-    if (report.tratamientos.length) report.tratamientos.forEach((row) => this.treatmentCard(row));
-    else this.panel('Sin tratamientos registrados', ['No existen tratamientos registrados para este animal.']);
+    if (hasTreatments) report.tratamientos.forEach((row) => this.treatmentCard(row));
+    else this.panel('Sin tratamientos registrados', ['No se registran tratamientos clínicos para este animal.']);
+
+    if (!hasTreatments) {
+      this.panel('Información clínica no registrada', [
+        'No hay diagnósticos clínicos registrados.',
+        'No hay medicamentos, costos, retiros sanitarios ni evidencias clínicas registradas.',
+        'Este PDF conserva la ficha real del animal y deja vacías las secciones sin soporte en la API.',
+      ], 'estado-sin-programacion');
+
+      this.sectionTitle('Evidencias clínicas');
+      this.panel('Sin evidencias clínicas', ['No hay evidencias clínicas registradas.']);
+
+      this.panel('Impacto reproductivo', ['Sin información clínica registrada para evaluar impacto reproductivo.'], 'estado-sin-programacion');
+
+      this.ensureSpace(150);
+      this.sectionTitle('Certificación técnica');
+      this.rect(MARGIN, this.y - 118, PAGE.width - MARGIN * 2, 118, [0.82, 0.87, 0.91], [1, 1, 1]);
+      this.wrapped('Certifico que la información clínica registrada en este documento corresponde a los registros almacenados en la plataforma AgroGenomaX.', MARGIN + 14, this.y - 32, 96, 8, FONT.bold, [0.06, 0.09, 0.12], 10);
+
+      this.footer();
+      this.pages.push(this.current.join('\n'));
+      this.totalPages = String(this.pages.length);
+      this.pages = this.pages.map((page) => page.replace(/__TOTAL_PAGES__/g, this.totalPages));
+      return this.output();
+    }
 
     this.panel('Restricción comercial temporal', report.retiro.lines, report.retiro.className);
 
@@ -517,40 +580,7 @@ class PdfBuilder {
 
     this.footer();
     this.pages.push(this.current.join('\n'));
-    this.totalPages = String(this.pages.length);
-    this.pages = this.pages.map((page) => page.replace(/__TOTAL_PAGES__/g, this.totalPages));
-
-    const fontRegular = this.addObject('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
-    const fontBold = this.addObject('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
-    const pageIds = [];
-    const pagesRootId = this.objects.length + this.pages.length * 2 + 1;
-    this.pages.forEach((content) => {
-      const contentId = this.addObject(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
-      const xObjects = [];
-      if (this.logoObjectId) xObjects.push(`/ImLogo ${this.logoObjectId} 0 R`);
-      if (this.brandObjectId) xObjects.push(`/ImBrand ${this.brandObjectId} 0 R`);
-      if (this.footerBrandObjectId) xObjects.push(`/ImFooterBrand ${this.footerBrandObjectId} 0 R`);
-      if (this.qrObjectId) xObjects.push(`/ImQr ${this.qrObjectId} 0 R`);
-      const xObject = xObjects.length ? `/XObject << ${xObjects.join(' ')} >>` : '';
-      const pageId = this.addObject(`<< /Type /Page /Parent ${pagesRootId} 0 R /MediaBox [0 0 ${PAGE.width} ${PAGE.height}] /Resources << /Font << /F1 ${fontRegular} 0 R /F2 ${fontBold} 0 R >> ${xObject} >> /Contents ${contentId} 0 R >>`);
-      pageIds.push(pageId);
-    });
-    const pagesId = this.addObject(`<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(' ')}] /Count ${pageIds.length} >>`);
-    const catalogId = this.addObject(`<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
-
-    const parts = ['%PDF-1.4\n%\xE2\xE3\xCF\xD3\n'];
-    const offsets = [0];
-    this.objects.forEach((object, index) => {
-      offsets.push(parts.join('').length);
-      parts.push(`${index + 1} 0 obj\n${object}\nendobj\n`);
-    });
-    const xrefOffset = parts.join('').length;
-    parts.push(`xref\n0 ${this.objects.length + 1}\n0000000000 65535 f \n`);
-    offsets.slice(1).forEach((offset) => parts.push(`${String(offset).padStart(10, '0')} 00000 n \n`));
-    parts.push(`trailer\n<< /Size ${this.objects.length + 1} /Root ${catalogId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
-
-    const bytes = new Uint8Array(parts.join('').split('').map((char) => char.charCodeAt(0) & 0xff));
-    return new Blob([bytes], { type: 'application/pdf' });
+    return this.output();
   }
 }
 

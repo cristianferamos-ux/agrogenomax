@@ -371,7 +371,7 @@ class PdfBuilder {
 
     this.sectionTitle('Historial de eventos reproductivos');
     if (report.eventos.length) report.eventos.forEach((event) => this.eventCard(event));
-    else this.panel('Sin eventos reproductivos', ['No existen eventos reproductivos registrados para este animal.']);
+    else this.panel('Sin eventos reproductivos', ['No se registran eventos reproductivos para este animal.']);
 
     this.sectionTitle('Evidencias reproductivas');
     if (report.evidencias.length) report.evidencias.forEach((item) => this.evidenceCard(item));
