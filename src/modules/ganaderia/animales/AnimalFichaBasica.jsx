@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ganaderiaApi } from '../api/ganaderiaApi.js';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
+import { formatDateDisplay } from '../utils/dateFormat.js';
 
 const fields = [
   ['codigo_interno', 'Codigo interno'],
@@ -169,6 +170,7 @@ export default function AnimalFichaBasica() {
   const identityRows = [
     ['QR asociado', valueFrom(animal, ['codigo_qr']) || 'Sin QR asignado'],
     ['Codigo interno', valueOf(animal, 'codigo_interno') || 'Sin codigo interno'],
+    ['Fecha nacimiento', formatDateDisplay(valueOf(animal, 'fecha_nacimiento'))],
     ['Predio', valueFrom(animal, ['nombre_predio']) || 'Sin predio registrado'],
     ['Potrero', valueFrom(animal, ['nombre_potrero']) || 'Sin potrero registrado'],
     ['Raza principal', valueFrom(animal, ['raza_principal']) || razas[0]?.nombre_raza || 'Sin raza registrada'],
