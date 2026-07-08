@@ -18,6 +18,75 @@ export function normalizeSex(value) {
   return '';
 }
 
+// Taxonomia cerrada de proposito productivo. Un mismo sexo/edad puede requerir
+// modulos distintos segun para que existe el animal en el hato (ver diseno
+// "Logica ganadera por sexo, proposito y produccion de leche").
+export const PROPOSITOS_MACHO = [
+  'Padrón/Reproductor',
+  'Calentador',
+  'Levante',
+  'Carne/Ceba',
+  'Reserva genética',
+  'Descarte',
+  'Otro',
+];
+
+export const PROPOSITOS_HEMBRA = [
+  'Donadora',
+  'Receptora',
+  'Leche',
+  'Carne',
+  'Cría',
+  'Doble propósito',
+  'Reemplazo',
+  'Descarte',
+  'Otro',
+];
+
+export function getPropositosPorSexo(sexo) {
+  const sexoNormalizado = normalizeSex(sexo);
+  if (sexoNormalizado === 'macho') return PROPOSITOS_MACHO;
+  if (sexoNormalizado === 'hembra') return PROPOSITOS_HEMBRA;
+  return [];
+}
+
+function propositoDe(animal) {
+  return valueOf(animal, ['proposito_productivo', 'proposito', 'propósito']);
+}
+
+// Solo hembra con proposito Leche o Doble proposito. Un macho nunca debe
+// mostrar produccion de leche, sin importar su categoria por edad/sexo.
+export function aplicaProduccionLeche(animal) {
+  const sexo = normalizeSex(valueOf(animal, ['sexo', 'sex']));
+  return sexo === 'hembra' && ['Leche', 'Doble propósito'].includes(propositoDe(animal));
+}
+
+// Comercializacion directa del animal (no de sus crias). Carne/Ceba y Descarte
+// son los casos sin ambiguedad; "Carne" (hembra) y "Doble propósito" comercializan
+// principalmente a traves de las crias, por lo que quedan fuera de este gate simple.
+export function aplicaComercializacion(animal) {
+  return ['Carne/Ceba', 'Descarte'].includes(propositoDe(animal));
+}
+
+const SIN_REPRODUCCION_MACHO = ['Levante', 'Carne/Ceba', 'Reserva genética', 'Descarte', 'Otro'];
+const SIN_REPRODUCCION_HEMBRA = ['Cría', 'Otro'];
+
+export function aplicaReproduccion(animal) {
+  const sexo = normalizeSex(valueOf(animal, ['sexo', 'sex']));
+  const proposito = propositoDe(animal);
+  if (sexo === 'macho') return !SIN_REPRODUCCION_MACHO.includes(proposito);
+  if (sexo === 'hembra') return !SIN_REPRODUCCION_HEMBRA.includes(proposito);
+  return false;
+}
+
+const GENETICA_PROTAGONISTA = ['Padrón/Reproductor', 'Reserva genética', 'Donadora'];
+
+// Genetica como modulo PRINCIPAL (no solo presente). Aplica a los propositos
+// donde la composicion racial/pedigri es el dato que sostiene la decision.
+export function aplicaGeneticaComoModuloPrincipal(animal) {
+  return GENETICA_PROTAGONISTA.includes(propositoDe(animal));
+}
+
 export function categoriaCebaPorSexo(sexo) {
   if (sexo === 'hembra') return 'Novilla de Ceba';
   if (sexo === 'macho') return 'Novillo de Ceba';

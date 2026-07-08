@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import GanaderiaDemoNotice from '../components/GanaderiaDemoNotice.jsx';
 import { loadDemoData, resetDemoData } from '../data/ganaderiaDemoData.js';
+import { aplicaProduccionLeche, aplicaComercializacion } from '../engine/categoria.js';
 import { buildDemoReportPdfBlob, downloadBlob } from '../utils/demoPdf.js';
 import '../styles/ganaderia-dashboard.css';
 import '../styles/ganaderia-demo.css';
@@ -547,12 +548,14 @@ function ReproduccionTab({ caso, casoActivo }) {
   );
 }
 
-function LecheTab({ caso, casoActivo }) {
-  if (casoActivo === 'coronado') {
+function LecheTab({ caso }) {
+  if (!aplicaProduccionLeche(caso.identidad)) {
     return (
       <section className="gan-dash-section">
         <h2>Producción de leche</h2>
-        <NotApplicable text="No aplica a este caso. Coronado es un macho en etapa de comercialización." />
+        <NotApplicable
+          text={`No aplica a este caso. El propósito productivo de ${caso.identidad.nombre} es "${caso.identidad.proposito_productivo}", no leche.`}
+        />
       </section>
     );
   }
@@ -614,12 +617,14 @@ function LecheTab({ caso, casoActivo }) {
   );
 }
 
-function ComercializacionTab({ caso, casoActivo }) {
-  if (casoActivo === 'esperanza') {
+function ComercializacionTab({ caso }) {
+  if (!aplicaComercializacion(caso.identidad)) {
     return (
       <section className="gan-dash-section">
         <h2>Comercialización</h2>
-        <NotApplicable text="No aplica a este caso. Esperanza es una vaca activa en producción de leche." />
+        <NotApplicable
+          text={`No aplica a este caso. El propósito productivo de ${caso.identidad.nombre} es "${caso.identidad.proposito_productivo}".`}
+        />
       </section>
     );
   }
