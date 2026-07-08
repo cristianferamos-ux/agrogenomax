@@ -142,14 +142,21 @@ router.get('/:id', async (req, res, next) => {
   try {
     const columns = await getColumns('animales');
     const idColumn = idColumnFor('animales', columns);
+    const qrColumns = await getColumns('qr_codes');
+    const qrAnimalColumn = pickColumn(qrColumns, ['animal_id', 'id_animal']);
+    const qrCodeColumn = pickColumn(qrColumns, ['codigo_qr', 'qr_codigo', 'qr_payload']);
+    const qrSelect = qrCodeColumn ? `q."${qrCodeColumn}" as codigo_qr,` : 'null::text as codigo_qr,';
+    const qrJoin = qrAnimalColumn ? `left join ${tableName('qr_codes')} q on q."${qrAnimalColumn}" = a."${idColumn}"` : '';
     const result = await query(
       `select
           a.*,
+          ${qrSelect}
           p.nombre_predio,
           po.nombre as nombre_potrero
          from ${tableName('animales')} a
          left join ${tableName('predios')} p on p.predio_id = a.predio_id
          left join ${tableName('potreros')} po on po.potrero_id = a.potrero_id
+         ${qrJoin}
         where a."${idColumn}" = $1
         limit 1`,
       [req.params.id],
