@@ -1,3 +1,5 @@
+import { formatDateTimeDisplay } from '../utils/dateFormat.js';
+
 const PAGE = { width: 612, height: 792 };
 const MARGIN = 42;
 const TOP_MARGIN = 57;
@@ -527,7 +529,7 @@ class PdfBuilder {
       ['EDAD', row.edad, 0.18],
       ['GDP', row.gdp, 0.18],
       ['ESTADO', row.estado, 0.2],
-      ['CATEGORÍA', row.categoria, 0.26],
+      ['ETAPA HISTÓRICA', row.categoria, 0.26],
     ];
 
     const drawRow = (items, y, valueY) => {
@@ -536,7 +538,7 @@ class PdfBuilder {
         const colW = width * ratio;
         const center = cursor + colW / 2;
         this.centeredText(label, center, y, 6.4, FONT.bold, labelColor);
-        this.centeredWrapped(value, center, valueY, Math.max(10, Math.floor(colW / 6)), 8.4, FONT.bold, label === 'ESTADO' || label === 'CATEGORÍA' ? color : textColor, 10);
+        this.centeredWrapped(value, center, valueY, Math.max(10, Math.floor(colW / 6)), 8.4, FONT.bold, label === 'ESTADO' || label === 'ETAPA HISTÓRICA' ? color : textColor, 10);
         cursor += colW;
       });
     };
@@ -557,7 +559,7 @@ class PdfBuilder {
       ['EDAD', 50],
       ['GDP', 50],
       ['ESTADO', 58],
-      ['CATEGORÍA', 108],
+      ['ETAPA HISTÓRICA', 108],
     ];
     const x = MARGIN;
     const width = PAGE.width - MARGIN * 2;
@@ -730,7 +732,8 @@ class PdfBuilder {
   }
 
   async build(report) {
-    const { animal, resumen, estado, historial, proyecciones, rentabilidad, meta, desempeno, generatedAt } = report;
+    const { animal, resumen, estado, historial, proyecciones, rentabilidad, meta, desempeno } = report;
+    const generatedAt = formatDateTimeDisplay(report.generatedAt || new Date());
     this.generatedAt = generatedAt;
     const codigoInforme = reportCode(generatedAt, animal.qr);
     const diagnostico = decisionAnalysis(resumen, estado, historial, rentabilidad);
@@ -769,7 +772,7 @@ class PdfBuilder {
       ['Raza', animal.raza],
       ['Sexo', animal.sexo],
       ['Edad', animal.edad],
-      ['Categoría', resumen.categoriaProductiva],
+      ['Categoría actual', resumen.categoriaProductiva],
     ].forEach(([label, value], index) => this.metricCard(label, value, MARGIN + (index % 3) * 176, this.y - Math.floor(index / 3) * 58, 166, 50));
     this.y -= 122;
 
@@ -807,6 +810,9 @@ class PdfBuilder {
         estadoClass: row.estado_productivo_class || (row.estado_productivo === 'Excelente' ? 'estado-vigente' : row.estado_productivo === 'Aceptable' ? 'estado-proxima' : row.estado_productivo === 'Inicial' ? 'estado-sin-programacion' : 'estado-vencida'),
       }));
       this.drawHistoryTable(tableRows, generatedAt);
+      this.ensureSpace(24, 'INFORME PRODUCTIVO DE PESAJES', generatedAt);
+      this.text('Nota: las categorías históricas se estiman según la edad del animal en la fecha de cada pesaje.', MARGIN, this.y, 8.5, FONT.bold, [0.32, 0.38, 0.45]);
+      this.y -= 20;
     } else {
       this.text('No existen pesajes registrados para este animal.', MARGIN, this.y, 10, FONT.bold, [0.32, 0.38, 0.45]);
       this.y -= 24;
@@ -827,14 +833,17 @@ class PdfBuilder {
       { label: 'Peor periodo', value: desempeno?.worst ? metric(desempeno.worst.ganancia_diaria_kg, ' kg/día') : 'NO REGISTRADO', className: 'estado-vencida' },
       { label: 'Ganancia acumulada', value: metric(resumen.diferencia, ' kg'), className: resumen.diferencia < 0 ? 'estado-vencida' : 'estado-vigente' },
       { label: 'Diferencia último pesaje', value: metric(resumen.lastDifference, ' kg'), className: resumen.lastDifference < 0 ? 'estado-vencida' : estado.className },
-      { label: 'Ganancia mensual proyectada', value: metric(resumen.gananciaMensual, ' kg/mes'), className: estado.className },
-      { label: 'Peso 30 días', value: metric(proyecciones.d30, ' kg'), className: estado.className },
-      { label: 'Peso 60 días', value: metric(proyecciones.d60, ' kg'), className: estado.className },
-      { label: 'Peso 90 días', value: metric(proyecciones.d90, ' kg'), className: estado.className },
-      { label: 'Escenario histórico 90 días', value: metric(proyecciones.escenarios?.[1]?.d90, ' kg'), className: resumen.historicalStatusInfo?.className || 'estado-sin-programacion' },
-      { label: 'Escenario óptimo 90 días', value: metric(proyecciones.escenarios?.[2]?.d90, ' kg'), className: 'estado-vigente' },
-      { label: 'Fecha 550 kg', value: proyecciones.venta550?.date ? `${formatDate(proyecciones.venta550.date)} (${intervalFromDays(proyecciones.venta550.days)})` : 'NO REGISTRADO', className: proyecciones.venta550 ? estado.className : 'estado-sin-programacion' },
+      { label: 'Ganancia mensual estimada', value: metric(resumen.gananciaMensual, ' kg/mes'), className: estado.className },
+      { label: 'Proyección orientativa 30 días', value: metric(proyecciones.d30, ' kg'), className: estado.className },
+      { label: 'Proyección orientativa 60 días', value: metric(proyecciones.d60, ' kg'), className: estado.className },
+      { label: 'Proyección orientativa 90 días', value: metric(proyecciones.d90, ' kg'), className: estado.className },
+      { label: 'Escenario histórico estimado 90 días', value: metric(proyecciones.escenarios?.[1]?.d90, ' kg'), className: resumen.historicalStatusInfo?.className || 'estado-sin-programacion' },
+      { label: 'Escenario óptimo estimado 90 días', value: metric(proyecciones.escenarios?.[2]?.d90, ' kg'), className: 'estado-vigente' },
+      { label: 'Fecha estimada 550 kg', value: proyecciones.venta550?.date ? `${formatDate(proyecciones.venta550.date)} (${intervalFromDays(proyecciones.venta550.days)})` : 'NO REGISTRADO', className: proyecciones.venta550 ? estado.className : 'estado-sin-programacion' },
     ], { columns: 3, colStep: 176, width: 166, height: 58, rowStep: 68, title: 'INFORME PRODUCTIVO DE PESAJES', generatedAt });
+    this.ensureSpace(24, 'INFORME PRODUCTIVO DE PESAJES', generatedAt);
+    this.text('Indicadores calculados con base en los pesajes registrados; las proyecciones son orientativas y no certificadas.', MARGIN, this.y, 8.5, FONT.bold, [0.32, 0.38, 0.45]);
+    this.y -= 20;
 
     this.sectionTitle('Diagnóstico inteligente AgroGenomaX');
     this.decisionBox('Diagnóstico productivo', [
@@ -846,25 +855,25 @@ class PdfBuilder {
         : 'El desempeño actual se mantiene dentro del rango técnico evaluado para su categoría.',
     ], estado.className, generatedAt);
     this.decisionBox('Pérdida potencial estimada', [
-      `Peso proyectado actual 90 días: ${metric(diagnostico.pesoProyectadoActual90, ' kg')}.`,
-      `Peso potencial óptimo 90 días: ${metric(diagnostico.pesoPotencial90, ' kg')}.`,
-      `Diferencia productiva: ${metric(diagnostico.perdidaPotencialKg, ' kg')}.`,
+      `Peso proyectado orientativo 90 días: ${metric(diagnostico.pesoProyectadoActual90, ' kg')}.`,
+      `Peso potencial óptimo estimado 90 días: ${metric(diagnostico.pesoPotencial90, ' kg')}.`,
+      `Diferencia productiva estimada: ${metric(diagnostico.perdidaPotencialKg, ' kg')}.`,
     ], diagnostico.perdidaPotencialKg > 0 ? 'estado-vencida' : 'estado-vigente', generatedAt);
     this.decisionBox('Pérdida económica potencial', [
       Number.isFinite(diagnostico.perdidaEconomica)
         ? `Con el precio registrado por kg, la pérdida potencial estimada es de ${money(diagnostico.perdidaEconomica)}.`
         : 'Ingrese precio por kg para estimar pérdida económica potencial.',
     ], Number.isFinite(diagnostico.perdidaEconomica) && diagnostico.perdidaEconomica > 0 ? 'estado-vencida' : 'estado-sin-programacion', generatedAt);
-    this.decisionBox('Recomendación AgroGenomaX', diagnostico.recommendation, estado.className, generatedAt);
+    this.decisionBox('Recomendación orientativa AgroGenomaX', diagnostico.recommendation, estado.className, generatedAt);
 
     this.ensureSpace(150, 'INFORME PRODUCTIVO DE PESAJES', generatedAt);
-    this.sectionTitle('Meta productiva');
+    this.sectionTitle('Meta productiva estimada');
     if (meta) {
       [
         ['Peso objetivo', metric(meta.pesoObjetivo, ' kg'), meta.achieved ? 'estado-vigente' : 'estado-proxima'],
         ['Kg faltantes', meta.achieved ? 'Meta alcanzada' : metric(meta.kgFaltantes, ' kg'), meta.achieved ? 'estado-vigente' : 'estado-proxima'],
-        ['Días estimados', Number.isFinite(meta.diasEstimados) ? `${Math.ceil(meta.diasEstimados)} días` : 'NO REGISTRADO', 'estado-proxima'],
-        ['Fecha estimada', meta.fechaEstimada || 'NO REGISTRADO', 'estado-proxima'],
+        ['Días estimados orientativos', Number.isFinite(meta.diasEstimados) ? `${Math.ceil(meta.diasEstimados)} días` : 'NO REGISTRADO', 'estado-proxima'],
+        ['Fecha estimada orientativa', meta.fechaEstimada || 'NO REGISTRADO', 'estado-proxima'],
       ].forEach(([label, value, className], index) => this.metricCard(label, value, MARGIN + (index % 2) * 264, this.y - Math.floor(index / 2) * 58, 250, 50, className));
       this.y -= 122;
     } else {
@@ -873,21 +882,21 @@ class PdfBuilder {
     }
 
     this.ensureSpace(104, 'INFORME PRODUCTIVO DE PESAJES', generatedAt);
-    this.sectionTitle('Rentabilidad estimada');
+    this.sectionTitle('Indicadores económicos estimados');
     if (rentabilidad) {
       this.metricCardGrid([
-        { label: 'Precio por kg', value: money(rentabilidad.precioKg), className: 'estado-sin-programacion' },
+        { label: 'Precio por kg registrado para cálculo', value: money(rentabilidad.precioKg), className: 'estado-sin-programacion' },
         { label: 'Valor bruto estimado por ganancia acumulada', value: money(rentabilidad.valorGanancia), className: 'estado-vigente' },
         { label: 'Valor bruto proyectado a 30 días', value: money(rentabilidad.valor30), className: 'estado-proxima' },
         { label: 'Costo diario total', value: money(rentabilidad.totalCostoDiario), className: 'estado-sin-programacion' },
-        { label: 'Valor bruto periodo reciente', value: money(rentabilidad.valorBrutoPeriodo), className: 'estado-proxima' },
-        { label: 'Margen periodo reciente', value: money(rentabilidad.margenPeriodo), className: rentabilidad.margenPeriodo < 0 ? 'estado-vencida' : 'estado-vigente' },
-        { label: 'Costo por kg ganado', value: money(rentabilidad.costoPorKgGanado), className: 'estado-sin-programacion' },
+        { label: 'Valor bruto estimado periodo reciente', value: money(rentabilidad.valorBrutoPeriodo), className: 'estado-proxima' },
+        { label: 'Margen estimado periodo reciente', value: money(rentabilidad.margenPeriodo), className: rentabilidad.margenPeriodo < 0 ? 'estado-vencida' : 'estado-vigente' },
+        { label: 'Costo estimado por kg ganado', value: money(rentabilidad.costoPorKgGanado), className: 'estado-sin-programacion' },
         { label: 'Retorno estimado', value: Number.isFinite(rentabilidad.retornoEstimado) ? `${formatNumber(rentabilidad.retornoEstimado)}x` : 'NO REGISTRADO', className: 'estado-vigente' },
         ...(Number.isFinite(rentabilidad.margen30) ? [{ label: 'Margen estimado 30 días', value: money(rentabilidad.margen30), className: rentabilidad.margen30 < 0 ? 'estado-vencida' : 'estado-vigente' }] : []),
       ], { columns: 2, colStep: 264, width: 250, height: 54, rowStep: 64, title: 'INFORME PRODUCTIVO DE PESAJES', generatedAt });
       this.ensureSpace(24, 'INFORME PRODUCTIVO DE PESAJES', generatedAt);
-      this.text('Los valores son estimaciones productivas y no representan utilidad neta final.', MARGIN, this.y, 8.5, FONT.bold, [0.32, 0.38, 0.45]);
+      this.text('Estimaciones orientativas con base en pesajes registrados; no constituyen valoración comercial certificada ni utilidad neta final.', MARGIN, this.y, 8.5, FONT.bold, [0.32, 0.38, 0.45]);
       this.y -= 20;
     } else {
       this.text('Ingrese precio por kg para estimar rentabilidad.', MARGIN, this.y, 10, FONT.bold, [0.32, 0.38, 0.45]);

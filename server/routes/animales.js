@@ -58,12 +58,6 @@ function parseDecimal(value) {
   return Number.isFinite(number) ? number : null;
 }
 
-function todayLocal() {
-  const now = new Date();
-  const timezoneOffset = now.getTimezoneOffset() * 60000;
-  return new Date(now.getTime() - timezoneOffset).toISOString().slice(0, 10);
-}
-
 async function insertAnimalBreeds(client, animalId, razas, tipoRaza) {
   const columns = await getColumns('animal_razas');
   const animalColumn = pickColumn(columns, ['animal_id', 'id_animal']);
@@ -142,7 +136,25 @@ router.get('/:id', async (req, res, next) => {
   try {
     const columns = await getColumns('animales');
     const idColumn = idColumnFor('animales', columns);
-    const result = await query(`select * from ${tableName('animales')} where "${idColumn}" = $1 limit 1`, [req.params.id]);
+    const qrColumns = await getColumns('qr_codes');
+    const qrAnimalColumn = pickColumn(qrColumns, ['animal_id', 'id_animal']);
+    const qrCodeColumn = pickColumn(qrColumns, ['codigo_qr', 'qr_codigo', 'qr_payload']);
+    const qrSelect = qrCodeColumn ? `q."${qrCodeColumn}" as codigo_qr,` : 'null::text as codigo_qr,';
+    const qrJoin = qrAnimalColumn ? `left join ${tableName('qr_codes')} q on q."${qrAnimalColumn}" = a."${idColumn}"` : '';
+    const result = await query(
+      `select
+          a.*,
+          ${qrSelect}
+          p.nombre_predio,
+          po.nombre as nombre_potrero
+         from ${tableName('animales')} a
+         left join ${tableName('predios')} p on p.predio_id = a.predio_id
+         left join ${tableName('potreros')} po on po.potrero_id = a.potrero_id
+         ${qrJoin}
+        where a."${idColumn}" = $1
+        limit 1`,
+      [req.params.id],
+    );
     if (!result.rows[0]) {
       res.status(404).json({ error: 'Animal no encontrado' });
       return;
@@ -157,13 +169,20 @@ router.post('/', async (req, res, next) => {
   const client = await pool.connect();
 
   try {
-    const { codigo_qr, predio_id, potrero_id, sexo, tipo_raza, razas = [] } = req.body;
+    const { codigo_qr, predio_id, potrero_id, sexo, tipo_raza, fecha_nacimiento, razas = [] } = req.body;
+    const fechaNacimiento = typeof fecha_nacimiento === 'string' ? fecha_nacimiento.trim() : fecha_nacimiento;
 
     if (!codigo_qr) throw Object.assign(new Error('El código QR es obligatorio.'), { status: 400 });
     if (!predio_id) throw Object.assign(new Error('El predio es obligatorio.'), { status: 400 });
     if (!potrero_id) throw Object.assign(new Error('El potrero es obligatorio.'), { status: 400 });
     if (!['Macho', 'Hembra'].includes(sexo)) {
       throw Object.assign(new Error('El sexo debe ser Macho o Hembra.'), { status: 400 });
+    }
+    if (!fechaNacimiento) {
+      throw Object.assign(new Error('La fecha de nacimiento es obligatoria.'), { status: 400 });
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaNacimiento)) {
+      throw Object.assign(new Error('La fecha de nacimiento debe usar formato YYYY-MM-DD.'), { status: 400 });
     }
 
     if (req.body.peso_nacimiento && (!parseDecimal(req.body.peso_nacimiento) || parseDecimal(req.body.peso_nacimiento) <= 0)) {
@@ -185,6 +204,7 @@ router.post('/', async (req, res, next) => {
     const animalColumns = await getColumns('animales');
     const normalizedBody = {
       ...req.body,
+      fecha_nacimiento: fechaNacimiento,
       peso_nacimiento: parseDecimal(req.body.peso_nacimiento) ?? req.body.peso_nacimiento,
     };
     const payload = pickPayload(animalColumns, normalizedBody, animalAliases);
@@ -212,7 +232,7 @@ router.post('/', async (req, res, next) => {
           'pesajes',
           {
             [pesajeAnimalColumn]: animalId,
-            [fechaColumn]: req.body.fecha_nacimiento || todayLocal(),
+            [fechaColumn]: fechaNacimiento,
             [pesoColumn]: pesoNacimiento,
             ...(observacionesColumn ? { [observacionesColumn]: 'Peso inicial registrado al nacimiento' } : {}),
           },

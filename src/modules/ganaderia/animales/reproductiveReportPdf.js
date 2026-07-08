@@ -1,3 +1,5 @@
+import { formatDateTimeDisplay } from '../utils/dateFormat.js';
+
 const PAGE = { width: 612, height: 792 };
 const MARGIN = 42;
 const TOP_MARGIN = 57;
@@ -314,7 +316,7 @@ class PdfBuilder {
   }
 
   async build(report) {
-    this.generatedAt = report.generatedAt;
+    this.generatedAt = formatDateTimeDisplay(report.generatedAt || new Date());
     const authUrl = `https://agrogenomax.pages.dev/qr/${encodeURIComponent(report.animal.qr || '')}`;
     const [logo, brand, footerBrand] = await Promise.all([
       loadImage('/agx-report-logo-white.jpeg'),
@@ -371,7 +373,7 @@ class PdfBuilder {
 
     this.sectionTitle('Historial de eventos reproductivos');
     if (report.eventos.length) report.eventos.forEach((event) => this.eventCard(event));
-    else this.panel('Sin eventos reproductivos', ['No existen eventos reproductivos registrados para este animal.']);
+    else this.panel('Sin eventos reproductivos', ['No se registran eventos reproductivos para este animal.']);
 
     this.sectionTitle('Evidencias reproductivas');
     if (report.evidencias.length) report.evidencias.forEach((item) => this.evidenceCard(item));

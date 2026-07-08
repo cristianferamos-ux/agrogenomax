@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { ganaderiaApi } from '../api/ganaderiaApi.js';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
+import { formatDateDisplay, normalizeDateValue } from '../utils/dateFormat.js';
 import { createSanitaryHistoryPdfBlob, sanitaryHistoryFileName } from './sanitaryHistoryPdf.js';
 
 const LABORATORIOS = [
@@ -56,12 +57,12 @@ function emptyForm() {
 }
 
 function formatDate(value) {
-  return value ? String(value).slice(0, 10) : '—';
+  return formatDateDisplay(value, '—');
 }
 
 function parseDate(value) {
-  const date = formatDate(value);
-  if (date === '—') return null;
+  const date = normalizeDateValue(value);
+  if (!date) return null;
   return new Date(`${date}T00:00:00`);
 }
 

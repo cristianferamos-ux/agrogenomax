@@ -1,3 +1,5 @@
+import { formatDateTimeDisplay } from '../utils/dateFormat.js';
+
 const PAGE = { width: 612, height: 792 };
 const MARGIN = 42;
 const FOOTER_SAFE_Y = 132;
@@ -430,6 +432,7 @@ class PdfBuilder {
   }
 
   async build({ animal, resumen, estadoGeneral, vacunaciones, generatedAt }) {
+    generatedAt = formatDateTimeDisplay(generatedAt || new Date());
     this.generatedAt = generatedAt;
     this.authUrl = animal.authUrl || `https://agrogenomax.pages.dev/qr/${encodeURIComponent(animal.qr || '')}`;
     const [logo, brand, footerBrand] = await Promise.all([loadLogo(), loadBrandWordmark(), loadFooterWordmark()]);
@@ -504,12 +507,12 @@ class PdfBuilder {
     this.sectionTitle('Vacunaciones registradas');
     if (!vacunaciones.length) {
       this.rect(MARGIN, this.y - 42, PAGE.width - MARGIN * 2, 42, [0.72, 0.77, 0.82], [0.98, 0.99, 1]);
-      this.text('No existen vacunaciones registradas para este animal.', MARGIN + 14, this.y - 25, 10, FONT.bold, [0.32, 0.38, 0.45]);
+      this.text('No se registran vacunaciones para este animal.', MARGIN + 14, this.y - 25, 10, FONT.bold, [0.32, 0.38, 0.45]);
       this.y -= 58;
     }
     vacunaciones.forEach((vacuna) => this.drawVaccineCard(vacuna, generatedAt));
 
-    const [generationDate, generationTime = 'NO REGISTRADO'] = String(generatedAt).split(',').map((part) => part.trim());
+    const [generationDate, generationTime = 'NO REGISTRADO'] = String(generatedAt).split(/\s+/).map((part) => part.trim());
     this.ensureSpace(126, 'HISTORIAL SANITARIO', generatedAt);
     this.sectionTitle('Trazabilidad del documento');
     this.rect(MARGIN, this.y - 96, PAGE.width - MARGIN * 2, 96, [0.82, 0.87, 0.91], [1, 1, 1]);

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ganaderiaApi } from '../api/ganaderiaApi.js';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
+import { formatDateDisplay } from '../utils/dateFormat.js';
 
 const fields = [
   ['codigo_interno', 'Codigo interno'],
@@ -29,6 +30,65 @@ function valueOf(animal, field) {
     color: ['color'],
   };
   return aliases[field]?.map((key) => animal?.[key]).find((value) => value !== undefined && value !== null) || '';
+}
+
+function valueFrom(animal, keys) {
+  return keys.map((key) => animal?.[key]).find((value) => value !== undefined && value !== null && value !== '') || '';
+}
+
+function formatPercent(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? `${number.toLocaleString('es-CO', { maximumFractionDigits: 2 })}%` : '--';
+}
+
+function todayLocal() {
+  const now = new Date();
+  const timezoneOffset = now.getTimezoneOffset() * 60000;
+  return new Date(now.getTime() - timezoneOffset).toISOString().slice(0, 10);
+}
+
+function ageMonths(animal) {
+  const directRaw = valueFrom(animal, ['edad_meses', 'edadMeses', 'age_months']);
+  const direct = Number(directRaw);
+  if (directRaw !== '' && Number.isFinite(direct)) return Math.floor(direct);
+
+  const rawDate = valueOf(animal, 'fecha_nacimiento');
+  if (!rawDate) return NaN;
+
+  const birth = new Date(`${String(rawDate).slice(0, 10)}T00:00:00`);
+  const analysisDate = valueFrom(animal, ['fecha_analisis', 'updated_at', 'created_at']) || todayLocal();
+  const today = new Date(`${String(analysisDate).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(birth.getTime())) return NaN;
+
+  let months = (today.getFullYear() - birth.getFullYear()) * 12 + today.getMonth() - birth.getMonth();
+  if (today.getDate() < birth.getDate()) months -= 1;
+  return months >= 0 ? months : NaN;
+}
+
+function categoryFor(animal, months) {
+  if (!Number.isFinite(months)) return 'Categoria no determinada';
+  const sex = String(valueOf(animal, 'sexo')).toLowerCase();
+
+  if (sex === 'hembra') {
+    if (months < 8) return 'Ternera lactante';
+    if (months < 12) return 'Ternera desteta';
+    if (months < 24) return 'Novilla de levante';
+    if (months < 36) return 'Novilla de desarrollo';
+    return 'Vaca adulta';
+  }
+
+  if (sex === 'macho') {
+    if (months < 8) return 'Ternero lactante';
+    if (months < 12) return 'Ternero desteto';
+    if (months < 24) return 'Novillo de levante';
+    if (months < 36) return 'Novillo de desarrollo';
+    return 'Toro adulto';
+  }
+
+  if (months < 8) return 'Cria lactante';
+  if (months < 24) return 'Levante';
+  if (months < 36) return 'Desarrollo';
+  return 'Adulto';
 }
 
 function isCommaDecimalInput(value) {
@@ -92,7 +152,7 @@ export default function AnimalFichaBasica() {
         ...form,
         peso_nacimiento: toApiDecimal(form.peso_nacimiento || ''),
       });
-      setAnimal(updated);
+      setAnimal((current) => ({ ...current, ...updated }));
       setStatus('Ficha basica actualizada en PostgreSQL.');
     } catch (err) {
       setError(err.message);
@@ -102,6 +162,22 @@ export default function AnimalFichaBasica() {
   if (!animal && !error) {
     return <div className="gan-panel">Cargando ficha animal...</div>;
   }
+
+  const currentAgeMonths = ageMonths(animal);
+  const breedComposition = razas.length
+    ? razas.map((raza) => `${raza.nombre_raza || `Raza ${raza.raza_id}`} ${formatPercent(raza.porcentaje)}`).join(' / ')
+    : 'Sin composicion racial registrada';
+  const identityRows = [
+    ['QR asociado', valueFrom(animal, ['codigo_qr']) || 'Sin QR asignado'],
+    ['Codigo interno', valueOf(animal, 'codigo_interno') || 'Sin codigo interno'],
+    ['Fecha nacimiento', formatDateDisplay(valueOf(animal, 'fecha_nacimiento'))],
+    ['Predio', valueFrom(animal, ['nombre_predio']) || 'Sin predio registrado'],
+    ['Potrero', valueFrom(animal, ['nombre_potrero']) || 'Sin potrero registrado'],
+    ['Raza principal', valueFrom(animal, ['raza_principal']) || razas[0]?.nombre_raza || 'Sin raza registrada'],
+    ['Composicion racial', breedComposition],
+    ['Edad actual', Number.isFinite(currentAgeMonths) ? `${currentAgeMonths} meses` : 'No registrada'],
+    ['Categoria actual', categoryFor(animal, currentAgeMonths)],
+  ];
 
   return (
     <div className="gan-stack">
@@ -135,6 +211,22 @@ export default function AnimalFichaBasica() {
             Genética
           </Link>
           <button type="button" disabled>Historial QR</button>
+        </div>
+
+        <div className="gan-breed-box">
+          <div className="gan-section-heading">
+            <span className="gan-eyebrow">Identidad real</span>
+            <h3>Trazabilidad del animal</h3>
+            <p>Datos operativos asociados al registro activo en PostgreSQL.</p>
+          </div>
+          <div className="gan-list">
+            {identityRows.map(([label, value]) => (
+              <article className="gan-list-row" key={label}>
+                <strong>{label}</strong>
+                <span>{value}</span>
+              </article>
+            ))}
+          </div>
         </div>
 
         <div className="gan-breed-box">

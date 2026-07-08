@@ -1,3 +1,5 @@
+import { formatDateTimeDisplay } from '../utils/dateFormat.js';
+
 const PAGE = { width: 612, height: 792 };
 const MARGIN = 42;
 const FONT = { regular: 'F1', bold: 'F2' };
@@ -170,7 +172,7 @@ class GeneticPdf {
   }
 
   async build(report) {
-    this.generatedAt = report.generatedAt;
+    this.generatedAt = formatDateTimeDisplay(report.generatedAt || new Date());
     const [symbol, brand, footer] = await Promise.all([
       loadImage('/agx-report-logo-white.jpeg'),
       loadImage('/agx-pdf-wordmark-color-vivid.jpeg'),
@@ -185,17 +187,31 @@ class GeneticPdf {
     this.cards(report.animal, 3);
     this.sectionTitle('Composición racial');
     this.cards(report.razas, 3);
-    this.sectionTitle('Genealogía');
-    this.cards(report.genealogia, 2);
-    this.sectionTitle('Mérito genético AGX');
-    this.cards(report.merito, 3);
-    this.sectionTitle('Inventario reproductivo');
-    this.cards(report.inventario, 3);
-    this.sectionTitle('Árbol genealógico');
-    this.panel('Línea genética visual', report.arbol);
-    this.sectionTitle('Descendencia registrada');
-    this.cards(report.descendencia, 2);
-    this.panel('Decisión AGX', report.decision);
+    if (report.advancedNotice) {
+      this.sectionTitle('Información genética avanzada');
+      this.panel('Estado del registro', [report.advancedNotice]);
+    }
+    if (report.genealogia?.length) {
+      this.sectionTitle('Genealogía');
+      this.cards(report.genealogia, 2);
+    }
+    if (report.merito?.length) {
+      this.sectionTitle('Evaluación genética registrada');
+      this.cards(report.merito, 3);
+    }
+    if (report.inventario?.length) {
+      this.sectionTitle('Inventario reproductivo registrado');
+      this.cards(report.inventario, 3);
+    }
+    if (report.arbol?.length) {
+      this.sectionTitle('Árbol genealógico');
+      this.panel('Línea genética visual', report.arbol);
+    }
+    if (report.descendencia?.length) {
+      this.sectionTitle('Descendencia registrada');
+      this.cards(report.descendencia, 2);
+    }
+    if (report.decision?.length) this.panel('Decisión registrada', report.decision);
 
     this.footer();
     this.pages.push(this.current.join('\n'));

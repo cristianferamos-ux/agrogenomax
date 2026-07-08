@@ -88,50 +88,6 @@ const caseStatuses = [
   'Fallecido',
 ];
 
-const mockTreatments = [
-  {
-    tratamiento_id: 'mock-1',
-    fecha_inicio: '2026-05-20',
-    fecha_finalizacion: '2026-05-25',
-    motivo: 'Cojera leve',
-    diagnostico: 'Inflamación podal',
-    sintomas: 'Apoyo irregular y sensibilidad al caminar',
-    estado_caso: 'Seguimiento',
-    nombre_comercial: 'Antiinflamatorio bovino',
-    principio_activo: 'Meloxicam',
-    laboratorio: 'Registro temporal',
-    lote: 'TEMP-001',
-    fecha_vencimiento: '2027-12-31',
-    dosis: 'Según criterio profesional',
-    unidad: 'ml',
-    via_aplicacion: 'Subcutánea',
-    frecuencia: 'Cada 24 horas',
-    duracion_dias: '3',
-    retiro_carne_dias: '8',
-    retiro_leche_dias: '3',
-    fecha_fin_retiro_carne: '2026-06-02',
-    fecha_fin_retiro_leche: '2026-05-28',
-    costo_medicamento: '85000',
-    costo_veterinario: '120000',
-    costo_mano_obra: '30000',
-    otros_costos: '0',
-    profesional: 'No registrado',
-    profesion: 'No registrada',
-    matricula: 'No registrada',
-    entidad: 'No registrada',
-    observaciones: 'Dato temporal de visualización. No guardado en PostgreSQL.',
-    evidencias: [
-      {
-        evidencia_id: 'ev-mock-1',
-        nombre: 'Registro fotográfico de apoyo irregular',
-        tipo: 'Foto de lesión',
-        fecha: '2026-05-20',
-        observacion: 'Evidencia local temporal.',
-      },
-    ],
-  },
-];
-
 function valueOf(row, aliases) {
   return aliases.map((key) => row?.[key]).find((value) => value !== undefined && value !== null && value !== '') || '';
 }
@@ -726,7 +682,7 @@ function openClinicalPrint({ animal, razas, rows, resumen, alerts, impact, clini
       <p><b>Estado clínico</b><span class="metric">${safe(resumen.estado)}</span></p><p><b>Eventos sanitarios</b><span class="metric">${safe(resumen.total)}</span></p><p><b>Costo sanitario</b><span class="metric">${safe(formatMoney(resumen.costo))}</span></p>
       <p><b>Riesgo</b>${safe(resumen.riesgo.label)}</p><p><b>Índice sanitario</b>${safe(`${resumen.indiceSanitario}/100`)}</p><p><b>Duración clínica</b>${safe(resumen.duracion?.days ?? '--')} días</p>
     </div></section>
-    <section class="panel"><h2>Historial clínico</h2>${rowsHtml || '<p>No existen tratamientos registrados.</p>'}</section>
+    <section class="panel"><h2>Historial clínico</h2>${rowsHtml || '<p>No se registran tratamientos clínicos para este animal.</p>'}</section>
     <section class="panel"><h2>Restricción comercial temporal</h2>${resumen.retiroActivo ? `<div class="grid"><p><b>Estado comercial</b>NO APTO TEMPORALMENTE</p><p><b>Restricción carne</b>${safe(resumen.carne.label === 'Activo' ? 'Retiro de carne activo' : 'Sin restricción')}</p><p><b>Liberación carne</b>${safe(resumen.carne.release || '--')}</p><p><b>Tiempo restante carne</b>${safe(resumen.carne.countdown || '--')}</p><p><b>Restricción leche</b>${safe(resumen.leche.label === 'Activo' ? 'Retiro de leche activo' : 'Sin restricción')}</p><p><b>Liberación leche</b>${safe(resumen.leche.release || '--')}</p></div>` : '<p><b>Estado comercial</b>APTO</p><p>Sin restricciones sanitarias activas.</p>'}</section>
     <section class="panel"><h2>Impacto productivo</h2><p>${impact ? `GDP previo: ${safe(formatMetric(impact.gdpBefore, ' kg/día'))}<br>GDP posterior: ${safe(formatMetric(impact.gdpAfter, ' kg/día'))}<br>Variación: ${safe(impactLabel(impact))}` : 'Sin datos suficientes de pesajes para estimar impacto productivo.'}</p></section>
     <section class="panel"><h2>Impacto económico sanitario</h2><p>Costo sanitario total: ${safe(formatMoney(economia.costoTratamiento))}<br>Recuperación productiva: ${safe(economia.recuperacionProductiva === null ? '--' : formatMetric(economia.recuperacionProductiva, ' kg/día'))}<br>Valor recuperado estimado: ${safe(economia.valorRecuperado === null ? '--' : formatMoney(economia.valorRecuperado))}<br>Pérdida productiva estimada: ${safe(economia.perdidaProductiva === null ? '--' : formatMoney(economia.perdidaProductiva))}<br>Pérdida evitada estimada: ${safe(economia.perdidaEvitada === null ? '--' : formatMoney(economia.perdidaEvitada))}<br>Retorno sanitario: ${safe(Number.isFinite(economia.retorno) ? `${formatMetric(economia.retorno, 'x')}` : '--')}<br>Resultado económico sanitario: ${safe(economicStatus.label)}</p><p>${safe(economicStatus.text)}</p><p>${safe(economia.message)}</p></section>
@@ -759,10 +715,10 @@ export default function AnimalTratamientosTab({ animalId }) {
   const [animal, setAnimal] = useState(null);
   const [razas, setRazas] = useState([]);
   const [pesajes, setPesajes] = useState([]);
-  const [tratamientos, setTratamientos] = useState(mockTreatments);
+  const [tratamientos, setTratamientos] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [evidenceForm, setEvidenceForm] = useState(emptyEvidence);
-  const [evidencias, setEvidencias] = useState(mockTreatments.flatMap((row) => row.evidencias || []));
+  const [evidencias, setEvidencias] = useState([]);
   const [precioKg, setPrecioKg] = useState('');
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
@@ -773,11 +729,14 @@ export default function AnimalTratamientosTab({ animalId }) {
       ganaderiaApi.getAnimal(resolvedAnimalId),
       ganaderiaApi.getAnimalRazas(resolvedAnimalId).catch(() => []),
       ganaderiaApi.listAnimalPesajesEvolucion(resolvedAnimalId).catch(() => []),
+      ganaderiaApi.listAnimalTratamientos(resolvedAnimalId).catch(() => []),
     ])
-      .then(([animalRow, razaRows, pesajeRows]) => {
+      .then(([animalRow, razaRows, pesajeRows, tratamientoRows]) => {
         setAnimal(animalRow);
         setRazas(razaRows || []);
         setPesajes(pesajeRows || []);
+        setTratamientos(tratamientoRows || []);
+        setEvidencias([]);
       })
       .catch((err) => setError(err.message));
   }, [resolvedAnimalId]);
@@ -862,7 +821,7 @@ export default function AnimalTratamientosTab({ animalId }) {
     return events.sort((a, b) => String(a.date).localeCompare(String(b.date)));
   }, [animal, tratamientos, impact, productiveTimelineResult]);
 
-  const submit = (event) => {
+  const submit = async (event) => {
     event.preventDefault();
     setError('');
     setStatus('');
@@ -870,21 +829,36 @@ export default function AnimalTratamientosTab({ animalId }) {
       setError('Fecha inicio, diagnóstico y estado del caso son obligatorios.');
       return;
     }
-    setTratamientos((current) => [{ ...form, tratamiento_id: `local-${Date.now()}`, evidencias: [] }, ...current]);
-    setForm(emptyForm);
-    setStatus('Registro sanitario agregado a la trazabilidad del animal. Pendiente conexión definitiva API/PostgreSQL.');
+    try {
+      await ganaderiaApi.createTratamiento({
+        animal_id: resolvedAnimalId,
+        fecha_inicio: form.fecha_inicio,
+        fecha_finalizacion: form.fecha_finalizacion,
+        motivo: form.motivo,
+        diagnostico: form.diagnostico,
+        sintomas: form.sintomas,
+        estado_caso: form.estado_caso,
+        nombre_comercial: form.nombre_comercial,
+        principio_activo: form.principio_activo,
+        laboratorio: form.laboratorio,
+        lote: form.lote,
+        dosis: form.dosis,
+        unidad: form.unidad,
+        via_aplicacion: form.via_aplicacion,
+        observaciones: form.observaciones,
+      });
+      const updated = await ganaderiaApi.listAnimalTratamientos(resolvedAnimalId);
+      setTratamientos(updated || []);
+      setForm(emptyForm);
+      setStatus('Tratamiento guardado correctamente en la historia clínica del animal.');
+    } catch (err) {
+      setError(err.message || 'No fue posible guardar el tratamiento en PostgreSQL/API.');
+    }
   };
 
   const addEvidence = () => {
     setError('');
-    setStatus('');
-    if (!evidenceForm.nombre.trim()) {
-      setError('Ingresa el nombre de la evidencia clínica.');
-      return;
-    }
-    setEvidencias((current) => [{ ...evidenceForm, evidencia_id: `evidencia-${Date.now()}` }, ...current]);
-    setEvidenceForm(emptyEvidence);
-    setStatus('Evidencia clínica agregada al archivo digital de trazabilidad.');
+    setStatus('Evidencias clínicas pendientes de soporte PostgreSQL/API.');
   };
 
   const downloadPdf = async () => {
@@ -1178,36 +1152,39 @@ export default function AnimalTratamientosTab({ animalId }) {
             <FormField label="Principio activo"><input value={form.principio_activo} onChange={(e) => update('principio_activo', e.target.value)} /></FormField>
             <FormField label="Laboratorio"><input value={form.laboratorio} onChange={(e) => update('laboratorio', e.target.value)} /></FormField>
             <FormField label="Lote"><input value={form.lote} onChange={(e) => update('lote', e.target.value)} /></FormField>
-            <FormField label="Fecha vencimiento"><input type="date" value={form.fecha_vencimiento} onChange={(e) => update('fecha_vencimiento', e.target.value)} /></FormField>
+            <FormField label="Fecha vencimiento"><input type="date" value={form.fecha_vencimiento} disabled title="Campo pendiente de soporte PostgreSQL/API." onChange={(e) => update('fecha_vencimiento', e.target.value)} /></FormField>
             <FormField label="Dosis"><input value={form.dosis} onChange={(e) => update('dosis', e.target.value)} /></FormField>
             <FormField label="Unidad"><input value={form.unidad} onChange={(e) => update('unidad', e.target.value)} /></FormField>
             <FormField label="Vía aplicación"><select value={form.via_aplicacion} onChange={(e) => update('via_aplicacion', e.target.value)}><option value="">Seleccione vía</option>{applicationRoutes.map((route) => <option key={route}>{route}</option>)}</select></FormField>
-            <FormField label="Frecuencia"><input value={form.frecuencia} onChange={(e) => update('frecuencia', e.target.value)} /></FormField>
-            <FormField label="Duración (días)"><input inputMode="numeric" value={form.duracion_dias} onChange={(e) => update('duracion_dias', e.target.value)} /></FormField>
+            <FormField label="Frecuencia"><input value={form.frecuencia} disabled placeholder="Campo pendiente de soporte PostgreSQL/API." title="Campo pendiente de soporte PostgreSQL/API." onChange={(e) => update('frecuencia', e.target.value)} /></FormField>
+            <FormField label="Duración (días)"><input inputMode="numeric" value={form.duracion_dias} disabled placeholder="Campo pendiente de soporte PostgreSQL/API." title="Campo pendiente de soporte PostgreSQL/API." onChange={(e) => update('duracion_dias', e.target.value)} /></FormField>
           </div>
         </AccordionSection>
         <AccordionSection title="3. Periodos de retiro">
+          <p className="gan-empty-text">Campo pendiente de soporte PostgreSQL/API.</p>
           <div className="gan-form gan-clinical-form">
-            <FormField label="Retiro carne (días)"><input inputMode="numeric" value={form.retiro_carne_dias} onChange={(e) => update('retiro_carne_dias', e.target.value)} /></FormField>
-            <FormField label="Retiro leche (días)"><input inputMode="numeric" value={form.retiro_leche_dias} onChange={(e) => update('retiro_leche_dias', e.target.value)} /></FormField>
-            <FormField label="Fecha fin retiro carne"><input type="date" value={form.fecha_fin_retiro_carne} onChange={(e) => update('fecha_fin_retiro_carne', e.target.value)} /></FormField>
-            <FormField label="Fecha fin retiro leche"><input type="date" value={form.fecha_fin_retiro_leche} onChange={(e) => update('fecha_fin_retiro_leche', e.target.value)} /></FormField>
+            <FormField label="Retiro carne (días)"><input inputMode="numeric" value={form.retiro_carne_dias} disabled onChange={(e) => update('retiro_carne_dias', e.target.value)} /></FormField>
+            <FormField label="Retiro leche (días)"><input inputMode="numeric" value={form.retiro_leche_dias} disabled onChange={(e) => update('retiro_leche_dias', e.target.value)} /></FormField>
+            <FormField label="Fecha fin retiro carne"><input type="date" value={form.fecha_fin_retiro_carne} disabled onChange={(e) => update('fecha_fin_retiro_carne', e.target.value)} /></FormField>
+            <FormField label="Fecha fin retiro leche"><input type="date" value={form.fecha_fin_retiro_leche} disabled onChange={(e) => update('fecha_fin_retiro_leche', e.target.value)} /></FormField>
           </div>
         </AccordionSection>
         <AccordionSection title="4. Costos">
+          <p className="gan-empty-text">Campo pendiente de soporte PostgreSQL/API.</p>
           <div className="gan-form gan-clinical-form">
-            <FormField label="Costo medicamento"><input inputMode="decimal" value={form.costo_medicamento} onChange={(e) => update('costo_medicamento', e.target.value)} /></FormField>
-            <FormField label="Costo veterinario"><input inputMode="decimal" value={form.costo_veterinario} onChange={(e) => update('costo_veterinario', e.target.value)} /></FormField>
-            <FormField label="Costo mano de obra"><input inputMode="decimal" value={form.costo_mano_obra} onChange={(e) => update('costo_mano_obra', e.target.value)} /></FormField>
-            <FormField label="Otros costos"><input inputMode="decimal" value={form.otros_costos} onChange={(e) => update('otros_costos', e.target.value)} /></FormField>
+            <FormField label="Costo medicamento"><input inputMode="decimal" value={form.costo_medicamento} disabled onChange={(e) => update('costo_medicamento', e.target.value)} /></FormField>
+            <FormField label="Costo veterinario"><input inputMode="decimal" value={form.costo_veterinario} disabled onChange={(e) => update('costo_veterinario', e.target.value)} /></FormField>
+            <FormField label="Costo mano de obra"><input inputMode="decimal" value={form.costo_mano_obra} disabled onChange={(e) => update('costo_mano_obra', e.target.value)} /></FormField>
+            <FormField label="Otros costos"><input inputMode="decimal" value={form.otros_costos} disabled onChange={(e) => update('otros_costos', e.target.value)} /></FormField>
           </div>
         </AccordionSection>
         <AccordionSection title="5. Profesional responsable">
+          <p className="gan-empty-text">Campo pendiente de soporte PostgreSQL/API.</p>
           <div className="gan-form gan-clinical-form">
-            <FormField label="Nombre"><input value={form.profesional} onChange={(e) => update('profesional', e.target.value)} /></FormField>
-            <FormField label="Profesión"><input value={form.profesion} onChange={(e) => update('profesion', e.target.value)} /></FormField>
-            <FormField label="Matrícula o tarjeta profesional"><input value={form.matricula} onChange={(e) => update('matricula', e.target.value)} /></FormField>
-            <FormField label="Entidad o registro profesional"><input value={form.entidad} onChange={(e) => update('entidad', e.target.value)} /></FormField>
+            <FormField label="Nombre"><input value={form.profesional} disabled onChange={(e) => update('profesional', e.target.value)} /></FormField>
+            <FormField label="Profesión"><input value={form.profesion} disabled onChange={(e) => update('profesion', e.target.value)} /></FormField>
+            <FormField label="Matrícula o tarjeta profesional"><input value={form.matricula} disabled onChange={(e) => update('matricula', e.target.value)} /></FormField>
+            <FormField label="Entidad o registro profesional"><input value={form.entidad} disabled onChange={(e) => update('entidad', e.target.value)} /></FormField>
           </div>
         </AccordionSection>
         <AccordionSection title="6. Observaciones y evidencias">
@@ -1223,7 +1200,7 @@ export default function AnimalTratamientosTab({ animalId }) {
 
       <section className="gan-breed-box">
         <div className="gan-section-heading"><span className="gan-eyebrow">Evidencias clínicas</span><h3>Archivo clínico digital</h3></div>
-        <p className="gan-empty-text">Evidencias sanitarias permanentes del historial del animal.</p>
+        <p className="gan-empty-text">Evidencias clínicas pendientes de soporte PostgreSQL/API.</p>
         <div className="gan-form gan-clinical-form">
           <FormField label="Nombre archivo o evidencia"><input value={evidenceForm.nombre} onChange={(e) => setEvidenceForm((current) => ({ ...current, nombre: e.target.value }))} /></FormField>
           <FormField label="Tipo evidencia"><select value={evidenceForm.tipo} onChange={(e) => setEvidenceForm((current) => ({ ...current, tipo: e.target.value }))}>{evidenceTypes.map((type) => <option key={type}>{type}</option>)}</select></FormField>

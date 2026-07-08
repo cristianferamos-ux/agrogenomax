@@ -83,9 +83,11 @@ export default function AnimalInitialForm({ codigoQr, onCreated }) {
     setError('');
     setStatus('');
 
+    if (!codigoQr) return setError('El código QR es obligatorio para registrar el animal.');
     if (!form.predio_id) return setError('Selecciona un predio.');
     if (!form.potrero_id) return setError('Selecciona un potrero asociado al predio.');
     if (!['Macho', 'Hembra'].includes(form.sexo)) return setError('Selecciona sexo Macho o Hembra.');
+    if (!form.fecha_nacimiento) return setError('La fecha de nacimiento es obligatoria para registrar el animal.');
     if (!['puro', 'cruzado'].includes(form.tipo_raza)) return setError('Selecciona si el animal es puro o cruzado.');
     if (!isValidCommaDecimal(form.peso_nacimiento)) return setError('Ingresa el peso al nacimiento con coma y máximo dos decimales. Ejemplo: 56,45.');
     if (form.tipo_raza === 'cruzado' && selectedRazas.some((item) => !item.raza_id || Number(item.porcentaje || 0) <= 0)) {
@@ -95,13 +97,28 @@ export default function AnimalInitialForm({ codigoQr, onCreated }) {
       return setError('La suma de porcentajes raciales debe ser 100%.');
     }
     if (!selectedRazas[0]?.raza_id) return setError('Selecciona al menos una raza.');
+    if (form.tipo_raza === 'puro' && Number(selectedRazas[0]?.porcentaje || 0) !== 100) {
+      return setError('Para un animal puro, la raza seleccionada debe representar el 100%.');
+    }
+
+    const razasPayload = selectedRazas.filter((item) => item.raza_id);
 
     try {
       const animal = await ganaderiaApi.createAnimal({
-        ...form,
-        peso_nacimiento: toApiDecimal(form.peso_nacimiento),
         codigo_qr: codigoQr,
-        razas: selectedRazas.filter((item) => item.raza_id),
+        predio_id: form.predio_id,
+        potrero_id: form.potrero_id,
+        codigo_interno: form.codigo_interno,
+        nombre: form.nombre,
+        sexo: form.sexo,
+        fecha_nacimiento: form.fecha_nacimiento,
+        peso_nacimiento: toApiDecimal(form.peso_nacimiento),
+        color: form.color,
+        numero_arete: form.numero_arete,
+        estado: form.estado,
+        observaciones: form.observaciones,
+        tipo_raza: form.tipo_raza,
+        razas: razasPayload,
       });
       setStatus('Animal guardado y QR asociado en PostgreSQL.');
       onCreated?.({ ...animal, id: animal.id || animal.animal_id });
@@ -132,7 +149,7 @@ export default function AnimalInitialForm({ codigoQr, onCreated }) {
           <select value={form.potrero_id} onChange={(event) => update('potrero_id', event.target.value)} required>
             <option value="">Seleccionar potrero</option>
             {potreros.map((potrero) => (
-              <option key={getRowId(potrero)} value={getRowId(potrero)}>{getRowLabel(potrero)}</option>
+              <option key={potrero.potrero_id ?? getRowId(potrero)} value={potrero.potrero_id ?? getRowId(potrero)}>{getRowLabel(potrero)}</option>
             ))}
           </select>
         </FormField>
@@ -149,8 +166,8 @@ export default function AnimalInitialForm({ codigoQr, onCreated }) {
             <option>Hembra</option>
           </select>
         </FormField>
-        <FormField label="Fecha de nacimiento">
-          <input type="date" value={form.fecha_nacimiento} onChange={(event) => update('fecha_nacimiento', event.target.value)} />
+        <FormField label="Fecha de nacimiento" required>
+          <input type="date" value={form.fecha_nacimiento} onChange={(event) => update('fecha_nacimiento', event.target.value)} required />
         </FormField>
         <FormField label="Peso al nacimiento">
           <input

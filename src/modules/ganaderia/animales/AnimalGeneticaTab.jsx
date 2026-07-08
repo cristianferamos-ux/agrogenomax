@@ -1,4 +1,4 @@
-import { Baby, Boxes, Download, Dna, GitBranch, Scale, ShieldCheck, Sparkles, TreePine } from 'lucide-react';
+import { Download, Dna, GitBranch } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { ganaderiaApi } from '../api/ganaderiaApi.js';
@@ -13,8 +13,40 @@ function animalName(animal, fallback) {
   return valueOf(animal, ['nombre', 'name', 'codigo_interno', 'codigo'], fallback);
 }
 
-function animalQr(animal) {
-  return valueOf(animal, ['codigo_qr', 'qr', 'codigo', 'codigo_interno'], '--');
+const ADVANCED_GENETIC_EMPTY = 'Información genética avanzada no registrada.';
+
+function animalInternalCode(animal) {
+  return valueOf(animal, ['codigo_interno', 'numero_arete', 'codigo'], '--');
+}
+
+function explicitQr(animal) {
+  const raw = valueOf(animal, ['codigo_qr', 'qr_codigo', 'qr', 'codigoQr'], '');
+  const match = String(raw || '').match(/AGX-\d{1,}/i);
+  return match ? match[0].toUpperCase() : '';
+}
+
+function qrCandidateFromRelation(animal) {
+  const qrId = valueOf(animal, ['qr_id', 'qrCodeId'], '');
+  const digits = String(qrId || '').replace(/\D/g, '');
+  return digits ? `AGX-${digits.padStart(6, '0')}` : '';
+}
+
+async function resolveAnimalQr(animal) {
+  const direct = explicitQr(animal);
+  if (direct) return direct;
+
+  const candidate = qrCandidateFromRelation(animal);
+  if (!candidate) return '--';
+
+  try {
+    const result = await ganaderiaApi.lookupQr(candidate);
+    const qrAnimalId = String(result?.qr?.animal_id || result?.animal?.animal_id || '');
+    if (result?.exists && qrAnimalId === String(animal?.animal_id || '')) return candidate;
+  } catch {
+    return '--';
+  }
+
+  return '--';
 }
 
 function normalizeSex(value) {
@@ -34,10 +66,6 @@ function ageMonths(animal) {
   return Math.max(0, Math.floor((Date.now() - birthDate.getTime()) / (1000 * 60 * 60 * 24 * 30.44)));
 }
 
-function formatMoney(value) {
-  return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(Number(value || 0));
-}
-
 function downloadBlob(blob, fileName) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -54,15 +82,6 @@ function geneticCategory(sex, months) {
   if (sex === 'Hembra') return 'Vientre / donadora potencial';
   if (sex === 'Macho') return 'Reproductor / ceba genética';
   return 'Adulto productivo';
-}
-
-function inferDecision(sex, merit, age) {
-  if (!Number.isFinite(age) || age < 12) return { state: 'Conservar', action: 'Evaluar desarrollo genético', tone: 'warning' };
-  if (merit >= 90 && sex === 'Macho') return { state: 'Usar como reproductor', action: 'Validar fertilidad y descendencia', tone: 'success' };
-  if (merit >= 90 && sex === 'Hembra') return { state: 'Donadora', action: 'Validar sanidad y mérito materno', tone: 'success' };
-  if (merit >= 75) return { state: 'Conservar', action: 'Mantener seguimiento productivo y sanitario', tone: 'success' };
-  if (merit >= 55) return { state: 'Vender', action: 'Evaluar precio comercial y objetivo del hato', tone: 'warning' };
-  return { state: 'Descarte', action: 'Revisar permanencia productiva', tone: 'danger' };
 }
 
 function toneClass(tone) {
@@ -87,6 +106,7 @@ export default function AnimalGeneticaTab() {
   const { id } = useParams();
   const [animal, setAnimal] = useState(null);
   const [razas, setRazas] = useState([]);
+  const [qrCode, setQrCode] = useState('--');
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
   const [generatingPdf, setGeneratingPdf] = useState(false);
@@ -95,8 +115,12 @@ export default function AnimalGeneticaTab() {
     let mounted = true;
     Promise.allSettled([ganaderiaApi.getAnimal(id), ganaderiaApi.getAnimalRazas(id)]).then(([animalResult, razasResult]) => {
       if (!mounted) return;
-      if (animalResult.status === 'fulfilled') setAnimal(animalResult.value);
-      else setError(animalResult.reason?.message || 'No se pudo cargar el animal.');
+      if (animalResult.status === 'fulfilled') {
+        setAnimal(animalResult.value);
+        resolveAnimalQr(animalResult.value).then((code) => {
+          if (mounted) setQrCode(code);
+        });
+      } else setError(animalResult.reason?.message || 'No se pudo cargar el animal.');
       if (razasResult.status === 'fulfilled') setRazas(razasResult.value || []);
     });
     return () => { mounted = false; };
@@ -107,8 +131,6 @@ export default function AnimalGeneticaTab() {
     const age = ageMonths(animal);
     const breedCount = razas.length;
     const purity = razas.reduce((max, row) => Math.max(max, Number(row.porcentaje || 0)), 0);
-    const merit = Math.min(100, Math.round(52 + (purity * 0.28) + Math.min(breedCount, 3) * 5 + (Number.isFinite(age) && age >= 12 ? 8 : 0)));
-    const decision = inferDecision(sex, merit, age);
     return {
       sex,
       age,
@@ -116,9 +138,6 @@ export default function AnimalGeneticaTab() {
       category: geneticCategory(sex, age),
       purity,
       breedCount,
-      merit,
-      decision,
-      value: merit >= 90 ? 18000000 : merit >= 75 ? 12000000 : merit >= 55 ? 7500000 : 4200000,
     };
   }, [animal, razas]);
 
@@ -128,26 +147,18 @@ export default function AnimalGeneticaTab() {
         value: `${Number(row.porcentaje || 0).toLocaleString('es-CO')}%`,
         detail: 'Composición racial registrada',
       }))
-    : [{ label: 'Composición racial', value: 'Sin registro', detail: 'Registre razas para calcular mérito genético.' }];
+    : [{ label: 'Composición racial', value: 'Sin registro', detail: 'Sin composición racial registrada en API.' }];
 
   const genealogy = [
-    { label: 'Padre', value: valueOf(animal, ['padre', 'nombre_padre'], '--'), detail: 'Línea paterna' },
-    { label: 'Madre', value: valueOf(animal, ['madre', 'nombre_madre'], '--'), detail: 'Línea materna' },
-    { label: 'Abuelo materno', value: valueOf(animal, ['abuelo_materno'], '--'), detail: 'Referencia genética' },
-    { label: 'Línea genética', value: valueOf(animal, ['linea_genetica'], 'Línea por documentar'), detail: 'Preparado para genealogía avanzada' },
+    { label: 'Genealogía', value: ADVANCED_GENETIC_EMPTY, detail: 'Sin padre, madre o línea genética registrada en API.' },
   ];
 
   const inventory = [
-    { label: 'Pajillas disponibles', value: metrics.sex === 'Macho' ? '0' : 'No aplica', detail: 'Inventario seminal' },
-    { label: 'Embriones disponibles', value: metrics.sex === 'Hembra' ? '0' : 'No aplica', detail: 'Inventario embrionario' },
-    { label: 'Certificados genéticos', value: 'Pendiente', detail: 'Estructura lista para adjuntos' },
+    { label: 'Inventario genético', value: ADVANCED_GENETIC_EMPTY, detail: 'Sin certificados, pajillas ni embriones registrados.' },
   ];
 
   const offspring = [
-    { label: 'Crías registradas', value: '0', detail: 'Pendiente conexión genética.' },
-    { label: 'Peso promedio descendencia', value: '--', detail: 'Requiere registros productivos.' },
-    { label: 'Hembras retenidas', value: '--', detail: 'Indicador para selección.' },
-    { label: 'Índice descendencia', value: 'No disponible', detail: 'Sin crías registradas.' },
+    { label: 'Descendencia', value: ADVANCED_GENETIC_EMPTY, detail: 'Sin crías o desempeño de descendencia registrados.' },
   ];
 
   const downloadReport = async () => {
@@ -156,33 +167,26 @@ export default function AnimalGeneticaTab() {
     setError('');
     try {
       const name = animalName(animal, `Animal ${id}`);
-      const qr = animalQr(animal);
+      const qr = qrCode !== '--' ? qrCode : await resolveAnimalQr(animal);
       const report = {
         generatedAt: new Date().toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }),
         animal: [
           { label: 'Nombre', value: name },
           { label: 'QR', value: qr },
+          { label: 'Código interno', value: animalInternalCode(animal) },
           { label: 'Raza base', value: razas.map((row) => row.nombre_raza).filter(Boolean).join(' / ') || '--' },
           { label: 'Sexo', value: metrics.sex },
           { label: 'Edad', value: metrics.ageText },
           { label: 'Categoría genética', value: metrics.category },
         ],
         razas: breedCards.map((card) => ({ label: card.label, value: `${card.value} - ${card.detail}` })),
-        genealogia: genealogy,
-        merito: [
-          { label: 'Mérito genético AGX', value: `${metrics.merit}/100`, color: metrics.merit >= 75 ? [0.28, 0.62, 0] : [0.9, 0.68, 0] },
-          { label: 'Valor genético estimado', value: formatMoney(metrics.value) },
-          { label: 'Decisión AGX', value: metrics.decision.state },
-        ],
-        inventario: inventory,
-        arbol: [
-          `Padre: ${genealogy[0].value}`,
-          `Madre: ${genealogy[1].value}`,
-          `Abuelo materno: ${genealogy[2].value}`,
-          `Línea genética: ${genealogy[3].value}`,
-        ],
-        descendencia: offspring,
-        decision: [metrics.decision.state, metrics.decision.action, 'Reporte generado con datos registrados en AgroGenomaX. Validar genealogía y certificados antes de decisiones comerciales.'],
+        genealogia: [],
+        merito: [],
+        inventario: [],
+        arbol: [],
+        descendencia: [],
+        decision: [],
+        advancedNotice: ADVANCED_GENETIC_EMPTY,
       };
       const blob = await createGeneticReportPdfBlob(report);
       downloadBlob(blob, geneticReportFileName(name, qr));
@@ -199,7 +203,7 @@ export default function AnimalGeneticaTab() {
   return (
     <div className="gan-stack gan-repro agx-genetics">
       <div className="gan-section-heading repro-intro">
-        <p>Identidad genética, genealogía, mérito AGX, embriones, pajillas, descendencia y valor comercial del animal.</p>
+        <p>Identidad genética básica y composición racial registrada en AgroGenomaX.</p>
       </div>
 
       <section className="gan-panel repro-summary-panel">
@@ -214,12 +218,12 @@ export default function AnimalGeneticaTab() {
           </button>
         </div>
         <div className="repro-executive-grid">
-          <GeneticCard label="QR" value={animalQr(animal)} detail="Identificación genética" />
+          <GeneticCard label="QR" value={qrCode} detail="Identificación real validada" />
+          <GeneticCard label="Código interno" value={animalInternalCode(animal)} detail="Código operativo separado del QR" />
+          <GeneticCard label="Raza base" value={razas.map((row) => row.nombre_raza).filter(Boolean).join(' / ') || '--'} detail="Dato registrado" />
           <GeneticCard label="Sexo" value={metrics.sex} detail="Contexto de selección" />
           <GeneticCard label="Edad" value={metrics.ageText} detail="Edad actual" />
           <GeneticCard label="Categoría" value={metrics.category} detail="Clasificación genética productiva" />
-          <GeneticCard label="Mérito genético AGX" value={`${metrics.merit}/100`} detail="Índice estimado interno" tone={metrics.merit >= 75 ? 'success' : 'warning'} />
-          <GeneticCard label="Valor genético estimado" value={formatMoney(metrics.value)} detail="Referencia comercial no contractual" />
         </div>
       </section>
 
@@ -235,58 +239,22 @@ export default function AnimalGeneticaTab() {
 
       <section className="gan-panel">
         <div className="gan-section-heading">
-          <span className="gan-eyebrow">Genealogía</span>
-          <h3>Padre, madre y línea genética</h3>
+          <span className="gan-eyebrow">Información genética avanzada</span>
+          <h3>Estado del registro</h3>
         </div>
         <div className="gan-summary-grid repro-metric-grid">
           {genealogy.map((card) => <GeneticCard key={card.label} label={card.label} value={card.value} detail={card.detail} icon={GitBranch} />)}
         </div>
       </section>
 
-      <section className="gan-panel agx-genetic-tree">
-        <div className="gan-section-heading">
-          <span className="gan-eyebrow">Árbol genealógico visual</span>
-          <h3>Línea genética</h3>
-        </div>
-        <div className="agx-tree-map">
-          <article><TreePine /><strong>{genealogy[0].value}</strong><span>Padre</span></article>
-          <article><Baby /><strong>{animalName(animal, `Animal ${id}`)}</strong><span>Animal</span></article>
-          <article><TreePine /><strong>{genealogy[1].value}</strong><span>Madre</span></article>
-          <article><GitBranch /><strong>{genealogy[2].value}</strong><span>Abuelo materno</span></article>
-        </div>
-      </section>
-
       <section className="gan-panel">
         <div className="gan-section-heading">
-          <span className="gan-eyebrow">Inventario reproductivo</span>
-          <h3>Pajillas y embriones</h3>
+          <span className="gan-eyebrow">Inventario y descendencia</span>
+          <h3>Información no registrada</h3>
         </div>
         <div className="gan-summary-grid repro-metric-grid">
-          {inventory.map((card) => <GeneticCard key={card.label} label={card.label} value={card.value} detail={card.detail} icon={Boxes} />)}
-        </div>
-      </section>
-
-      <section className="gan-panel">
-        <div className="gan-section-heading">
-          <span className="gan-eyebrow">Descendencia registrada</span>
-          <h3>Proyección de legado genético</h3>
-        </div>
-        <div className="gan-summary-grid repro-metric-grid">
-          {offspring.map((card) => <GeneticCard key={card.label} label={card.label} value={card.value} detail={card.detail} icon={Baby} />)}
-        </div>
-      </section>
-
-      <section className={`gan-panel repro-decision-panel ${toneClass(metrics.decision.tone)}`}>
-        <div className="gan-section-heading">
-          <span className="gan-eyebrow">Decisión AGX</span>
-          <h3>{metrics.decision.state}</h3>
-          <p>{metrics.decision.action}</p>
-        </div>
-        <div className="gan-summary-grid repro-metric-grid">
-          <GeneticCard icon={ShieldCheck} label="Conservar" value={metrics.decision.state === 'Conservar' ? 'Recomendado' : 'En evaluación'} detail="Selección productiva" />
-          <GeneticCard icon={Sparkles} label="Usar como reproductor" value={metrics.decision.state === 'Usar como reproductor' ? 'Recomendado' : 'Según categoría'} detail="Validar fertilidad" />
-          <GeneticCard icon={Dna} label="Donadora / receptora" value={metrics.decision.state === 'Donadora' ? 'Recomendado' : 'En evaluación'} detail="Validar sanidad y mérito" />
-          <GeneticCard icon={Scale} label="Valor comercial" value={formatMoney(metrics.value)} detail="Estimación interna AGX" />
+          {inventory.map((card) => <GeneticCard key={card.label} label={card.label} value={card.value} detail={card.detail} icon={GitBranch} />)}
+          {offspring.map((card) => <GeneticCard key={card.label} label={card.label} value={card.value} detail={card.detail} icon={GitBranch} />)}
         </div>
       </section>
 

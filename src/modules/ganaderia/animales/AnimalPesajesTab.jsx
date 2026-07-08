@@ -12,6 +12,7 @@ import {
 } from 'recharts';
 import { ganaderiaApi } from '../api/ganaderiaApi.js';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
+import { formatDateDisplay as formatDateDisplayValue } from '../utils/dateFormat.js';
 import { createProductiveReportPdfBlob, productiveReportFileName } from './productiveReportPdf.js';
 
 function todayLocal() {
@@ -175,10 +176,7 @@ function formatDate(value) {
 }
 
 function formatDateDisplay(value) {
-  const date = formatDate(value);
-  if (!date) return '--';
-  const [year, month, day] = date.split('-');
-  return year && month && day ? `${day}-${month}-${year}` : date;
+  return formatDateDisplayValue(value, '--');
 }
 
 function formatNumber(value) {
@@ -659,7 +657,7 @@ export default function AnimalPesajesTab({ animalId }) {
       gdpReciente: recentDailyAverage,
       promedioDiario: recentDailyAverage,
       gananciaMensual: Number.isFinite(recentDailyAverage) ? recentDailyAverage * 30 : null,
-      ultimoPesajeFecha: last ? formatDate(getFecha(last)) : '',
+      ultimoPesajeFecha: last ? formatDateDisplay(getFecha(last)) : '',
       ultimoPesajeHace: last ? daysSince(getFecha(last)) : '—',
       diasDesdeUltimoPesaje: daysSinceLast,
       timeAlert,
@@ -752,7 +750,7 @@ export default function AnimalPesajesTab({ animalId }) {
       diasEstimados,
       fechaEstimada: estimatedDate.toISOString().slice(0, 10),
       achieved: false,
-      message: goal.fechaObjetivo ? `Fecha objetivo: ${goal.fechaObjetivo}` : 'Proyección calculada con GDP reciente.',
+      message: goal.fechaObjetivo ? `Fecha objetivo: ${formatDateDisplay(goal.fechaObjetivo)}` : 'Proyección calculada con GDP reciente.',
     };
   }, [goal, summary]);
 
@@ -785,7 +783,8 @@ export default function AnimalPesajesTab({ animalId }) {
   const chartData = useMemo(
     () =>
       enrichedRows.map((row) => ({
-        fecha: formatDate(getFecha(row)),
+        fecha: formatDateDisplay(getFecha(row)),
+        fechaIso: formatDate(getFecha(row)),
         peso: getPeso(row),
         pesoAnterior: row.peso_anterior,
         pesoAnteriorLabel: row.es_peso_nacimiento || !Number.isFinite(row.peso_anterior) ? 'Registro inicial' : formatMetric(row.peso_anterior, ' kg'),
@@ -1254,7 +1253,7 @@ export default function AnimalPesajesTab({ animalId }) {
           <div className="gan-dashboard-grid gan-projection-grid">
             <article className={productiveGoal.achieved ? 'estado-vigente' : 'estado-proxima'}><span>Kg faltantes</span><strong>{productiveGoal.achieved ? 'Meta alcanzada' : formatMetric(productiveGoal.kgFaltantes, ' kg')}</strong></article>
             <article className={productiveGoal.achieved ? 'estado-vigente' : 'estado-proxima'}><span>Días estimados</span><strong>{Number.isFinite(productiveGoal.diasEstimados) ? formatDays(Math.ceil(productiveGoal.diasEstimados)) : '----'}</strong></article>
-            <article className={productiveGoal.achieved ? 'estado-vigente' : 'estado-proxima'}><span>Fecha estimada</span><strong>{productiveGoal.fechaEstimada || '----'}</strong></article>
+            <article className={productiveGoal.achieved ? 'estado-vigente' : 'estado-proxima'}><span>Fecha estimada</span><strong>{productiveGoal.fechaEstimada ? formatDateDisplay(productiveGoal.fechaEstimada) : '----'}</strong></article>
             <article className={productiveGoal.achieved ? 'estado-vigente' : 'estado-sin-programacion'}><span>Estado meta</span><strong>{productiveGoal.message}</strong></article>
           </div>
         ) : (
@@ -1270,11 +1269,11 @@ export default function AnimalPesajesTab({ animalId }) {
         <div className="gan-dashboard-grid gan-projection-grid">
           {performance.hasComparativePeriods ? (
             <>
-              <article className="estado-vigente"><span>Mejor periodo de ganancia</span><strong>{performance.best ? `${formatMetric(performance.best.ganancia_diaria_kg, ' kg/día')} (${formatDate(getFecha(performance.best))})` : '----'}</strong></article>
-              <article className="estado-vencida"><span>Peor periodo de ganancia</span><strong>{performance.worst ? `${formatMetric(performance.worst.ganancia_diaria_kg, ' kg/día')} (${formatDate(getFecha(performance.worst))})` : '----'}</strong></article>
+              <article className="estado-vigente"><span>Mejor periodo de ganancia</span><strong>{performance.best ? `${formatMetric(performance.best.ganancia_diaria_kg, ' kg/día')} (${formatDateDisplay(getFecha(performance.best))})` : '----'}</strong></article>
+              <article className="estado-vencida"><span>Peor periodo de ganancia</span><strong>{performance.worst ? `${formatMetric(performance.worst.ganancia_diaria_kg, ' kg/día')} (${formatDateDisplay(getFecha(performance.worst))})` : '----'}</strong></article>
             </>
           ) : (
-            <article className="estado-neutro"><span>Periodo evaluado</span><strong>{performance.best ? `${formatMetric(performance.best.ganancia_diaria_kg, ' kg/día')} (${formatDate(getFecha(performance.best))})` : '----'}</strong></article>
+            <article className="estado-neutro"><span>Periodo evaluado</span><strong>{performance.best ? `${formatMetric(performance.best.ganancia_diaria_kg, ' kg/día')} (${formatDateDisplay(getFecha(performance.best))})` : '----'}</strong></article>
           )}
           <article className="estado-neutro"><span>Promedio histórico</span><strong>{formatMetric(summary.gdpHistorico, ' kg/día')}</strong></article>
           <article className={performance.trendClassName}><span>Tendencia actual</span><strong>{performance.tendencia}</strong></article>
