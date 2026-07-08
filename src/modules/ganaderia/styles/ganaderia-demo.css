@@ -212,8 +212,307 @@ button.gan-dash-sidebar-link {
   line-height: 1.55;
 }
 
+.gan-demo-case-selector {
+  display: inline-flex;
+  gap: 0.4rem;
+  margin-bottom: 1.4rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 0.3rem;
+}
+
+.gan-demo-case-btn {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #9fb3a8;
+  padding: 0.5rem 1.1rem;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.gan-demo-case-btn.is-active {
+  background: linear-gradient(90deg, #39ff14, #7cff00);
+  color: #04170a;
+}
+
+.gan-demo-not-applicable {
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  border-radius: 0.8rem;
+  background: rgba(255, 255, 255, 0.015);
+  padding: 1.4rem;
+  color: #9fb3a8;
+  font-size: 0.88rem;
+}
+
+.gan-demo-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.1rem;
+}
+
+.gan-demo-summary-grid-compact {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 1.4rem;
+}
+
+.gan-demo-summary-card {
+  display: grid;
+  gap: 0.8rem;
+  border: 1px solid rgba(57, 255, 20, 0.18);
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 1.2rem;
+}
+
+.gan-demo-summary-card header {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.gan-demo-summary-card header strong {
+  color: #ffffff;
+  font-size: 1.05rem;
+  font-family: Space Grotesk, Inter, sans-serif;
+}
+
+.gan-demo-summary-card header span {
+  color: #9fb3a8;
+  font-size: 0.78rem;
+}
+
+.gan-demo-summary-card ul {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: #b7c7bd;
+  font-size: 0.85rem;
+}
+
+.gan-demo-summary-card li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+}
+
+.gan-demo-summary-card li.is-positive {
+  color: #7cff00;
+}
+
+.gan-demo-summary-card li.is-alert {
+  color: #ffb35c;
+}
+
+.gan-demo-animales-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.1rem;
+}
+
+.gan-demo-animal-card {
+  display: grid;
+  justify-items: start;
+  gap: 0.5rem;
+  border: 1px solid rgba(57, 255, 20, 0.18);
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 1.3rem;
+}
+
+.gan-demo-animal-card strong {
+  color: #ffffff;
+  font-size: 1.05rem;
+  font-family: Space Grotesk, Inter, sans-serif;
+}
+
+.gan-demo-animal-card > span {
+  color: #9fb3a8;
+  font-size: 0.82rem;
+}
+
+.gan-demo-animal-status {
+  border-radius: 999px;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.gan-demo-animal-status.is-ready {
+  border: 1px solid rgba(57, 255, 20, 0.4);
+  background: rgba(57, 255, 20, 0.1);
+  color: #7cff00;
+}
+
+.gan-demo-animal-status.is-lactating {
+  border: 1px solid rgba(10, 132, 255, 0.4);
+  background: rgba(10, 132, 255, 0.1);
+  color: #5ab4ff;
+}
+
+.gan-demo-ficha-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 11rem;
+}
+
+.gan-demo-ficha-row span {
+  color: #7a8a80;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.gan-demo-ficha-row strong {
+  color: #ffffff;
+  font-size: 0.88rem;
+}
+
+.gan-demo-note {
+  margin: 0.4rem 0 0;
+  color: #7a8a80;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  font-style: italic;
+}
+
+.gan-demo-alert-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  border-radius: 0.8rem;
+  padding: 1rem 1.2rem;
+  margin-bottom: 0.9rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.gan-demo-alert-box p {
+  margin: 0 0 0.3rem;
+  color: #d8e2ee;
+}
+
+.gan-demo-alert-box p:last-child {
+  margin-bottom: 0;
+}
+
+.gan-demo-alert-box.is-warning {
+  border: 1px solid rgba(255, 179, 92, 0.35);
+  background: rgba(255, 179, 92, 0.08);
+  color: #ffb35c;
+}
+
+.gan-demo-alert-box.is-alert {
+  border: 1px solid rgba(255, 107, 107, 0.35);
+  background: rgba(255, 107, 107, 0.08);
+  color: #ff8a8a;
+}
+
+.gan-demo-alert-box.is-positive {
+  border: 1px solid rgba(57, 255, 20, 0.3);
+  background: rgba(57, 255, 20, 0.06);
+  color: #7cff00;
+}
+
+.gan-demo-alert-box svg {
+  flex: 0 0 auto;
+  margin-top: 0.1rem;
+}
+
+.gan-demo-table-checkpoints .gan-demo-table-row {
+  display: grid;
+  grid-template-columns: 10rem 12rem 6rem 8rem;
+  gap: 0.8rem;
+  align-items: center;
+}
+
+.gan-demo-table-milk .gan-demo-table-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.gan-demo-table-milk strong.is-alert-value {
+  color: #ff8a8a;
+}
+
+.gan-demo-decision-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.2rem;
+}
+
+.gan-demo-decision-card {
+  display: grid;
+  gap: 0.5rem;
+  border: 1px solid rgba(57, 255, 20, 0.18);
+  border-radius: 0.8rem;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 1.1rem;
+}
+
+.gan-demo-decision-card strong {
+  color: #ffffff;
+  font-size: 0.92rem;
+}
+
+.gan-demo-decision-card p {
+  margin: 0;
+  color: #b7c7bd;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.gan-demo-indicator-list {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  padding-left: 1.2rem;
+  color: #d8e2ee;
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.gan-demo-report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+}
+
+@media (max-width: 900px) {
+  .gan-demo-summary-grid-compact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 700px) {
-  .gan-demo-columns {
+  .gan-demo-columns,
+  .gan-demo-summary-grid,
+  .gan-demo-summary-grid-compact,
+  .gan-demo-animales-grid,
+  .gan-demo-decision-grid {
     grid-template-columns: 1fr;
+  }
+
+  .gan-demo-table-checkpoints .gan-demo-table-row {
+    grid-template-columns: 1fr;
+  }
+
+  .gan-demo-case-selector {
+    width: 100%;
+  }
+
+  .gan-demo-case-btn {
+    flex: 1;
+    text-align: center;
   }
 }

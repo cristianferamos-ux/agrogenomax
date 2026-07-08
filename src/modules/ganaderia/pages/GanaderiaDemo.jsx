@@ -1,20 +1,25 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
+  AlertTriangle,
   Beef,
+  CheckCircle2,
   ClipboardList,
   Dna,
   FileBarChart,
   LayoutDashboard,
-  MapPin,
+  Milk,
   QrCode,
   RotateCcw,
   Scale,
-  Sprout,
+  Stethoscope,
   Syringe,
+  Tag,
+  TrendingDown,
+  TrendingUp,
 } from 'lucide-react';
 import GanaderiaDemoNotice from '../components/GanaderiaDemoNotice.jsx';
-import { loadDemoData, saveDemoData, resetDemoData, generateId, generateQrCodigo } from '../data/ganaderiaDemoData.js';
+import { loadDemoData, resetDemoData } from '../data/ganaderiaDemoData.js';
 import { buildDemoReportPdfBlob, downloadBlob } from '../utils/demoPdf.js';
 import '../styles/ganaderia-dashboard.css';
 import '../styles/ganaderia-demo.css';
@@ -22,30 +27,43 @@ import '../styles/ganaderia-demo.css';
 const tabs = [
   { id: 'resumen', label: 'Resumen', icon: LayoutDashboard },
   { id: 'animales', label: 'Animales', icon: Beef },
-  { id: 'predios', label: 'Predios y potreros', icon: MapPin },
+  { id: 'ficha', label: 'Ficha animal', icon: ClipboardList },
+  { id: 'qr', label: 'QR', icon: QrCode },
   { id: 'pesajes', label: 'Pesajes', icon: Scale },
   { id: 'sanidad', label: 'Sanidad', icon: Syringe },
+  { id: 'tratamientos', label: 'Tratamientos', icon: Stethoscope },
   { id: 'reproduccion', label: 'Reproducción', icon: Dna },
-  { id: 'qr', label: 'QR', icon: QrCode },
-  { id: 'fichas', label: 'Fichas', icon: ClipboardList },
+  { id: 'leche', label: 'Producción de leche', icon: Milk },
+  { id: 'comercializacion', label: 'Comercialización', icon: Tag },
   { id: 'reportes', label: 'Reportes', icon: FileBarChart },
 ];
+
+function formatFecha(iso) {
+  const date = new Date(iso);
+  const dd = String(date.getDate()).padStart(2, '0');
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const yyyy = date.getFullYear();
+  return `${dd}-${mm}-${yyyy}`;
+}
 
 export default function GanaderiaDemo() {
   const [data, setData] = useState(() => loadDemoData());
   const [activeTab, setActiveTab] = useState('resumen');
-
-  const update = (updater) => {
-    setData((current) => {
-      const next = updater(current);
-      saveDemoData(next);
-      return next;
-    });
-  };
+  const [casoActivo, setCasoActivo] = useState('coronado');
 
   const handleReset = () => {
     setData(resetDemoData());
     setActiveTab('resumen');
+    setCasoActivo('coronado');
+  };
+
+  const coronado = data.casos.coronado;
+  const esperanza = data.casos.esperanza;
+  const caso = casoActivo === 'coronado' ? coronado : esperanza;
+
+  const verFicha = (casoId) => {
+    setCasoActivo(casoId);
+    setActiveTab('ficha');
   };
 
   return (
@@ -82,8 +100,8 @@ export default function GanaderiaDemo() {
         <header className="gan-dash-header">
           <div>
             <span className="gan-dash-badge">Modo Demo</span>
-            <h1>Versión Demo interactiva</h1>
-            <p>Registra animales, predios, pesajes, sanidad y reproducción de prueba. Nada de esto afecta datos reales.</p>
+            <h1>Cuenta Demo — Ganadería Inteligente</h1>
+            <p>Dos casos completos de ejemplo: Coronado y Esperanza. Los datos son temporales y se reinician al cerrar esta pestaña.</p>
           </div>
           <div className="gan-dash-header-actions">
             <button type="button" className="gan-dash-btn is-outline" onClick={handleReset}>
@@ -92,553 +110,585 @@ export default function GanaderiaDemo() {
           </div>
         </header>
 
-        {activeTab === 'resumen' && <ResumenTab data={data} />}
-        {activeTab === 'animales' && <AnimalesTab data={data} update={update} />}
-        {activeTab === 'predios' && <PrediosTab data={data} update={update} />}
-        {activeTab === 'pesajes' && <PesajesTab data={data} update={update} />}
-        {activeTab === 'sanidad' && <SanidadTab data={data} update={update} />}
-        {activeTab === 'reproduccion' && <ReproduccionTab data={data} update={update} />}
-        {activeTab === 'qr' && <QrTab data={data} update={update} />}
-        {activeTab === 'fichas' && <FichasTab data={data} />}
-        {activeTab === 'reportes' && <ReportesTab data={data} />}
+        {activeTab !== 'resumen' && activeTab !== 'animales' && (
+          <CaseSelector casoActivo={casoActivo} onChange={setCasoActivo} coronado={coronado} esperanza={esperanza} />
+        )}
+
+        {activeTab === 'resumen' && <ResumenTab coronado={coronado} esperanza={esperanza} onVerFicha={verFicha} />}
+        {activeTab === 'animales' && <AnimalesTab coronado={coronado} esperanza={esperanza} onVerFicha={verFicha} />}
+        {activeTab === 'ficha' && <FichaTab caso={caso} casoActivo={casoActivo} />}
+        {activeTab === 'qr' && <QrTab coronado={coronado} esperanza={esperanza} onVerFicha={verFicha} />}
+        {activeTab === 'pesajes' && <PesajesTab caso={caso} casoActivo={casoActivo} />}
+        {activeTab === 'sanidad' && <SanidadTab caso={caso} />}
+        {activeTab === 'tratamientos' && <TratamientosTab caso={caso} />}
+        {activeTab === 'reproduccion' && <ReproduccionTab caso={caso} casoActivo={casoActivo} />}
+        {activeTab === 'leche' && <LecheTab caso={caso} casoActivo={casoActivo} />}
+        {activeTab === 'comercializacion' && <ComercializacionTab caso={caso} casoActivo={casoActivo} />}
+        {activeTab === 'reportes' && <ReportesTab coronado={coronado} esperanza={esperanza} />}
       </main>
     </div>
   );
 }
 
-function ResumenTab({ data }) {
-  const metrics = [
-    { label: 'Animales de prueba', value: data.animales.length },
-    { label: 'Predios de prueba', value: data.predios.length },
-    { label: 'Potreros de prueba', value: data.potreros.length },
-    { label: 'Pesajes registrados', value: data.pesajes.length },
-    { label: 'Vacunas registradas', value: data.vacunas.length },
-    { label: 'Tratamientos registrados', value: data.tratamientos.length },
-    { label: 'Eventos reproductivos', value: data.reproduccion.length },
-  ];
+function CaseSelector({ casoActivo, onChange, coronado, esperanza }) {
+  return (
+    <div className="gan-demo-case-selector" role="tablist" aria-label="Seleccionar caso demo">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={casoActivo === 'coronado'}
+        className={`gan-demo-case-btn${casoActivo === 'coronado' ? ' is-active' : ''}`}
+        onClick={() => onChange('coronado')}
+      >
+        Ver caso {coronado.identidad.nombre}
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={casoActivo === 'esperanza'}
+        className={`gan-demo-case-btn${casoActivo === 'esperanza' ? ' is-active' : ''}`}
+        onClick={() => onChange('esperanza')}
+      >
+        Ver caso {esperanza.identidad.nombre}
+      </button>
+    </div>
+  );
+}
 
+function NotApplicable({ text }) {
+  return (
+    <div className="gan-demo-not-applicable">
+      <p>{text}</p>
+    </div>
+  );
+}
+
+function ResumenTab({ coronado, esperanza, onVerFicha }) {
   return (
     <section className="gan-dash-section">
-      <h2>Resumen de la sesión demo</h2>
-      <div className="gan-dash-metrics-grid">
-        {metrics.map((metric) => (
-          <article key={metric.label} className="gan-dash-metric-card">
-            <span className="gan-dash-metric-icon">
-              <ClipboardList size={20} />
-            </span>
-            <div>
-              <strong>{metric.value}</strong>
-              <span>{metric.label}</span>
-            </div>
-          </article>
-        ))}
+      <h2>Resumen comparativo de la sesión demo</h2>
+      <div className="gan-demo-summary-grid">
+        <article className="gan-demo-summary-card">
+          <header>
+            <strong>{coronado.identidad.nombre}</strong>
+            <span>{coronado.identidad.raza}</span>
+          </header>
+          <ul>
+            <li>Peso actual: <strong>{coronado.identidad.pesoActualKg} kg</strong></li>
+            <li>Categoría: <strong>{coronado.identidad.categoria}</strong></li>
+            <li className="is-positive">
+              <CheckCircle2 size={15} /> Alerta de crecimiento resuelta ({coronado.analisisPesajes.evidenciaRecuperacion})
+            </li>
+          </ul>
+          <button type="button" className="gan-dash-btn is-outline" onClick={() => onVerFicha('coronado')}>
+            Ver ficha de {coronado.identidad.nombre}
+          </button>
+        </article>
+
+        <article className="gan-demo-summary-card">
+          <header>
+            <strong>{esperanza.identidad.nombre}</strong>
+            <span>{esperanza.identidad.raza}</span>
+          </header>
+          <ul>
+            <li>Producción de hoy: <strong>{esperanza.produccionLeche.registrosDiarios.at(-1).litros} L</strong></li>
+            <li>Días en leche: <strong>{esperanza.reproduccion.diasEnLeche}</strong></li>
+            <li className="is-alert">
+              <AlertTriangle size={15} /> Alerta activa: {esperanza.produccionLeche.alerta}
+            </li>
+          </ul>
+          <button type="button" className="gan-dash-btn is-outline" onClick={() => onVerFicha('esperanza')}>
+            Ver ficha de {esperanza.identidad.nombre}
+          </button>
+        </article>
       </div>
     </section>
   );
 }
 
-function AnimalesTab({ data, update }) {
-  const [form, setForm] = useState({
-    nombre: '',
-    especie: 'Bovino',
-    sexo: 'Hembra',
-    predioId: data.predios[0]?.id || '',
-    potreroId: data.potreros[0]?.id || '',
-    marcaHierro: '',
-    numeroHierro: '',
-  });
-
-  const handleSubmit = (event) => {
-    event.preventDefault();
-    if (!form.nombre.trim()) return;
-
-    update((current) => ({
-      ...current,
-      animales: [
-        ...current.animales,
-        {
-          id: generateId('animal'),
-          ...form,
-          qrCodigo: generateQrCodigo(),
-          fechaRegistro: new Date().toISOString(),
-        },
-      ],
-    }));
-    setForm((prev) => ({ ...prev, nombre: '', marcaHierro: '', numeroHierro: '' }));
-  };
-
+function AnimalesTab({ coronado, esperanza, onVerFicha }) {
   return (
     <section className="gan-dash-section">
-      <h2>Registrar animal de prueba</h2>
-      <form className="gan-demo-form" onSubmit={handleSubmit}>
-        <label>
-          Nombre o identificador
-          <input value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} required />
-        </label>
-        <label>
-          Especie
-          <select value={form.especie} onChange={(e) => setForm({ ...form, especie: e.target.value })}>
-            <option>Bovino</option>
-            <option>Bufalino</option>
-            <option>Equino</option>
-          </select>
-        </label>
-        <label>
-          Sexo
-          <select value={form.sexo} onChange={(e) => setForm({ ...form, sexo: e.target.value })}>
-            <option>Hembra</option>
-            <option>Macho</option>
-          </select>
-        </label>
-        <label>
-          Predio
-          <select value={form.predioId} onChange={(e) => setForm({ ...form, predioId: e.target.value })}>
-            <option value="">Sin asignar</option>
-            {data.predios.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.nombre}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Potrero
-          <select value={form.potreroId} onChange={(e) => setForm({ ...form, potreroId: e.target.value })}>
-            <option value="">Sin asignar</option>
-            {data.potreros.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.nombre}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Marca de hierro
-          <input value={form.marcaHierro} onChange={(e) => setForm({ ...form, marcaHierro: e.target.value })} />
-        </label>
-        <label>
-          Número de hierro
-          <input value={form.numeroHierro} onChange={(e) => setForm({ ...form, numeroHierro: e.target.value })} />
-        </label>
-        <button type="submit" className="gan-dash-btn is-primary">
-          Registrar animal
-        </button>
-      </form>
-
-      <h2 className="gan-demo-list-title">Animales registrados en la demo ({data.animales.length})</h2>
-      <div className="gan-demo-table">
-        {data.animales.map((animal) => (
-          <div key={animal.id} className="gan-demo-table-row">
-            <strong>{animal.nombre}</strong>
-            <span>{animal.especie} · {animal.sexo}</span>
-            <span>QR: {animal.qrCodigo}</span>
-          </div>
-        ))}
-        {data.animales.length === 0 && <p className="gan-demo-empty">Aún no hay animales de prueba registrados.</p>}
+      <h2>Animales de la sesión demo</h2>
+      <p className="gan-demo-report-text">
+        Esta demo trabaja con dos casos completos, no con un listado abierto de animales genéricos.
+      </p>
+      <div className="gan-demo-animales-grid">
+        <article className="gan-demo-animal-card">
+          <strong>{coronado.identidad.nombre}</strong>
+          <span>{coronado.identidad.raza}</span>
+          <span className="gan-demo-animal-status is-ready">{coronado.identidad.estadoComercial}</span>
+          <button type="button" className="gan-dash-btn is-primary" onClick={() => onVerFicha('coronado')}>
+            Ver ficha
+          </button>
+        </article>
+        <article className="gan-demo-animal-card">
+          <strong>{esperanza.identidad.nombre}</strong>
+          <span>{esperanza.identidad.raza}</span>
+          <span className="gan-demo-animal-status is-lactating">{esperanza.identidad.estadoProductivo}</span>
+          <button type="button" className="gan-dash-btn is-primary" onClick={() => onVerFicha('esperanza')}>
+            Ver ficha
+          </button>
+        </article>
       </div>
     </section>
   );
 }
 
-function PrediosTab({ data, update }) {
-  const [predio, setPredio] = useState({ nombre: '', ubicacion: '' });
-  const [potrero, setPotrero] = useState({ nombre: '', predioId: data.predios[0]?.id || '', capacidad: '' });
-
-  const submitPredio = (event) => {
-    event.preventDefault();
-    if (!predio.nombre.trim()) return;
-    update((current) => ({ ...current, predios: [...current.predios, { id: generateId('predio'), ...predio }] }));
-    setPredio({ nombre: '', ubicacion: '' });
-  };
-
-  const submitPotrero = (event) => {
-    event.preventDefault();
-    if (!potrero.nombre.trim() || !potrero.predioId) return;
-    update((current) => ({
-      ...current,
-      potreros: [...current.potreros, { id: generateId('potrero'), ...potrero, capacidad: Number(potrero.capacidad) || 0 }],
-    }));
-    setPotrero({ nombre: '', predioId: data.predios[0]?.id || '', capacidad: '' });
-  };
+function FichaTab({ caso, casoActivo }) {
+  const { identidad, genealogia } = caso;
+  const isCoronado = casoActivo === 'coronado';
 
   return (
     <section className="gan-dash-section">
-      <h2>Crear predio de prueba</h2>
-      <form className="gan-demo-form" onSubmit={submitPredio}>
-        <label>
-          Nombre del predio
-          <input value={predio.nombre} onChange={(e) => setPredio({ ...predio, nombre: e.target.value })} required />
-        </label>
-        <label>
-          Ubicación
-          <input value={predio.ubicacion} onChange={(e) => setPredio({ ...predio, ubicacion: e.target.value })} />
-        </label>
-        <button type="submit" className="gan-dash-btn is-primary">
-          Crear predio
-        </button>
-      </form>
+      <h2>Ficha de {identidad.nombre}</h2>
 
-      <h2 className="gan-demo-list-title">Crear potrero de prueba</h2>
-      <form className="gan-demo-form" onSubmit={submitPotrero}>
-        <label>
-          Nombre del potrero
-          <input value={potrero.nombre} onChange={(e) => setPotrero({ ...potrero, nombre: e.target.value })} required />
-        </label>
-        <label>
-          Predio
-          <select value={potrero.predioId} onChange={(e) => setPotrero({ ...potrero, predioId: e.target.value })}>
-            {data.predios.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.nombre}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Capacidad (animales)
-          <input type="number" value={potrero.capacidad} onChange={(e) => setPotrero({ ...potrero, capacidad: e.target.value })} />
-        </label>
-        <button type="submit" className="gan-dash-btn is-primary">
-          Crear potrero
-        </button>
-      </form>
-
-      <div className="gan-demo-columns">
-        <div>
-          <h3>Predios ({data.predios.length})</h3>
-          {data.predios.map((p) => (
-            <div key={p.id} className="gan-demo-table-row">
-              <strong>{p.nombre}</strong>
-              <span>{p.ubicacion || 'Sin ubicación'}</span>
-            </div>
-          ))}
+      <div className="gan-demo-ficha-head">
+        <div className="gan-demo-ficha-row">
+          <span>Código interno</span>
+          <strong>{identidad.codigoInterno}</strong>
         </div>
-        <div>
-          <h3>Potreros ({data.potreros.length})</h3>
-          {data.potreros.map((p) => (
-            <div key={p.id} className="gan-demo-table-row">
-              <strong>{p.nombre}</strong>
-              <span>Capacidad: {p.capacidad || 0}</span>
-            </div>
-          ))}
+        <div className="gan-demo-ficha-row">
+          <span>QR demo</span>
+          <strong>{identidad.qrCodigo}</strong>
+        </div>
+        <div className="gan-demo-ficha-row">
+          <span>Sexo</span>
+          <strong>{identidad.sexo}</strong>
+        </div>
+        <div className="gan-demo-ficha-row">
+          <span>Raza / composición</span>
+          <strong>{identidad.composicionRacial}</strong>
+        </div>
+        <div className="gan-demo-ficha-row">
+          <span>Fecha de nacimiento</span>
+          <strong>{formatFecha(identidad.fechaNacimiento)}</strong>
+        </div>
+        <div className="gan-demo-ficha-row">
+          <span>Edad</span>
+          <strong>{isCoronado ? `${identidad.edadMeses} meses` : identidad.edadAproximada}</strong>
+        </div>
+        <div className="gan-demo-ficha-row">
+          <span>Categoría</span>
+          <strong>{identidad.categoria}</strong>
+        </div>
+        <div className="gan-demo-ficha-row">
+          <span>Estado productivo</span>
+          <strong>{identidad.estadoProductivo}</strong>
+        </div>
+        <div className="gan-demo-ficha-row">
+          <span>Predio / potrero</span>
+          <strong>{identidad.predioReferencia} — {identidad.potreroReferencia}</strong>
         </div>
       </div>
-    </section>
-  );
-}
 
-function AnimalSelect({ data, value, onChange }) {
-  return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} required>
-      <option value="">Selecciona un animal</option>
-      {data.animales.map((animal) => (
-        <option key={animal.id} value={animal.id}>
-          {animal.nombre}
-        </option>
-      ))}
-    </select>
-  );
-}
-
-function PesajesTab({ data, update }) {
-  const [form, setForm] = useState({ animalId: '', peso: '' });
-
-  const handleSubmit = (event) => {
-    event.preventDefault();
-    if (!form.animalId || !form.peso) return;
-    update((current) => ({
-      ...current,
-      pesajes: [...current.pesajes, { id: generateId('pesaje'), animalId: form.animalId, peso: Number(form.peso), fecha: new Date().toISOString() }],
-    }));
-    setForm({ animalId: '', peso: '' });
-  };
-
-  return (
-    <section className="gan-dash-section">
-      <h2>Registrar pesaje de prueba</h2>
-      <form className="gan-demo-form" onSubmit={handleSubmit}>
-        <label>
-          Animal
-          <AnimalSelect data={data} value={form.animalId} onChange={(v) => setForm({ ...form, animalId: v })} />
-        </label>
-        <label>
-          Peso (kg)
-          <input type="number" value={form.peso} onChange={(e) => setForm({ ...form, peso: e.target.value })} required />
-        </label>
-        <button type="submit" className="gan-dash-btn is-primary">
-          Registrar pesaje
-        </button>
-      </form>
-
-      <h2 className="gan-demo-list-title">Historial de pesajes ({data.pesajes.length})</h2>
-      <div className="gan-demo-table">
-        {data.pesajes.map((item) => (
-          <div key={item.id} className="gan-demo-table-row">
-            <strong>{data.animales.find((a) => a.id === item.animalId)?.nombre || 'Animal eliminado'}</strong>
-            <span>{item.peso} kg</span>
-            <span>{new Date(item.fecha).toLocaleDateString('es-CO')}</span>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function SanidadTab({ data, update }) {
-  const [vacuna, setVacuna] = useState({ animalId: '', nombre: '' });
-  const [tratamiento, setTratamiento] = useState({ animalId: '', tipo: '', observacion: '' });
-
-  const submitVacuna = (event) => {
-    event.preventDefault();
-    if (!vacuna.animalId || !vacuna.nombre.trim()) return;
-    update((current) => ({
-      ...current,
-      vacunas: [...current.vacunas, { id: generateId('vacuna'), ...vacuna, fecha: new Date().toISOString() }],
-    }));
-    setVacuna({ animalId: '', nombre: '' });
-  };
-
-  const submitTratamiento = (event) => {
-    event.preventDefault();
-    if (!tratamiento.animalId || !tratamiento.tipo.trim()) return;
-    update((current) => ({
-      ...current,
-      tratamientos: [...current.tratamientos, { id: generateId('tratamiento'), ...tratamiento, fecha: new Date().toISOString() }],
-    }));
-    setTratamiento({ animalId: '', tipo: '', observacion: '' });
-  };
-
-  return (
-    <section className="gan-dash-section">
-      <h2>Registrar vacuna de prueba</h2>
-      <form className="gan-demo-form" onSubmit={submitVacuna}>
-        <label>
-          Animal
-          <AnimalSelect data={data} value={vacuna.animalId} onChange={(v) => setVacuna({ ...vacuna, animalId: v })} />
-        </label>
-        <label>
-          Vacuna aplicada
-          <input value={vacuna.nombre} onChange={(e) => setVacuna({ ...vacuna, nombre: e.target.value })} required />
-        </label>
-        <button type="submit" className="gan-dash-btn is-primary">
-          Registrar vacuna
-        </button>
-      </form>
-
-      <h2 className="gan-demo-list-title">Registrar tratamiento de prueba</h2>
-      <form className="gan-demo-form" onSubmit={submitTratamiento}>
-        <label>
-          Animal
-          <AnimalSelect data={data} value={tratamiento.animalId} onChange={(v) => setTratamiento({ ...tratamiento, animalId: v })} />
-        </label>
-        <label>
-          Tipo de tratamiento
-          <input value={tratamiento.tipo} onChange={(e) => setTratamiento({ ...tratamiento, tipo: e.target.value })} required />
-        </label>
-        <label>
-          Observación
-          <input value={tratamiento.observacion} onChange={(e) => setTratamiento({ ...tratamiento, observacion: e.target.value })} />
-        </label>
-        <button type="submit" className="gan-dash-btn is-primary">
-          Registrar tratamiento
-        </button>
-      </form>
-
-      <div className="gan-demo-columns">
-        <div>
-          <h3>Vacunas ({data.vacunas.length})</h3>
-          {data.vacunas.map((v) => (
-            <div key={v.id} className="gan-demo-table-row">
-              <strong>{data.animales.find((a) => a.id === v.animalId)?.nombre}</strong>
-              <span>{v.nombre}</span>
+      <h3 className="gan-demo-list-title">Genealogía</h3>
+      <div className="gan-demo-ficha-head">
+        {isCoronado ? (
+          <>
+            <div className="gan-demo-ficha-row">
+              <span>Padre</span>
+              <strong>{genealogia.padre} ({genealogia.razaPadre})</strong>
             </div>
-          ))}
-        </div>
-        <div>
-          <h3>Tratamientos ({data.tratamientos.length})</h3>
-          {data.tratamientos.map((t) => (
-            <div key={t.id} className="gan-demo-table-row">
-              <strong>{data.animales.find((a) => a.id === t.animalId)?.nombre}</strong>
-              <span>{t.tipo}</span>
+            <div className="gan-demo-ficha-row">
+              <span>Madre</span>
+              <strong>{genealogia.madre} ({genealogia.razaMadre})</strong>
             </div>
-          ))}
+            <div className="gan-demo-ficha-row">
+              <span>Pureza</span>
+              <strong>{genealogia.pureza}</strong>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="gan-demo-ficha-row">
+              <span>Madre</span>
+              <strong>{genealogia.madre} ({genealogia.razaMadre})</strong>
+            </div>
+            <div className="gan-demo-ficha-row">
+              <span>Padre</span>
+              <strong>{genealogia.padre} ({genealogia.razaPadre})</strong>
+            </div>
+            <div className="gan-demo-ficha-row">
+              <span>Composición racial</span>
+              <strong>{genealogia.composicionRacial}</strong>
+            </div>
+          </>
+        )}
+        <div className="gan-demo-ficha-row">
+          <span>Genética avanzada</span>
+          <strong>{genealogia.geneticaAvanzada}</strong>
         </div>
       </div>
-    </section>
-  );
-}
 
-function ReproduccionTab({ data, update }) {
-  const [form, setForm] = useState({ animalId: '', evento: 'Servicio' });
+      {isCoronado ? (
+        <>
+          <h3 className="gan-demo-list-title">Origen reproductivo</h3>
+          <p className="gan-demo-report-text">
+            <strong>{caso.origenReproductivo.metodo}.</strong> {caso.origenReproductivo.descripcion}
+          </p>
+          <p className="gan-demo-note">{caso.origenReproductivo.nota}</p>
+        </>
+      ) : (
+        <>
+          <h3 className="gan-demo-list-title">Origen (F1)</h3>
+          <p className="gan-demo-report-text">{genealogia.origen} {genealogia.explicacionF1}</p>
+        </>
+      )}
 
-  const handleSubmit = (event) => {
-    event.preventDefault();
-    if (!form.animalId) return;
-    update((current) => ({
-      ...current,
-      reproduccion: [...current.reproduccion, { id: generateId('reproduccion'), ...form, fecha: new Date().toISOString() }],
-    }));
-    setForm({ animalId: '', evento: 'Servicio' });
-  };
-
-  return (
-    <section className="gan-dash-section">
-      <h2>Registrar evento reproductivo de prueba</h2>
-      <form className="gan-demo-form" onSubmit={handleSubmit}>
-        <label>
-          Animal
-          <AnimalSelect data={data} value={form.animalId} onChange={(v) => setForm({ ...form, animalId: v })} />
-        </label>
-        <label>
-          Evento
-          <select value={form.evento} onChange={(e) => setForm({ ...form, evento: e.target.value })}>
-            <option>Servicio</option>
-            <option>Diagnóstico de preñez</option>
-            <option>Parto</option>
-            <option>Destete</option>
-          </select>
-        </label>
-        <button type="submit" className="gan-dash-btn is-primary">
-          Registrar evento
-        </button>
-      </form>
-
-      <h2 className="gan-demo-list-title">Eventos reproductivos ({data.reproduccion.length})</h2>
-      <div className="gan-demo-table">
-        {data.reproduccion.map((item) => (
-          <div key={item.id} className="gan-demo-table-row">
-            <strong>{data.animales.find((a) => a.id === item.animalId)?.nombre}</strong>
-            <span>{item.evento}</span>
-            <span>{new Date(item.fecha).toLocaleDateString('es-CO')}</span>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function QrTab({ data, update }) {
-  const regenerar = (animalId) => {
-    update((current) => ({
-      ...current,
-      animales: current.animales.map((a) => (a.id === animalId ? { ...a, qrCodigo: generateQrCodigo() } : a)),
-    }));
-  };
-
-  return (
-    <section className="gan-dash-section">
-      <h2>Códigos QR digitales de prueba</h2>
-      <div className="gan-demo-qr-grid">
-        {data.animales.map((animal) => (
-          <article key={animal.id} className="gan-demo-qr-card">
-            <div className="gan-demo-qr-pattern" aria-hidden="true" />
-            <strong>{animal.nombre}</strong>
-            <code>{animal.qrCodigo}</code>
-            <button type="button" className="gan-dash-btn is-outline" onClick={() => regenerar(animal.id)}>
-              Generar nuevo QR
-            </button>
-          </article>
-        ))}
-        {data.animales.length === 0 && <p className="gan-demo-empty">Registra un animal para generar su QR digital.</p>}
-      </div>
-    </section>
-  );
-}
-
-function FichasTab({ data }) {
-  const [animalId, setAnimalId] = useState(data.animales[0]?.id || '');
-  const animal = data.animales.find((a) => a.id === animalId);
-
-  const historial = useMemo(() => {
-    if (!animal) return null;
-    return {
-      pesajes: data.pesajes.filter((p) => p.animalId === animal.id),
-      vacunas: data.vacunas.filter((v) => v.animalId === animal.id),
-      tratamientos: data.tratamientos.filter((t) => t.animalId === animal.id),
-      reproduccion: data.reproduccion.filter((r) => r.animalId === animal.id),
-    };
-  }, [animal, data]);
-
-  return (
-    <section className="gan-dash-section">
-      <h2>Consultar ficha animal</h2>
-      <label className="gan-demo-select-inline">
-        Animal
-        <select value={animalId} onChange={(e) => setAnimalId(e.target.value)}>
-          {data.animales.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.nombre}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      {animal && historial ? (
-        <div className="gan-demo-ficha">
-          <div className="gan-demo-ficha-head">
-            <strong>{animal.nombre}</strong>
-            <span>{animal.especie} · {animal.sexo}</span>
-            <span>QR: {animal.qrCodigo}</span>
-            <span>Marca/número de hierro: {animal.marcaHierro || '—'} / {animal.numeroHierro || '—'}</span>
-          </div>
-          <div className="gan-demo-columns">
-            <div>
-              <h3>Pesajes ({historial.pesajes.length})</h3>
-              {historial.pesajes.map((p) => (
-                <div key={p.id} className="gan-demo-table-row">
-                  <span>{p.peso} kg</span>
-                </div>
-              ))}
-            </div>
-            <div>
-              <h3>Sanidad</h3>
-              {historial.vacunas.map((v) => (
-                <div key={v.id} className="gan-demo-table-row">
-                  <span>Vacuna: {v.nombre}</span>
-                </div>
-              ))}
-              {historial.tratamientos.map((t) => (
-                <div key={t.id} className="gan-demo-table-row">
-                  <span>Tratamiento: {t.tipo}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+      <h3 className="gan-demo-list-title">Alertas y recomendaciones principales</h3>
+      {isCoronado ? (
+        <div className="gan-demo-alert-box is-positive">
+          <CheckCircle2 size={18} />
+          <p>{caso.analisisPesajes.evidenciaRecuperacion}</p>
         </div>
       ) : (
-        <p className="gan-demo-empty">Registra un animal para ver su ficha.</p>
+        <div className="gan-demo-alert-box is-alert">
+          <AlertTriangle size={18} />
+          <div>
+            <p>{caso.produccionLeche.alerta}</p>
+            <p className="gan-demo-note">{caso.produccionLeche.recomendacion}</p>
+          </div>
+        </div>
       )}
     </section>
   );
 }
 
-function ReportesTab({ data }) {
-  const handleDescargar = () => {
+function QrTab({ coronado, esperanza, onVerFicha }) {
+  return (
+    <section className="gan-dash-section">
+      <h2>Códigos QR digitales de la demo</h2>
+      <div className="gan-demo-qr-grid">
+        {[coronado, esperanza].map((animalCaso) => {
+          const casoId = animalCaso === coronado ? 'coronado' : 'esperanza';
+          return (
+            <article key={animalCaso.identidad.codigoInterno} className="gan-demo-qr-card">
+              <div className="gan-demo-qr-pattern" aria-hidden="true" />
+              <strong>{animalCaso.identidad.nombre}</strong>
+              <code>{animalCaso.identidad.qrCodigo}</code>
+              <button type="button" className="gan-dash-btn is-outline" onClick={() => onVerFicha(casoId)}>
+                Ver ficha
+              </button>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function PesajesTab({ caso, casoActivo }) {
+  if (casoActivo === 'coronado') {
+    return (
+      <section className="gan-dash-section">
+        <h2>Pesajes de {caso.identidad.nombre} — checkpoints desde el nacimiento</h2>
+        <div className="gan-demo-table gan-demo-table-checkpoints">
+          {caso.pesajes.map((checkpoint) => (
+            <div key={checkpoint.etapa} className="gan-demo-table-row">
+              <strong>{checkpoint.etapa}</strong>
+              <span>{checkpoint.mesesEdad} meses — {formatFecha(checkpoint.fecha)}</span>
+              <span>{checkpoint.pesoKg} kg</span>
+              <span>{checkpoint.gdpKgDia === null ? '—' : `${checkpoint.gdpKgDia} kg/día`}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="gan-demo-alert-box is-warning">
+          <AlertTriangle size={18} />
+          <div>
+            <p><strong>Interpretación:</strong> {caso.analisisPesajes.interpretacion}</p>
+            <p>{caso.analisisPesajes.alerta}</p>
+            <p className="gan-demo-note"><strong>Recomendación:</strong> {caso.analisisPesajes.recomendacion}</p>
+          </div>
+        </div>
+        <div className="gan-demo-alert-box is-positive">
+          <CheckCircle2 size={18} />
+          <p>{caso.analisisPesajes.evidenciaRecuperacion}</p>
+        </div>
+        <p className="gan-demo-note">Ganancia diaria promedio general (nacimiento a hoy): {caso.analisisPesajes.gdpGeneralKgDia} kg/día.</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="gan-dash-section">
+      <h2>Pesajes mensuales de {caso.identidad.nombre}</h2>
+      <div className="gan-demo-table">
+        {caso.pesajesMensuales.map((registro) => (
+          <div key={registro.etapa} className="gan-demo-table-row">
+            <strong>{registro.etapa}</strong>
+            <span>{registro.pesoKg} kg</span>
+          </div>
+        ))}
+      </div>
+      <div className="gan-demo-alert-box is-positive">
+        <TrendingUp size={18} />
+        <p>{caso.condicionCorporal.interpretacion}</p>
+      </div>
+      <p className="gan-demo-note">Condición corporal actual: {caso.condicionCorporal.valor}.</p>
+    </section>
+  );
+}
+
+function SanidadTab({ caso }) {
+  const esLista = Array.isArray(caso.sanidad) && caso.sanidad.length > 0 && 'etapa' in caso.sanidad[0];
+
+  return (
+    <section className="gan-dash-section">
+      <h2>Plan sanitario de {caso.identidad.nombre}</h2>
+      <div className="gan-demo-table">
+        {esLista
+          ? caso.sanidad.map((item) => (
+              <div key={item.etapa} className="gan-demo-table-row">
+                <strong>{item.etapa}</strong>
+                <span>{item.evento}</span>
+              </div>
+            ))
+          : caso.sanidad.map((item) => (
+              <div key={item.evento} className="gan-demo-table-row">
+                <strong>{item.evento}</strong>
+                <span>{item.estado}</span>
+              </div>
+            ))}
+      </div>
+      <div className="gan-demo-alert-box is-positive">
+        <CheckCircle2 size={18} />
+        <p>Estado sanitario general: {caso.estadoSanitario}.</p>
+      </div>
+    </section>
+  );
+}
+
+function TratamientosTab({ caso }) {
+  const tratamiento = caso.tratamientoDestacado;
+  return (
+    <section className="gan-dash-section">
+      <h2>Tratamientos de {caso.identidad.nombre}</h2>
+      <div className="gan-demo-ficha-head">
+        {tratamiento.etapa && (
+          <div className="gan-demo-ficha-row">
+            <span>Etapa</span>
+            <strong>{tratamiento.etapa}</strong>
+          </div>
+        )}
+        <div className="gan-demo-ficha-row">
+          <span>Descripción</span>
+          <strong>{tratamiento.descripcion}</strong>
+        </div>
+        {tratamiento.vinculadoA && (
+          <div className="gan-demo-ficha-row">
+            <span>Vinculado a</span>
+            <strong>{tratamiento.vinculadoA}</strong>
+          </div>
+        )}
+      </div>
+      <p className="gan-demo-note">{tratamiento.nota}</p>
+    </section>
+  );
+}
+
+function ReproduccionTab({ caso, casoActivo }) {
+  if (casoActivo === 'coronado') {
+    return (
+      <section className="gan-dash-section">
+        <h2>Reproducción — {caso.identidad.nombre}</h2>
+        <p className="gan-demo-report-text">{caso.reproduccion.resumen}</p>
+        <div className="gan-demo-ficha-head">
+          <div className="gan-demo-ficha-row">
+            <span>Método</span>
+            <strong>{caso.origenReproductivo.metodo}</strong>
+          </div>
+          <div className="gan-demo-ficha-row">
+            <span>Evento</span>
+            <strong>{caso.origenReproductivo.descripcion}</strong>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="gan-dash-section">
+      <h2>Reproducción — {caso.identidad.nombre}</h2>
+      <div className="gan-demo-ficha-head">
+        <div className="gan-demo-ficha-row">
+          <span>Estado reproductivo actual</span>
+          <strong>{caso.reproduccion.estadoActual}</strong>
+        </div>
+        <div className="gan-demo-ficha-row">
+          <span>Último parto</span>
+          <strong>{formatFecha(caso.reproduccion.ultimoParto)}</strong>
+        </div>
+        <div className="gan-demo-ficha-row">
+          <span>Días en leche</span>
+          <strong>{caso.reproduccion.diasEnLeche}</strong>
+        </div>
+        <div className="gan-demo-ficha-row">
+          <span>Edad al primer parto</span>
+          <strong>{caso.reproduccion.primerPartoEdadMeses} meses</strong>
+        </div>
+      </div>
+      <div className="gan-demo-alert-box is-warning">
+        <AlertTriangle size={18} />
+        <p>{caso.reproduccion.proximoEvento}</p>
+      </div>
+    </section>
+  );
+}
+
+function LecheTab({ caso, casoActivo }) {
+  if (casoActivo === 'coronado') {
+    return (
+      <section className="gan-dash-section">
+        <h2>Producción de leche</h2>
+        <NotApplicable text="No aplica a este caso. Coronado es un macho en etapa de comercialización." />
+      </section>
+    );
+  }
+
+  const registros = caso.produccionLeche.registrosDiarios;
+  const hoy = registros.at(-1);
+  const ayer = registros.at(-2);
+  const tendenciaBaja = hoy.litros < ayer.litros;
+
+  return (
+    <section className="gan-dash-section">
+      <h2>Producción de leche — {caso.identidad.nombre}</h2>
+
+      <div className="gan-demo-summary-grid gan-demo-summary-grid-compact">
+        <div className="gan-dash-metric-card">
+          <div>
+            <strong>{hoy.litros} L</strong>
+            <span>Producción de hoy</span>
+          </div>
+        </div>
+        <div className="gan-dash-metric-card">
+          <div>
+            <strong>{caso.produccionLeche.promedioSemanalLitros} L</strong>
+            <span>Promedio últimos 7 días</span>
+          </div>
+        </div>
+        <div className="gan-dash-metric-card">
+          <div>
+            <strong>{caso.produccionLeche.promedioLactanciaHistoricoLitros} L</strong>
+            <span>Promedio histórico de la lactancia</span>
+          </div>
+        </div>
+        <div className="gan-dash-metric-card">
+          <div>
+            <strong>{caso.produccionLeche.produccionAcumuladaLitros} L</strong>
+            <span>Acumulado en {caso.produccionLeche.diasEnLeche} días</span>
+          </div>
+        </div>
+      </div>
+
+      <h3 className="gan-demo-list-title">Registro diario (últimos 18 días)</h3>
+      <div className="gan-demo-table gan-demo-table-milk">
+        {registros.map((registro) => (
+          <div key={registro.diasAtras} className="gan-demo-table-row">
+            <span>{formatFecha(registro.fecha)}</span>
+            <strong className={registro.litros < 16 ? 'is-alert-value' : ''}>{registro.litros} L</strong>
+          </div>
+        ))}
+      </div>
+
+      <div className="gan-demo-alert-box is-alert">
+        {tendenciaBaja ? <TrendingDown size={18} /> : <AlertTriangle size={18} />}
+        <div>
+          <p>{caso.produccionLeche.alerta}</p>
+          <p className="gan-demo-note"><strong>Recomendación:</strong> {caso.produccionLeche.recomendacion}</p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ComercializacionTab({ caso, casoActivo }) {
+  if (casoActivo === 'esperanza') {
+    return (
+      <section className="gan-dash-section">
+        <h2>Comercialización</h2>
+        <NotApplicable text="No aplica a este caso. Esperanza es una vaca activa en producción de leche." />
+      </section>
+    );
+  }
+
+  const { comercializacion } = caso;
+
+  return (
+    <section className="gan-dash-section">
+      <h2>Comercialización — {caso.identidad.nombre}</h2>
+      <div className="gan-demo-ficha-head">
+        <div className="gan-demo-ficha-row">
+          <span>Peso objetivo</span>
+          <strong>{comercializacion.pesoObjetivoMinKg}–{comercializacion.pesoObjetivoMaxKg} kg</strong>
+        </div>
+        <div className="gan-demo-ficha-row">
+          <span>Peso actual</span>
+          <strong>{comercializacion.pesoActualKg} kg</strong>
+        </div>
+        <div className="gan-demo-ficha-row">
+          <span>Categoría</span>
+          <strong>{comercializacion.categoria}</strong>
+        </div>
+        <div className="gan-demo-ficha-row">
+          <span>Estado</span>
+          <strong>{comercializacion.estado}</strong>
+        </div>
+      </div>
+
+      <h3 className="gan-demo-list-title">Rutas de decisión</h3>
+      <div className="gan-demo-decision-grid">
+        {comercializacion.rutas.map((ruta) => (
+          <article key={ruta.titulo} className="gan-demo-decision-card">
+            <strong>{ruta.titulo}</strong>
+            <p>{ruta.detalle}</p>
+          </article>
+        ))}
+      </div>
+
+      <h3 className="gan-demo-list-title">Indicadores que soportan la decisión</h3>
+      <ul className="gan-demo-indicator-list">
+        {comercializacion.indicadores.map((indicador) => (
+          <li key={indicador}>{indicador}</li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function ReportesTab({ coronado, esperanza }) {
+  const handleDescargar = (caso) => {
     const lines = [
-      `Animales de prueba: ${data.animales.length}`,
-      `Predios de prueba: ${data.predios.length}`,
-      `Potreros de prueba: ${data.potreros.length}`,
-      `Pesajes registrados: ${data.pesajes.length}`,
-      `Vacunas registradas: ${data.vacunas.length}`,
-      `Tratamientos registrados: ${data.tratamientos.length}`,
-      `Eventos reproductivos: ${data.reproduccion.length}`,
+      `${caso.identidad.nombre} — ${caso.identidad.raza}`,
+      `Código interno: ${caso.identidad.codigoInterno}`,
+      `QR demo: ${caso.identidad.qrCodigo}`,
+      `Estado productivo: ${caso.identidad.estadoProductivo}`,
       '',
       'Este informe fue generado en Modo Demo con datos de prueba.',
       'No corresponde a informacion real de clientes de AgroGenomaX.',
     ];
-    const blob = buildDemoReportPdfBlob('Informe demo - Ganaderia Inteligente', lines);
-    downloadBlob(blob, 'informe-demo-ganaderia-inteligente.pdf');
+    const blob = buildDemoReportPdfBlob(`Informe demo - ${caso.identidad.nombre}`, lines);
+    downloadBlob(blob, `informe-demo-${caso.identidad.codigoInterno.toLowerCase()}.pdf`);
   };
 
   return (
     <section className="gan-dash-section">
-      <h2>Reportes de prueba</h2>
+      <h2>Reportes de la demo</h2>
       <p className="gan-demo-report-text">
-        Genera un informe con los datos actuales de tu sesión demo y descárgalo en PDF de prueba.
+        Estructura preparada para los reportes PDF completos de cada caso (informe productivo, historial sanitario,
+        reporte genético y reporte comercial o reproductivo). En esta fase se puede descargar un informe demo básico
+        por animal.
       </p>
-      <button type="button" className="gan-dash-btn is-primary" onClick={handleDescargar}>
-        Descargar informe PDF de prueba
-      </button>
+      <div className="gan-demo-report-actions">
+        <button type="button" className="gan-dash-btn is-primary" onClick={() => handleDescargar(coronado)}>
+          Descargar informe demo de {coronado.identidad.nombre}
+        </button>
+        <button type="button" className="gan-dash-btn is-primary" onClick={() => handleDescargar(esperanza)}>
+          Descargar informe demo de {esperanza.identidad.nombre}
+        </button>
+      </div>
     </section>
   );
 }
