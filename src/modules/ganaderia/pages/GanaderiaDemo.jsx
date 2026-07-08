@@ -44,6 +44,13 @@ function formatKg(value) {
 }
 
 function formatFecha(iso) {
+  // Extrae AAAA-MM-DD directo del string cuando es posible, para no depender
+  // de cómo el navegador interprete la zona horaria al construir un Date().
+  const match = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) {
+    const [, yyyy, mm, dd] = match;
+    return `${dd}-${mm}-${yyyy}`;
+  }
   const date = new Date(iso);
   const dd = String(date.getDate()).padStart(2, '0');
   const mm = String(date.getMonth() + 1).padStart(2, '0');
@@ -196,10 +203,10 @@ function ResumenTab({ coronado, esperanza, onVerFicha }) {
             <span>{esperanza.identidad.raza}</span>
           </header>
           <ul>
-            <li>Producción de hoy: <strong>{esperanza.produccionLeche.registrosDiarios.at(-1).litros} L</strong></li>
+            <li>Producción de hoy: <strong>{esperanza.produccionLeche.litros_hoy} L</strong></li>
             <li>Días en leche: <strong>{esperanza.reproduccion.diasEnLeche}</strong></li>
-            <li className="is-alert">
-              <AlertTriangle size={15} /> Alerta activa: {esperanza.produccionLeche.alerta}
+            <li className={esperanza.produccionLeche.caida?.hayCaida ? 'is-alert' : 'is-positive'}>
+              <AlertTriangle size={15} /> Alerta activa: {esperanza.produccionLeche.alerta_principal}
             </li>
           </ul>
           <button type="button" className="gan-dash-btn is-outline" onClick={() => onVerFicha('esperanza')}>
@@ -352,10 +359,10 @@ function FichaTab({ caso, casoActivo }) {
           <p>{caso.analisisPesajes.evidenciaRecuperacion}</p>
         </div>
       ) : (
-        <div className="gan-demo-alert-box is-alert">
+        <div className={`gan-demo-alert-box ${caso.produccionLeche.caida?.hayCaida ? 'is-alert' : 'is-positive'}`}>
           <AlertTriangle size={18} />
           <div>
-            <p>{caso.produccionLeche.alerta}</p>
+            <p>{caso.produccionLeche.alerta_principal}</p>
             <p className="gan-demo-note">{caso.produccionLeche.recomendacion}</p>
           </div>
         </div>
@@ -560,10 +567,9 @@ function LecheTab({ caso }) {
     );
   }
 
-  const registros = caso.produccionLeche.registrosDiarios;
-  const hoy = registros.at(-1);
-  const ayer = registros.at(-2);
-  const tendenciaBaja = hoy.litros < ayer.litros;
+  const leche = caso.produccionLeche;
+  const registros = leche.registros;
+  const hayCaida = Boolean(leche.caida?.hayCaida);
 
   return (
     <section className="gan-dash-section">
@@ -572,45 +578,49 @@ function LecheTab({ caso }) {
       <div className="gan-demo-summary-grid gan-demo-summary-grid-compact">
         <div className="gan-dash-metric-card">
           <div>
-            <strong>{hoy.litros} L</strong>
+            <strong>{leche.litros_hoy} L</strong>
             <span>Producción de hoy</span>
           </div>
         </div>
         <div className="gan-dash-metric-card">
           <div>
-            <strong>{caso.produccionLeche.promedioSemanalLitros} L</strong>
+            <strong>{leche.promedio_semanal} L</strong>
             <span>Promedio últimos 7 días</span>
           </div>
         </div>
         <div className="gan-dash-metric-card">
           <div>
-            <strong>{caso.produccionLeche.promedioLactanciaHistoricoLitros} L</strong>
-            <span>Promedio histórico de la lactancia</span>
+            <strong>{leche.promedio_historico} L</strong>
+            <span>Promedio de los registros disponibles</span>
           </div>
         </div>
         <div className="gan-dash-metric-card">
           <div>
-            <strong>{caso.produccionLeche.produccionAcumuladaLitros} L</strong>
-            <span>Acumulado en {caso.produccionLeche.diasEnLeche} días</span>
+            <strong>{leche.produccion_acumulada} L</strong>
+            <span>Acumulado ({registros.length} días registrados)</span>
           </div>
         </div>
       </div>
+      <p className="gan-demo-note">
+        Días en leche: {leche.dias_en_leche} — Etapa de lactancia: {leche.etapa_lactancia}.
+      </p>
 
-      <h3 className="gan-demo-list-title">Registro diario (últimos 18 días)</h3>
+      <h3 className="gan-demo-list-title">Registro diario (últimos {registros.length} días)</h3>
       <div className="gan-demo-table gan-demo-table-milk">
         {registros.map((registro) => (
-          <div key={registro.diasAtras} className="gan-demo-table-row">
+          <div key={registro.fecha} className="gan-demo-table-row">
             <span>{formatFecha(registro.fecha)}</span>
-            <strong className={registro.litros < 16 ? 'is-alert-value' : ''}>{registro.litros} L</strong>
+            <strong className={registro.litros_dia < 16 ? 'is-alert-value' : ''}>{registro.litros_dia} L</strong>
           </div>
         ))}
       </div>
 
-      <div className="gan-demo-alert-box is-alert">
-        {tendenciaBaja ? <TrendingDown size={18} /> : <AlertTriangle size={18} />}
+      <div className={`gan-demo-alert-box ${hayCaida ? 'is-alert' : 'is-positive'}`}>
+        {hayCaida ? <TrendingDown size={18} /> : <CheckCircle2 size={18} />}
         <div>
-          <p>{caso.produccionLeche.alerta}</p>
-          <p className="gan-demo-note"><strong>Recomendación:</strong> {caso.produccionLeche.recomendacion}</p>
+          <p>{leche.alerta_principal}</p>
+          <p className="gan-demo-note">{leche.interpretacion}</p>
+          <p className="gan-demo-note"><strong>Recomendación:</strong> {leche.recomendacion}</p>
         </div>
       </div>
     </section>

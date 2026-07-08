@@ -6,6 +6,7 @@ import { clasificarCategoriaPorEdadSexo } from '../engine/categoria.js';
 import { enrichRows, calcularGDP, calcularTendenciaPesajes, classifyProductivity, obtenerUmbralesGDP, thresholdText } from '../engine/pesajes.js';
 import { daysUntil, vaccinationStatus, sanitaryGeneralStatus } from '../engine/sanidad.js';
 import { formatComposicionRacial } from '../engine/genetica.js';
+import { calcularResumenLechero, obtenerEstadoProduccionLeche } from '../engine/produccionLeche.js';
 
 const STORAGE_KEY = 'agx_ganaderia_demo_v2';
 
@@ -21,10 +22,6 @@ function daysAgo(n) {
   return date.toISOString();
 }
 
-function round1(value) {
-  return Math.round(value * 10) / 10;
-}
-
 function round2(value) {
   return Number.isFinite(value) ? Math.round(value * 100) / 100 : value;
 }
@@ -32,11 +29,6 @@ function round2(value) {
 // Formato es-CO (coma decimal) para texto narrativo, consistente con el resto de la demo.
 function formatKgCO(value) {
   return Number.isFinite(value) ? value.toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
-}
-
-function promedio(values) {
-  if (!values.length) return 0;
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
 /**
@@ -173,12 +165,15 @@ function buildCoronado() {
 }
 
 /**
- * Producción diaria de leche de Esperanza: 18 registros, del más antiguo (hace 17 días)
- * al más reciente (hoy). Los últimos 3 días muestran una caída real de ~15% frente al
- * promedio de los 15 días anteriores, para que la alerta de caída de producción sea
- * consistente con los propios datos y no un texto suelto sin soporte numérico.
+ * Registros diarios de leche de Esperanza: 18 registros, del más antiguo (hace 17 días)
+ * al más reciente (hoy), en forma canónica (fecha, litros_dia, numero_ordenos, potrero_id,
+ * observaciones) — la misma forma que debería tener un futuro registro real. Los últimos
+ * 3 días muestran una caída real de ~15% frente al promedio de los 15 días anteriores,
+ * coincidiendo con el cambio de potrero registrado el mismo día, para que la alerta de
+ * caída de producción salga del motor común con soporte numérico real, no de un texto
+ * suelto escrito a mano.
  */
-function buildEsperanzaProduccionDiaria() {
+function buildEsperanzaRegistrosLeche() {
   const litrosPorDiaAtras = {
     17: 17.4, 16: 17.8, 15: 17.2, 14: 18.0, 13: 17.6,
     12: 17.9, 11: 17.3, 10: 17.7, 9: 18.1, 8: 17.4,
@@ -186,24 +181,22 @@ function buildEsperanzaProduccionDiaria() {
     2: 15.0, 1: 14.8, 0: 15.1,
   };
 
-  return Object.entries(litrosPorDiaAtras)
-    .map(([diasAtras, litros]) => ({
-      diasAtras: Number(diasAtras),
-      fecha: daysAgo(Number(diasAtras)),
-      litros,
-    }))
-    .sort((a, b) => b.diasAtras - a.diasAtras);
+  return Object.entries(litrosPorDiaAtras).map(([diasAtrasRaw, litros]) => {
+    const diasAtras = Number(diasAtrasRaw);
+    return {
+      fecha: daysAgo(diasAtras),
+      litros_dia: litros,
+      numero_ordenos: 2,
+      potrero_id: diasAtras <= 3 ? 'Potrero 2 (demo)' : 'Potrero 1 (demo)',
+      observaciones: diasAtras === 3 ? 'Cambio de potrero: de Potrero 1 (demo) a Potrero 2 (demo).' : '',
+    };
+  });
 }
 
 function buildEsperanza() {
-  const produccionDiaria = buildEsperanzaProduccionDiaria();
-  const ultimos3 = produccionDiaria.filter((r) => r.diasAtras <= 2).map((r) => r.litros);
-  const anteriores15 = produccionDiaria.filter((r) => r.diasAtras >= 3).map((r) => r.litros);
-  const promedioReciente = round1(promedio(ultimos3));
-  const promedioBase = round1(promedio(anteriores15));
-  const caidaPorcentaje = round1(((promedioBase - promedioReciente) / promedioBase) * 100);
-  const promedioSemanal = round1(promedio(produccionDiaria.filter((r) => r.diasAtras <= 6).map((r) => r.litros)));
-  const promedioLactanciaHistorico = round1(2700 / 150);
+  const registrosLecheRaw = buildEsperanzaRegistrosLeche();
+  const resumenLechero = calcularResumenLechero({ animal: { dias_en_leche: 150 }, registrosLeche: registrosLecheRaw });
+  const estadoLeche = obtenerEstadoProduccionLeche(resumenLechero);
 
   const identidadBase = {
     nombre: 'Esperanza',
@@ -280,14 +273,13 @@ function buildEsperanza() {
       primerPartoEdadMeses: 27,
       proximoEvento: 'Programar servicio en los próximos 30–45 días para mantener un intervalo entre partos cercano a 13–14 meses.',
     },
+    // Todo lo que sigue viene de engine/produccionLeche.js (calcularResumenLechero):
+    // litros_hoy, promedio_semanal, promedio_historico, produccion_acumulada,
+    // dias_en_leche, etapa_lactancia, alerta_principal, interpretacion, recomendacion,
+    // caida (detalle de la caída detectada) y registros (normalizados, orden ascendente).
     produccionLeche: {
-      registrosDiarios: produccionDiaria,
-      promedioSemanalLitros: promedioSemanal,
-      promedioLactanciaHistoricoLitros: promedioLactanciaHistorico,
-      produccionAcumuladaLitros: 2700,
-      diasEnLeche: 150,
-      alerta: `Producción de leche cayó ${caidaPorcentaje}% en los últimos 3 días (de ${promedioBase} L/día a ${promedioReciente} L/día).`,
-      recomendacion: 'Revisar alimentación, disponibilidad de agua o estrés calórico. La caída coincide con el cambio reciente de potrero.',
+      ...resumenLechero,
+      estado: estadoLeche,
     },
     pesajesMensuales: [
       { etapa: 'Al parto', mesesDesdeParto: 0, pesoKg: 460 },

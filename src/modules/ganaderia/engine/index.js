@@ -6,3 +6,4 @@ export * as categoria from './categoria.js';
 export * as pesajes from './pesajes.js';
 export * as sanidad from './sanidad.js';
 export * as genetica from './genetica.js';
+export * as produccionLeche from './produccionLeche.js';
