@@ -1,3 +1,5 @@
+import { formatDateTimeDisplay } from '../utils/dateFormat.js';
+
 const PAGE = { width: 612, height: 792 };
 const MARGIN = 42;
 const TOP_MARGIN = 57;
@@ -314,7 +316,7 @@ class PdfBuilder {
   }
 
   async build(report) {
-    this.generatedAt = report.generatedAt;
+    this.generatedAt = formatDateTimeDisplay(report.generatedAt || new Date());
     const authUrl = `https://agrogenomax.pages.dev/qr/${encodeURIComponent(report.animal.qr || '')}`;
     const [logo, brand, footerBrand] = await Promise.all([
       loadImage('/agx-report-logo-white.jpeg'),

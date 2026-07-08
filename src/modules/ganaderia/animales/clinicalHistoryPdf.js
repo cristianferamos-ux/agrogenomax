@@ -1,4 +1,6 @@
-﻿const PAGE = { width: 612, height: 792 };
+﻿import { formatDateTimeDisplay } from '../utils/dateFormat.js';
+
+const PAGE = { width: 612, height: 792 };
 const MARGIN = 42;
 const FOOTER_SAFE_Y = 132;
 const FONT = { regular: 'F1', bold: 'F2' };
@@ -444,7 +446,7 @@ class PdfBuilder {
   }
 
   async build(report) {
-    this.generatedAt = report.generatedAt;
+    this.generatedAt = formatDateTimeDisplay(report.generatedAt || new Date());
     const authUrl = report.animal.authUrl || `https://agrogenomax.pages.dev/qr/${encodeURIComponent(report.animal.qr || '')}`;
     const [logo, brand, footerBrand] = await Promise.all([loadLogo(), loadBrandWordmark(), loadFooterWordmark()]);
     this.logo = logo;

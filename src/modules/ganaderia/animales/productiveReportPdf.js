@@ -1,3 +1,5 @@
+import { formatDateTimeDisplay } from '../utils/dateFormat.js';
+
 const PAGE = { width: 612, height: 792 };
 const MARGIN = 42;
 const TOP_MARGIN = 57;
@@ -730,7 +732,8 @@ class PdfBuilder {
   }
 
   async build(report) {
-    const { animal, resumen, estado, historial, proyecciones, rentabilidad, meta, desempeno, generatedAt } = report;
+    const { animal, resumen, estado, historial, proyecciones, rentabilidad, meta, desempeno } = report;
+    const generatedAt = formatDateTimeDisplay(report.generatedAt || new Date());
     this.generatedAt = generatedAt;
     const codigoInforme = reportCode(generatedAt, animal.qr);
     const diagnostico = decisionAnalysis(resumen, estado, historial, rentabilidad);

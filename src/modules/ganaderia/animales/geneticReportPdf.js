@@ -1,3 +1,5 @@
+import { formatDateTimeDisplay } from '../utils/dateFormat.js';
+
 const PAGE = { width: 612, height: 792 };
 const MARGIN = 42;
 const FONT = { regular: 'F1', bold: 'F2' };
@@ -170,7 +172,7 @@ class GeneticPdf {
   }
 
   async build(report) {
-    this.generatedAt = report.generatedAt;
+    this.generatedAt = formatDateTimeDisplay(report.generatedAt || new Date());
     const [symbol, brand, footer] = await Promise.all([
       loadImage('/agx-report-logo-white.jpeg'),
       loadImage('/agx-pdf-wordmark-color-vivid.jpeg'),
