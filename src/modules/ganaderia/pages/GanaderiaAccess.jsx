@@ -60,20 +60,11 @@ export default function GanaderiaAccess() {
           title="Ingreso de usuarios registrados"
           text={
             <>
-              <strong>Para clientes con plan activo</strong>
-              <br />
-              Accede con tu usuario y contraseña para gestionar tus predios, animales, QR, pesajes, vacunas,
-              tratamientos, reproducción e informes reales.
+              <strong>Para clientes con plan activo.</strong> Accede con tu usuario y contraseña para gestionar
+              predios, animales, QR, pesajes, vacunas, tratamientos, reproducción e informes reales.
             </>
           }
-          note={
-            <>
-              Tus datos son privados y no se comparten con otros clientes.
-              <br />
-              Este acceso requiere un plan activo. Si aún no tienes uno, revisa "Planes y precios" o prueba primero
-              la demo.
-            </>
-          }
+          note="Tus datos son privados. Si aún no tienes plan, revisa Planes y precios o prueba la demo."
           primary={{ label: 'Ingresar a mi cuenta', to: '/ganaderia/dashboard' }}
           secondary={{ label: 'Recuperar acceso', to: '/ganaderia/proximamente/recuperar-acceso' }}
         />
@@ -85,20 +76,11 @@ export default function GanaderiaAccess() {
           title="Cuenta Demo"
           text={
             <>
-              <strong>Pruébala sin compromiso</strong>
-              <br />
-              Explora cómo funciona Ganadería Inteligente: registra animales, QR, pesajes y vacunas de ejemplo, y
-              descarga un informe demo.
+              <strong>Pruébala sin compromiso.</strong> Explora Ganadería Inteligente: registra animales, QR,
+              pesajes y vacunas de ejemplo, y descarga un informe demo.
             </>
           }
-          note={
-            <>
-              No requiere registro. Puedes empezar de inmediato.
-              <br />
-              Los datos que registres aquí son solo para esta sesión, no se guardan de forma permanente y no afectan
-              cuentas reales de ningún cliente.
-            </>
-          }
+          note="Sin registro. Datos temporales de esta sesión, no afectan cuentas reales de ningún cliente."
           primary={{ label: 'Entrar a la demo', to: '/ganaderia/demo' }}
         />
 
@@ -107,20 +89,11 @@ export default function GanaderiaAccess() {
           title="Planes y precios"
           text={
             <>
-              <strong>Elige el plan según tu hato</strong>
-              <br />
-              Todos los planes incluyen plataforma, nube, chapetas QR y capacitación. Compara opciones y elige la que
-              se ajusta a tu operación.
+              <strong>Elige el plan según tu hato.</strong> Todos los planes incluyen plataforma, nube, chapetas QR
+              y capacitación.
             </>
           }
-          note={
-            <>
-              Recomendado si ya probaste la demo y quieres activar tu cuenta.
-              <br />
-              El acceso a tu cuenta real se habilita al contratar un plan. Nuestro equipo te acompaña en la
-              activación.
-            </>
-          }
+          note="Recomendado si ya probaste la demo. La activación de tu cuenta va acompañada por nuestro equipo."
           primary={{ label: 'Ver planes', to: '/ganaderia/planes' }}
         />
       </div>
