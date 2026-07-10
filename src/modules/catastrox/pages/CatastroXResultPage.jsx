@@ -136,13 +136,13 @@ export default function CatastroXResultPage() {
   const packages = getCatastroxPackages();
 
   return (
-    <section className="catastrox-page">
-      <div className="catastrox-page-title">
+    <section className="catastrox-page catastrox-result-free-page">
+      <div className="catastrox-page-title catastrox-result-hero">
         <span>Resultado gratuito</span>
         <h1>{found && !isTechnicalReview ? 'Predio identificado' : specialCopy.title}</h1>
         <p>
           {found && !isTechnicalReview
-            ? 'Su predio fue identificado. Para conocer el área, descargar el plano digital o usar los archivos en Google Earth, seleccione un paquete.'
+            ? 'CatastroX identificó su predio. Para conocer el área, descargar el plano digital o usar archivos en Google Earth, seleccione un paquete.'
             : specialCopy.description}
         </p>
       </div>
@@ -153,24 +153,20 @@ export default function CatastroXResultPage() {
           { label: 'Volver a CatastroX', to: '/catastrox', tone: 'ghost' },
         ]}
       />
-      <div className="catastrox-two-col">
+      <div className="catastrox-two-col catastrox-result-layout">
         {found && !isTechnicalReview ? (
-          <section className="catastrox-page" style={{ padding: 0 }}>
+          <section className="catastrox-result-info">
             <CatastroXResultSummary predio={predio} mode="free" />
-            <article className="catastrox-card">
+            <article className="catastrox-card catastrox-locked-card">
               <div className="catastrox-section-heading">
                 <span>Información bloqueada</span>
                 <h2>Datos disponibles al activar un paquete</h2>
               </div>
-              <p className="catastrox-copy">Las descargas reales solo se desbloquean después del pago aprobado del paquete seleccionado.</p>
-              <div className="catastrox-summary-grid">
+              <div className="catastrox-locked-grid">
                 {LOCKED_ITEMS.map((item) => (
-                  <div key={item} className="catastrox-summary-item">
-                    <span>
-                      <Lock size={14} style={{ marginRight: 6, verticalAlign: 'text-bottom' }} />
-                      Bloqueado
-                    </span>
-                    <strong>{item}</strong>
+                  <div key={item} className="catastrox-locked-item">
+                    <Lock size={15} />
+                    <span>{item}</span>
                   </div>
                 ))}
               </div>
@@ -192,17 +188,19 @@ export default function CatastroXResultPage() {
             ) : null}
           </section>
         )}
-        <CatastroXMockMap predio={predio} />
+        <div className="catastrox-result-map-shell">
+          <CatastroXMockMap predio={predio} />
+        </div>
       </div>
 
       {found && !isTechnicalReview ? (
-        <article className="catastrox-card">
+        <article className="catastrox-card" id="catastrox-packages">
           <div className="catastrox-section-heading">
             <span>Paquetes disponibles</span>
             <h2>Elija el paquete que desea comprar</h2>
           </div>
           <p className="catastrox-copy">
-            El flujo comercial es simple: identifique el predio, elija un paquete, apruebe el pago con Wompi y luego descargue únicamente los archivos incluidos en su compra.
+            Elija el paquete según el uso que necesita: plano digital, archivos para Google Earth o formatos técnicos para trabajo profesional.
           </p>
           <div className="catastrox-grid">
             {packages.map((pkg) => (
@@ -216,6 +214,7 @@ export default function CatastroXResultPage() {
                 tone={pkg.tone}
                 features={pkg.features}
                 ctaLabel={`Comprar ${pkg.label}`}
+                recommended={pkg.id === 'plus'}
               />
             ))}
           </div>

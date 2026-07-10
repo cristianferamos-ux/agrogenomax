@@ -3,6 +3,7 @@ import { getCatastroxResultById, lookupPredioMock } from './catastroxMockService
 
 const CONFIGURED_API_BASE = import.meta.env.VITE_API_URL || import.meta.env.VITE_AGX_API_URL || '';
 const LOCAL_API_BASE = '/api';
+const AUDIT_DOWNLOADS_ENABLED = String(import.meta.env.VITE_CATASTROX_AUDIT_DOWNLOADS || '').toLowerCase() === 'true';
 
 export const CATASTROX_LOOKUP_STORAGE_KEY = 'catastrox_last_lookup';
 
@@ -29,6 +30,11 @@ function isLookupNotFoundPayload(payload) {
 
 function normalizeApiBase(value) {
   return String(value || '').trim().replace(/\/$/, '');
+}
+
+function buildApiUrl(apiBase, path) {
+  const normalizedBase = normalizeApiBase(apiBase || LOCAL_API_BASE);
+  return `${normalizedBase}${path}`;
 }
 
 function isLocalHostname() {
@@ -133,42 +139,73 @@ function normalizeQueryPoint(queryPoint, fallback) {
   return { lat, lng };
 }
 
-function buildRealPredio(predio, coords, queryPoint) {
-  const polygonGeoJson = geometryToFeature(predio.geometry);
-  const routeId = `real-${predio.id}`;
+function buildRealPredio(predio, coords, queryPoint, apiBase) {
+  const routeId = predio.routeId || predio.lookup_id || `lookup-${Date.now()}`;
   const resolvedQueryPoint = normalizeQueryPoint(queryPoint, coords);
-  const areaHa = Number(predio.areaHa || 0);
-  const isSpecialReview = Number.isFinite(areaHa) && areaHa >= 5000;
+  const previewPath = `/catastrox/lookups/${encodeURIComponent(routeId)}/preview-map`;
+  const previewGeometryPath = `/catastrox/lookups/${encodeURIComponent(routeId)}/preview-geometry`;
 
   return {
-    id: String(predio.id),
+    id: String(routeId),
     routeId,
     source: 'api',
-    estado: isSpecialReview ? CATASTROX_STATUS.REVISION_ESPECIAL : CATASTROX_STATUS.IDENTIFICADO,
-    estadoLabel: isSpecialReview ? 'Revisión especial requerida' : 'Predio identificado',
+    estado: CATASTROX_STATUS.IDENTIFICADO,
+    estadoLabel: 'Predio identificado',
     municipio: cleanText(predio.municipio) || null,
     departamento: cleanText(predio.departamento) || null,
     gestor: cleanText(predio.gestor) || null,
-    codigoMunicipio: predio.codigoMunicipio || null,
-    codigoDepartamento: predio.codigoDepartamento || null,
-    areaHa,
-    areaM2: Number(predio.areaM2 || 0),
-    perimetroM: Number(predio.perimetroM || 0),
-    codigoPredial: predio.codigo || 'No disponible',
-    codigoAnterior: predio.codigoAnterior || 'No disponible',
-    estadoPredial: 'Predio individualizado encontrado en la base catastral consultada.',
-    verificacionPoligono: 'La geometría fue devuelta por la consulta espacial y se muestra como polígono real del predio.',
+    estadoPredial:
+      predio.estadoPredial ||
+      'Predio identificado. Información detallada disponible únicamente al activar un paquete.',
+    previewMapUrl: buildApiUrl(apiBase, previewPath),
+    previewGeometryUrl: buildApiUrl(apiBase, previewGeometryPath),
+    previewMessage: predio.previewMessage || 'Predio identificado sobre imagen satelital.',
+    verificacionPoligono: 'Vista previa comercial del predio identificado.',
     recomendaciones: [
       'Verifique la información con la autoridad catastral competente antes de un acto jurídico.',
       'Active el Diagnóstico Predial si necesita revisar código, área y perímetro con mayor detalle.',
       'Solicite acompañamiento técnico si requiere regularización o validación adicional.',
     ],
-    vertices: buildVerticesFromGeometry(predio.geometry),
-    linderos: Number(predio.perimetroM) > 0 ? [['Perímetro reportado', `${Number(predio.perimetroM).toFixed(2)} m`]] : [],
     referencePoint: resolvedQueryPoint || coords,
     queryPoint: resolvedQueryPoint,
-    geometry: predio.geometry || null,
-    polygonGeoJson,
+    safePreviewUnavailable: true,
+  };
+}
+
+export function isCatastroxAuditDownloadsAvailable() {
+  return AUDIT_DOWNLOADS_ENABLED && isLocalHostname();
+}
+
+function buildAuditLookup(payload, routeId) {
+  const predio = payload?.predio || {};
+  const storedLookup = getLastLookup();
+  const storedPredio = storedLookup?.predio || {};
+
+  return {
+    found: true,
+    status: payload?.status || 'AUDIT_FULL_RESULT',
+    routeId,
+    lookup_id: routeId,
+    source: 'audit-local',
+    audit: true,
+    canPurchase: true,
+    legalNotice: payload?.legalNotice || '',
+    predio: {
+      ...storedPredio,
+      ...predio,
+      id: String(predio.id || routeId),
+      routeId,
+      lookup_id: routeId,
+      source: 'audit-local',
+      estado: CATASTROX_STATUS.IDENTIFICADO,
+      estadoLabel: 'Predio identificado',
+      estadoPredial: predio.estadoPredial || 'Predio identificado en la base catastral consultada.',
+      referencePoint: predio.referencePoint || storedPredio.referencePoint || storedLookup?.queryPoint || null,
+      queryPoint: predio.queryPoint || storedPredio.queryPoint || storedLookup?.queryPoint || null,
+      previewMapUrl: predio.previewMapUrl || storedPredio.previewMapUrl || '',
+      previewGeometryUrl: predio.previewGeometryUrl || storedPredio.previewGeometryUrl || '',
+      previewMessage: predio.previewMessage || storedPredio.previewMessage || 'Predio identificado sobre imagen satelital.',
+    },
   };
 }
 
@@ -239,24 +276,15 @@ function buildNotFoundLookup(coords, payload) {
       estadoLabel: stateLabelByState[state],
       municipio: coverage.municipio || null,
       departamento: coverage.departamento || null,
-      codigoMunicipio: coverage.codigoMunicipio,
-      codigoDepartamento: null,
       gestorCatastral: coverage.gestorCatastral,
       estadoCobertura: coverage.estadoCobertura,
-      areaHa: 0,
-      areaM2: 0,
-      perimetroM: 0,
-      codigoPredial: 'No disponible',
-      codigoAnterior: 'No disponible',
       estadoPredial: payload?.message || 'Consulta sin individualización confirmada.',
       verificacionPoligono: payload?.message || 'Consulta sin individualización confirmada.',
       recomendaciones: recommendationsByState[state],
-      vertices: [],
-      linderos: [],
       referencePoint: queryPoint || coords,
       queryPoint,
-      geometry: null,
-      polygonGeoJson: null,
+      previewMessage: 'Vista previa cartográfica no disponible para esta consulta.',
+      safePreviewUnavailable: true,
     },
   };
 }
@@ -391,15 +419,77 @@ export async function lookupPredio({ lat, lng }) {
       municipio: cleanText(payload?.municipio) || cleanText(payload?.predio?.municipio) || null,
       departamento: cleanText(payload?.departamento) || cleanText(payload?.predio?.departamento) || null,
       gestor: cleanText(payload?.gestor) || cleanText(payload?.predio?.gestor) || null,
-      routeId: `real-${payload.predio.id}`,
+      lookup_id: payload.lookup_id || payload.predio?.lookup_id || null,
+      routeId: payload.routeId || payload.lookup_id || payload.predio?.routeId,
       source: 'api',
-      predio: buildRealPredio(payload.predio, coords, payload?.queryPoint),
+      canPurchase: payload?.canPurchase === true,
+      commercialMessage: payload?.commercialMessage || payload?.message || '',
+      legalNotice: payload?.legalNotice || '',
+      coverage: payload?.coverage || null,
+      predio: buildRealPredio(payload.predio, coords, payload?.queryPoint, apiBase),
     };
     persistLookupResult(normalized);
     return normalized;
   }
 
   throw lastError || new CatastroxApiError('No fue posible conectar con el servicio catastral.', { code: 'API_UNAVAILABLE' });
+}
+
+export async function fetchCatastroxAuditFullResult(routeId) {
+  if (!isCatastroxAuditDownloadsAvailable()) {
+    throw new CatastroxApiError('El modo auditoría local no está habilitado.', {
+      code: 'AUDIT_DOWNLOADS_DISABLED',
+      status: 404,
+    });
+  }
+
+  const lookupId = String(routeId || '').trim();
+  if (!lookupId) {
+    throw new CatastroxApiError('No hay identificador de consulta para auditoría.', {
+      code: 'MISSING_LOOKUP_ID',
+      status: 400,
+    });
+  }
+
+  let lastError = null;
+
+  for (const apiBase of getApiBaseCandidates()) {
+    const url = `${apiBase}/catastrox/audit/lookups/${encodeURIComponent(lookupId)}/full-result`;
+    let response;
+
+    try {
+      response = await fetch(url, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+      });
+    } catch (error) {
+      lastError = new CatastroxApiError('No fue posible conectar con el endpoint local de auditoría.', {
+        code: 'AUDIT_API_UNAVAILABLE',
+        url,
+        payload: error,
+      });
+      continue;
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    const payload = contentType.includes('application/json') ? await response.json() : null;
+
+    if (!response.ok) {
+      lastError = new CatastroxApiError(payload?.error || 'Auditoría local no disponible para esta consulta.', {
+        code: payload?.status || 'AUDIT_API_ERROR',
+        status: response.status,
+        url,
+        payload,
+      });
+      continue;
+    }
+
+    return buildAuditLookup(payload, lookupId);
+  }
+
+  throw lastError || new CatastroxApiError('No fue posible cargar datos completos de auditoría.', {
+    code: 'AUDIT_API_UNAVAILABLE',
+  });
 }
 
 export async function lookupPredioWithFallback({ lat, lng }) {

@@ -13,7 +13,12 @@ import {
   getCatastroxPackage,
 } from '../config/catastroxPackages.js';
 import { CATASTROX_STATUS } from '../data/catastroxMockData.js';
-import { resolveLookupForRoute, saveLastLookup } from '../services/catastroxApi.js';
+import {
+  fetchCatastroxAuditFullResult,
+  isCatastroxAuditDownloadsAvailable,
+  resolveLookupForRoute,
+  saveLastLookup,
+} from '../services/catastroxApi.js';
 import {
   getApprovedPurchaseRecordByKeys,
   getPackageRank,
@@ -151,6 +156,9 @@ export default function CatastroXPackagePage({ packageId }) {
   const lookup = resolveLookupForRoute(id);
   const pkg = getCatastroxPackage(packageId);
   const [checkoutState, setCheckoutState] = useState(null);
+  const [auditLookup, setAuditLookup] = useState(null);
+  const [auditState, setAuditState] = useState(null);
+  const [isLoadingAudit, setIsLoadingAudit] = useState(false);
   const [pendingPackageId, setPendingPackageId] = useState(null);
   const [, setPurchaseVersion] = useState(0);
   const [isStartingCheckout, setIsStartingCheckout] = useState(false);
@@ -206,15 +214,20 @@ export default function CatastroXPackagePage({ packageId }) {
     );
   }
 
-  const predio = lookup.predio;
+  const auditAvailable = isCatastroxAuditDownloadsAvailable();
+  const effectiveLookup = auditLookup || lookup;
+  const predio = effectiveLookup.predio;
   const routeId = predio.routeId || predio.id;
-  const purchasedPackage = getPurchasedPackageForLookup(lookup);
+  const purchasedPackage = getPurchasedPackageForLookup(effectiveLookup);
   const paidRank = getPackageRank(purchasedPackage?.packageId);
   const currentRank = getPackageRank(packageId);
-  const isPaid = isPackageUnlockedForLookup({ lookup, packageId });
-  const visibleDownloads = buildDownloadsForPackage(packageId).filter((download) =>
-    getUnlockedDownloadsForPackage({ lookup, packageId }).includes(download.id),
-  );
+  const isAuditUnlocked = Boolean(auditLookup);
+  const isPaid = isPackageUnlockedForLookup({ lookup: effectiveLookup, packageId });
+  const visibleDownloads = isAuditUnlocked
+    ? buildDownloadsForPackage(packageId)
+    : buildDownloadsForPackage(packageId).filter((download) =>
+        getUnlockedDownloadsForPackage({ lookup: effectiveLookup, packageId }).includes(download.id),
+      );
   const hasHigherPackage = paidRank > currentRank;
   const unlockedPackage = purchasedPackage ? getCatastroxPackage(purchasedPackage.packageId) : null;
   const packageCopy = PACKAGE_PAGE_COPY[packageId];
@@ -235,6 +248,26 @@ export default function CatastroXPackagePage({ packageId }) {
     ];
     return actions;
   }, [routeId]);
+
+  const handleEnableAuditDownloads = async () => {
+    try {
+      setIsLoadingAudit(true);
+      setAuditState(null);
+      const fullLookup = await fetchCatastroxAuditFullResult(lookup.routeId || lookup.lookup_id || id);
+      setAuditLookup(fullLookup);
+      setAuditState({
+        status: 'ready',
+        message: 'Modo auditoría local activo. Descargas habilitadas solo para revisión en este equipo.',
+      });
+    } catch (error) {
+      setAuditState({
+        status: 'error',
+        message: error?.message || 'No fue posible activar la auditoría local.',
+      });
+    } finally {
+      setIsLoadingAudit(false);
+    }
+  };
 
   const handleStartCheckout = async () => {
     let opened = false;
@@ -397,7 +430,7 @@ export default function CatastroXPackagePage({ packageId }) {
       </div>
       <CatastroXPageActions actions={navigationActions} />
       <div className="catastrox-two-col">
-        <CatastroXResultSummary predio={predio} mode={isPaid ? 'paid' : 'free'} />
+        <CatastroXResultSummary predio={predio} mode={isPaid || isAuditUnlocked ? 'paid' : 'free'} />
         <CatastroXMockMap predio={predio} />
       </div>
 
@@ -414,7 +447,7 @@ export default function CatastroXPackagePage({ packageId }) {
         </ul>
       </section>
 
-      {!isPaid ? (
+      {!isPaid && !isAuditUnlocked ? (
         <section className="catastrox-card">
           <div className="catastrox-section-heading">
             <span>Pago</span>
@@ -466,22 +499,54 @@ export default function CatastroXPackagePage({ packageId }) {
       ) : (
         <section className="catastrox-card">
           <div className="catastrox-section-heading">
-            <span>Descargas habilitadas</span>
-            <h2>{pkg.label} habilitado</h2>
+            <span>{isAuditUnlocked ? 'Modo auditoría local — no disponible en producción' : 'Descargas habilitadas'}</span>
+            <h2>{isAuditUnlocked ? `${pkg.label} habilitado para auditoría` : `${pkg.label} habilitado`}</h2>
           </div>
           <div className="catastrox-success">
-            <strong>Pago aprobado</strong>
+            <strong>{isAuditUnlocked ? 'Auditoría local activa' : 'Pago aprobado'}</strong>
             <span>
-              {includedMessage || `Se habilitaron las descargas de ${pkg.label.toLowerCase()} para este predio.`}
+              {isAuditUnlocked
+                ? 'Estas descargas son temporales para revisión local y no representan una compra real.'
+                : includedMessage || `Se habilitaron las descargas de ${pkg.label.toLowerCase()} para este predio.`}
             </span>
           </div>
           <div className="catastrox-action-row">
             {visibleDownloads.map((item) => (
-              <CatastroXDownloadMock key={item.id} label={item.label} onClick={() => item.action(lookup)} />
+              <CatastroXDownloadMock key={item.id} label={item.label} onClick={() => item.action(effectiveLookup)} />
             ))}
           </div>
         </section>
       )}
+      {auditAvailable && !isAuditUnlocked ? (
+        <section className="catastrox-card catastrox-audit-card">
+          <div className="catastrox-section-heading">
+            <span>Modo auditoría local — no disponible en producción</span>
+            <h2>Auditar descargas sin abrir pagos</h2>
+          </div>
+          <p className="catastrox-copy">
+            Herramienta temporal para validar entregables en localhost. No reemplaza el flujo seguro con pago aprobado.
+          </p>
+          {!isAuditUnlocked ? (
+            <div className="catastrox-action-row">
+              <button type="button" className="catastrox-button is-secondary" onClick={handleEnableAuditDownloads} disabled={isLoadingAudit}>
+                {isLoadingAudit ? 'Cargando auditoría...' : 'Activar auditoría de descargas'}
+              </button>
+            </div>
+          ) : (
+            <div className="catastrox-action-row">
+              {visibleDownloads.map((item) => (
+                <CatastroXDownloadMock key={`audit-${item.id}`} label={`${item.label} audit`} onClick={() => item.action(effectiveLookup)} />
+              ))}
+            </div>
+          )}
+          {auditState?.message ? (
+            <div className={auditState.status === 'error' ? 'catastrox-inline-panel' : 'catastrox-success'}>
+              <strong>{auditState.status === 'error' ? 'Auditoría no disponible' : 'Auditoría local activa'}</strong>
+              <span>{auditState.message}</span>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
       <CatastroXDisclaimer />
     </section>
   );

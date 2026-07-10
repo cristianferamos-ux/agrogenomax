@@ -5,6 +5,19 @@ import CatastroXMap from './CatastroXMap.jsx';
 import { CatastroxApiError, clearLastLookup, lookupPredio } from '../services/catastroxApi.js';
 
 const INITIAL_COORDS = { lat: '', lng: '' };
+const LOOKUP_UNAVAILABLE_MESSAGE =
+  'La consulta predial no está disponible en este momento. Intenta nuevamente más tarde.';
+
+function getPublicLookupErrorMessage(error) {
+  const message = String(error?.message || '');
+  if (/CATASTROX_DATABASE_URL|PostGIS|base\s+independiente|variable\s+de\s+entorno/i.test(message)) {
+    return LOOKUP_UNAVAILABLE_MESSAGE;
+  }
+  if (error?.status >= 500 || error?.code === 'API_ERROR' || error?.code === 'API_UNAVAILABLE') {
+    return LOOKUP_UNAVAILABLE_MESSAGE;
+  }
+  return message || LOOKUP_UNAVAILABLE_MESSAGE;
+}
 
 export default function CatastroXSearchForm() {
   const navigate = useNavigate();
@@ -84,14 +97,15 @@ export default function CatastroXSearchForm() {
       const result = await lookupPredio({ lat, lng });
 
       if (result.found) {
-        navigate(`/catastrox/resultado/real-${result.predio.id}`);
+        const routeId = result.routeId || result.predio?.routeId || result.predio?.id;
+        navigate(`/catastrox/resultado/${routeId}`);
         return;
       }
 
       navigate('/catastrox/resultado/no-found');
     } catch (error) {
       if (error instanceof CatastroxApiError) {
-        setErrorMessage(error.message);
+        setErrorMessage(getPublicLookupErrorMessage(error));
       } else {
         setErrorMessage('No fue posible completar la consulta predial.');
       }

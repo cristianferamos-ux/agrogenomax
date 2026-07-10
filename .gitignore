@@ -4,3 +4,6 @@ dist
 .DS_Store
 .vite
 .env.local
+db_backups/
+audit_outputs/
+*.sql.backup

@@ -12,6 +12,7 @@ import {
   projectRingToViewport,
 } from './ProjectionEngine.js';
 import { reducePointsForVisualClarity, selectVisibleReferencePoints } from './VisibleReferencePointEngine.js';
+import { getVeredaDisplay } from './veredaDisplay.js';
 import {
   cumulativeDistances,
   getPointBounds,
@@ -77,6 +78,15 @@ function cleanText(value, fallback = '') {
   return next || fallback;
 }
 
+function escapeXml(value) {
+  return cleanText(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
 function formatNumber(value, decimals = 2) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return 'Sin dato';
@@ -94,6 +104,19 @@ function predioName(predio) {
   return cleanText(predio.nombrePredio) || `Predio ${fileSafeCode(predio)}`;
 }
 
+function resolveVeredaNombre(predio, source) {
+  return cleanText(
+    predio.veredaNombre ||
+      predio.vereda_nombre ||
+      predio.vereda ||
+      predio.nombreVereda ||
+      predio.nombre_vereda ||
+      source?.veredaNombre ||
+      source?.vereda_nombre ||
+      source?.vereda,
+  );
+}
+
 function geometryToGeoJson(geometry) {
   if (!geometry) return null;
   if (geometry.type === 'Feature') return geometry.geometry;
@@ -108,11 +131,78 @@ function firstRing(geometry) {
   return [];
 }
 
+function normalizePolygonParts(geometry) {
+  const geo = geometryToGeoJson(geometry);
+  if (!geo) return [];
+  const rawPolygons =
+    geo.type === 'Polygon'
+      ? [geo.coordinates || []]
+      : geo.type === 'MultiPolygon'
+        ? geo.coordinates || []
+        : [];
+
+  return rawPolygons
+    .map((polygon, partIndex) => {
+      const outerRing = normalizeRing(polygon?.[0] || []);
+      if (outerRing.length < 4) return null;
+      const innerRings = (polygon || [])
+        .slice(1)
+        .map((ring) => normalizeRing(ring || []))
+        .filter((ring) => ring.length >= 4);
+      const displayGeometry = buildDisplayRingFromOriginalRing(outerRing);
+      const bounds = getRingBounds(outerRing);
+      return {
+        partIndex,
+        outerRing,
+        innerRings,
+        bounds,
+        vertexCount: outerRing.length - 1,
+        displayRing: displayGeometry.displayRing,
+        displayVertices: displayGeometry.displayVertices,
+        displayRingReport: displayGeometry.report,
+      };
+    })
+    .filter(Boolean);
+}
+
+function mergePartBounds(parts) {
+  const rings = parts.flatMap((part) => part.outerRing.slice(0, -1));
+  if (!rings.length) return null;
+  return getRingBounds(rings);
+}
+
+function buildMapRingFromParts(parts) {
+  const points = parts.flatMap((part) => part.outerRing.slice(0, -1));
+  return normalizeRing(points);
+}
+
+function partPredio(predio, part) {
+  return {
+    ...predio,
+    ring: part.outerRing,
+    displayRing: part.displayRing,
+    displayVertices: part.displayVertices,
+    displayRingReport: part.displayRingReport,
+    geometryParts: [part],
+    partIndex: part.partIndex,
+    partLabel: `Parte ${part.partIndex + 1}`,
+  };
+}
+
 function normalizePredioForDeliverables(source) {
   const predio = source?.predio || source || {};
   const geometry = predio.geometry || predio.polygonGeoJson?.geometry || predio.polygonGeoJson || null;
-  const ring = normalizeRing(firstRing(geometry));
-  const displayGeometry = buildDisplayRingFromOriginalRing(ring);
+  const geometryParts = normalizePolygonParts(geometry);
+  const ring = geometryParts[0]?.outerRing || normalizeRing(firstRing(geometry));
+  const displayGeometry = geometryParts[0]
+    ? {
+        displayRing: geometryParts[0].displayRing,
+        displayVertices: geometryParts[0].displayVertices,
+        report: geometryParts[0].displayRingReport,
+      }
+    : buildDisplayRingFromOriginalRing(ring);
+  const mapRing = geometryParts.length ? buildMapRingFromParts(geometryParts) : ring;
+  const geometryBounds = geometryParts.length ? mergePartBounds(geometryParts) : getRingBounds(ring);
 
   return {
     id: predio.id,
@@ -125,9 +215,13 @@ function normalizePredioForDeliverables(source) {
     perimetroM: Number(predio.perimetroM || 0),
     estadoPredial: cleanText(predio.estadoPredial, 'Predio identificado en la base catastral consultada.'),
     tipoZona: cleanText(predio.tipoZona, 'Rural'),
+    veredaDisplay: predio.veredaDisplay || getVeredaDisplay(resolveVeredaNombre(predio, source)),
     nombrePredio: predioName(predio),
     queryPoint: predio.queryPoint || source?.queryPoint || null,
     geometry,
+    geometryParts,
+    geometryBounds,
+    mapRing,
     ring,
     displayRing: displayGeometry.displayRing,
     displayVertices: displayGeometry.displayVertices,
@@ -625,9 +719,22 @@ function drawHeader(context, predio, pageLabel, title, layout) {
   context.fillText('by CRH', zone.x + 16, zone.y + 46);
   context.fillText('Vertical predial de AgroGenomaX', zone.x + 16, zone.y + 60);
 
-  setFont(context, 18, 700);
+  const pageBox = {
+    x: zone.x + zone.width - 76,
+    y: zone.y + 8,
+    width: 62,
+    height: 34,
+  };
+  const titleX = zone.x + 360;
+  const titleMaxWidth = pageBox.x - titleX - 12;
+  let titleFontSize = 18;
+  setFont(context, titleFontSize, 700);
+  while (context.measureText(title).width > titleMaxWidth && titleFontSize > 12) {
+    titleFontSize -= 0.5;
+    setFont(context, titleFontSize, 700);
+  }
   context.fillStyle = '#0a2e73';
-  context.fillText(title, zone.x + 360, zone.y + 24);
+  context.fillText(title, titleX, zone.y + 24);
   setFont(context, 8, 700);
   context.fillStyle = '#334155';
   context.fillText('CÓDIGO PREDIAL', zone.x + 500, zone.y + 42);
@@ -636,12 +743,12 @@ function drawHeader(context, predio, pageLabel, title, layout) {
   context.fillText(predio.codigoPredial, zone.x + 500, zone.y + 58);
 
   context.fillStyle = '#0a2e73';
-  context.fillRect(zone.x + zone.width - 56, zone.y + 8, 42, 34);
+  context.fillRect(pageBox.x, pageBox.y, pageBox.width, pageBox.height);
   context.fillStyle = '#ffffff';
   setFont(context, 7, 700);
-  context.fillText('PÁGINA', zone.x + zone.width - 50, zone.y + 21);
-  setFont(context, 10, 700);
-  context.fillText(pageLabel, zone.x + zone.width - 46, zone.y + 34);
+  context.fillText('PÁGINA', pageBox.x + 7, zone.y + 21);
+  setFont(context, 8.6, 700);
+  context.fillText(pageLabel, pageBox.x + 7, zone.y + 34);
 }
 
 function drawPanel(context, rect, title) {
@@ -765,6 +872,54 @@ function drawPolygonOverlay(context, points, { stroke = '#ffea00', fill = 'rgba(
   context.lineWidth = lineWidth;
   context.strokeStyle = stroke;
   context.stroke();
+}
+
+function drawPolygonPartOverlay(context, outerPoints, innerPointRings = [], options = {}) {
+  if (!outerPoints.length) return;
+  const { stroke = '#ffea00', fill = 'rgba(0, 116, 136, 0.24)', lineWidth = 2 } = options;
+  context.beginPath();
+  context.moveTo(outerPoints[0][0], outerPoints[0][1]);
+  for (const [x, y] of outerPoints.slice(1)) {
+    context.lineTo(x, y);
+  }
+  context.closePath();
+  innerPointRings.forEach((ring) => {
+    if (!ring.length) return;
+    context.moveTo(ring[0][0], ring[0][1]);
+    for (const [x, y] of ring.slice(1)) {
+      context.lineTo(x, y);
+    }
+    context.closePath();
+  });
+  if (fill) {
+    context.fillStyle = fill;
+    context.fill('evenodd');
+  }
+  context.lineWidth = lineWidth;
+  context.strokeStyle = stroke;
+  context.stroke();
+}
+
+function projectRingForMap(ring, mapState, mapRect) {
+  return projectRingToViewport(ring, mapState, mapRect.width, mapRect.height).map(([x, y]) => [
+    mapRect.x + x,
+    mapRect.y + y,
+  ]);
+}
+
+function projectDisplayParts(predio, mapState, mapRect) {
+  const parts = predio.geometryParts?.length
+    ? predio.geometryParts
+    : [{
+        outerRing: predio.ring,
+        innerRings: [],
+        displayRing: predio.displayRing?.length ? predio.displayRing : predio.ring,
+      }];
+  return parts.map((part) => ({
+    part,
+    outer: projectRingForMap(part.displayRing?.length ? part.displayRing : part.outerRing, mapState, mapRect),
+    inners: (part.innerRings || []).map((ring) => projectRingForMap(ring, mapState, mapRect)),
+  }));
 }
 
 function buildVisiblePointPlacements(projectedPoints, mapZone, polygonPoints = [], blockedRects = []) {
@@ -1088,8 +1243,108 @@ function drawBullets(context, items, x, y, width, color) {
   });
 }
 
+function todayDisplayDate() {
+  const now = new Date();
+  return new Intl.DateTimeFormat('es-CO', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(now).replace(/\//g, '-');
+}
+
+function drawLegalFooter(context, rect) {
+  drawWrappedText(
+    context,
+    'CatastroX realiza análisis técnico con información geográfica y catastral pública disponible. No reemplaza certificados oficiales del IGAC, gestor catastral, oficina de registro ni autoridad competente.',
+    rect.x,
+    rect.y,
+    rect.width,
+    10,
+    '#334155',
+    400,
+    8,
+  );
+}
+
+function drawCommercialMetric(context, x, y, width, label, value, accent = '#00aeea') {
+  context.fillStyle = '#ffffff';
+  context.fillRect(x, y, width, 58);
+  context.strokeStyle = '#d6dfef';
+  context.strokeRect(x, y, width, 58);
+  context.fillStyle = accent;
+  context.fillRect(x, y, 5, 58);
+  setFont(context, 8.7, 700);
+  context.fillStyle = '#52637d';
+  context.fillText(label.toUpperCase(), x + 14, y + 19);
+  drawWrappedText(context, value, x + 14, y + 40, width - 24, 13, '#0f172a', 700, 12);
+}
+
+function buildPlusSummaryPageCanvas(predio, layoutData, pageLabel = '1 de 6') {
+  const { canvas, context } = createPageCanvas();
+  const mapRect = { x: 420, y: 136, width: 332, height: 296 };
+  const mapState = computeMapState(predio.mapRing?.length ? predio.mapRing : predio.ring, mapRect.width, mapRect.height, 18);
+
+  drawHeader(context, predio, pageLabel, 'DIAGNÓSTICO PREDIAL CATASTROX', SATELLITE_LAYOUT);
+
+  context.fillStyle = '#07152d';
+  context.fillRect(24, 128, 360, 86);
+  context.fillStyle = '#00aeea';
+  context.fillRect(24, 128, 6, 86);
+  drawWrappedText(
+    context,
+    'Este reporte presenta la información predial identificada por CatastroX a partir de información geográfica y catastral pública disponible.',
+    44,
+    160,
+    316,
+    15,
+    '#ffffff',
+    700,
+    13,
+  );
+
+  drawCommercialMetric(context, 24, 238, 172, 'Municipio', predio.municipio);
+  drawCommercialMetric(context, 212, 238, 172, 'Departamento', predio.departamento);
+  drawCommercialMetric(context, 24, 312, 172, 'Área total', `${formatNumber(predio.areaHa)} ha`, '#8bcf2b');
+  drawCommercialMetric(context, 212, 312, 172, 'Perímetro', `${formatNumber(predio.perimetroM)} m`, '#8bcf2b');
+  drawCommercialMetric(context, 24, 386, 360, 'Código predial', predio.codigoPredial, '#00aeea');
+  drawCommercialMetric(context, 24, 460, 360, 'Código anterior', predio.codigoAnterior, '#00aeea');
+
+  context.fillStyle = '#f8fbff';
+  context.fillRect(mapRect.x - 10, mapRect.y - 10, mapRect.width + 20, mapRect.height + 20);
+  context.strokeStyle = '#c9d6ea';
+  context.strokeRect(mapRect.x - 10, mapRect.y - 10, mapRect.width + 20, mapRect.height + 20);
+
+  return drawHybridMap(context, mapRect, mapState).then(() => {
+    const projectedParts = projectDisplayParts(predio, mapState, mapRect);
+    projectedParts.forEach(({ outer, inners }) => {
+      drawPolygonPartOverlay(context, outer, inners, { stroke: '#ffea00', fill: 'rgba(0, 174, 234, 0.18)', lineWidth: 2.4 });
+    });
+    drawCompassRose(context, mapRect.x + 46, mapRect.y + 48, false);
+    const scalePolygon = projectedParts.flatMap((entry) => entry.outer);
+    const summaryScaleAnchor = chooseScaleBarAnchor(mapRect, scalePolygon, [], [], true);
+    drawScaleBar(context, summaryScaleAnchor.x, summaryScaleAnchor.y, 800, { compact: true });
+
+    drawPanel(context, { x: 420, y: 456, width: 332, height: 68 }, 'PAQUETE PLUS');
+    drawWrappedText(
+      context,
+      'Incluye PDF, KML y KMZ para visualizar el polígono del predio y abrirlo en Google Earth.',
+      436,
+      494,
+      300,
+      13,
+      '#243446',
+      400,
+      10.5,
+    );
+
+    drawLegalFooter(context, { x: 24, y: 580, width: 744, height: 14 });
+    return canvas;
+  });
+}
+
 function buildDiagnosticPageCanvas(predio) {
   const { canvas, context } = createPageCanvas();
+  const veredaDisplay = predio.veredaDisplay || getVeredaDisplay();
   const layout = {
     page: { x: 0, y: 0, width: 612, height: 792 },
     header: { x: 24, y: 24, width: 564, height: 84 },
@@ -1111,6 +1366,8 @@ function buildDiagnosticPageCanvas(predio) {
     ['Código anterior', predio.codigoAnterior],
     ['Municipio', predio.municipio],
     ['Departamento', predio.departamento],
+    [veredaDisplay.label, veredaDisplay.value],
+    ...(veredaDisplay.isCadastralCode ? [[veredaDisplay.secondaryLabel, veredaDisplay.secondaryValue]] : []),
     ['Tipo de zona', predio.tipoZona],
     ['Área total', `${formatNumber(predio.areaHa)} ha`],
     ['Área total m²', `${formatNumber(predio.areaM2)} m²`],
@@ -1143,6 +1400,10 @@ function buildDiagnosticPageCanvas(predio) {
   context.fillText('RECOMENDACIONES AUTOMÁTICAS', 44, 612);
   drawBullets(context, buildAutomaticRecommendations(predio), 44, 634, 520, '#8bcf2b');
 
+  if (veredaDisplay.isCadastralCode) {
+    drawWrappedText(context, veredaDisplay.note, 44, 704, 520, 11, '#52637d', 400, 9);
+  }
+
   context.fillStyle = '#52637d';
   setFont(context, 10, 700);
   context.fillText('AVISO LEGAL', 44, 734);
@@ -1156,6 +1417,134 @@ function buildDiagnosticPageCanvas(predio) {
     '#243446',
     400,
     9,
+  );
+
+  return canvas;
+}
+
+function buildPlusDataPageCanvas(predio, pageLabel = '3 de 6') {
+  const { canvas, context } = createPageCanvas();
+  const veredaDisplay = predio.veredaDisplay || getVeredaDisplay();
+  const locationRows = [
+    { label: 'Municipio', value: predio.municipio },
+    { label: 'Departamento', value: predio.departamento },
+    { label: veredaDisplay.label, value: veredaDisplay.value },
+    ...(veredaDisplay.isCadastralCode
+      ? [{ label: veredaDisplay.secondaryLabel, value: veredaDisplay.secondaryValue }]
+      : []),
+    { label: 'Código predial', value: predio.codigoPredial },
+    { label: 'Código anterior', value: predio.codigoAnterior },
+  ];
+  drawHeader(context, predio, pageLabel, 'DATOS TÉCNICOS DEL PREDIO', TABLE_LAYOUT);
+
+  drawPanel(context, { x: 24, y: 126, width: 744, height: 316 }, 'RESUMEN TÉCNICO');
+  drawKeyValueRows(context, 48, 176, 320, [
+    { label: 'Área en hectáreas', value: `${formatNumber(predio.areaHa)} ha` },
+    { label: 'Área en metros cuadrados', value: `${formatNumber(predio.areaM2)} m²` },
+    { label: 'Perímetro', value: `${formatNumber(predio.perimetroM)} m` },
+    { label: 'Tipo de zona', value: predio.tipoZona },
+  ], { labelSize: 9.5, valueSize: 13, labelGap: 13, rowGap: 48, lineHeight: 13 });
+
+  drawKeyValueRows(context, 420, 176, 304, locationRows, { labelSize: 9.1, valueSize: 11.5, labelGap: 12, rowGap: 42, lineHeight: 12 });
+
+  drawPanel(context, { x: 24, y: 466, width: 744, height: 72 }, 'FUENTE Y LECTURA');
+  drawWrappedText(
+    context,
+    veredaDisplay.isCadastralCode
+      ? `La información se organiza para facilitar la lectura del propietario. ${veredaDisplay.note}`
+      : 'La información se organiza para facilitar la lectura del propietario. Los valores técnicos se derivan de la geometría predial identificada en la base geográfica y catastral consultada por CatastroX.',
+    44,
+    506,
+    704,
+    13,
+    '#243446',
+    400,
+    10.5,
+  );
+
+  drawLegalFooter(context, { x: 24, y: 580, width: 744, height: 14 });
+  return canvas;
+}
+
+function buildPlusFilesPageCanvas(predio, pageLabel = '4 de 6') {
+  const { canvas, context } = createPageCanvas();
+  drawHeader(context, predio, pageLabel, 'USO DE ARCHIVOS PLUS', TABLE_LAYOUT);
+
+  drawPanel(context, { x: 24, y: 126, width: 744, height: 120 }, 'QUÉ INCLUYE');
+  drawBullets(context, [
+    'PDF predial con resumen comercial, plano satelital y datos técnicos principales.',
+    'Archivo KML para abrir el polígono del predio en Google Earth y herramientas compatibles.',
+    'Archivo KMZ comprimido para compartir y visualizar el polígono de forma más práctica.',
+  ], 48, 172, 700, '#00aeea');
+
+  drawPanel(context, { x: 24, y: 274, width: 354, height: 190 }, 'CÓMO USAR KML/KMZ');
+  drawBullets(context, [
+    'Abre Google Earth o una aplicación compatible.',
+    'Carga el archivo KML o KMZ entregado.',
+    'Verifica la ubicación visual del polígono sobre el mapa.',
+    'Usa el archivo como apoyo de consulta, planeación y conversación técnica.',
+  ], 48, 320, 302, '#8bcf2b');
+
+  drawPanel(context, { x: 414, y: 274, width: 354, height: 190 }, 'ALCANCE DEL PLUS');
+  drawBullets(context, [
+    'Permite visualizar el predio y revisar sus datos prediales principales.',
+    'No reemplaza levantamientos topográficos, certificados oficiales ni decisiones de autoridad.',
+    'Para usos jurídicos, registrales o constructivos se requiere validación oficial según aplique.',
+  ], 438, 320, 302, '#00aeea');
+
+  drawPanel(context, { x: 24, y: 492, width: 744, height: 48 }, 'PREDIO ANALIZADO');
+  drawWrappedText(
+    context,
+    `${predio.municipio}, ${predio.departamento}. Código predial: ${predio.codigoPredial}. Generado el ${todayDisplayDate()}.`,
+    44,
+    526,
+    704,
+    12,
+    '#0f172a',
+    700,
+    10.5,
+  );
+
+  drawLegalFooter(context, { x: 24, y: 580, width: 744, height: 14 });
+  return canvas;
+}
+
+function buildPlusLegalPageCanvas(predio, pageLabel = '5 de 6') {
+  const { canvas, context } = createPageCanvas();
+  drawHeader(context, predio, pageLabel, 'ALCANCE Y ADVERTENCIA LEGAL', TABLE_LAYOUT);
+
+  drawPanel(context, { x: 24, y: 126, width: 744, height: 142 }, 'ALCANCE DEL REPORTE');
+  drawWrappedText(
+    context,
+    'CatastroX realiza análisis técnico con información geográfica y catastral pública disponible. No reemplaza certificados oficiales del IGAC, gestor catastral, oficina de registro ni autoridad competente.',
+    48,
+    176,
+    696,
+    16,
+    '#0f172a',
+    700,
+    12,
+  );
+
+  drawPanel(context, { x: 24, y: 298, width: 744, height: 190 }, 'USOS QUE REQUIEREN VALIDACIÓN OFICIAL');
+  drawBullets(context, [
+    'Decisiones jurídicas, notariales o registrales.',
+    'Trámites ante autoridades, curadurías, gestores catastrales u oficinas de registro.',
+    'Construcción, deslinde, amojonamiento o intervención física del predio.',
+    'Conflictos de linderos o decisiones que requieran precisión topográfica certificada.',
+  ], 48, 344, 696, '#00aeea');
+
+  drawPanel(context, { x: 24, y: 500, width: 744, height: 66 }, 'RECOMENDACIÓN');
+  drawWrappedText(
+    context,
+    'Use este reporte como insumo técnico inicial. Si el caso exige soporte jurídico, constructivo o registral, valide la información con la autoridad o profesional competente.',
+    44,
+    538,
+    704,
+    12,
+    '#243446',
+    400,
+    10.5,
   );
 
   return canvas;
@@ -1521,7 +1910,7 @@ function buildExecutiveTablePageCanvas(predio, pageLabel, rows, startIndex = 0, 
   drawSimpleTable(
     context,
     tableRect,
-    isContinuation ? 'TABLA EJECUTIVA DE PUNTOS VISIBLES Y LONGITUDES (CONTINUACIÓN)' : 'TABLA EJECUTIVA DE PUNTOS VISIBLES Y LONGITUDES',
+    `${isContinuation ? 'TABLA EJECUTIVA DE PUNTOS VISIBLES Y LONGITUDES (CONTINUACIÓN)' : 'TABLA EJECUTIVA DE PUNTOS VISIBLES Y LONGITUDES'}${predio.partLabel ? ` - ${predio.partLabel.toUpperCase()}` : ''}`,
     headers,
     columnXs,
     visibleRows,
@@ -1558,16 +1947,16 @@ function buildExecutiveTablePageCanvas(predio, pageLabel, rows, startIndex = 0, 
   };
 }
 
-function buildExecutiveTablePagesCanvases(predio, referenceRows, referenceSegments) {
+function buildExecutiveTablePagesCanvases(predio, referenceRows, referenceSegments, startPage = 3, totalDocumentPages = null) {
   const unifiedRows = buildUnifiedTableRows(referenceRows, referenceSegments);
   const availableRows = Math.max(1, Math.floor((TABLE_LAYOUT.mapArea.height - 54) / 20));
   const totalTablePages = Math.ceil(unifiedRows.length / availableRows);
-  const totalPages = 2 + totalTablePages;
+  const totalPages = totalDocumentPages || 2 + totalTablePages;
   const canvases = [];
   let nextIndex = 0;
 
   for (let tablePage = 0; tablePage < totalTablePages; tablePage += 1) {
-    const pageLabel = `${3 + tablePage} de ${totalPages}`;
+    const pageLabel = `${startPage + tablePage} de ${totalPages}`;
     const result = buildExecutiveTablePageCanvas(predio, pageLabel, unifiedRows, nextIndex, tablePage > 0, totalPages);
     canvases.push(result.canvas);
     nextIndex = result.nextIndex;
@@ -2101,7 +2490,7 @@ async function buildSatellitePageCanvas(predio, layoutData, pageLabel = '1 de 3'
   drawPanel(context, SATELLITE_LAYOUT.bottomPanel, 'LECTURA VISUAL DEL PREDIO');
   drawWrappedText(
     context,
-    'Esta página prioriza la interpretación visual del predio sobre la imagen satelital real. Las coordenadas y longitudes de referencia se presentan de forma consolidada en la tabla ejecutiva de las páginas siguientes.',
+    `Plano visual generado el ${todayDisplayDate()}. La imagen satelital permite ubicar el predio identificado; los puntos y longitudes se conservan como anexo técnico al final del reporte.`,
     SATELLITE_LAYOUT.bottomPanel.x + 14,
     SATELLITE_LAYOUT.bottomPanel.y + 34,
     SATELLITE_LAYOUT.bottomPanel.width - 28,
@@ -2126,7 +2515,7 @@ async function buildSatellitePageCanvas(predio, layoutData, pageLabel = '1 de 3'
   return canvas;
 }
 
-async function buildTechnicalPagesCanvases(predio, layoutData, technicalPageLabel = '2 de 3') {
+async function buildTechnicalPagesCanvases(predio, layoutData, technicalPageLabel = '2 de 3', tableStartPage = 3, totalDocumentPages = null) {
   const { mapState, referencePoints, referenceRows, referenceSegments } = layoutData;
   const expandedMapArea = { x: 24, y: 108, width: 744, height: 450 };
   const { canvas, context } = createPageCanvas();
@@ -2154,7 +2543,11 @@ async function buildTechnicalPagesCanvases(predio, layoutData, technicalPageLabe
   context.strokeRect(mapRect.x, mapRect.y, mapRect.width, mapRect.height);
   setFont(context, 10.5, 700);
   context.fillStyle = '#0a2e73';
-  context.fillText('PLANO TÉCNICO • GEOMETRÍA DEL PREDIO', TECHNICAL_LAYOUT.header.x + 16, TECHNICAL_LAYOUT.header.y + 76);
+  context.fillText(
+    `PLANO TÉCNICO • GEOMETRÍA DEL PREDIO${predio.partLabel ? ` • ${predio.partLabel.toUpperCase()}` : ''}`,
+    TECHNICAL_LAYOUT.header.x + 16,
+    TECHNICAL_LAYOUT.header.y + 76,
+  );
 
   drawPolygonOverlay(context, projected, { stroke: '#1170cf', fill: null, lineWidth: 2 });
   const pointPlacements = buildVisiblePointPlacements(projectedRefs, mapRect, projected);
@@ -2205,7 +2598,7 @@ async function buildTechnicalPagesCanvases(predio, layoutData, technicalPageLabe
     8,
   );
 
-  const tableCanvases = buildExecutiveTablePagesCanvases(predio, referenceRows, referenceSegments);
+  const tableCanvases = buildExecutiveTablePagesCanvases(predio, referenceRows, referenceSegments, tableStartPage, totalDocumentPages);
   return [canvas, ...tableCanvases];
 }
 
@@ -2239,19 +2632,52 @@ export async function buildPlanPdfBytes(source) {
   await ensurePdfFontsLoaded();
   const predio = normalizePredioForDeliverables(source);
   const attemptBuild = async (layoutOptions = {}) => {
-    const layoutData = buildLayoutData(predio, resolvePlanLayoutOptions(predio, layoutOptions));
-    const availableRows = Math.max(1, Math.floor((TABLE_LAYOUT.mapArea.height - 54) / 20));
-    const totalTablePages = Math.ceil(layoutData.referenceRows.length / availableRows);
-    const totalPages = 2 + totalTablePages;
-    const satelliteCanvas = await buildSatellitePageCanvas(predio, layoutData, `1 de ${totalPages}`);
-    const technicalCanvases = await buildTechnicalPagesCanvases(predio, layoutData, `2 de ${totalPages}`);
+    const parts = predio.geometryParts?.length ? predio.geometryParts : [{ outerRing: predio.ring, innerRings: [] }];
+    const partEntries = parts.map((part) => {
+      const nextPredio = partPredio(predio, part);
+      const layoutData = buildLayoutData(nextPredio, resolvePlanLayoutOptions(nextPredio, layoutOptions));
+      const availableRows = Math.max(1, Math.floor((TABLE_LAYOUT.mapArea.height - 54) / 20));
+      const tablePages = Math.max(1, Math.ceil(layoutData.referenceRows.length / availableRows));
+      return { predio: nextPredio, layoutData, tablePages };
+    });
+    const summaryLayoutData = {
+      ...partEntries[0].layoutData,
+      mapState: computeMapState(predio.mapRing?.length ? predio.mapRing : predio.ring, SATELLITE_LAYOUT.mapArea.width, SATELLITE_LAYOUT.mapArea.height, 18),
+    };
+    const totalTechnicalPages = partEntries.reduce((sum, entry) => sum + 1 + entry.tablePages, 0);
+    const totalPages = 4 + totalTechnicalPages;
+    const summaryCanvas = await buildPlusSummaryPageCanvas(predio, summaryLayoutData, `1 de ${totalPages}`);
+    const dataCanvas = buildPlusDataPageCanvas(predio, `2 de ${totalPages}`);
+    const filesCanvas = buildPlusFilesPageCanvas(predio, `3 de ${totalPages}`);
+    const legalCanvas = buildPlusLegalPageCanvas(predio, `4 de ${totalPages}`);
+    const technicalCanvases = [];
+    let pageCursor = 5;
+    for (const entry of partEntries) {
+      const canvases = await buildTechnicalPagesCanvases(
+        entry.predio,
+        entry.layoutData,
+        `${pageCursor} de ${totalPages}`,
+        pageCursor + 1,
+        totalPages,
+      );
+      technicalCanvases.push(...canvases);
+      pageCursor += canvases.length;
+    }
     const pageImages = [];
 
     pageImages.push({
-      width: satelliteCanvas.width,
-      height: satelliteCanvas.height,
-      bytes: await canvasToJpegBytes(satelliteCanvas),
+      width: summaryCanvas.width,
+      height: summaryCanvas.height,
+      bytes: await canvasToJpegBytes(summaryCanvas),
     });
+
+    for (const pageCanvas of [dataCanvas, filesCanvas, legalCanvas]) {
+      pageImages.push({
+        width: pageCanvas.width,
+        height: pageCanvas.height,
+        bytes: await canvasToJpegBytes(pageCanvas),
+      });
+    }
 
     for (const pageCanvas of technicalCanvases) {
       pageImages.push({
@@ -2272,27 +2698,64 @@ export async function buildPlanPdfBytes(source) {
   }
 }
 
+function kmlLinearRing(ring) {
+  const coords = ring.map(([lng, lat]) => `${lng},${lat},0`).join(' ');
+  return `<LinearRing>
+            <coordinates>${coords}</coordinates>
+          </LinearRing>`;
+}
+
+function kmlPolygon(part) {
+  const inners = (part.innerRings || [])
+    .map((ring) => `
+        <innerBoundaryIs>
+          ${kmlLinearRing(ring)}
+        </innerBoundaryIs>`)
+    .join('');
+  return `<Polygon>
+        <outerBoundaryIs>
+          ${kmlLinearRing(part.outerRing)}
+        </outerBoundaryIs>${inners}
+      </Polygon>`;
+}
+
 export function buildKmlText(source) {
   const predio = normalizePredioForDeliverables(source);
-  const coords = predio.ring.map(([lng, lat]) => `${lng},${lat},0`).join(' ');
+  const parts = predio.geometryParts?.length
+    ? predio.geometryParts
+    : [{ outerRing: predio.ring, innerRings: [] }];
+  const geometryKml = parts.length === 1
+    ? kmlPolygon(parts[0])
+    : `<MultiGeometry>
+${parts.map((part) => `      ${kmlPolygon(part)}`).join('\n')}
+      </MultiGeometry>`;
+  const documentName = `CatastroX - ${predio.municipio}, ${predio.departamento}`;
+  const veredaLine = predio.veredaDisplay?.isCadastralCode
+    ? `${predio.veredaDisplay.label}: ${predio.veredaDisplay.value}. ${predio.veredaDisplay.secondaryLabel}: ${predio.veredaDisplay.secondaryValue}. ${predio.veredaDisplay.note}`
+    : `${predio.veredaDisplay?.label || 'Vereda'}: ${predio.veredaDisplay?.value || 'Información no disponible'}.`;
+  const description = [
+    'Reporte predial CatastroX - Paquete Plus.',
+    `Municipio: ${predio.municipio}.`,
+    `Departamento: ${predio.departamento}.`,
+    veredaLine,
+    `Código predial: ${predio.codigoPredial}.`,
+    `Área total: ${formatNumber(predio.areaHa)} ha.`,
+    `Perímetro: ${formatNumber(predio.perimetroM)} m.`,
+    'Archivo para visualización del polígono predial en Google Earth o herramientas compatibles.',
+    'No reemplaza certificados oficiales, levantamientos topográficos ni decisiones de autoridad competente.',
+  ].join(' ');
   return `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
-    <name>${predio.codigoPredial}</name>
+    <name>${escapeXml(documentName)}</name>
     <Placemark>
-      <name>${predio.codigoPredial}</name>
-      <description>Geometría predial CatastroX.</description>
+      <name>${escapeXml(`Predio ${predio.codigoPredial}`)}</name>
+      <description>${escapeXml(description)}</description>
       <Style>
         <LineStyle><color>ffef8b00</color><width>3</width></LineStyle>
         <PolyStyle><color>66ffd9b3</color></PolyStyle>
       </Style>
-      <Polygon>
-        <outerBoundaryIs>
-          <LinearRing>
-            <coordinates>${coords}</coordinates>
-          </LinearRing>
-        </outerBoundaryIs>
-      </Polygon>
+      ${geometryKml}
     </Placemark>
   </Document>
 </kml>`;
@@ -2386,16 +2849,21 @@ function buildZip(entries) {
 
 function writeShapefileParts(source) {
   const predio = normalizePredioForDeliverables(source);
-  const ring = [...predio.ring];
-  if (!ring.length) {
+  const geometryParts = predio.geometryParts?.length
+    ? predio.geometryParts
+    : [{ outerRing: predio.ring, innerRings: [] }];
+  const shapeRings = geometryParts.flatMap((part) => [part.outerRing, ...(part.innerRings || [])]).filter((ring) => ring.length >= 4);
+  if (!shapeRings.length) {
     throw new Error('El predio no tiene geometría disponible para generar archivos GIS.');
   }
 
-  const xs = ring.map((pt) => pt[0]);
-  const ys = ring.map((pt) => pt[1]);
+  const allPoints = shapeRings.flat();
+  const xs = allPoints.map((pt) => pt[0]);
+  const ys = allPoints.map((pt) => pt[1]);
   const bbox = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
-  const numPoints = ring.length;
-  const recordContentBytes = 4 + 32 + 4 + 4 + 4 + 16 * numPoints;
+  const numParts = shapeRings.length;
+  const numPoints = allPoints.length;
+  const recordContentBytes = 4 + 32 + 4 + 4 + 4 * numParts + 16 * numPoints;
   const fileLengthWords = (100 + 8 + recordContentBytes) / 2;
 
   const shp = new ArrayBuffer(100 + 8 + recordContentBytes);
@@ -2409,14 +2877,22 @@ function writeShapefileParts(source) {
   shpView.setInt32(104, recordContentBytes / 2, false);
   shpView.setInt32(108, 5, true);
   bbox.forEach((value, index) => shpView.setFloat64(112 + index * 8, value, true));
-  shpView.setInt32(144, 1, true);
+  shpView.setInt32(144, numParts, true);
   shpView.setInt32(148, numPoints, true);
-  shpView.setInt32(152, 0, true);
-  let pointOffset = 156;
-  ring.forEach(([lng, lat]) => {
-    shpView.setFloat64(pointOffset, lng, true);
-    shpView.setFloat64(pointOffset + 8, lat, true);
-    pointOffset += 16;
+  let partStart = 0;
+  let partOffset = 152;
+  shapeRings.forEach((ring) => {
+    shpView.setInt32(partOffset, partStart, true);
+    partStart += ring.length;
+    partOffset += 4;
+  });
+  let pointOffset = 152 + numParts * 4;
+  shapeRings.forEach((ring) => {
+    ring.forEach(([lng, lat]) => {
+      shpView.setFloat64(pointOffset, lng, true);
+      shpView.setFloat64(pointOffset + 8, lat, true);
+      pointOffset += 16;
+    });
   });
 
   const shx = new ArrayBuffer(108);
@@ -2625,8 +3101,11 @@ export function buildDxfText(source) {
 
   const layoutData = buildLayoutData(predio, resolvePlanLayoutOptions(predio));
   const { referencePoints = [], referenceRows = [] } = layoutData;
-  const ring = predio.ring;
-  const bbox = getRingBounds(ring);
+  const shapeRings = (predio.geometryParts?.length
+    ? predio.geometryParts.flatMap((part) => [part.outerRing, ...(part.innerRings || [])])
+    : [predio.ring]).filter((ring) => ring.length >= 4);
+  const allDxfPoints = shapeRings.flat();
+  const bbox = getRingBounds(allDxfPoints);
   const spanLng = Math.max((bbox.maxLng || 0) - (bbox.minLng || 0), 0.0001);
   const spanLat = Math.max((bbox.maxLat || 0) - (bbox.minLat || 0), 0.0001);
   const vertexRadius = Math.max(Math.min(spanLng, spanLat) * 0.015, 0.00004);
@@ -2656,7 +3135,7 @@ export function buildDxfText(source) {
       'CATASTROX_INFO',
       'CATASTROX_ADVERTENCIA',
     ])}0\nENDSEC\n`,
-    `0\nSECTION\n2\nENTITIES\n${buildDxfPolylineEntity('CATASTROX_POLIGONO', ring)}${vertexEntities}${buildDxfInfoEntities(
+    `0\nSECTION\n2\nENTITIES\n${shapeRings.map((ring) => buildDxfPolylineEntity('CATASTROX_POLIGONO', ring)).join('')}${vertexEntities}${buildDxfInfoEntities(
       predio,
       [bbox.minLng, bbox.minLat, bbox.maxLng, bbox.maxLat],
       spanLng,
@@ -2740,6 +3219,12 @@ export async function buildDeliverableDebugSummary(source) {
     department: predio.departamento,
     areaHa: predio.areaHa,
     ringPoints: predio.ring.length,
+    geometryPartCount: predio.geometryParts?.length || 0,
+    geometryRingCount: predio.geometryParts?.reduce((sum, part) => sum + 1 + (part.innerRings?.length || 0), 0) || 0,
+    geometryTotalPoints: predio.geometryParts?.reduce(
+      (sum, part) => sum + part.outerRing.length + (part.innerRings || []).reduce((innerSum, ring) => innerSum + ring.length, 0),
+      0,
+    ) || predio.ring.length,
     referencePoints: layoutData.referencePoints.length,
     pdfBytes: diagnosticPdfBytes,
     planPdfBytes,
