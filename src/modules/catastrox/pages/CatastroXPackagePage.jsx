@@ -14,7 +14,9 @@ import {
 } from '../config/catastroxPackages.js';
 import { CATASTROX_STATUS } from '../data/catastroxMockData.js';
 import {
+  mergeAuditFullResultWithAdvanced,
   fetchCatastroxAuditFullResult,
+  fetchCatastroxAdvancedLookup,
   isCatastroxAuditDownloadsAvailable,
   resolveLookupForRoute,
   saveLastLookup,
@@ -92,6 +94,17 @@ function buildDownloadsForPackage(packageId) {
       ...DOWNLOAD_BUTTONS[downloadId],
     };
   });
+}
+
+function resolveLookupCoordinates(...candidates) {
+  for (const candidate of candidates) {
+    const lat = Number.parseFloat(candidate?.lat);
+    const lng = Number.parseFloat(candidate?.lng);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return { lat, lng };
+    }
+  }
+  return null;
 }
 
 function hasWompiIframe() {
@@ -253,11 +266,42 @@ export default function CatastroXPackagePage({ packageId }) {
     try {
       setIsLoadingAudit(true);
       setAuditState(null);
-      const fullLookup = await fetchCatastroxAuditFullResult(lookup.routeId || lookup.lookup_id || id);
-      setAuditLookup(fullLookup);
+      const originalLookupId = lookup.routeId || lookup.lookup_id || id;
+      let fullLookup = null;
+      let advancedLookup = null;
+      let coordinates = resolveLookupCoordinates(
+        lookup?.predio?.queryPoint,
+        lookup?.queryPoint,
+        lookup?.predio?.referencePoint,
+      );
+
+      fullLookup = await fetchCatastroxAuditFullResult(originalLookupId);
+      coordinates = resolveLookupCoordinates(
+        fullLookup?.predio?.queryPoint,
+        fullLookup?.queryPoint,
+        coordinates,
+      );
+
+      if (coordinates) {
+        try {
+          advancedLookup = await fetchCatastroxAdvancedLookup({
+            ...coordinates,
+            lookup_id: originalLookupId,
+          });
+        } catch {
+          advancedLookup = null;
+        }
+      }
+
+      const enrichedLookup = advancedLookup
+        ? mergeAuditFullResultWithAdvanced(fullLookup, advancedLookup)
+        : fullLookup;
+      setAuditLookup(enrichedLookup);
       setAuditState({
         status: 'ready',
-        message: 'Modo auditoría local activo. Descargas habilitadas solo para revisión en este equipo.',
+        message: advancedLookup
+          ? 'Modo auditoría local activo con motor avanzado CatastroX Clean. Descargas habilitadas solo para revisión en este equipo.'
+          : 'Modo auditoría local activo. Descargas habilitadas solo para revisión en este equipo.',
       });
     } catch (error) {
       setAuditState({

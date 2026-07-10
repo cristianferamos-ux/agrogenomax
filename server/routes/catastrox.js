@@ -13,14 +13,29 @@ const CATASTROX_LEGAL_NOTICE =
 const LOOKUP_PREVIEW_TTL_MS = 30 * 60 * 1000;
 const lookupPreviewStore = new Map();
 const AUDIT_DOWNLOADS_ENABLED = String(process.env.CATASTROX_AUDIT_DOWNLOADS || '').toLowerCase() === 'true';
+const ADVANCED_LOOKUP_ENABLED = String(process.env.CATASTROX_ADVANCED_LOOKUP_ENABLED || '').toLowerCase() === 'true';
+const TECHNICAL_VEREDA_PATTERN = /^\d+[A-Z]{2}$/i;
+const CATASTROX_ORIGEN_NACIONAL_PROJ =
+  '+proj=tmerc +lat_0=4 +lon_0=-73 +k=0.9992 +x_0=5000000 +y_0=2000000 +ellps=GRS80 +units=m +no_defs +type=crs';
 
 function buildLookupId() {
   return `cx-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function rememberLookupPreview(lookupId, predioId) {
+  const existing = lookupPreviewStore.get(lookupId);
   lookupPreviewStore.set(lookupId, {
+    ...(existing || {}),
     predioId,
+    createdAt: Date.now(),
+  });
+}
+
+function rememberAdvancedLookupPreview(lookupId, codigoPredial) {
+  const existing = lookupPreviewStore.get(lookupId);
+  lookupPreviewStore.set(lookupId, {
+    ...(existing || {}),
+    codigoPredial,
     createdAt: Date.now(),
   });
 }
@@ -136,6 +151,60 @@ function parseCoordinate(value, label) {
 
 function toNullableString(value) {
   return value === null || value === undefined || value === '' ? null : String(value).trim();
+}
+
+function toNullableNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function hasValidRing(ring) {
+  return Array.isArray(ring) && ring.length >= 4;
+}
+
+function isValidPredioGeometry(geometry) {
+  const geo = typeof geometry === 'string' ? JSON.parse(geometry) : geometry;
+  if (!geo || !geo.type || !Array.isArray(geo.coordinates)) return false;
+
+  if (geo.type === 'Polygon') {
+    return hasValidRing(geo.coordinates[0]);
+  }
+
+  if (geo.type === 'MultiPolygon') {
+    return geo.coordinates.some((polygon) => hasValidRing(polygon?.[0]));
+  }
+
+  return false;
+}
+
+function getVeredaDisplay(veredaNombre) {
+  const value = toNullableString(veredaNombre);
+
+  if (!value) {
+    return {
+      label: 'Vereda',
+      value: 'Información no disponible',
+      isCadastralCode: false,
+    };
+  }
+
+  if (TECHNICAL_VEREDA_PATTERN.test(value)) {
+    return {
+      label: 'Vereda',
+      value: 'Información no disponible',
+      secondaryLabel: 'Identificador catastral de vereda',
+      secondaryValue: value,
+      note: 'La fuente catastral pública consultada no registra un nombre común de vereda para este predio.',
+      isCadastralCode: true,
+    };
+  }
+
+  return {
+    label: 'Vereda',
+    value,
+    isCadastralCode: false,
+  };
 }
 
 function buildQueryPoint(lat, lng) {
@@ -554,8 +623,50 @@ router.get('/audit/lookups/:lookupId/full-result', async (req, res, next) => {
       return;
     }
 
-    const fullResult = await query(
-      `select
+    const CLEAN_FULL_RESULT_QUERY = `select
+         p.codigo_predial,
+         p.codigo_anterior,
+         p.departamento_nombre,
+         p.municipio_nombre,
+         p.zona,
+         p.nombre_predio,
+         p.direccion_real,
+         p.vereda_nombre,
+         p.barrio_nombre,
+         p.sector_codigo,
+         p.manzana_codigo,
+         p.area_terreno_m2,
+         p.area_terreno_ha,
+         ST_Perimeter(p.geom) as perimetro_m,
+         p.destino_economico_nombre,
+         p.uso_1_nombre,
+         p.uso_2_nombre,
+         p.uso_3_nombre,
+         p.numero_construcciones,
+         p.area_construida_m2,
+         p.tipos_construccion_resumen,
+         p.fuente,
+         p.fecha_proceso,
+         ST_AsGeoJSON(
+           ST_Transform(
+             ST_Multi(
+               ST_CollectionExtract(
+                 case
+                   when ST_IsValid(p.geom) then p.geom
+                   else ST_MakeValid(p.geom)
+                 end,
+                 3
+               )
+             ),
+             $2,
+             4326
+           )
+         )::json as geometry
+       from catastrox_clean.v_predios_enriquecidos p
+       where p.codigo_predial = $1
+       limit 1`;
+
+    const LEGACY_FULL_RESULT_QUERY = `select
          c.id,
          c.codigo,
          c.codigo_anterior,
@@ -581,13 +692,28 @@ router.get('/audit/lookups/:lookupId/full-result', async (req, res, next) => {
        left join gis.municipios_colombia m
          on m.mpcodigo = c.codigo_municipio
        where c.id = $1
-       limit 1`,
-      [preview.predioId],
-    );
+       limit 1`;
 
-    const row = fullResult.rows[0];
+    let source = null;
+    let row = null;
 
-    if (!row?.geometry) {
+    if (preview.codigoPredial) {
+      const cleanResult = await query(CLEAN_FULL_RESULT_QUERY, [preview.codigoPredial, CATASTROX_ORIGEN_NACIONAL_PROJ]);
+      if (cleanResult.rows[0] && isValidPredioGeometry(cleanResult.rows[0].geometry)) {
+        source = 'clean';
+        row = cleanResult.rows[0];
+      }
+    }
+
+    if (!row && preview.predioId) {
+      const legacyResult = await query(LEGACY_FULL_RESULT_QUERY, [preview.predioId]);
+      if (legacyResult.rows[0] && isValidPredioGeometry(legacyResult.rows[0].geometry)) {
+        source = 'legacy';
+        row = legacyResult.rows[0];
+      }
+    }
+
+    if (!row) {
       res.status(404).json({
         found: false,
         status: 'FULL_RESULT_UNAVAILABLE',
@@ -603,20 +729,35 @@ router.get('/audit/lookups/:lookupId/full-result', async (req, res, next) => {
       localOnly: true,
       legalNotice: CATASTROX_LEGAL_NOTICE,
       predio: {
-        id: row.id,
+        id: source === 'clean' ? row.codigo_predial : row.id,
         routeId: lookupId,
         lookup_id: lookupId,
-        source: 'audit-local',
-        codigoPredial: toNullableString(row.codigo) || String(row.id),
+        source: source === 'clean' ? 'audit-local-clean' : 'audit-local',
+        codigoPredial: toNullableString(source === 'clean' ? row.codigo_predial : (row.codigo || row.codigo_predial)),
         codigoAnterior: toNullableString(row.codigo_anterior) || 'No disponible',
-        municipio: toNullableString(row.mpnombre),
-        departamento: toNullableString(row.depto),
+        municipio: toNullableString(row.mpnombre || row.municipio_nombre),
+        departamento: toNullableString(row.depto || row.departamento_nombre),
         gestor: toNullableString(row.gestor),
-        areaM2: Number(row.shape_area || 0),
-        areaHa: Number(row.shape_area || 0) / 10000,
-        perimetroM: Number(row.shape_length || 0),
+        nombrePredio: toNullableString(row.nombre_predio),
+        direccionReal: toNullableString(row.direccion_real),
+        veredaDisplay: getVeredaDisplay(row.vereda_nombre),
+        barrioNombre: toNullableString(row.barrio_nombre),
+        sectorCodigo: toNullableString(row.sector_codigo),
+        manzanaCodigo: toNullableString(row.manzana_codigo),
+        areaM2: Number(row.shape_area || row.area_terreno_m2 || 0),
+        areaHa: Number(row.area_terreno_ha || (Number(row.shape_area || 0) / 10000)),
+        perimetroM: Number(row.shape_length || row.perimetro_m || 0),
         estadoPredial: 'Predio identificado en la base catastral consultada.',
-        tipoZona: 'Rural',
+        tipoZona: toNullableString(row.zona) || 'Rural',
+        destinoEconomicoNombre: toNullableString(row.destino_economico_nombre),
+        uso1Nombre: toNullableString(row.uso_1_nombre),
+        uso2Nombre: toNullableString(row.uso_2_nombre),
+        uso3Nombre: toNullableString(row.uso_3_nombre),
+        numeroConstrucciones: toNullableNumber(row.numero_construcciones),
+        areaConstruidaM2: toNullableNumber(row.area_construida_m2),
+        tiposConstruccionResumen: toNullableString(row.tipos_construccion_resumen),
+        fuente: toNullableString(row.fuente),
+        fechaProceso: toNullableString(row.fecha_proceso),
         geometry: row.geometry,
         polygonGeoJson: {
           type: 'Feature',
@@ -624,6 +765,118 @@ router.get('/audit/lookups/:lookupId/full-result', async (req, res, next) => {
           geometry: row.geometry,
         },
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/advanced/lookup', async (req, res, next) => {
+  try {
+    if (!ADVANCED_LOOKUP_ENABLED || !isLocalAuditRequest(req)) {
+      res.status(404).json({
+        found: false,
+        status: 'ADVANCED_LOOKUP_DISABLED',
+      });
+      return;
+    }
+
+    const lat = parseCoordinate(req.body?.lat, 'lat');
+    const lng = parseCoordinate(req.body?.lng, 'lng');
+
+    const advancedResult = await query(
+      `with punto as (
+         select ST_SetSRID(
+           ST_Transform(
+             ST_SetSRID(ST_MakePoint($1, $2), 4326),
+             $3
+           ),
+           9377
+         ) as geom
+       )
+       select
+         p.codigo_predial,
+         p.codigo_anterior,
+         p.departamento_nombre,
+         p.municipio_dane,
+         p.municipio_nombre,
+         p.zona,
+         p.nombre_predio,
+         p.direccion_real,
+         p.vereda_nombre,
+         p.barrio_nombre,
+         p.sector_codigo,
+         p.manzana_codigo,
+         p.area_terreno_m2,
+         p.area_terreno_ha,
+         p.destino_economico_nombre,
+         p.uso_1_nombre,
+         p.uso_2_nombre,
+         p.uso_3_nombre,
+         p.numero_construcciones,
+         p.area_construida_m2,
+         p.tipos_construccion_resumen,
+         p.fuente,
+         p.fecha_proceso
+       from catastrox_clean.v_predios_enriquecidos p, punto
+       where ST_Covers(p.geom, punto.geom)
+          or ST_Intersects(p.geom, punto.geom)
+       order by
+         case when ST_Covers(p.geom, punto.geom) then 0 else 1 end,
+         ST_Area(p.geom) asc
+       limit 1`,
+      [lng, lat, CATASTROX_ORIGEN_NACIONAL_PROJ],
+    );
+
+    const row = advancedResult.rows[0];
+
+    if (!row) {
+      res.status(404).json({
+        found: false,
+        status: 'ADVANCED_PREDIO_NOT_FOUND',
+        queryPoint: buildQueryPoint(lat, lng),
+      });
+      return;
+    }
+
+    const requestedLookupId = String(req.body?.lookup_id || req.body?.routeId || '').trim();
+    const lookupId = requestedLookupId || buildLookupId();
+    rememberAdvancedLookupPreview(lookupId, row.codigo_predial);
+
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      found: true,
+      status: 'ADVANCED_LOOKUP_FOUND',
+      internal: true,
+      localOnly: true,
+      lookup_id: lookupId,
+      routeId: lookupId,
+      queryPoint: buildQueryPoint(lat, lng),
+      geometryAvailable: true,
+      codigo_predial: toNullableString(row.codigo_predial),
+      codigo_anterior: toNullableString(row.codigo_anterior),
+      nombre_predio: toNullableString(row.nombre_predio),
+      direccion_real: toNullableString(row.direccion_real),
+      departamento_nombre: toNullableString(row.departamento_nombre),
+      municipio_dane: toNullableString(row.municipio_dane),
+      municipio_nombre: toNullableString(row.municipio_nombre),
+      zona: toNullableString(row.zona),
+      vereda_nombre: toNullableString(row.vereda_nombre),
+      veredaDisplay: getVeredaDisplay(row.vereda_nombre),
+      barrio_nombre: toNullableString(row.barrio_nombre),
+      sector_codigo: toNullableString(row.sector_codigo),
+      manzana_codigo: toNullableString(row.manzana_codigo),
+      area_terreno_m2: toNullableNumber(row.area_terreno_m2),
+      area_terreno_ha: toNullableNumber(row.area_terreno_ha),
+      destino_economico_nombre: toNullableString(row.destino_economico_nombre),
+      uso_1_nombre: toNullableString(row.uso_1_nombre),
+      uso_2_nombre: toNullableString(row.uso_2_nombre),
+      uso_3_nombre: toNullableString(row.uso_3_nombre),
+      numero_construcciones: toNullableNumber(row.numero_construcciones),
+      area_construida_m2: toNullableNumber(row.area_construida_m2),
+      tipos_construccion_resumen: toNullableString(row.tipos_construccion_resumen),
+      fuente: toNullableString(row.fuente),
+      fecha_proceso: toNullableString(row.fecha_proceso),
     });
   } catch (error) {
     next(error);
