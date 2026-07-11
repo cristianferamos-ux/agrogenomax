@@ -10,7 +10,8 @@
     "preview": "vite preview --host 127.0.0.1",
     "catastrox:regression": "node scripts/catastrox/regression/validate-v7-regression.mjs",
     "catastrox:regression:local": "powershell -ExecutionPolicy Bypass -File scripts/catastrox/regression/run-v7-regression.ps1",
-    "test:catastrox-semantic": "node src/modules/catastrox/semantic/tests/runSemanticTests.mjs"
+    "test:catastrox-semantic": "node src/modules/catastrox/semantic/tests/runSemanticTests.mjs",
+    "test:catastrox-geometry": "node src/modules/catastrox/utils/tests/runGeometryTests.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.0",

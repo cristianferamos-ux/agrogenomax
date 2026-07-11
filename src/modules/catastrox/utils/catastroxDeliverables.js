@@ -1228,6 +1228,39 @@ function drawPolygonPartOverlay(context, outerPoints, innerPointRings = [], opti
   context.stroke();
 }
 
+// Corrección controlada 1: plano técnico con anillos interiores. Función pura (sin
+// canvas) que prepara los trazados del exterior y de cada anillo interior como
+// contornos independientes, en el mismo orden recibido, sin concatenarlos entre si.
+// outerPoints se conserva como primer elemento sin modificar; los anillos vacios o sin
+// puntos se descartan (entradas invalidas no producen un trazado).
+export function buildTechnicalPolygonSubpaths(outerPoints = [], innerPointRings = []) {
+  if (!outerPoints.length) return [];
+  const inners = innerPointRings.filter((ring) => ring && ring.length > 0);
+  return [outerPoints, ...inners];
+}
+
+// A diferencia de drawPolygonPartOverlay (portada satelital, con relleno evenodd), esta
+// función es exclusiva del plano técnico: nunca rellena, solo traza cada subpath (exterior
+// y anillos interiores) como contorno cerrado e independiente (moveTo por anillo evita
+// cualquier linea artificial entre exterior, huecos o partes distintas).
+function drawTechnicalPolygonPartOverlay(context, outerPoints, innerPointRings = [], options = {}) {
+  const { stroke = '#1170cf', lineWidth = 2 } = options;
+  const subpaths = buildTechnicalPolygonSubpaths(outerPoints, innerPointRings);
+
+  context.lineWidth = lineWidth;
+  context.strokeStyle = stroke;
+
+  subpaths.forEach((ring) => {
+    context.beginPath();
+    context.moveTo(ring[0][0], ring[0][1]);
+    for (const [x, y] of ring.slice(1)) {
+      context.lineTo(x, y);
+    }
+    context.closePath();
+    context.stroke();
+  });
+}
+
 function projectRingForMap(ring, mapState, mapRect) {
   return projectRingToViewport(ring, mapState, mapRect.width, mapRect.height).map(([x, y]) => [
     mapRect.x + x,
@@ -3120,6 +3153,17 @@ async function buildTechnicalPagesCanvases(predio, layoutData, technicalPageLabe
   const projected = applyFitTransform(baseProjected, transform);
   const baseProjectedRefs = referencePoints.map((entry) => projectPointToViewport(entry.point || entry, mapState, mapRect.width, mapRect.height));
   const projectedRefs = applyFitTransform(baseProjectedRefs, transform);
+  // El anillo exterior siempre acota a sus propios anillos interiores (son geometrias
+  // contenidas en el mismo polígono), por lo que createFitTransform no necesita
+  // concatenar coordenadas de anillos distintos: el encuadre calculado sobre el
+  // exterior ya es válido para dibujar también los huecos de esta misma parte.
+  // Los anillos interiores se proyectan igual que baseProjected (projectRingToViewport
+  // sin sumar mapRect.x/y) y pasan por el mismo applyFitTransform: projectRingForMap
+  // no sirve aqui porque ya suma mapRect.x/y antes del fit, duplicando el desplazamiento.
+  const innerRings = predio.geometryParts?.[0]?.innerRings || [];
+  const projectedInnerRings = innerRings.map((ring) =>
+    applyFitTransform(projectRingToViewport(ring, mapState, mapRect.width, mapRect.height), transform),
+  );
 
   context.fillStyle = '#ffffff';
   context.fillRect(expandedMapArea.x, expandedMapArea.y, expandedMapArea.width, expandedMapArea.height);
@@ -3135,7 +3179,7 @@ async function buildTechnicalPagesCanvases(predio, layoutData, technicalPageLabe
     TECHNICAL_LAYOUT.header.y + 76,
   );
 
-  drawPolygonOverlay(context, projected, { stroke: '#1170cf', fill: null, lineWidth: 2 });
+  drawTechnicalPolygonPartOverlay(context, projected, projectedInnerRings, { stroke: '#1170cf', lineWidth: 2 });
   const pointPlacements = buildVisiblePointPlacements(projectedRefs, mapRect, projected);
   const compassCenter = { x: mapRect.x + 52, y: mapRect.y + 54 };
   const preliminaryScaleAnchor = chooseScaleBarAnchor(mapRect, projected, projectedRefs, pointPlacements, true);
