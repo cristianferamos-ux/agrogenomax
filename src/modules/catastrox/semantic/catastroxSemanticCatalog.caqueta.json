@@ -1,0 +1,962 @@
+{
+  "version": "caqueta-igac-clean-2026-04",
+  "source": "D:/CatastroX_IGAC_Limpio_2026/18_CAQUETA/codigos_caqueta.json",
+  "sourceNotes": [
+    "CATASTRO_DESTINOS y CATASTRO_USOS provienen de Colombia en Mapas / config?cmd=config.",
+    "domTipoConstruccion y domTipoDominio provienen de dominios GDB detectados.",
+    "Catalogo reducido a dominios necesarios para interpretacion comercial CatastroX."
+  ],
+  "domains": {
+    "CATASTRO_DESTINOS": {
+      "field": "DESTINO_ECONOMICO",
+      "values": {
+        "0": {
+          "label": "No especificado",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "A": {
+          "label": "Habitacional",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "AA": {
+          "label": "Infraestructura asociada a la producción agropecuaria",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "AB": {
+          "label": "Infraestructura de seguridad",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "AC": {
+          "label": "Infraestructura de saneamiénto básico",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "B": {
+          "label": "Industrial",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "C": {
+          "label": "Comercial",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "D": {
+          "label": "Agropecuario",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "E": {
+          "label": "Minero",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "F": {
+          "label": "Cultural",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "G": {
+          "label": "Recreacional",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "H": {
+          "label": "Salubridad",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "I": {
+          "label": "Institucional",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "J": {
+          "label": "Educativo",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "K": {
+          "label": "Religioso",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "L": {
+          "label": "Agrícola",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "M": {
+          "label": "Pecuario",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "N": {
+          "label": "Agruindustrial",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "O": {
+          "label": "Forestal",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "P": {
+          "label": "Uso publico",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "Q": {
+          "label": "Servicios especiales",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "R": {
+          "label": "Lote urbanizable no urbanizado",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "S": {
+          "label": "Lote urbanizado no construido o edificado",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "T": {
+          "label": "Lote no urbanizable",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "U": {
+          "label": "Acuicola",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "V": {
+          "label": "AMBIGUO: Infraestructura hidraulica | Servicios funerarios",
+          "confidence": "media",
+          "status": "bloqueado_ambiguo",
+          "approvedForClient": false,
+          "note": "No mostrar al cliente hasta decision manual."
+        },
+        "W": {
+          "label": "Mineria hidrocarburos",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "X": {
+          "label": "Infraestructura de transporte",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        },
+        "Z": {
+          "label": "Agroforestal",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion, no codigo crudo."
+        }
+      }
+    },
+    "CATASTRO_USOS": {
+      "field": "USO_1/USO_2/USO_3",
+      "values": {
+        "0": {
+          "label": "No especificado",
+          "confidence": "media-alta",
+          "status": "no_especificado",
+          "approvedForClient": false,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "1": {
+          "label": "VIVIENDA HASTA 3 PISOS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "2": {
+          "label": "RAMADAS - COBERTIZOS - CANEYES",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "3": {
+          "label": "GALPONES - GALLINEROS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "4": {
+          "label": "ESTABLOS - PESEBRERAS - CABALLERIZAS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "5": {
+          "label": "COCHERAS - MARRANERAS - PORQUERIZAS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "6": {
+          "label": "BODEGA CASA BOMBA",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "7": {
+          "label": "INDUSTRIAS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "8": {
+          "label": "SILOS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "9": {
+          "label": "PISCINAS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "10": {
+          "label": "TANQUES",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "11": {
+          "label": "BENEFICIADEROS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "12": {
+          "label": "COLEGIO Y UNIVERSIDADES",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "13": {
+          "label": "BIBLIOTECA",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "14": {
+          "label": "GARAJES CUBIERTOS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "15": {
+          "label": "Centros Comerciales En Ph (Villa Vergel, San Andresito, Pasaje Dorado II -Pasto)",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "16": {
+          "label": "BODEGAS COMERCIALES - GRANDES ALMACENES",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "17": {
+          "label": "Centros Comerciales En Ph (Liceo-Pasto)",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "18": {
+          "label": "SECADEROS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "19": {
+          "label": "CLINICAS - HOSPITALES - CENTROS MEDICOS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "20": {
+          "label": "POZOS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "21": {
+          "label": "KIOSCOS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "22": {
+          "label": "Centros Comerciales En Ph (Amorel Centro-Pasto)",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "23": {
+          "label": "ALBERCAS - BANADERAS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "24": {
+          "label": "Centros Comerciales En Ph (Pontevedra-Pasto)",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "25": {
+          "label": "HOTELES EN PH",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "26": {
+          "label": "CORRALES",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "27": {
+          "label": "CASA ELBAS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "28": {
+          "label": "COMERCIO",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "29": {
+          "label": "IGLESIA",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "30": {
+          "label": "Centros Comerciales En Ph (San Angustin-Pasto)",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "31": {
+          "label": "HOTELES",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "32": {
+          "label": "Centros Comerciales En Ph (Saguan del Lago-Pasto)",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "33": {
+          "label": "CLUBES - CASINOS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "34": {
+          "label": "OFICINAS - CONSULTORIOS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "35": {
+          "label": "APARTAMENTOS MAS DE 4 PISOS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "36": {
+          "label": "RESTAURANTES",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "37": {
+          "label": "PENSIONES Y RESIDENCIAS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "38": {
+          "label": "PUESTOS DE SALUD",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "39": {
+          "label": "PARQUEADEROS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "40": {
+          "label": "BARRACAS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "41": {
+          "label": "TEATRO - CINEMAS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "42": {
+          "label": "AULAS DE CLASES",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "43": {
+          "label": "COLISEOS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "44": {
+          "label": "CASAS DE CULTO",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "45": {
+          "label": "TALLERES",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "46": {
+          "label": "JARDIN INFANTIL EN CASA",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "47": {
+          "label": "TORRES DE ENFRIAMIENTO",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "48": {
+          "label": "MUELLES",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "49": {
+          "label": "ESTACION DE BOMBEO",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "50": {
+          "label": "ESTADIOS - PLAZA DE TOROS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "51": {
+          "label": "CARCELES",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "52": {
+          "label": "PARQUE CEMENTERIOS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "53": {
+          "label": "VIVIENDA COLONIAL",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "54": {
+          "label": "COMERCIO COLONIAL",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "55": {
+          "label": "OFICINAS - CONSULTORIOS COLONIALES",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "56": {
+          "label": "APARTAMENTOS EN EDIFICIO DE 4 Y 5 PISOS (CARTAGENA)",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "57": {
+          "label": "Centros Comerciales En Ph (Los Andes-Pasto)",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "58": {
+          "label": "CENTROS COMERCIALES",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "59": {
+          "label": "Centros Comerciales En Ph (Amorel Avda-Pasto)",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "60": {
+          "label": "CANCHAS DE TENIS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "61": {
+          "label": "Invernadero (Neira_Caldas, Caldono_Cauca)",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "62": {
+          "label": "TOBOGANES",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "63": {
+          "label": "VIVIENDA RECREACIONAL",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "64": {
+          "label": "CAMARONERAS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "65": {
+          "label": "FUERTES Y CASTILLOS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "66": {
+          "label": "MURALLAS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "67": {
+          "label": "Centros Comerciales En Ph (Potrerillo-Pasto)",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "68": {
+          "label": "Centros Comerciales En Ph (Terminal-Pasto)",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "69": {
+          "label": "Centros Comerciales En Ph (Ventas Populares la 16-Pasto)",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "70": {
+          "label": "VIVIENDA HASTA 3 PISOS EN PH",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "71": {
+          "label": "APARTAMENTOS 4 Y MÁS PISOS EN PH",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "72": {
+          "label": "VIVIENDA RECREACIONAL EN PH",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "73": {
+          "label": "BODEGAS CASA BOMBA EN PH",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "74": {
+          "label": "BODEGAS COMERCIALES EN PH",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "75": {
+          "label": "COMERCIO EN PH",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "76": {
+          "label": "CENTROS COMERCIALES EN PH",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "77": {
+          "label": "OFICINAS CONSULTORIOS EN PH",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "78": {
+          "label": "PARQUEADEROS EN PH",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "79": {
+          "label": "GARAJES EN PH",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "80": {
+          "label": "INDUSTRIAS EN PH",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "81": {
+          "label": "Centros Comerciales En Ph (Pasaje Dorado I, Torres la 17-Pasto)",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "82": {
+          "label": "MARQUESINAS - PATIOS CUBIERTOS",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "83": {
+          "label": "LAGUNAS DE OXIDACION",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "84": {
+          "label": "VÍA FERREA",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "85": {
+          "label": "CARRETERA",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "86": {
+          "label": "TEATRO - CINEMAS EN PH",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "87": {
+          "label": "IGLESIA EN PH",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "88": {
+          "label": "RESTAURANTES EN PH",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "89": {
+          "label": "HOTEL COLONIAL",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "90": {
+          "label": "RESTAURANTE COLONIAL",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "91": {
+          "label": "ENTIDAD EDUCATIVA COLONIAL - COLEGIO COLONIAL",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "92": {
+          "label": "AEROGENERADOR DE ENERGIA",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "93": {
+          "label": "Centros Comerciales En Ph (Bombona-Pasto)",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "94": {
+          "label": "Centros Comerciales En Ph (Sebastian-Pasto)",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "95": {
+          "label": "Centros Comerciales En Ph (Valle de Atriz-Pasto)",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "96": {
+          "label": "Centros Comerciales En Ph (Galerias-Pasto)",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "97": {
+          "label": "Centros Comerciales En Ph (Orient-Pasto)",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "98": {
+          "label": "Centros Comerciales En Ph (San Andresito-Pasto)",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        },
+        "99": {
+          "label": "CIMIENTOS, ESTRUCTURA, MUROS Y PLACA BASE",
+          "confidence": "media-alta",
+          "status": "traducido",
+          "approvedForClient": true,
+          "note": "Mostrar solo descripcion si agrega valor comercial."
+        }
+      }
+    },
+    "domTipoConstruccion": {
+      "field": "TIPO_CONSTRUCCION",
+      "values": {
+        "CONVENCIONAL": {
+          "label": "Convencional",
+          "confidence": "alta",
+          "status": "confirmado",
+          "approvedForClient": true,
+          "note": "Apto para PDF y API."
+        },
+        "NO CONVENCIONAL": {
+          "label": "No Convencional",
+          "confidence": "alta",
+          "status": "confirmado",
+          "approvedForClient": true,
+          "note": "Apto para PDF y API."
+        }
+      }
+    },
+    "domTipoDominio": {
+      "field": "TIPO_DOMINIO",
+      "values": {
+        "COMUN": {
+          "label": "Común",
+          "confidence": "alta",
+          "status": "confirmado_interno",
+          "approvedForClient": false,
+          "note": "Conservar interno; no propuesto para PDF base."
+        },
+        "PRIVADO": {
+          "label": "Privado",
+          "confidence": "alta",
+          "status": "confirmado_interno",
+          "approvedForClient": false,
+          "note": "Conservar interno; no propuesto para PDF base."
+        }
+      }
+    }
+  }
+}
