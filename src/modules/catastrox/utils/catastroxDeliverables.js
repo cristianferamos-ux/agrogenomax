@@ -3509,12 +3509,99 @@ function buildZip(entries) {
   return concatUint8Arrays([localData, centralDirectory, end]);
 }
 
+// Corrección controlada 2: orientación de anillos para el estándar ESRI Shapefile
+// (exterior en sentido horario/CW, hueco en sentido antihorario/CCW). El motor nunca
+// había impuesto esta convención de forma explícita: heredaba el sentido de recorrido
+// tal como llegaba en geometryParts (a su vez heredado sin alterar desde el GeoJSON de
+// origen). Estos helpers son puros (no dependen de canvas ni de ningún estado global) y
+// solo se usan en el flujo previo a writeShapefileParts; KML, DXF y PDF siguen leyendo
+// geometryParts sin pasar por ellos.
+
+// area > 0 => sentido antihorario (CCW); area < 0 => sentido horario (CW). Formula
+// shoelace estandar para coordenadas (lng=X, lat=Y, Y creciente hacia el norte),
+// verificada con un cuadrado unitario trivial antes de esta implementación. Funciona
+// tanto si el anillo llega cerrado (ultimo punto = primero) como abierto, ya que el
+// termino de "cierre" entre el ultimo y el primer punto se suma explicitamente.
+export function calculateSignedRingArea(ring) {
+  if (!ring || ring.length < 3) return 0;
+  let sum = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const [x1, y1] = ring[i];
+    const [x2, y2] = ring[(i + 1) % ring.length];
+    sum += x1 * y2 - x2 * y1;
+  }
+  return sum / 2;
+}
+
+// Cierra el anillo si hace falta, sin duplicar el punto de cierre si ya esta cerrado.
+// Nunca muta el arreglo recibido.
+export function ensureClosedRing(ring) {
+  if (!ring || !ring.length) return [];
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  const isClosed = first[0] === last[0] && first[1] === last[1];
+  return isClosed ? ring.slice() : [...ring, [first[0], first[1]]];
+}
+
+// Area firmada por debajo de este umbral (en unidades de grado^2, muy por debajo del
+// area real mas pequena observada en datos reales, ~1e-8) se considera degenerada:
+// anillo colineal o sin superficie real, no una geometria valida con orientacion.
+const DEGENERATE_RING_AREA_EPSILON = 1e-15;
+
+// Reorienta un anillo para cumplir la convencion ESRI Shapefile segun su rol:
+// role = 'outer' -> horario (CW); role = 'inner' -> antihorario (CCW). Nunca muta el
+// arreglo original. Si ya tiene la orientacion correcta, devuelve la secuencia intacta
+// (cerrada); si debe invertirse, revierte el orden de vertices preservando el cierre
+// (un anillo cerrado [P0..Pn,P0] invertido sigue siendo [P0,Pn..P1,P0], mismo primer y
+// ultimo punto). Devuelve null para anillos invalidos (menos de 4 posiciones tras
+// cerrar) o degenerados (area firmada ~0), para que el llamador los excluya de forma
+// controlada.
+export function orientRingForShapefile(ring, role) {
+  const closed = ensureClosedRing(ring);
+  if (closed.length < 4) return null;
+
+  const area = calculateSignedRingArea(closed);
+  if (Math.abs(area) <= DEGENERATE_RING_AREA_EPSILON) return null;
+
+  const isCounterClockwise = area > 0;
+  const mustInvert =
+    (role === 'outer' && isCounterClockwise) || (role === 'inner' && !isCounterClockwise);
+
+  return mustInvert ? closed.slice().reverse() : closed;
+}
+
+// Aplica orientRingForShapefile a cada parte de geometryParts, conservando la secuencia
+// exterior-de-parte-1, interiores-de-parte-1, exterior-de-parte-2, ... (nunca concatena
+// exterior e interiores entre si ni reordena las partes globalmente). Una parte cuyo
+// exterior resulte invalido/degenerado se excluye completa; un interior invalido se
+// descarta individualmente sin afectar al resto de la parte.
+export function buildShapefileOrientedParts(geometryParts) {
+  const parts = geometryParts || [];
+  const oriented = [];
+
+  for (const part of parts) {
+    const outerRing = orientRingForShapefile(part?.outerRing, 'outer');
+    if (!outerRing) continue;
+
+    const innerRings = (part?.innerRings || [])
+      .map((ring) => orientRingForShapefile(ring, 'inner'))
+      .filter(Boolean);
+
+    oriented.push({ outerRing, innerRings });
+  }
+
+  return oriented;
+}
+
 function writeShapefileParts(source) {
   const predio = normalizePredioForDeliverables(source);
   const geometryParts = predio.geometryParts?.length
     ? predio.geometryParts
     : [{ outerRing: predio.ring, innerRings: [] }];
-  const shapeRings = geometryParts.flatMap((part) => [part.outerRing, ...(part.innerRings || [])]).filter((ring) => ring.length >= 4);
+  // Orientacion ESRI (exterior CW, hueco CCW) impuesta explicitamente solo para el SHP;
+  // geometryParts en si no se modifica, por lo que KML/DXF/PDF no se ven afectados.
+  const orientedParts = buildShapefileOrientedParts(geometryParts);
+  const shapeRings = orientedParts.flatMap((part) => [part.outerRing, ...part.innerRings]);
   if (!shapeRings.length) {
     throw new Error('El predio no tiene geometría disponible para generar archivos GIS.');
   }

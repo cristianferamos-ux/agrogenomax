@@ -1,8 +1,8 @@
-// Runner rastreable de la suite de pruebas geometricas del plano tecnico (anillos
-// interiores).
+// Runner rastreable de la suite de pruebas geometricas: plano tecnico (anillos
+// interiores) y orientacion de anillos para Shapefile (convencion ESRI).
 //
-// Por que existe: buildTechnicalPolygonSubpaths.test.js importa
-// ../catastroxDeliverables.js, que a su vez importa (indirectamente, via
+// Por que existe: ambos archivos de prueba importan ../catastroxDeliverables.js, que a
+// su vez importa (indirectamente, via
 // ../semantic/catastroxSemanticCatalog.js) un JSON sin el atributo `with { type: 'json'
 // }` que Node exige en ejecucion directa. Ese archivo es codigo aprobado y compartido
 // con el motor de produccion; no se modifica para esta suite. Vite (ya declarado en
@@ -21,6 +21,7 @@ const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', '..');
 
 const TEST_FILES = [
   '/src/modules/catastrox/utils/__tests__/buildTechnicalPolygonSubpaths.test.js',
+  '/src/modules/catastrox/utils/__tests__/shapefileRingOrientation.test.js',
 ];
 
 const server = await createServer({
