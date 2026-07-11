@@ -12,6 +12,26 @@ function formatMetric(value, unit, decimals = 2) {
   return `${formatNumber(value, decimals)} ${unit}`;
 }
 
+function isUrbanZona(predio) {
+  return /urbano/i.test(String(predio?.tipoZona || predio?.zona || ''));
+}
+
+// Regla 6.5: predios urbanos con area < 10.000 m2 muestran solo m2; >= 10.000 m2 muestran
+// m2 como principal y ha como complementaria. Rural conserva ha + m2 por separado.
+function buildAreaRows(predio) {
+  if (isUrbanZona(predio)) {
+    const areaRows = [['Área total', formatMetric(predio.areaM2, 'm²')]];
+    if (Number(predio.areaM2) >= 10000) {
+      areaRows.push(['Área total (ha)', formatMetric(predio.areaHa, 'ha')]);
+    }
+    return areaRows;
+  }
+  return [
+    ['Área total en hectáreas', formatMetric(predio.areaHa, 'ha')],
+    ['Área total en m²', formatMetric(predio.areaM2, 'm²')],
+  ];
+}
+
 export default function CatastroXResultSummary({ predio, mode = 'free' }) {
   const veredaDisplay = getVeredaDisplay(
     predio?.veredaNombre ||
@@ -38,12 +58,12 @@ export default function CatastroXResultSummary({ predio, mode = 'free' }) {
       : [
           ['Municipio', formatText(predio.municipio)],
           ['Departamento', formatText(predio.departamento)],
-          [veredaDisplay.label, veredaDisplay.value],
-          ...(veredaDisplay.isCadastralCode
+          // Regla 6.2: vereda no se muestra para predios urbanos.
+          ...(isUrbanZona(predio) ? [] : [[veredaDisplay.label, veredaDisplay.value]]),
+          ...(!isUrbanZona(predio) && veredaDisplay.isCadastralCode
             ? [[veredaDisplay.secondaryLabel, veredaDisplay.secondaryValue]]
             : []),
-          ['Área total en hectáreas', formatMetric(predio.areaHa, 'ha')],
-          ['Área total en m²', formatMetric(predio.areaM2, 'm²')],
+          ...buildAreaRows(predio),
           ['Perímetro', formatMetric(predio.perimetroM, 'm')],
           ['Código predial', formatText(predio.codigoPredial)],
           ['Código anterior', formatText(predio.codigoAnterior)],
@@ -82,7 +102,7 @@ export default function CatastroXResultSummary({ predio, mode = 'free' }) {
           </div>
         ))}
       </div>
-      {mode !== 'free' && veredaDisplay.isCadastralCode ? (
+      {mode !== 'free' && !isUrbanZona(predio) && veredaDisplay.isCadastralCode ? (
         <p className="catastrox-summary-note">{veredaDisplay.note}</p>
       ) : null}
       {mode === 'free' ? (

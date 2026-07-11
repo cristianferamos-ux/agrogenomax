@@ -13,9 +13,15 @@ function PreviewViewport({ geometry }) {
     const bounds = layer.getBounds();
     if (!bounds.isValid()) return undefined;
 
+    // Zoom urbano dinamico: fitBounds ajusta al bounding box real del predio. El tope se
+    // elevo de 17 a 18 (antes insuficiente para lotes de pocos metros de lado). Se probo
+    // subir hasta 21 pero el proveedor de teselas (Esri World_Imagery) devuelve "Map data
+    // not yet available" para zonas rurales/urbanas pequenas de Caqueta a partir de zoom 19;
+    // 18 es el maximo que carga imagenes reales de forma consistente en las tres cabeceras
+    // urbanas probadas (Puerto Rico, La Montanita, Valparaiso).
     const syncPreview = () => {
       map.invalidateSize(false);
-      map.fitBounds(bounds, { padding: [28, 28], animate: false, maxZoom: 17 });
+      map.fitBounds(bounds, { padding: [28, 28], animate: false, maxZoom: 18 });
     };
 
     syncPreview();
@@ -82,6 +88,7 @@ function SatellitePreviewMap({ predio }) {
       <MapContainer
         center={[4.5709, -74.2973]}
         zoom={5}
+        maxZoom={18}
         scrollWheelZoom={false}
         dragging={false}
         doubleClickZoom={false}
@@ -92,6 +99,7 @@ function SatellitePreviewMap({ predio }) {
         <TileLayer
           attribution="Tiles &copy; Esri"
           url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+          maxZoom={18}
         />
         {previewGeometry ? <PreviewViewport geometry={previewGeometry} /> : null}
         {previewGeometry ? (

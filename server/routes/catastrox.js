@@ -35,6 +35,7 @@ function rememberAdvancedLookupPreview(lookupId, codigoPredial) {
   const existing = lookupPreviewStore.get(lookupId);
   lookupPreviewStore.set(lookupId, {
     ...(existing || {}),
+    source: 'clean',
     codigoPredial,
     createdAt: Date.now(),
   });
@@ -349,6 +350,56 @@ async function findMunicipioByPoint(lng, lat) {
   return normalizeMunicipioRow(nearestMatch.rows[0]);
 }
 
+async function findCleanPredioByPoint(lng, lat) {
+  const result = await query(
+    `with punto as (
+       select ST_SetSRID(
+         ST_Transform(
+           ST_SetSRID(ST_MakePoint($1, $2), 4326),
+           $3
+         ),
+         9377
+       ) as geom
+     ),
+     candidatos as (
+       select
+         p.codigo_predial,
+         p.zona,
+         ST_Multi(
+           ST_CollectionExtract(
+             case
+               when ST_IsValid(p.geom) then p.geom
+               else ST_MakeValid(p.geom)
+             end,
+             3
+           )
+         ) as lookup_geom
+       from catastrox_clean.v_predios_enriquecidos p
+     )
+     select
+       c.codigo_predial,
+       c.zona
+     from candidatos c, punto p
+     where c.lookup_geom is not null
+       and not ST_IsEmpty(c.lookup_geom)
+       and (
+         ST_Covers(c.lookup_geom, p.geom)
+         or ST_Intersects(c.lookup_geom, p.geom)
+       )
+     order by
+       case
+         when ST_Covers(c.lookup_geom, p.geom) then 0
+         else 1
+       end,
+       ST_Area(c.lookup_geom) asc,
+       c.codigo_predial asc
+     limit 1`,
+    [lng, lat, CATASTROX_ORIGEN_NACIONAL_PROJ],
+  );
+
+  return result.rows[0] || null;
+}
+
 router.post('/lookup', async (req, res, next) => {
   try {
     const lat = parseCoordinate(req.body?.lat, 'lat');
@@ -459,6 +510,48 @@ router.post('/lookup', async (req, res, next) => {
       return;
     }
 
+    const cleanPredio = await findCleanPredioByPoint(lng, lat);
+
+    if (cleanPredio) {
+      const municipio = await findMunicipioByPoint(lng, lat);
+      const coverage = municipio ? resolveCoverageStatus({ municipio, lat, lng }) : null;
+      const lookupId = buildLookupId();
+      rememberAdvancedLookupPreview(lookupId, cleanPredio.codigo_predial);
+
+      res.json({
+        lookup_id: lookupId,
+        routeId: lookupId,
+        found: true,
+        status: 'FOUND',
+        municipio: toNullableString(municipio?.municipio),
+        departamento: toNullableString(municipio?.departamento),
+        gestor: toNullableString(municipio?.gestorCatastral),
+        canPurchase: true,
+        commercialMessage:
+          'Predio identificado. Para conocer área, perímetro, códigos prediales, plano y archivos descargables, seleccione un paquete.',
+        legalNotice: CATASTROX_LEGAL_NOTICE,
+        coverage: {
+          municipio: coverage?.municipio || municipio?.municipio || null,
+          departamento: coverage?.departamento || municipio?.departamento || null,
+          gestorCatastral: coverage?.gestorCatastral || municipio?.gestorCatastral || null,
+          estadoCobertura: coverage?.estadoCobertura || null,
+        },
+        predio: {
+          lookup_id: lookupId,
+          routeId: lookupId,
+          municipio: toNullableString(municipio?.municipio),
+          departamento: toNullableString(municipio?.departamento),
+          gestor: toNullableString(municipio?.gestorCatastral),
+          estadoPredial:
+            'Predio identificado. Información detallada disponible únicamente al activar un paquete.',
+          previewMapUrl: `/api/catastrox/lookups/${encodeURIComponent(lookupId)}/preview-map`,
+          previewGeometryUrl: `/api/catastrox/lookups/${encodeURIComponent(lookupId)}/preview-geometry`,
+          previewMessage: 'Vista previa protegida del predio identificado.',
+        },
+      });
+      return;
+    }
+
     const municipio = await findMunicipioByPoint(lng, lat);
 
     if (municipio) {
@@ -508,27 +601,53 @@ router.get('/lookups/:lookupId/preview-map', async (req, res, next) => {
       return;
     }
 
-    const previewResult = await query(
-      `select
-         ST_AsGeoJSON(
-           ST_SimplifyPreserveTopology(
-             ST_Multi(
-               ST_CollectionExtract(
-                 case
-                   when ST_IsValid(c.geom) then c.geom
-                   else ST_MakeValid(c.geom)
-                 end,
-                 3
+    const previewResult = preview.source === 'clean'
+      ? await query(
+          `select
+             ST_AsGeoJSON(
+               ST_SimplifyPreserveTopology(
+                 ST_Transform(
+                   ST_Multi(
+                     ST_CollectionExtract(
+                       case
+                         when ST_IsValid(p.geom) then p.geom
+                         else ST_MakeValid(p.geom)
+                       end,
+                       3
+                     )
+                   ),
+                   $2,
+                   4326
+                 ),
+                 0.00003
                )
-             ),
-             0.00003
-           )
-         )::json as preview_geometry
-       from gis.catastro_caqueta c
-       where c.id = $1
-       limit 1`,
-      [preview.predioId],
-    );
+             )::json as preview_geometry
+           from catastrox_clean.v_predios_enriquecidos p
+           where p.codigo_predial = $1
+           limit 1`,
+          [preview.codigoPredial, CATASTROX_ORIGEN_NACIONAL_PROJ],
+        )
+      : await query(
+          `select
+             ST_AsGeoJSON(
+               ST_SimplifyPreserveTopology(
+                 ST_Multi(
+                   ST_CollectionExtract(
+                     case
+                       when ST_IsValid(c.geom) then c.geom
+                       else ST_MakeValid(c.geom)
+                     end,
+                     3
+                   )
+                 ),
+                 0.00003
+               )
+             )::json as preview_geometry
+           from gis.catastro_caqueta c
+           where c.id = $1
+           limit 1`,
+          [preview.predioId],
+        );
     const pathData = normalizeRingForSvg(previewResult.rows[0]?.preview_geometry);
     res.setHeader('Cache-Control', 'no-store');
     res.type('image/svg+xml').send(buildPreviewSvg(pathData));
@@ -550,35 +669,69 @@ router.get('/lookups/:lookupId/preview-geometry', async (req, res, next) => {
       return;
     }
 
-    const previewResult = await query(
-      `with source as (
-         select
-           ST_Multi(
-             ST_CollectionExtract(
-               case
-                 when ST_IsValid(c.geom) then c.geom
-                 else ST_MakeValid(c.geom)
-               end,
-               3
-             )
-           ) as geom
-         from gis.catastro_caqueta c
-         where c.id = $1
-         limit 1
-       ),
-       degraded as (
-         select
-           ST_SimplifyPreserveTopology(
-             ST_SnapToGrid(geom, 0.00008),
-             0.00008
-           ) as geom
-         from source
-         where geom is not null and not ST_IsEmpty(geom)
-       )
-       select ST_AsGeoJSON(geom, 5)::json as preview_geometry
-       from degraded`,
-      [preview.predioId],
-    );
+    const previewResult = preview.source === 'clean'
+      ? await query(
+          `with source as (
+             select
+               ST_Transform(
+                 ST_Multi(
+                   ST_CollectionExtract(
+                     case
+                       when ST_IsValid(p.geom) then p.geom
+                       else ST_MakeValid(p.geom)
+                     end,
+                     3
+                   )
+                 ),
+                 $2,
+                 4326
+               ) as geom
+             from catastrox_clean.v_predios_enriquecidos p
+             where p.codigo_predial = $1
+             limit 1
+           ),
+           degraded as (
+             select
+               ST_SimplifyPreserveTopology(
+                 ST_SnapToGrid(geom, 0.00008),
+                 0.00008
+               ) as geom
+             from source
+             where geom is not null and not ST_IsEmpty(geom)
+           )
+           select ST_AsGeoJSON(geom, 5)::json as preview_geometry
+           from degraded`,
+          [preview.codigoPredial, CATASTROX_ORIGEN_NACIONAL_PROJ],
+        )
+      : await query(
+          `with source as (
+             select
+               ST_Multi(
+                 ST_CollectionExtract(
+                   case
+                     when ST_IsValid(c.geom) then c.geom
+                     else ST_MakeValid(c.geom)
+                   end,
+                   3
+                 )
+               ) as geom
+             from gis.catastro_caqueta c
+             where c.id = $1
+             limit 1
+           ),
+           degraded as (
+             select
+               ST_SimplifyPreserveTopology(
+                 ST_SnapToGrid(geom, 0.00008),
+                 0.00008
+               ) as geom
+             from source
+             where geom is not null and not ST_IsEmpty(geom)
+           )
+           select ST_AsGeoJSON(geom, 5)::json as preview_geometry
+           from degraded`,
+          [preview.predioId],
+        );
 
     const previewGeometry = previewResult.rows[0]?.preview_geometry || null;
 

@@ -346,6 +346,54 @@ function resolveUrbanFieldOrNotApplicable(value, zona) {
   return /rural/i.test(cleanText(zona)) ? 'No aplica' : 'No registrado';
 }
 
+function isUrbanZona(predio) {
+  return /urbano/i.test(cleanText(predio?.tipoZona || predio?.zona));
+}
+
+// Umbral (m2) a partir del cual un predio urbano muestra hectareas ademas de m2.
+const URBAN_AREA_HA_THRESHOLD_M2 = 10000;
+
+// Regla 6.5: predios urbanos con area < 10.000 m2 muestran unicamente m2; >= 10.000 m2
+// muestran m2 como unidad principal y ha como complementaria. Predios rurales conservan
+// la logica aprobada (ha y m2 siempre visibles por separado).
+function buildAreaDisplayFields(predio, { haLabel = 'Área en hectáreas', m2Label = 'Área en metros cuadrados', combinedLabel = 'Área total' } = {}) {
+  if (isUrbanZona(predio)) {
+    if (Number(predio.areaM2) < URBAN_AREA_HA_THRESHOLD_M2) {
+      return [{ label: combinedLabel, value: `${formatNumber(predio.areaM2)} m²` }];
+    }
+    return [
+      { label: combinedLabel, value: `${formatNumber(predio.areaM2)} m²` },
+      { label: `${combinedLabel} (ha)`, value: `${formatNumber(predio.areaHa)} ha` },
+    ];
+  }
+  return [
+    { label: haLabel, value: `${formatNumber(predio.areaHa)} ha` },
+    { label: m2Label, value: `${formatNumber(predio.areaM2)} m²` },
+  ];
+}
+
+// Version de una sola linea para tarjetas compactas (pagina 1, KML) donde solo cabe un valor.
+function buildAreaPrimaryDisplay(predio) {
+  if (isUrbanZona(predio) && Number(predio.areaM2) < URBAN_AREA_HA_THRESHOLD_M2) {
+    return `${formatNumber(predio.areaM2)} m²`;
+  }
+  return `${formatNumber(predio.areaHa)} ha`;
+}
+
+// Regla 6.6: la auditoria de la GDB publica (ver audit_outputs/catastrox/urban_integral_audit)
+// demostro que "numero_construcciones" es un conteo de filas de U_CONSTRUCCION, no de
+// edificaciones fisicas verificadas (Puerto Rico: 50 filas = solo 2 construcciones reales,
+// 48 filas duplicadas geometricamente). No se puede afirmar "construcciones" sin verificar
+// caso por caso, por lo que se usa la etiqueta mas conservadora y honesta.
+const CONSTRUCTION_COUNT_LABEL = 'Registros constructivos asociados';
+const CONSTRUCTION_COUNT_LABEL_COMPACT = 'Registros constructivos';
+
+function formatConstructionCount(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 'No registrados';
+  return formatNumber(parsed, 0);
+}
+
 // Devuelve una linea por tipo de construccion ("Convencional: 1"), nunca unidas en una sola linea.
 function formatTiposConstruccionDisplayLines(value) {
   const clean = cleanText(value);
@@ -1316,6 +1364,36 @@ function drawVisiblePoints(context, projectedPoints, placements = null, options 
   });
 }
 
+// Regla Fase 8: escala grafica dinamica. metros/pixel en el centro del mapa usando la
+// formula estandar de Web Mercator (156543.03392 m por unidad de "mundo" en zoom 0,
+// consistente con TILE_SIZE=256 y mapState.scale=2^zoom de ProjectionEngine.js).
+const WEB_MERCATOR_METERS_PER_WORLD_UNIT_AT_ZOOM0 = 156543.03392;
+
+function computeMetersPerPixel(mapState, extraScale = 1) {
+  const latRad = ((mapState?.centerLat ?? 0) * Math.PI) / 180;
+  const metersPerPixelBase = (WEB_MERCATOR_METERS_PER_WORLD_UNIT_AT_ZOOM0 * Math.cos(latRad)) / (mapState?.scale || 1);
+  return metersPerPixelBase / (extraScale || 1);
+}
+
+// Redondea a la serie 1-2-5 x 10^n mas cercana (convencion estandar de escalas graficas).
+function roundToNiceScaleMeters(value) {
+  if (!Number.isFinite(value) || value <= 0) return 10;
+  const exponent = Math.floor(Math.log10(value));
+  const base = value / 10 ** exponent;
+  const niceBase = base < 1.5 ? 1 : base < 3.5 ? 2 : base < 7.5 ? 5 : 10;
+  return niceBase * 10 ** exponent;
+}
+
+// Calcula la distancia total (m) que debe representar la barra de escala para que su ancho
+// visual ocupe ~25-35% del ancho util del mapa, dado el mapState (zoom/latitud) vigente y,
+// opcionalmente, un factor de reescalado adicional aplicado tras la proyeccion base
+// (createFitTransform en la pagina tecnica).
+function computeDynamicScaleMeters(mapState, mapWidthPx, extraScale = 1) {
+  const metersPerPixel = computeMetersPerPixel(mapState, extraScale);
+  const desiredMeters = mapWidthPx * 0.3 * metersPerPixel;
+  return roundToNiceScaleMeters(desiredMeters);
+}
+
 function drawScaleBar(context, x, y, totalMeters = 800, options = {}) {
   const { compact = false } = options;
   const boxWidth = compact ? 146 : 170;
@@ -1686,15 +1764,26 @@ function buildPlusSummaryPageCanvas(predio, layoutData, pageLabel = '1 de 6') {
   const { canvas, context } = createPageCanvas();
   const mapRect = { x: 420, y: 136, width: 332, height: 296 };
   const mapState = computeMapState(predio.mapRing?.length ? predio.mapRing : predio.ring, mapRect.width, mapRect.height, 18);
-  const constructionLabel = `${formatNumberOrUnavailable(predio.numeroConstrucciones, { decimals: 0 })} / ${formatNumberOrUnavailable(predio.areaConstruidaM2, { suffix: 'm²' })}`;
+  const constructionLabel = `${formatConstructionCount(predio.numeroConstrucciones)} / ${formatNumberOrUnavailable(predio.areaConstruidaM2, { suffix: 'm²' })}`;
 
   drawHeader(context, predio, pageLabel, 'DIAGNÓSTICO PREDIAL CATASTROX', SATELLITE_LAYOUT);
 
-  const displayNombrePredio = toProperNameTitleCase(predio.nombrePredio);
-  const sameNameAndAddress = areEquivalentTexts(predio.nombrePredio, predio.direccionReal);
-  const summaryHeadline = sameNameAndAddress
-    ? `Predio ${displayNombrePredio}. Información identificada por CatastroX a partir de fuentes geográficas y catastrales públicas disponibles.`
-    : `Predio ${displayNombrePredio}. Dirección: ${predio.direccionReal}. Información identificada por CatastroX a partir de fuentes geográficas y catastrales públicas disponibles.`;
+  // Regla 6.1: en zona urbana la direccion es el dato principal; nunca se muestra
+  // "nombre_predio" (que en la fuente publica es solo una copia de un texto de direccion).
+  const isUrban = isUrbanZona(predio);
+  let summaryHeadline;
+  if (isUrban) {
+    const direccionDisplay = predio.direccionReal && predio.direccionReal !== 'No disponible'
+      ? predio.direccionReal
+      : 'Dirección no registrada';
+    summaryHeadline = `Dirección del predio: ${direccionDisplay}. Información identificada por CatastroX a partir de fuentes geográficas y catastrales públicas disponibles.`;
+  } else {
+    const displayNombrePredio = toProperNameTitleCase(predio.nombrePredio);
+    const sameNameAndAddress = areEquivalentTexts(predio.nombrePredio, predio.direccionReal);
+    summaryHeadline = sameNameAndAddress
+      ? `Predio ${displayNombrePredio}. Información identificada por CatastroX a partir de fuentes geográficas y catastrales públicas disponibles.`
+      : `Predio ${displayNombrePredio}. Dirección: ${predio.direccionReal}. Información identificada por CatastroX a partir de fuentes geográficas y catastrales públicas disponibles.`;
+  }
 
   context.fillStyle = '#07152d';
   context.fillRect(24, 128, 360, 86);
@@ -1715,9 +1804,9 @@ function buildPlusSummaryPageCanvas(predio, layoutData, pageLabel = '1 de 6') {
   drawCommercialMetric(context, 24, 238, 172, 'Municipio', withKnownToponymAccents(predio.municipio));
   drawCommercialMetric(context, 212, 238, 172, 'Departamento', withKnownToponymAccents(predio.departamento));
   drawCommercialMetric(context, 24, 312, 172, 'Zona', toSentenceCase(predio.tipoZona), '#00aeea');
-  drawCommercialMetric(context, 212, 312, 172, 'Área total', `${formatNumber(predio.areaHa)} ha`, '#8bcf2b');
+  drawCommercialMetric(context, 212, 312, 172, 'Área total', buildAreaPrimaryDisplay(predio), '#8bcf2b');
   drawCommercialMetric(context, 24, 386, 172, 'Perímetro', `${formatNumber(predio.perimetroM)} m`, '#8bcf2b');
-  drawCommercialMetric(context, 212, 386, 172, 'Construcciones', constructionLabel, '#8bcf2b');
+  drawCommercialMetric(context, 212, 386, 172, CONSTRUCTION_COUNT_LABEL_COMPACT, constructionLabel, '#8bcf2b');
   drawCommercialMetric(context, 24, 460, 172, 'Destinación catastral', toSentenceCase(predio.destinoEconomicoNombre) || 'Información no disponible', '#00aeea');
   drawCommercialMetric(context, 212, 460, 172, 'Usos constructivos', buildUsosConstructivosResumen(predio), '#00aeea');
 
@@ -1734,7 +1823,8 @@ function buildPlusSummaryPageCanvas(predio, layoutData, pageLabel = '1 de 6') {
     drawCompassRose(context, mapRect.x + 46, mapRect.y + 48, false);
     const scalePolygon = projectedParts.flatMap((entry) => entry.outer);
     const summaryScaleAnchor = chooseScaleBarAnchor(mapRect, scalePolygon, [], [], true);
-    drawScaleBar(context, summaryScaleAnchor.x, summaryScaleAnchor.y, 800, { compact: true });
+    const summaryScaleMeters = computeDynamicScaleMeters(mapState, mapRect.width);
+    drawScaleBar(context, summaryScaleAnchor.x, summaryScaleAnchor.y, summaryScaleMeters, { compact: true });
 
     drawPanel(context, { x: 420, y: 456, width: 332, height: 68 }, 'PAQUETE PLUS');
     drawWrappedText(
@@ -1757,6 +1847,7 @@ function buildPlusSummaryPageCanvas(predio, layoutData, pageLabel = '1 de 6') {
 function buildDiagnosticPageCanvas(predio) {
   const { canvas, context } = createPageCanvas();
   const veredaDisplay = predio.veredaDisplay || getVeredaDisplay();
+  const isUrban = isUrbanZona(predio);
   const layout = {
     page: { x: 0, y: 0, width: 612, height: 792 },
     header: { x: 24, y: 24, width: 564, height: 84 },
@@ -1778,11 +1869,11 @@ function buildDiagnosticPageCanvas(predio) {
     ['Código anterior', predio.codigoAnterior],
     ['Municipio', predio.municipio],
     ['Departamento', predio.departamento],
-    [veredaDisplay.label, veredaDisplay.value],
-    ...(veredaDisplay.isCadastralCode ? [[veredaDisplay.secondaryLabel, veredaDisplay.secondaryValue]] : []),
+    // Regla 6.2: vereda no aplica ni se muestra en predios urbanos.
+    ...(isUrban ? [] : [[veredaDisplay.label, veredaDisplay.value]]),
+    ...(!isUrban && veredaDisplay.isCadastralCode ? [[veredaDisplay.secondaryLabel, veredaDisplay.secondaryValue]] : []),
     ['Tipo de zona', predio.tipoZona],
-    ['Área total', `${formatNumber(predio.areaHa)} ha`],
-    ['Área total m²', `${formatNumber(predio.areaM2)} m²`],
+    ...buildAreaDisplayFields(predio, { haLabel: 'Área total', m2Label: 'Área total m²' }).map(({ label, value }) => [label, value]),
     ['Perímetro', `${formatNumber(predio.perimetroM)} m`],
     ['Estado predial', predio.estadoPredial],
   ];
@@ -1812,7 +1903,7 @@ function buildDiagnosticPageCanvas(predio) {
   context.fillText('RECOMENDACIONES AUTOMÁTICAS', 44, 612);
   drawBullets(context, buildAutomaticRecommendations(predio), 44, 634, 520, '#8bcf2b');
 
-  if (veredaDisplay.isCadastralCode) {
+  if (!isUrban && veredaDisplay.isCadastralCode) {
     drawWrappedText(context, veredaDisplay.note, 44, 704, 520, 11, '#52637d', 400, 9);
   }
 
@@ -1861,22 +1952,39 @@ function drawIdentificacionPanel(context, rect, predio, options = {}) {
   const { labelValueGap = 13, fieldGap = 24, fieldHeight = 34, columns = 2 } = options;
   drawPanel(context, rect, 'IDENTIFICACIÓN Y LOCALIZACIÓN');
 
+  const isUrban = isUrbanZona(predio);
   const veredaDisplay = predio.veredaDisplay || getVeredaDisplay();
-  const veredaFields = veredaDisplay.isCadastralCode
-    ? [
-        { label: veredaDisplay.label, value: 'No registrada' },
-        { label: 'Código catastral de vereda', value: veredaDisplay.secondaryValue },
-      ]
-    : [{ label: veredaDisplay.label, value: veredaDisplay.value }];
+  // Regla 6.2: vereda no se muestra en absoluto para predios urbanos (ni siquiera como
+  // "Información no disponible"); en rurales se conserva el comportamiento aprobado.
+  const veredaFields = isUrban
+    ? []
+    : veredaDisplay.isCadastralCode
+      ? [
+          { label: veredaDisplay.label, value: 'No registrada' },
+          { label: 'Código catastral de vereda', value: veredaDisplay.secondaryValue },
+        ]
+      : [{ label: veredaDisplay.label, value: veredaDisplay.value }];
+
+  // Regla 6.1: en zona urbana el primer campo es la direccion (nunca "Nombre del predio",
+  // que en la fuente publica es solo una copia de texto de direccion, no un nombre real).
+  const identificationHeaderField = isUrban
+    ? {
+        label: 'Dirección del predio',
+        value: predio.direccionReal && predio.direccionReal !== 'No disponible' ? predio.direccionReal : 'Dirección no registrada',
+        fullWidth: true,
+      }
+    : { label: 'Nombre del predio', value: toProperNameTitleCase(predio.nombrePredio), fullWidth: true };
 
   const regularFields = [
-    { label: 'Nombre del predio', value: toProperNameTitleCase(predio.nombrePredio), fullWidth: true },
+    identificationHeaderField,
     { label: 'Municipio', value: toDisplayToponymTitleCase(predio.municipio) },
     { label: 'Departamento', value: toDisplayToponymTitleCase(predio.departamento) },
     { label: 'Zona', value: toSentenceCase(predio.tipoZona) },
     ...veredaFields,
     { label: 'Barrio', value: resolveUrbanFieldOrNotApplicable(predio.barrioNombre, predio.tipoZona) },
-    { label: 'Manzana', value: resolveUrbanFieldOrNotApplicable(predio.manzanaCodigo, predio.tipoZona) },
+    // Regla 6.4: nunca mostrar el codigo de manzana como si fuera un nombre; la auditoria de
+    // la GDB confirmo que no existe ningun campo de nombre legible para manzana.
+    { label: 'Manzana', value: isUrban ? 'No registrada' : resolveUrbanFieldOrNotApplicable(predio.manzanaCodigo, predio.tipoZona) },
   ];
 
   const contentX = rect.x + PDF_LAYOUT_GRID.panelPaddingX;
@@ -1900,10 +2008,9 @@ function drawCaracteristicasFisicasPanel(context, rect, predio, options = {}) {
   const { labelValueGap = 13, fieldGap = 24 } = options;
   drawPanel(context, rect, 'CARACTERÍSTICAS FÍSICAS');
   const fields = [
-    { label: 'Área en hectáreas', value: `${formatNumber(predio.areaHa)} ha` },
-    { label: 'Área en metros cuadrados', value: `${formatNumber(predio.areaM2)} m²` },
+    ...buildAreaDisplayFields(predio),
     { label: 'Perímetro', value: `${formatNumber(predio.perimetroM)} m` },
-    { label: 'Número de construcciones', value: formatNumberOrUnavailable(predio.numeroConstrucciones, { decimals: 0 }) },
+    { label: CONSTRUCTION_COUNT_LABEL, value: formatConstructionCount(predio.numeroConstrucciones) },
     { label: 'Área construida', value: formatNumberOrUnavailable(predio.areaConstruidaM2, { suffix: 'm²' }) },
   ];
   return drawFieldGrid(
@@ -2355,7 +2462,7 @@ function buildUnifiedTableRows(referenceRows, referenceSegments) {
     row.lat,
     row.lng,
     `${referenceSegments[index].from}-${referenceSegments[index].to}`,
-    `${Math.round(referenceSegments[index].distance)} m`,
+    `${formatNumber(referenceSegments[index].distance, 2)} m`,
   ]);
 }
 
@@ -2450,7 +2557,7 @@ function buildReferenceTableRows(referenceRows, referenceSegments) {
     lat: row.lat,
     lng: row.lng,
     segment: `${referenceSegments[index].from}-${referenceSegments[index].to}`,
-    distance: `${Math.round(referenceSegments[index].distance)} m`,
+    distance: `${formatNumber(referenceSegments[index].distance, 2)} m`,
   }));
 }
 
@@ -2948,7 +3055,8 @@ async function buildSatellitePageCanvas(predio, layoutData, pageLabel = '1 de 3'
   });
   drawCompassRose(context, mapRect.x + 54, mapRect.y + 54, false);
   const satelliteScaleAnchor = chooseScaleBarAnchor(mapRect, projected, projectedRefs, pointPlacements, false);
-  drawScaleBar(context, satelliteScaleAnchor.x, satelliteScaleAnchor.y, 800);
+  const satelliteScaleMeters = computeDynamicScaleMeters(mapState, mapRect.width);
+  drawScaleBar(context, satelliteScaleAnchor.x, satelliteScaleAnchor.y, satelliteScaleMeters);
 
   const infoRect = { x: SATELLITE_LAYOUT.rightPanel.x, y: SATELLITE_LAYOUT.rightPanel.y, width: SATELLITE_LAYOUT.rightPanel.width, height: SATELLITE_LAYOUT.rightPanel.height };
 
@@ -2960,8 +3068,7 @@ async function buildSatellitePageCanvas(predio, layoutData, pageLabel = '1 de 3'
     { label: 'Código predial anterior', value: predio.codigoAnterior },
     { label: 'Municipio', value: predio.municipio },
     { label: 'Departamento', value: predio.departamento },
-    { label: 'Área total', value: `${formatNumber(predio.areaHa)} ha` },
-    { label: 'Área total m²', value: `${formatNumber(predio.areaM2)} m²` },
+    ...buildAreaDisplayFields(predio, { haLabel: 'Área total', m2Label: 'Área total m²' }),
     { label: 'Perímetro', value: `${formatNumber(predio.perimetroM)} m` },
     { label: 'Estado predial', value: predio.estadoPredial },
   ], { labelSize: 9.1, valueSize: 11.5, labelGap: 12, rowGap: 31, lineHeight: 12.5 });
@@ -3055,7 +3162,10 @@ async function buildTechnicalPagesCanvases(predio, layoutData, technicalPageLabe
   drawVisiblePoints(context, projectedRefs, pointPlacements);
   drawCompassRose(context, compassCenter.x, compassCenter.y, true);
   const technicalScaleAnchor = chooseScaleBarAnchor(mapRect, projected, projectedRefs, [...technicalDimensionResult.placements, ...pointPlacements], true);
-  drawScaleBar(context, technicalScaleAnchor.x, technicalScaleAnchor.y, 800, { compact: true });
+  // El plano tecnico reescala la proyeccion base con createFitTransform (transform.scale);
+  // la escala grafica debe reflejar esa reescala adicional, no solo el zoom del mapState.
+  const technicalScaleMeters = computeDynamicScaleMeters(mapState, mapRect.width, transform.scale);
+  drawScaleBar(context, technicalScaleAnchor.x, technicalScaleAnchor.y, technicalScaleMeters, { compact: true });
 
   console.log('CatastroX visible point quality report', {
     codigoPredial: predio.codigoPredial,
@@ -3230,20 +3340,24 @@ export function buildKmlText(source) {
 ${parts.map((part) => `      ${kmlPolygon(part)}`).join('\n')}
       </MultiGeometry>`;
   const documentName = `CatastroX - ${predio.municipio}, ${predio.departamento}`;
-  const veredaLine = predio.veredaDisplay?.isCadastralCode
-    ? `${predio.veredaDisplay.label}: ${predio.veredaDisplay.value}. ${predio.veredaDisplay.secondaryLabel}: ${predio.veredaDisplay.secondaryValue}. ${predio.veredaDisplay.note}`
-    : `${predio.veredaDisplay?.label || 'Vereda'}: ${predio.veredaDisplay?.value || 'Información no disponible'}.`;
+  const isUrban = isUrbanZona(predio);
+  // Regla 6.2: la vereda no se incluye en la descripcion KML de predios urbanos.
+  const veredaLine = isUrban
+    ? null
+    : predio.veredaDisplay?.isCadastralCode
+      ? `${predio.veredaDisplay.label}: ${predio.veredaDisplay.value}. ${predio.veredaDisplay.secondaryLabel}: ${predio.veredaDisplay.secondaryValue}. ${predio.veredaDisplay.note}`
+      : `${predio.veredaDisplay?.label || 'Vereda'}: ${predio.veredaDisplay?.value || 'Información no disponible'}.`;
   const description = [
     'Reporte predial CatastroX - Paquete Plus.',
     `Municipio: ${predio.municipio}.`,
     `Departamento: ${predio.departamento}.`,
     veredaLine,
     `Código predial: ${predio.codigoPredial}.`,
-    `Área total: ${formatNumber(predio.areaHa)} ha.`,
+    `Área total: ${buildAreaPrimaryDisplay(predio)}.`,
     `Perímetro: ${formatNumber(predio.perimetroM)} m.`,
     `Destino económico: ${predio.destinoEconomicoNombre}.`,
     `Uso principal: ${predio.uso1Nombre}.`,
-    `Registros constructivos asociados: ${formatNumberOrUnavailable(predio.numeroConstrucciones, { decimals: 0 })}.`,
+    `Registros constructivos asociados: ${formatConstructionCount(predio.numeroConstrucciones)}.`,
     predio.destinoEconomicoSemantic?.isAmbiguous ? predio.destinoEconomicoSemantic.note : null,
     'Archivo para visualización del polígono predial en Google Earth o herramientas compatibles.',
     'No reemplaza certificados oficiales, levantamientos topográficos ni decisiones de autoridad competente.',
