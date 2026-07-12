@@ -437,12 +437,150 @@ async function cleanCandidateProvider(codigoPredial) {
   return result.rows.map((row) => ({ source: row.source, sourceRecordId: row.source_record_id }));
 }
 
+// Limite operativo (a nivel de consulta SQL) de codigos clean distintos que se
+// consideran para un solo punto: una salvaguarda de rendimiento/memoria ante
+// datos anomalos, muy por encima de MAX_ALTERNATE_CANDIDATES (10) en
+// catastroxResolverShadow.js, que aplica su propio limite de exhibicion sobre
+// lo que esta funcion devuelva. Este limite nunca decide "cual" codigo
+// conservar por relevancia — solo acota cuantas filas puede devolver la
+// consulta como maximo.
+const CROSS_SOURCE_PROBE_QUERY_LIMIT = 200;
+
+// Sondeo de solo lectura (V1.1) usado exclusivamente para observabilidad de
+// divergencia legacy/clean: cuando /lookup sirvio un codigo legacy que no
+// esta en la matriz, verifica que codigo(s) de catastrox_clean.predios
+// cubren el mismo punto. Nunca decide nada por si mismo — solo reporta lo que
+// encuentra, con la forma limitada que exige catastroxResolverShadow.js
+// (found, alternateSource, alternateCandidates POR CODIGO, totalCodeCount,
+// totalRecordCount, queryResultTruncated, relationStatus). No se ejecuta
+// ninguna consulta de escritura.
+//
+// Contrato por codigo, no por fila: cada codigo_predial distinto produce UNA
+// entrada en alternateCandidates, con TODOS sus identificadores tecnicos
+// (fid) agrupados en sourceRecordIds — nunca se elige un unico fid
+// representativo (nunca MIN(fid), MAX(fid) ni ninguna otra seleccion
+// arbitraria). Los identificadores solo sirven de trazabilidad tecnica;
+// ninguno representa vigencia oficial.
+//
+// Conteos reales antes del limite: totalCodeCount y totalRecordCount se
+// calculan con funciones de ventana (count(*) over(), sum(...) over()) sobre
+// el conjunto YA agrupado por codigo_predial, evaluadas antes de que la
+// clausula LIMIT recorte las filas devueltas — por eso reflejan el universo
+// real, no solo lo que esta consulta decide devolver. queryResultTruncated
+// es true cuando totalCodeCount supera la cantidad de codigos efectivamente
+// devueltos (CROSS_SOURCE_PROBE_QUERY_LIMIT).
+async function crossSourceCleanProbe({ lat, lng, currentCodigoPredial }) {
+  const result = await query(
+    `with punto as (
+       select ST_SetSRID(
+         ST_Transform(
+           ST_SetSRID(ST_MakePoint($1, $2), 4326),
+           $3
+         ),
+         9377
+       ) as geom
+     ),
+     coincidencias as (
+       select p.codigo_predial, p.fid
+       from catastrox_clean.predios p, punto
+       where ST_Covers(
+         ST_Multi(
+           ST_CollectionExtract(
+             case
+               when ST_IsValid(p.geom) then p.geom
+               else ST_MakeValid(p.geom)
+             end,
+             3
+           )
+         ),
+         punto.geom
+       )
+     ),
+     agrupado as (
+       -- Un renglon por codigo_predial distinto, con TODOS sus fid
+       -- agrupados (nunca MIN/MAX): array_agg conserva cada identificador
+       -- tecnico encontrado, ordenado para reproducibilidad.
+       select
+         codigo_predial,
+         array_agg(fid order by fid) as fids,
+         count(*) as record_count
+       from coincidencias
+       group by codigo_predial
+     ),
+     con_totales as (
+       -- Funciones de ventana evaluadas sobre TODO el conjunto agrupado,
+       -- antes de aplicar LIMIT abajo: total_code_count/total_record_count
+       -- son el conteo real, no el conteo de lo que finalmente se devuelve.
+       select
+         codigo_predial,
+         fids,
+         record_count,
+         count(*) over () as total_code_count,
+         sum(record_count) over () as total_record_count
+       from agrupado
+     )
+     select codigo_predial, fids, record_count, total_code_count, total_record_count
+     from con_totales
+     order by codigo_predial
+     limit ${CROSS_SOURCE_PROBE_QUERY_LIMIT}`,
+    [lng, lat, CATASTROX_ORIGEN_NACIONAL_PROJ],
+  );
+
+  const rows = result.rows;
+
+  if (rows.length === 0) {
+    return {
+      found: false,
+      alternateSource: null,
+      alternateCandidates: [],
+      totalCodeCount: 0,
+      totalRecordCount: 0,
+      queryResultTruncated: false,
+      relationStatus: 'NO_CLEAN_MATCH',
+    };
+  }
+
+  const totalCodeCount = Number(rows[0].total_code_count);
+  const totalRecordCount = Number(rows[0].total_record_count);
+  const returnedCodeCount = rows.length;
+  const queryResultTruncated = totalCodeCount > returnedCodeCount;
+
+  const alternateCandidates = rows.map((row) => ({
+    codigoPredial: row.codigo_predial,
+    sourceRecordIds: (row.fids || []).map(String),
+  }));
+
+  if (totalCodeCount > 1) {
+    return {
+      found: true,
+      alternateSource: 'clean',
+      alternateCandidates,
+      totalCodeCount,
+      totalRecordCount,
+      queryResultTruncated,
+      relationStatus: 'MULTIPLE_CLEAN_CODES',
+    };
+  }
+
+  const [row] = rows;
+  return {
+    found: true,
+    alternateSource: 'clean',
+    alternateCandidates,
+    totalCodeCount,
+    totalRecordCount,
+    queryResultTruncated,
+    relationStatus: row.codigo_predial === currentCodigoPredial ? 'SAME_CODE' : 'DIFFERENT_CODE',
+  };
+}
+
 // Instancia unica del servicio de modo sombra. Desactivado por defecto
 // (RESOLVER_SHADOW_ENABLED=false). Nunca tiene autoridad sobre /lookup: solo
 // observa y registra en un bufer en memoria (ver FASE 4/7 del modo sombra).
 const resolverShadow = createCatastroxResolverShadow({
   enabled: RESOLVER_SHADOW_ENABLED,
   candidateProvider: cleanCandidateProvider,
+  crossSourceProbe: crossSourceCleanProbe,
   maxEntries: 200,
 });
 
@@ -571,11 +709,17 @@ router.post('/lookup', async (req, res, next) => {
         },
       });
 
+      // lat/lng se pasan unicamente para permitir el sondeo de divergencia de
+      // fuente (crossSourceProbe) dentro de evaluateLookupInShadow; el modulo
+      // de sombra las usa de forma efimera y nunca las incluye en la
+      // telemetria persistida (ver catastroxResolverShadow.js).
       scheduleResolverShadowEvaluation(resolverShadow, {
         lookupId,
         codigoPredial: row.codigo_predial || null,
         currentSource: 'legacy',
         currentSourceRecordId: row.id != null ? String(row.id) : null,
+        lat,
+        lng,
       });
       return;
     }

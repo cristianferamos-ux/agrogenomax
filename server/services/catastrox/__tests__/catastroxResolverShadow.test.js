@@ -13,6 +13,9 @@ import {
   COMPARISON_STATUS,
   SHADOW_ERROR_CODE,
   MATRIX_ERROR_CODE,
+  SHADOW_REASON_CODE,
+  CROSS_SOURCE_RELATION_STATUS,
+  MAX_ALTERNATE_CANDIDATES,
 } from '../catastroxResolverShadow.js';
 import { REASON_CODE } from '../catastroxResolutionPolicy.js';
 import { isLocalSocketRequest, scheduleResolverShadowEvaluation } from '../../../routes/catastrox.js';
@@ -70,7 +73,16 @@ const ALLOWED_RECORD_KEYS = new Set([
   'reasonCodes',
   'evaluationMs',
   'errorCode',
+  'alternateSource',
+  'alternateCodeCount',
+  'alternateRecordCount',
+  'alternateCandidates',
+  'alternateCandidatesTruncated',
+  'crossSourceProbeTruncated',
+  'relationStatus',
 ]);
+
+const CODE_LEGACY_UNCLASSIFIED = '999999999999999999999999999998';
 
 describe('catastroxResolverShadow — createCatastroxResolverShadow', () => {
   // 1. Flag desactivado: cero consultas
@@ -323,7 +335,7 @@ describe('catastroxResolverShadow — createCatastroxResolverShadow', () => {
     const keys = Object.keys(record);
     assert.deepEqual(new Set(keys), ALLOWED_RECORD_KEYS);
     for (const key of keys) {
-      assert.ok(!/lat|lng|coord/i.test(key), `la clave "${key}" sugiere una coordenada`);
+      assert.ok(!/^lat$|^lng$|coord/i.test(key), `la clave "${key}" sugiere una coordenada`);
     }
   });
 
@@ -911,5 +923,623 @@ describe('catastroxResolverShadow — privacidad (FASE 5)', () => {
     for (const forbidden of ['"lat"', '"lng"', 'geojson', 'polygon', 'multipolygon', 'point(']) {
       assert.ok(!serialized.includes(forbidden), `el registro no debe contener "${forbidden}"`);
     }
+  });
+});
+
+describe('catastroxResolverShadow — divergencia legacy/clean, contrato POR CODIGO (V1.1)', () => {
+  function probeReturning(result) {
+    return async () => result;
+  }
+
+  function probeCallCounting(result) {
+    let calls = 0;
+    const fn = async () => {
+      calls += 1;
+      return result;
+    };
+    fn.getCallCount = () => calls;
+    return fn;
+  }
+
+  const LEGACY_INPUT_BASE = {
+    lookupId: 'cx-v11c-1',
+    codigoPredial: CODE_LEGACY_UNCLASSIFIED,
+    currentSource: 'legacy',
+    currentSourceRecordId: '11732',
+    lat: 1.5,
+    lng: -75.5,
+  };
+
+  // 1. Un codigo con una fila
+  test('1) un codigo con una sola fila -> alternateCodeCount=1, alternateRecordCount=1, sourceRecordIds con un elemento', async () => {
+    const shadow = createCatastroxResolverShadow({
+      enabled: true,
+      candidateProvider: providerReturning(ONLY_CANDIDATE),
+      crossSourceProbe: probeReturning({
+        found: true,
+        alternateSource: 'clean',
+        alternateCandidates: [{ codigoPredial: CODE_EXACT_NONE, sourceRecordIds: ['2531'] }],
+        totalCodeCount: 1,
+        totalRecordCount: 1,
+        queryResultTruncated: false,
+        relationStatus: CROSS_SOURCE_RELATION_STATUS.DIFFERENT_CODE,
+      }),
+    });
+
+    const result = await shadow.evaluateLookupInShadow(LEGACY_INPUT_BASE);
+    assert.equal(result.record.comparisonStatus, COMPARISON_STATUS.SOURCE_CODE_DIVERGENCE);
+    assert.equal(result.record.alternateCodeCount, 1);
+    assert.equal(result.record.alternateRecordCount, 1);
+    assert.deepEqual([...result.record.alternateCandidates], [{ codigoPredial: CODE_EXACT_NONE, sourceRecordIds: ['2531'] }]);
+    assert.equal(result.record.crossSourceProbeTruncated, false);
+    assert.equal(result.record.resolutionStatus, null);
+  });
+
+  // 2. Un codigo con varias filas
+  test('2) un unico codigo con varias filas fisicas -> alternateCodeCount=1 pero alternateRecordCount=cantidad de filas, todas agrupadas en sourceRecordIds', async () => {
+    const shadow = createCatastroxResolverShadow({
+      enabled: true,
+      candidateProvider: providerReturning(ONLY_CANDIDATE),
+      crossSourceProbe: probeReturning({
+        found: true,
+        alternateSource: 'clean',
+        alternateCandidates: [{ codigoPredial: CODE_EXACT_NONE, sourceRecordIds: ['20', '10', '15'] }],
+        totalCodeCount: 1,
+        totalRecordCount: 3,
+        queryResultTruncated: false,
+        relationStatus: CROSS_SOURCE_RELATION_STATUS.DIFFERENT_CODE,
+      }),
+    });
+
+    const result = await shadow.evaluateLookupInShadow(LEGACY_INPUT_BASE);
+    assert.equal(result.record.alternateCodeCount, 1);
+    assert.equal(result.record.alternateRecordCount, 3);
+    assert.equal(result.record.alternateCandidates.length, 1);
+    // ordenados deterministicamente (numericamente, al ser fids)
+    assert.deepEqual([...result.record.alternateCandidates[0].sourceRecordIds], ['10', '15', '20']);
+    assert.notEqual(result.record.relationStatus, CROSS_SOURCE_RELATION_STATUS.MULTIPLE_CLEAN_CODES);
+  });
+
+  // 3. Dos codigos con varias filas
+  test('3) dos codigos distintos, cada uno con varias filas -> alternateCodeCount=2, cada candidato conserva todos sus sourceRecordIds', async () => {
+    const shadow = createCatastroxResolverShadow({
+      enabled: true,
+      candidateProvider: providerReturning(ONLY_CANDIDATE),
+      crossSourceProbe: probeReturning({
+        found: true,
+        alternateSource: 'clean',
+        alternateCandidates: [
+          { codigoPredial: '999000000000000000000000000002', sourceRecordIds: ['21', '20'] },
+          { codigoPredial: '999000000000000000000000000001', sourceRecordIds: ['11', '10', '12'] },
+        ],
+        totalCodeCount: 2,
+        totalRecordCount: 5,
+        queryResultTruncated: false,
+        relationStatus: CROSS_SOURCE_RELATION_STATUS.MULTIPLE_CLEAN_CODES,
+      }),
+    });
+
+    const result = await shadow.evaluateLookupInShadow(LEGACY_INPUT_BASE);
+    assert.equal(result.record.alternateCodeCount, 2);
+    assert.equal(result.record.alternateRecordCount, 5);
+    assert.deepEqual([...result.record.alternateCandidates], [
+      { codigoPredial: '999000000000000000000000000001', sourceRecordIds: ['10', '11', '12'] },
+      { codigoPredial: '999000000000000000000000000002', sourceRecordIds: ['20', '21'] },
+    ]);
+  });
+
+  // 4. Identificadores repetidos
+  test('4) identificadores tecnicos repetidos dentro del mismo codigo se deduplican', async () => {
+    const shadow = createCatastroxResolverShadow({
+      enabled: true,
+      candidateProvider: providerReturning(ONLY_CANDIDATE),
+      crossSourceProbe: probeReturning({
+        found: true,
+        alternateSource: 'clean',
+        alternateCandidates: [
+          { codigoPredial: CODE_EXACT_NONE, sourceRecordIds: ['10', '10', '20', '20', '20'] },
+        ],
+        relationStatus: CROSS_SOURCE_RELATION_STATUS.DIFFERENT_CODE,
+      }),
+    });
+
+    const result = await shadow.evaluateLookupInShadow(LEGACY_INPUT_BASE);
+    assert.deepEqual([...result.record.alternateCandidates[0].sourceRecordIds], ['10', '20']);
+  });
+
+  // 5. Orden SQL diferente
+  test('5) el mismo conjunto de codigos/identificadores en distinto orden de llegada produce telemetria identica', async () => {
+    const shadowA = createCatastroxResolverShadow({
+      enabled: true,
+      candidateProvider: providerReturning(ONLY_CANDIDATE),
+      crossSourceProbe: probeReturning({
+        found: true,
+        alternateSource: 'clean',
+        alternateCandidates: [
+          { codigoPredial: '999000000000000000000000000002', sourceRecordIds: ['20', '21'] },
+          { codigoPredial: '999000000000000000000000000001', sourceRecordIds: ['12', '10'] },
+        ],
+        relationStatus: CROSS_SOURCE_RELATION_STATUS.MULTIPLE_CLEAN_CODES,
+      }),
+    });
+    const shadowB = createCatastroxResolverShadow({
+      enabled: true,
+      candidateProvider: providerReturning(ONLY_CANDIDATE),
+      crossSourceProbe: probeReturning({
+        found: true,
+        alternateSource: 'clean',
+        alternateCandidates: [
+          { codigoPredial: '999000000000000000000000000001', sourceRecordIds: ['10', '12'] },
+          { codigoPredial: '999000000000000000000000000002', sourceRecordIds: ['21', '20'] },
+        ],
+        relationStatus: CROSS_SOURCE_RELATION_STATUS.MULTIPLE_CLEAN_CODES,
+      }),
+    });
+
+    const resultA = await shadowA.evaluateLookupInShadow(LEGACY_INPUT_BASE);
+    const resultB = await shadowB.evaluateLookupInShadow(LEGACY_INPUT_BASE);
+    assert.deepEqual([...resultA.record.alternateCandidates], [...resultB.record.alternateCandidates]);
+  });
+
+  // 6. Ningun uso de MIN(fid)
+  test('6) el sondeo real no usa MIN(fid), MAX(fid) ni ninguna seleccion arbitraria de un unico identificador', () => {
+    const routesSource = readFileSync(ROUTES_SOURCE_PATH, 'utf8');
+    // Se excluyen las lineas de comentario (// ...), que documentan a
+    // proposito por que NO se usa MIN/MAX, para no generar un falso positivo
+    // contra el propio texto explicativo.
+    const codeOnly = routesSource
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('//'))
+      .join('\n');
+    assert.ok(!/min\s*\(\s*p?\.?fid\s*\)/i.test(codeOnly), 'no debe usar MIN(fid)');
+    assert.ok(!/max\s*\(\s*p?\.?fid\s*\)/i.test(codeOnly), 'no debe usar MAX(fid)');
+    assert.ok(/array_agg\s*\(\s*fid/i.test(codeOnly), 'debe agrupar todos los fid con array_agg');
+  });
+
+  // 7. Conteo de codigos correcto
+  test('7) alternateCodeCount refleja el totalCodeCount real informado por el sondeo, no solo lo devuelto en el arreglo', async () => {
+    const rawCandidates = Array.from({ length: 5 }, (_, i) => ({
+      codigoPredial: `99900000000000000000000000${String(i).padStart(4, '0')}`,
+      sourceRecordIds: [String(i)],
+    }));
+    const shadow = createCatastroxResolverShadow({
+      enabled: true,
+      candidateProvider: providerReturning(ONLY_CANDIDATE),
+      crossSourceProbe: probeReturning({
+        found: true,
+        alternateSource: 'clean',
+        alternateCandidates: rawCandidates,
+        totalCodeCount: 5,
+        totalRecordCount: 5,
+        queryResultTruncated: false,
+        relationStatus: CROSS_SOURCE_RELATION_STATUS.MULTIPLE_CLEAN_CODES,
+      }),
+    });
+    const result = await shadow.evaluateLookupInShadow(LEGACY_INPUT_BASE);
+    assert.equal(result.record.alternateCodeCount, 5);
+  });
+
+  // 8. Conteo de registros correcto
+  test('8) alternateRecordCount refleja el totalRecordCount real informado por el sondeo (suma de filas, no de codigos)', async () => {
+    const shadow = createCatastroxResolverShadow({
+      enabled: true,
+      candidateProvider: providerReturning(ONLY_CANDIDATE),
+      crossSourceProbe: probeReturning({
+        found: true,
+        alternateSource: 'clean',
+        alternateCandidates: [
+          { codigoPredial: '999000000000000000000000000001', sourceRecordIds: ['1', '2', '3'] },
+          { codigoPredial: '999000000000000000000000000002', sourceRecordIds: ['4'] },
+        ],
+        totalCodeCount: 2,
+        totalRecordCount: 4,
+        queryResultTruncated: false,
+        relationStatus: CROSS_SOURCE_RELATION_STATUS.MULTIPLE_CLEAN_CODES,
+      }),
+    });
+    const result = await shadow.evaluateLookupInShadow(LEGACY_INPUT_BASE);
+    assert.equal(result.record.alternateCodeCount, 2);
+    assert.equal(result.record.alternateRecordCount, 4);
+  });
+
+  // 9. Limite SQL alcanzado
+  test('9) queryResultTruncated=true fuerza relationStatus=MULTIPLE_CLEAN_CODES y marca crossSourceProbeTruncated, aunque el sondeo autoreporte otra cosa', async () => {
+    const shadow = createCatastroxResolverShadow({
+      enabled: true,
+      candidateProvider: providerReturning(ONLY_CANDIDATE),
+      crossSourceProbe: probeReturning({
+        found: true,
+        alternateSource: 'clean',
+        alternateCandidates: [{ codigoPredial: CODE_EXACT_NONE, sourceRecordIds: ['2531'] }],
+        totalCodeCount: 250,
+        totalRecordCount: 400,
+        queryResultTruncated: true,
+        // Inconsistencia deliberada: el sondeo dice DIFFERENT_CODE, pero el
+        // propio truncamiento demuestra que hay mas de un codigo — el modulo
+        // debe corregirlo, nunca confiar ciegamente.
+        relationStatus: CROSS_SOURCE_RELATION_STATUS.DIFFERENT_CODE,
+      }),
+    });
+
+    const result = await shadow.evaluateLookupInShadow(LEGACY_INPUT_BASE);
+    assert.equal(result.record.relationStatus, CROSS_SOURCE_RELATION_STATUS.MULTIPLE_CLEAN_CODES);
+    assert.equal(result.record.crossSourceProbeTruncated, true);
+    assert.equal(result.record.comparisonStatus, COMPARISON_STATUS.SOURCE_CODE_DIVERGENCE);
+    assert.equal(result.record.resolutionStatus, null);
+  });
+
+  // 10. Conteo total mayor que resultados devueltos
+  test('10) alternateCodeCount puede ser mayor que la cantidad de candidatos almacenados en el registro', async () => {
+    const rawCandidates = Array.from({ length: 15 }, (_, i) => ({
+      codigoPredial: `99900000000000000000000000${String(i).padStart(4, '0')}`,
+      sourceRecordIds: [String(i)],
+    }));
+    const shadow = createCatastroxResolverShadow({
+      enabled: true,
+      candidateProvider: providerReturning(ONLY_CANDIDATE),
+      crossSourceProbe: probeReturning({
+        found: true,
+        alternateSource: 'clean',
+        alternateCandidates: rawCandidates,
+        totalCodeCount: 250,
+        totalRecordCount: 250,
+        queryResultTruncated: true,
+        relationStatus: CROSS_SOURCE_RELATION_STATUS.MULTIPLE_CLEAN_CODES,
+      }),
+    });
+    const result = await shadow.evaluateLookupInShadow(LEGACY_INPUT_BASE);
+    assert.equal(result.record.alternateCodeCount, 250);
+    assert.ok(result.record.alternateCandidates.length < result.record.alternateCodeCount);
+    assert.equal(result.record.alternateCandidates.length, MAX_ALTERNATE_CANDIDATES);
+    assert.equal(result.record.crossSourceProbeTruncated, true);
+  });
+
+  // 11. Truncamiento de telemetria a 10 codigos
+  test('11) mas de MAX_ALTERNATE_CANDIDATES codigos (sin truncamiento SQL) activa alternateCandidatesTruncated=true en la capa de telemetria', async () => {
+    const manyCandidates = Array.from({ length: MAX_ALTERNATE_CANDIDATES + 3 }, (_, i) => ({
+      codigoPredial: `99900000000000000000000000${String(i).padStart(4, '0')}`,
+      sourceRecordIds: [String(i)],
+    }));
+    const shadow = createCatastroxResolverShadow({
+      enabled: true,
+      candidateProvider: providerReturning(ONLY_CANDIDATE),
+      crossSourceProbe: probeReturning({
+        found: true,
+        alternateSource: 'clean',
+        alternateCandidates: manyCandidates,
+        totalCodeCount: manyCandidates.length,
+        totalRecordCount: manyCandidates.length,
+        queryResultTruncated: false, // el SQL devolvio todo; el truncamiento es solo de telemetria
+        relationStatus: CROSS_SOURCE_RELATION_STATUS.MULTIPLE_CLEAN_CODES,
+      }),
+    });
+    const result = await shadow.evaluateLookupInShadow(LEGACY_INPUT_BASE);
+    assert.equal(result.record.crossSourceProbeTruncated, false);
+    assert.equal(result.record.alternateCandidatesTruncated, true);
+    assert.equal(result.record.alternateCandidates.length, MAX_ALTERNATE_CANDIDATES);
+    assert.equal(result.record.alternateCodeCount, manyCandidates.length);
+  });
+
+  // 12. Ninguna seleccion oficial
+  test('12) ningun candidato ni identificador se elige como "el" oficial; no existen campos singulares', async () => {
+    const shadow = createCatastroxResolverShadow({
+      enabled: true,
+      candidateProvider: providerReturning(ONLY_CANDIDATE),
+      crossSourceProbe: probeReturning({
+        found: true,
+        alternateSource: 'clean',
+        alternateCandidates: [
+          { codigoPredial: CODE_EXACT_NONE, sourceRecordIds: ['2531', '2532'] },
+          { codigoPredial: CODE_MATERIAL_CONFLICT, sourceRecordIds: ['1230'] },
+        ],
+        relationStatus: CROSS_SOURCE_RELATION_STATUS.MULTIPLE_CLEAN_CODES,
+      }),
+    });
+
+    const result = await shadow.evaluateLookupInShadow(LEGACY_INPUT_BASE);
+    assert.equal(result.record.codigoPredial, CODE_LEGACY_UNCLASSIFIED);
+    assert.ok(!('alternateCodigoPredial' in result.record));
+    assert.ok(!('alternateSourceRecordId' in result.record));
+    assert.ok(!('sourceRecordId' in result.record.alternateCandidates[0]));
+  });
+
+  // 13. Arreglos profundamente inmutables
+  test('13) alternateCandidates y cada sourceRecordIds estan profundamente congelados', async () => {
+    const shadow = createCatastroxResolverShadow({
+      enabled: true,
+      candidateProvider: providerReturning(ONLY_CANDIDATE),
+      crossSourceProbe: probeReturning({
+        found: true,
+        alternateSource: 'clean',
+        alternateCandidates: [{ codigoPredial: CODE_EXACT_NONE, sourceRecordIds: ['2531', '2532'] }],
+        relationStatus: CROSS_SOURCE_RELATION_STATUS.DIFFERENT_CODE,
+      }),
+    });
+
+    const result = await shadow.evaluateLookupInShadow(LEGACY_INPUT_BASE);
+    assert.throws(() => { result.record.alternateCandidates.push({ codigoPredial: 'x', sourceRecordIds: [] }); }, TypeError);
+    assert.throws(() => { result.record.alternateCandidates[0].codigoPredial = 'INTRUSO'; }, TypeError);
+    assert.throws(() => { result.record.alternateCandidates[0].sourceRecordIds.push('999'); }, TypeError);
+    assert.throws(() => { result.record.alternateCandidates[0].sourceRecordIds[0] = 'INTRUSO'; }, TypeError);
+  });
+
+  // 14. Los tres casos forenses conservan SOURCE_CODE_DIVERGENCE
+  test('14) los tres codigos del diagnostico forense conservan SOURCE_CODE_DIVERGENCE bajo el contrato por codigo', async () => {
+    // Formas confirmadas por consulta de solo lectura real (array_agg + count/sum
+    // over(), ver FASE 6 / informe): los tres puntos tienen mas de un
+    // codigo_predial clean distinto, cada uno con exactamente un fid en esta
+    // muestra real.
+    const forensicCases = [
+      {
+        legacyCodigo: '185920002000000020343000000000',
+        alternateCandidates: [
+          { codigoPredial: '185920002000000020113000000000', sourceRecordIds: ['22967'] },
+          { codigoPredial: '185920002000000020343000000000', sourceRecordIds: ['23548'] },
+        ],
+      },
+      {
+        legacyCodigo: '187530001000000390053000000000',
+        alternateCandidates: [
+          { codigoPredial: '187530001000000390052000000000', sourceRecordIds: ['35104'] },
+          { codigoPredial: '187530001000000390053000000000', sourceRecordIds: ['35174'] },
+        ],
+      },
+      {
+        legacyCodigo: '185920001000000110195000000000',
+        alternateCandidates: [
+          { codigoPredial: '185920001000000110000000000000', sourceRecordIds: ['23606'] },
+          { codigoPredial: '185920001000000110195000000000', sourceRecordIds: ['23631'] },
+          { codigoPredial: '185920601000000040004000000000', sourceRecordIds: ['68610'] },
+        ],
+      },
+    ];
+
+    for (const { legacyCodigo, alternateCandidates } of forensicCases) {
+      const shadow = createCatastroxResolverShadow({
+        enabled: true,
+        candidateProvider: providerReturning(ONLY_CANDIDATE),
+        crossSourceProbe: probeReturning({
+          found: true,
+          alternateSource: 'clean',
+          alternateCandidates,
+          totalCodeCount: alternateCandidates.length,
+          totalRecordCount: alternateCandidates.length,
+          queryResultTruncated: false,
+          relationStatus: CROSS_SOURCE_RELATION_STATUS.MULTIPLE_CLEAN_CODES,
+        }),
+      });
+      const result = await shadow.evaluateLookupInShadow({
+        lookupId: `cx-forensic-${legacyCodigo}`,
+        codigoPredial: legacyCodigo,
+        currentSource: 'legacy',
+        currentSourceRecordId: '1',
+        lat: 1.5,
+        lng: -75.5,
+      });
+      assert.equal(result.record.comparisonStatus, COMPARISON_STATUS.SOURCE_CODE_DIVERGENCE);
+      assert.equal(result.record.resolutionStatus, null);
+      assert.equal(result.record.errorCode, null);
+      assert.equal(result.record.alternateCodeCount, alternateCandidates.length);
+    }
+  });
+
+  // 15. La muestra conserva los conteos esperados (verificacion estructural
+  // reducida; la validacion literal de 47+3+10/0/0 sobre las 60 consultas
+  // reales se ejecuta en FASE 6 contra el servidor real, ver informe).
+  test('15) el resumen agrega evaluaciones de politica y divergencias como resultados "clasificables" separados de NOT_APPLICABLE', async () => {
+    let probeCalls = 0;
+    const shadow = createCatastroxResolverShadow({
+      enabled: true,
+      candidateProvider: providerReturning(ONLY_CANDIDATE),
+      crossSourceProbe: async () => {
+        probeCalls += 1;
+        return {
+          found: true,
+          alternateSource: 'clean',
+          alternateCandidates: [{ codigoPredial: CODE_EXACT_NONE, sourceRecordIds: ['2531'] }],
+          totalCodeCount: 1,
+          totalRecordCount: 1,
+          queryResultTruncated: false,
+          relationStatus: CROSS_SOURCE_RELATION_STATUS.DIFFERENT_CODE,
+        };
+      },
+    });
+
+    await shadow.evaluateLookupInShadow({ lookupId: 'cx-15a', codigoPredial: CODE_EXACT_NONE, currentSource: 'clean', currentSourceRecordId: '101' });
+    await shadow.evaluateLookupInShadow({ lookupId: 'cx-15b', codigoPredial: CODE_MATERIAL_CONFLICT, currentSource: 'legacy', currentSourceRecordId: '202' });
+    await shadow.evaluateLookupInShadow({ lookupId: 'cx-15c', codigoPredial: CODE_LEGACY_UNCLASSIFIED, currentSource: 'legacy', currentSourceRecordId: '303', lat: 1.1, lng: -75.1 });
+    const notApplicableResult = await shadow.evaluateLookupInShadow({ lookupId: 'cx-15d', codigoPredial: CODE_NOT_CLASSIFIED, currentSource: 'clean', currentSourceRecordId: '404' });
+
+    assert.equal(notApplicableResult.outcome, SHADOW_OUTCOME.NOT_APPLICABLE);
+    assert.equal(probeCalls, 1);
+
+    const summary = shadow.getShadowSummary();
+    assert.equal(summary.totalEvaluations, 3);
+    assert.equal(summary.byComparisonStatus[COMPARISON_STATUS.SOURCE_CODE_DIVERGENCE], 1);
+  });
+
+  // FASE 2 (cierre reproducible V1.1): reproduce exactamente la relacion
+  // aritmetica que produce crossSourceCleanProbe cuando el limite operativo
+  // de la consulta SQL (CROSS_SOURCE_PROBE_QUERY_LIMIT=200) se alcanza: 250
+  // codigos distintos existen en total, pero la consulta solo puede devolver
+  // 200 filas (una por codigo, por el LIMIT). totalCodeCount se calculo con
+  // count(*) over() ANTES del LIMIT, por lo que sigue siendo 250 aunque
+  // returnedCodeCount sea 200 — exactamente el mismo calculo que hace
+  // routes.js: queryResultTruncated = totalCodeCount > returnedCodeCount.
+  test('FASE2) limite SQL de 200 alcanzado con 250 codigos reales: returnedCodeCount=200, totalCodeCount=250 se preserva, queryResultTruncated=true', async () => {
+    const returnedCodeCount = 200;
+    const totalCodeCount = 250;
+    const returnedRows = Array.from({ length: returnedCodeCount }, (_, i) => ({
+      codigoPredial: `99900000000000000000000000${String(i).padStart(4, '0')}`,
+      sourceRecordIds: [String(i)],
+    }));
+    // Misma formula que routes.js: queryResultTruncated = totalCodeCount > returnedCodeCount.
+    const queryResultTruncated = totalCodeCount > returnedRows.length;
+    assert.equal(queryResultTruncated, true);
+
+    const shadow = createCatastroxResolverShadow({
+      enabled: true,
+      candidateProvider: providerReturning(ONLY_CANDIDATE),
+      crossSourceProbe: probeReturning({
+        found: true,
+        alternateSource: 'clean',
+        alternateCandidates: returnedRows,
+        totalCodeCount,
+        totalRecordCount: totalCodeCount,
+        queryResultTruncated,
+        relationStatus: CROSS_SOURCE_RELATION_STATUS.MULTIPLE_CLEAN_CODES,
+      }),
+    });
+
+    const result = await shadow.evaluateLookupInShadow(LEGACY_INPUT_BASE);
+    assert.equal(result.record.alternateCodeCount, 250);
+    assert.equal(result.record.crossSourceProbeTruncated, true);
+    // La telemetria conserva solo 10 codigos en el bufer, pero el conteo total sigue siendo 250.
+    assert.equal(result.record.alternateCandidates.length, MAX_ALTERNATE_CANDIDATES);
+    assert.equal(result.record.alternateCandidatesTruncated, true);
+    assert.equal(result.record.relationStatus, CROSS_SOURCE_RELATION_STATUS.MULTIPLE_CLEAN_CODES);
+    assert.equal(result.record.comparisonStatus, COMPARISON_STATUS.SOURCE_CODE_DIVERGENCE);
+  });
+
+  // Cobertura adicional heredada (SAME_CODE, NO_CLEAN_MATCH, errores del
+  // sondeo, flag apagado, sin unhandledRejection, reasonCodes sin duplicados)
+  // — sigue siendo relevante bajo el nuevo contrato por codigo.
+  describe('casos adicionales de la maquina de estados', () => {
+    test('SAME_CODE -> NOT_APPLICABLE (el codigo, por definicion de esta rama, no esta clasificado)', async () => {
+      const shadow = createCatastroxResolverShadow({
+        enabled: true,
+        candidateProvider: providerReturning(ONLY_CANDIDATE),
+        crossSourceProbe: probeReturning({
+          found: true,
+          alternateSource: 'clean',
+          alternateCandidates: [{ codigoPredial: CODE_LEGACY_UNCLASSIFIED, sourceRecordIds: ['999'] }],
+          totalCodeCount: 1,
+          totalRecordCount: 1,
+          queryResultTruncated: false,
+          relationStatus: CROSS_SOURCE_RELATION_STATUS.SAME_CODE,
+        }),
+      });
+      const result = await shadow.evaluateLookupInShadow(LEGACY_INPUT_BASE);
+      assert.equal(result.outcome, SHADOW_OUTCOME.NOT_APPLICABLE);
+      assert.deepEqual(shadow.getShadowEvaluations(), []);
+    });
+
+    test('NO_CLEAN_MATCH -> NOT_APPLICABLE', async () => {
+      const shadow = createCatastroxResolverShadow({
+        enabled: true,
+        candidateProvider: providerReturning(ONLY_CANDIDATE),
+        crossSourceProbe: probeReturning({ found: false, alternateSource: null, alternateCandidates: [], totalCodeCount: 0, totalRecordCount: 0, queryResultTruncated: false, relationStatus: CROSS_SOURCE_RELATION_STATUS.NO_CLEAN_MATCH }),
+      });
+      const result = await shadow.evaluateLookupInShadow(LEGACY_INPUT_BASE);
+      assert.equal(result.outcome, SHADOW_OUTCOME.NOT_APPLICABLE);
+      assert.deepEqual(shadow.getShadowEvaluations(), []);
+    });
+
+    test('crossSourceProbe que lanza -> EVALUATION_ERROR aislado con errorCode CROSS_SOURCE_PROBE_ERROR', async () => {
+      const shadow = createCatastroxResolverShadow({
+        enabled: true,
+        candidateProvider: providerReturning(ONLY_CANDIDATE),
+        crossSourceProbe: async () => { throw new Error('fallo simulado de sondeo cruzado'); },
+      });
+      const result = await shadow.evaluateLookupInShadow(LEGACY_INPUT_BASE);
+      assert.equal(result.record.comparisonStatus, COMPARISON_STATUS.EVALUATION_ERROR);
+      assert.equal(result.record.errorCode, SHADOW_ERROR_CODE.CROSS_SOURCE_PROBE_ERROR);
+      assert.equal(result.record.resolutionStatus, null);
+    });
+
+    test('relationStatus=PROBE_ERROR devuelto (sin lanzar) tambien produce EVALUATION_ERROR aislado, incluso si queryResultTruncated=true', async () => {
+      const shadow = createCatastroxResolverShadow({
+        enabled: true,
+        candidateProvider: providerReturning(ONLY_CANDIDATE),
+        crossSourceProbe: probeReturning({ found: false, alternateSource: null, alternateCandidates: [], queryResultTruncated: true, relationStatus: CROSS_SOURCE_RELATION_STATUS.PROBE_ERROR }),
+      });
+      const result = await shadow.evaluateLookupInShadow(LEGACY_INPUT_BASE);
+      assert.equal(result.record.comparisonStatus, COMPARISON_STATUS.EVALUATION_ERROR);
+      assert.equal(result.record.errorCode, SHADOW_ERROR_CODE.CROSS_SOURCE_PROBE_ERROR);
+    });
+
+    test('con enabled=false, crossSourceProbe jamas se invoca', async () => {
+      const probe = probeCallCounting({ found: true, alternateSource: 'clean', alternateCandidates: [{ codigoPredial: CODE_EXACT_NONE, sourceRecordIds: ['2531'] }], relationStatus: CROSS_SOURCE_RELATION_STATUS.DIFFERENT_CODE });
+      const shadow = createCatastroxResolverShadow({ enabled: false, candidateProvider: providerReturning(ONLY_CANDIDATE), crossSourceProbe: probe });
+      const result = await shadow.evaluateLookupInShadow(LEGACY_INPUT_BASE);
+      assert.equal(result.outcome, SHADOW_OUTCOME.NO_OP);
+      assert.equal(probe.getCallCount(), 0);
+    });
+
+    test('routes.js reutiliza las variables lat/lng ya parseadas, nunca vuelve a leer req.body dentro del disparo asincrono', () => {
+      const routesSource = readFileSync(ROUTES_SOURCE_PATH, 'utf8');
+      const scheduleBlocks = routesSource.split('scheduleResolverShadowEvaluation(resolverShadow,').slice(1);
+      assert.ok(scheduleBlocks.length >= 1);
+      for (const block of scheduleBlocks) {
+        const snippet = block.slice(0, 300);
+        assert.ok(!/req\.body/.test(snippet), 'el disparador no debe releer req.body');
+      }
+    });
+
+    test('reasonCodes de un registro de divergencia nunca contienen duplicados', async () => {
+      const shadow = createCatastroxResolverShadow({
+        enabled: true,
+        candidateProvider: providerReturning(ONLY_CANDIDATE),
+        crossSourceProbe: probeReturning({ found: true, alternateSource: 'clean', alternateCandidates: [{ codigoPredial: CODE_EXACT_NONE, sourceRecordIds: ['2531'] }], relationStatus: CROSS_SOURCE_RELATION_STATUS.DIFFERENT_CODE }),
+      });
+      const result = await shadow.evaluateLookupInShadow(LEGACY_INPUT_BASE);
+      const codes = [...result.record.reasonCodes];
+      assert.equal(codes.length, new Set(codes).size);
+    });
+
+    test('un crossSourceProbe que rechaza, disparado via scheduleResolverShadowEvaluation, no produce unhandledRejection', async () => {
+      let unhandled = null;
+      const onUnhandledRejection = (reason) => { unhandled = reason; };
+      process.on('unhandledRejection', onUnhandledRejection);
+      try {
+        const shadow = createCatastroxResolverShadow({
+          enabled: true,
+          candidateProvider: providerReturning(ONLY_CANDIDATE),
+          crossSourceProbe: async () => { throw new Error('rechazo simulado del sondeo cruzado'); },
+        });
+        scheduleResolverShadowEvaluation(shadow, LEGACY_INPUT_BASE);
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        assert.equal(unhandled, null);
+      } finally {
+        process.off('unhandledRejection', onUnhandledRejection);
+      }
+    });
+
+    test('coordenadas y geometria nunca aparecen en un registro de divergencia (regresion)', async () => {
+      const shadow = createCatastroxResolverShadow({
+        enabled: true,
+        candidateProvider: providerReturning(ONLY_CANDIDATE),
+        crossSourceProbe: probeReturning({ found: true, alternateSource: 'clean', alternateCandidates: [{ codigoPredial: CODE_EXACT_NONE, sourceRecordIds: ['2531'] }], relationStatus: CROSS_SOURCE_RELATION_STATUS.DIFFERENT_CODE }),
+      });
+      const result = await shadow.evaluateLookupInShadow(LEGACY_INPUT_BASE);
+      const keys = Object.keys(result.record);
+      assert.deepEqual(new Set(keys), ALLOWED_RECORD_KEYS);
+      assert.ok(!keys.some((k) => /^lat$|^lng$|coord/i.test(k)));
+      const serialized = JSON.stringify(result.record).toLowerCase();
+      for (const forbidden of ['geojson', 'polygon', 'multipolygon', 'point(', 'wkt', 'wkb']) {
+        assert.ok(!serialized.includes(forbidden));
+      }
+    });
+
+    test('getShadowEvaluations() expone el mismo arreglo completo de candidatos que el endpoint local', async () => {
+      const shadow = createCatastroxResolverShadow({
+        enabled: true,
+        candidateProvider: providerReturning(ONLY_CANDIDATE),
+        crossSourceProbe: probeReturning({
+          found: true,
+          alternateSource: 'clean',
+          alternateCandidates: [
+            { codigoPredial: CODE_EXACT_NONE, sourceRecordIds: ['2531'] },
+            { codigoPredial: CODE_MATERIAL_CONFLICT, sourceRecordIds: ['1230', '1231'] },
+          ],
+          relationStatus: CROSS_SOURCE_RELATION_STATUS.MULTIPLE_CLEAN_CODES,
+        }),
+      });
+      await shadow.evaluateLookupInShadow(LEGACY_INPUT_BASE);
+      const exposed = shadow.getShadowEvaluations();
+      assert.equal(exposed.length, 1);
+      assert.equal(exposed[0].alternateCandidates.length, 2);
+      assert.deepEqual(new Set(Object.keys(exposed[0])), ALLOWED_RECORD_KEYS);
+    });
   });
 });

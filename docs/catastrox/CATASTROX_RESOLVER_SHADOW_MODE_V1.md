@@ -144,15 +144,52 @@ primero):
   codigoPredial,
   currentSource,                // 'legacy' | 'clean' (lo que /lookup ya eligio)
   currentSourceRecordId,        // identificador tecnico interno de esa fila
-  resolutionStatus,             // salida de catastroxResolutionPolicy, o null si hubo error
+  resolutionStatus,             // salida de catastroxResolutionPolicy, o null si hubo error o divergencia
   candidateSelectionStatus,
   policySelectedTechnicalKey,   // "source::sourceRecordId" del representante elegido por la politica, o null
   comparisonStatus,             // ver tabla abajo
-  reasonCodes,                  // reason codes de la politica para ese codigo
+  reasonCodes,                  // reason codes de la politica o del sondeo cruzado, segun el caso
   evaluationMs,                 // duracion de la evaluacion
   errorCode,                    // null, o el codigo de error aislado
+  alternateSource,               // V1.1 — 'clean', o null si no hubo sondeo cruzado
+  alternateCodeCount,             // V1.1 — cantidad REAL de codigos clean distintos (anterior al limite de la consulta SQL), aunque el arreglo de abajo este truncado
+  alternateRecordCount,           // V1.1 — cantidad REAL de filas fisicas clean encontradas (suma de todos los sourceRecordIds de todos los codigos), anterior al limite de la consulta SQL
+  alternateCandidates,             // V1.1 — arreglo [{codigoPredial, sourceRecordIds:[...]}] POR CODIGO, nunca un candidato "elegido" unico ni un unico fid
+  alternateCandidatesTruncated,    // V1.1 — true si alternateCodeCount > MAX_ALTERNATE_CANDIDATES (10): truncamiento de TELEMETRIA
+  crossSourceProbeTruncated,       // V1.1 — true si la propia consulta SQL ya alcanzo su limite operativo (200 codigos): truncamiento de CONSULTA
+  relationStatus,                 // V1.1 — resultado (posiblemente corregido) del sondeo cruzado, o null si no se ejecuto
 }
 ```
+
+Todo registro —incluidos los de la política V1 original— siempre incluye estos
+siete campos de V1.1, en `null`/`0`/`[]`/`false` cuando no hubo sondeo cruzado.
+La forma del registro es fija y completa desde su construcción (`baseRecord`
+en `catastroxResolverShadow.js`) — nunca se compone parcialmente ni por mezcla
+del objeto de entrada, precisamente para que las coordenadas efímeras del
+input (ver V1.1 más abajo) no puedan filtrarse accidentalmente a ningún campo
+persistido.
+
+**`alternateCandidates` es un contrato POR CÓDIGO, no por fila, y nunca un
+campo singular.** Cada elemento de `alternateCandidates` representa **un
+código `clean` observado espacialmente en el mismo punto** —no un "predio
+equivalente" ni una afirmación de identidad con el predio legacy— y agrupa
+**todos** los identificadores técnicos (`fid`) encontrados para ese código en
+`sourceRecordIds`, un arreglo, nunca un único valor elegido. Dos versiones
+previas de este contrato fueron corregidas hasta llegar a esta forma:
+
+1. La primera versión exponía `alternateCodigoPredial`/`alternateSourceRecordId`
+   como campos **singulares**, ambiguos cuando había más de un código.
+2. La segunda versión introdujo `alternateCandidates` como arreglo, pero cada
+   candidato todavía tenía un único `sourceRecordId` — lo que obligaba a
+   elegir un `fid` representativo (aunque fuera solo el primero encontrado)
+   cuando un mismo código tenía varias filas físicas.
+
+La versión definitiva (`sourceRecordIds: string[]`) elimina esa última
+selección implícita: **ningún `fid` representa vigencia oficial**, todos los
+identificadores encontrados para un código quedan expuestos por igual.
+`sourceRecordIds` es exclusivamente trazabilidad técnica para poder rastrear,
+si hiciera falta, de qué filas físicas de `catastrox_clean.predios` proviene
+la observación — nunca un criterio de selección.
 
 ### Valores de `comparisonStatus`
 
@@ -163,7 +200,8 @@ primero):
 | `SOURCE_NOT_COMPARABLE` | `/lookup` sirvió el resultado desde la fuente `legacy`; la matriz y los candidatos de la política son exclusivamente de `clean`, por lo que no hay una comparación técnica válida (nunca se mezclan candidatos legacy y clean). |
 | `PENDING_POLICY` | La política V1 no tiene todavía un criterio aprobado para ese código (`resolutionStatus = PENDING_POLICY`); no hay representante que comparar. |
 | `CURRENT_FLOW_WOULD_BE_BLOCKED` | La política bloquearía este código (`BLOCKED_REVIEW` o `BLOCKED_CRITICAL`) aunque `/lookup` sí devolvió un resultado — la señal de observación más importante de esta fase. |
-| `EVALUATION_ERROR` | La evaluación falló (error contractual del resolver o error del proveedor de candidatos); el error quedó aislado dentro del modo sombra y nunca llegó a `/lookup`. |
+| `EVALUATION_ERROR` | La evaluación falló (error contractual del resolver, error del proveedor de candidatos, o error del sondeo cruzado); el error quedó aislado dentro del modo sombra y nunca llegó a `/lookup`. |
+| `SOURCE_CODE_DIVERGENCE` | **(V1.1)** `/lookup` sirvió un código `legacy` no clasificado, y el sondeo cruzado encontró uno o más códigos `clean` distintos cubriendo el mismo punto. La política **nunca** se ejecuta en este estado. |
 
 ## Información expresamente prohibida
 
@@ -177,13 +215,171 @@ El servicio de sombra **nunca** almacena, ni siquiera transitoriamente:
   de `gis.catastro_caqueta`).
 - El cuerpo completo de la respuesta HTTP que recibió el cliente.
 - Sentencias SQL (el módulo de sombra nunca ejecuta SQL directamente; toda
-  consulta a PostGIS ocurre a través de `candidateProvider`, una dependencia
-  inyectada por quien lo instancia — en producción, `server/routes/catastrox.js`).
+  consulta a PostGIS ocurre a través de `candidateProvider` y, desde V1.1,
+  `crossSourceProbe` — ambas dependencias inyectadas por quien instancia el
+  servicio — en producción, `server/routes/catastrox.js`).
 
 Este contrato está verificado por pruebas automatizadas (ver
-`server/services/catastrox/__tests__/catastroxResolverShadow.test.js`, casos
-12, 13, 23 y 24), que revisan tanto la forma exacta de cada registro de
-telemetría como el código fuente del propio módulo.
+`server/services/catastrox/__tests__/catastroxResolverShadow.test.js`), que
+revisan tanto la forma exacta de cada registro de telemetría (incluidos los de
+divergencia) como el código fuente del propio módulo.
+
+## V1.1 — Observación de divergencia legacy/clean
+
+### Causa técnica
+
+`gis.catastro_caqueta` (fuente `legacy`) y `catastrox_clean.predios` (fuente
+`clean`) mantienen espacios de `codigo_predial` completamente independientes,
+sin ningún campo de equivalencia documentado en el esquema actual. Cuando un
+punto de `/lookup` cae dentro de un predio `legacy` cuyo `codigo` no forma
+parte de los 549 duplicados auditados (todos ellos exclusivamente `clean`),
+la versión V1 del modo sombra respondía `NOT_APPLICABLE` sin más contexto —
+indistinguible de un código genuinamente no duplicado. Una investigación
+forense (`audit_outputs/catastrox/resolver_shadow_missing_evaluations/root_cause.md`)
+confirmó, con evidencia real, que en varios de esos casos el punto
+efectivamente coincide con uno o más predios `clean` de código distinto — es
+decir, existe una **divergencia de identificador entre fuentes para el mismo
+punto geográfico**, no un error del sistema.
+
+### Contrato de `crossSourceProbe`
+
+Dependencia inyectada (nunca implementada dentro del módulo puro), con la
+firma:
+
+```js
+crossSourceProbe({ lat, lng, currentSource, currentCodigoPredial })
+  => Promise<{
+       found: boolean,
+       alternateSource: 'clean' | null,
+       alternateCandidates: Array<{ codigoPredial: string, sourceRecordIds: string[] }>,
+       totalCodeCount?: number,      // conteo REAL de codigos, anterior al limite SQL
+       totalRecordCount?: number,    // conteo REAL de filas, anterior al limite SQL
+       queryResultTruncated?: boolean,
+       relationStatus: 'SAME_CODE' | 'DIFFERENT_CODE' | 'NO_CLEAN_MATCH'
+                      | 'MULTIPLE_CLEAN_CODES' | 'PROBE_ERROR',
+     }>
+```
+
+`alternateCandidates` es **siempre un arreglo** (posiblemente vacío) — nunca
+un campo singular, y cada elemento agrupa **todos** los `sourceRecordIds` de
+ese código, nunca uno solo. `catastroxResolverShadow.js` nunca confía
+ciegamente en lo que la implementación inyectada devuelva: antes de almacenar
+cualquier candidato en el búfer, `normalizeAlternateCandidates` (interna al
+módulo):
+
+1. Descarta entradas sin `codigoPredial` válido.
+2. **Fusiona por código**: si el mismo `codigoPredial` aparece en más de una
+   entrada de entrada, sus `sourceRecordIds` se combinan en un único grupo.
+3. **Elimina identificadores técnicos duplicados** dentro de cada grupo — el
+   mismo `fid` repetido para un código nunca produce dos entradas en
+   `sourceRecordIds`.
+4. **Ordena deterministamente**: los identificadores de cada grupo,
+   numéricamente cuando son válidos como número (caso normal de un `fid`);
+   los propios códigos, alfabéticamente. Nunca por área, `ctid` ni orden
+   físico de llegada. El mismo conjunto de candidatos, en cualquier orden de
+   entrada, produce siempre la misma telemetría (verificado por prueba
+   automatizada).
+5. **Nunca elige un candidato ni un identificador "principal"**: el resultado
+   es siempre la lista completa de códigos (hasta el límite operativo), cada
+   uno con la lista completa de sus identificadores — jamás reducidos a un
+   único ganador.
+6. Trunca a `MAX_ALTERNATE_CANDIDATES` (**10 códigos**, no 10 filas) para el
+   registro almacenado (`alternateCandidatesTruncated = true` cuando aplica),
+   pero `alternateCodeCount`/`alternateRecordCount` siempre reflejan el
+   conteo real — preferentemente el que reporta el propio `crossSourceProbe`
+   (`totalCodeCount`/`totalRecordCount`, calculado antes de su límite SQL);
+   solo si el probe no los suministra, se usa un cálculo local de respaldo
+   (que entonces solo puede reflejar lo que el probe ya decidió devolver).
+
+**Diferencia entre truncamiento de consulta y truncamiento de telemetría**:
+son dos límites independientes, con dos banderas independientes.
+
+| Bandera | Capa | Significado |
+|---|---|---|
+| `crossSourceProbeTruncated` | Consulta SQL | La propia consulta ya alcanzó su límite operativo (`CROSS_SOURCE_PROBE_QUERY_LIMIT = 200` códigos) antes de que este módulo viera el resultado. |
+| `alternateCandidatesTruncated` | Telemetría | Este módulo recibió más de `MAX_ALTERNATE_CANDIDATES` (10) códigos y truncó el arreglo almacenado — independientemente de si la consulta SQL ya estaba truncada o no. |
+
+Si `crossSourceProbeTruncated = true`, es matemáticamente imposible que exista
+un único código (el truncamiento en sí mismo demuestra que hay al menos dos),
+por lo que `catastroxResolverShadow.js` **fuerza** `relationStatus =
+MULTIPLE_CLEAN_CODES` sin importar lo que el `crossSourceProbe` haya
+autoreportado — salvo que el propio probe reporte `PROBE_ERROR`, que nunca se
+reinterpreta como divergencia.
+
+La implementación real (`crossSourceCleanProbe` en `server/routes/catastrox.js`)
+consulta, de solo lectura, qué código(s) de `catastrox_clean.predios` cubren
+el mismo punto que ya usó `/lookup`. Usa `array_agg(fid order by fid)` para
+agrupar **todos** los `fid` de cada `codigo_predial` (nunca `MIN(fid)` ni
+`MAX(fid)` ni ninguna otra selección arbitraria de un único identificador), y
+calcula `totalCodeCount`/`totalRecordCount` con funciones de ventana
+(`count(*) over ()`, `sum(...) over ()`) evaluadas sobre el conjunto ya
+agrupado por código — **antes** de que la cláusula `LIMIT` final recorte las
+filas devueltas, por lo que reflejan el universo real, no solo lo que la
+consulta decide devolver. El límite operativo de la consulta es de **200
+códigos** (`CROSS_SOURCE_PROBE_QUERY_LIMIT`) — una salvaguarda de rendimiento,
+muy por encima del límite de exhibición de 10 códigos que aplica
+`catastroxResolverShadow.js` sobre el resultado. Nunca ejecuta una escritura
+ni modifica ningún dato.
+
+### Regla `SOURCE_CODE_DIVERGENCE`
+
+Se activa **exclusivamente** cuando: (1) `/lookup` sirvió un código `legacy`;
+(2) ese código no está en la matriz; (3) el sondeo cruzado encuentra código(s)
+`clean` en el mismo punto; (4) esos códigos son distintos entre sí (o la
+propia consulta ya estaba truncada, lo cual implica lo mismo). Ante esa
+divergencia:
+
+- `comparisonStatus = SOURCE_CODE_DIVERGENCE`.
+- `resolutionStatus`, `candidateSelectionStatus` y `policySelectedTechnicalKey`
+  quedan en `null` — **la política nunca se ejecuta** sobre ningún código
+  alternativo, aunque la consulta esté truncada.
+- `codigoPredial` conserva siempre el código `legacy` original, servido
+  realmente por `/lookup`. **Nunca se sustituye** por ninguno de los
+  candidatos de `alternateCandidates`, ni por ninguno de sus
+  `sourceRecordIds` (verificado por prueba automatizada). Un "candidato
+  alternativo" en este contrato significa **un código observado
+  espacialmente en el mismo punto** — nunca una afirmación de que ese predio
+  sea equivalente u oficialmente correspondiente al legacy servido.
+- Cuando el sondeo encuentra un único código clean distinto
+  (`relationStatus=DIFFERENT_CODE`), `reasonCodes = ['SOURCE_CODE_DIVERGENCE']`
+  y `alternateCandidates` contiene exactamente una entrada
+  (`alternateCodeCount = 1`, con todos los `sourceRecordIds` de ese código).
+- Cuando el sondeo encuentra más de un código clean en el mismo punto
+  (`relationStatus=MULTIPLE_CLEAN_CODES` — el caso real de los tres códigos
+  del diagnóstico forense, confirmado con 2 y 3 candidatos respectivamente),
+  `reasonCodes = ['MULTIPLE_CLEAN_CODES_AT_LOOKUP_POINT']` y
+  `alternateCandidates` contiene todos los códigos encontrados
+  (`alternateCodeCount >= 2`): ante ambigüedad genuina, el sistema **nunca
+  elige** uno de los candidatos por su cuenta — expone la lista completa.
+- Si el sondeo no encuentra ningún código clean (`NO_CLEAN_MATCH`), o el
+  código clean encontrado coincide con el legacy ya confirmado no clasificado
+  (`SAME_CODE`), el resultado sigue siendo `NOT_APPLICABLE` — sin registro
+  nuevo de telemetría.
+- Si el sondeo falla (lanza una excepción, o devuelve
+  `relationStatus=PROBE_ERROR`), el resultado es `comparisonStatus =
+  EVALUATION_ERROR` con `errorCode = CROSS_SOURCE_PROBE_ERROR`, aislado igual
+  que cualquier otro error del modo sombra — nunca llega a `/lookup`.
+
+### Coordenadas efímeras
+
+`evaluateLookupInShadow(input)` acepta opcionalmente `lat`/`lng` en el objeto
+de entrada, **únicamente** para poder invocar `crossSourceProbe` cuando
+corresponde. Esas coordenadas:
+
+- nunca se escriben en el búfer de telemetría (`baseRecord` no las acepta
+  como parámetro; el registro se construye siempre por campos nombrados,
+  nunca por composición o `spread` del input);
+- nunca se devuelven en ningún endpoint (`getShadowEvaluations()` expone
+  exactamente los mismos campos que el búfer interno);
+- nunca se escriben en logs (el módulo no usa `console.log` en ningún punto,
+  verificado por prueba automatizada);
+- nunca se incorporan a `reasonCodes` (que son siempre constantes fijas);
+- no se persisten de ninguna forma — se descartan al retornar de
+  `evaluateLookupInShadow`.
+
+`server/routes/catastrox.js` reutiliza las mismas variables `lat`/`lng` ya
+parseadas al inicio de `/lookup` para la consulta real — nunca vuelve a leer
+`req.body` dentro del disparador asíncrono (`scheduleResolverShadowEvaluation`).
 
 ## Endpoints locales
 
