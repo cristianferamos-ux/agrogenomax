@@ -1,0 +1,2763 @@
+{
+  "version": "1.0.0",
+  "sourceCommit": "49062502a8351905aed2419d5d071cafcd3399db",
+  "classificationSource": "catastrox_clean.predios",
+  "counts": {
+    "AUTO_RESOLVED": 351,
+    "PENDING_POLICY": 47,
+    "BLOCKED_REVIEW": 151,
+    "BLOCKED_CRITICAL": 0,
+    "total": 549
+  },
+  "entries": {
+    "180290001000000110038000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180290101000000130020000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "180940001000000050045000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940001000000050080000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940001000000050083000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940001000000050188000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940001000000060038000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940001000000080136000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940001000000090013000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940001000000090035000000000": {
+      "geometryStatus": "MINIMAL_VARIATION",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940001000000090054000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940001000000090055000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940001000000090056000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940001000000090057000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940001000000110030000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940002000000060107000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "COMMERCIAL_SENSITIVE",
+      "reasonCodes": []
+    },
+    "180940002000000060109000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940002000000090009000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940002000000090010000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940002000000090017000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940003000000080005000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NORMALIZATION_SUSPECT",
+      "reasonCodes": [
+        "ZONE_NORMALIZATION_SUSPECT"
+      ]
+    },
+    "180940003000000080214000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940003000000110001000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940100000000050011000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940100000000050041000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940100000000080004000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940100000000190006000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940100000000310010000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940100000000310044000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940100000000360024000000000": {
+      "geometryStatus": "MINIMAL_VARIATION",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940100000000410001000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "180940100000000410011000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "180940100000000530015000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940100000000570010000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940100000000579003000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940100000000579004000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "180940100000000920008000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "181500101000000350014000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182050101000000200901900000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470001000000030007000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470001000000030018000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470001000000069999000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "COMMERCIAL_SENSITIVE",
+      "reasonCodes": []
+    },
+    "182470001000000100033000000000": {
+      "geometryStatus": "MINIMAL_VARIATION",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470002000000040004000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470002000000040038000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470002000000040039000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470002000000060002000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470002000000060003000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470002000000080002000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470002000000090022000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470002000000100107000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "182470003000000020002000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470003000000020069000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470003000000040007000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470003000000060053000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470003000000090014000000000": {
+      "geometryStatus": "MINIMAL_VARIATION",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470003000000090047000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000000200003000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000000280001000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "182470100000000280002000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "182470100000000290027000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000000360009000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000000370001000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "COMMERCIAL_SENSITIVE",
+      "reasonCodes": []
+    },
+    "182470100000000440005000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000000440006000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000000440021000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000000440022000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000000440026000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000000600003000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "COMMERCIAL_SENSITIVE",
+      "reasonCodes": []
+    },
+    "182470100000000600033000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000000610009000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000000610027000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000000700021000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "COMMERCIAL_SENSITIVE",
+      "reasonCodes": []
+    },
+    "182470100000000730070000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000001220009000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000001230014000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000001260002000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000001260017000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000001330009000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000001380012000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": [
+        "MANZANA_ZERO_SENTINEL"
+      ]
+    },
+    "182470100000001910001000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "182470100000002090010000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000002700009000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003060005000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003120004000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003120010000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003120011000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003130001000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003130002000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003130005000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003130006000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003130007000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003130008000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003130010000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003130013000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003130014000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003130016000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003130017000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003130024000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003130027000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003140003000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003140004000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003140008000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003140009000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003140010000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003140011000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003140012000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003140013000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003140014000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003140015000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003140016000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003140018000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003140019000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003140020000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003140021000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003140027000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182470100000003140028000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560001000000010041000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560001000000010053000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560001000000010125000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560001000000010228000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560001000000010315000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560001000000010322000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560001000000020245000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560001000000020249000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560001000000020309000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560001000000020533000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560001000000020536000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560001000000020538000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560001000000030355000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560001000000030356000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560001000000030357000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560001000000030363000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560002000000010057000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560002000000010059000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560002000000010092000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560002000000020010000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560002000000020017000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560002000000020039000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560002000000020053000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560002000000020054000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560002000000020055000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560002000000020056000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560002000000020058000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560002000000020059000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560002000000020075000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560002000000020101000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560002000000020114000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560002000000030031000000000": {
+      "geometryStatus": "MINIMAL_VARIATION",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560002000000030085000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560002000000030170000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560002000000050057000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560002000000060001000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560002000000060006000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560002000000060038000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560002000000060041000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560002000000070001000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560002000000070132000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "182560003000000010172000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000030001000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000030002000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000030003000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000030004000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000030005000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000030006000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000030007000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000030008000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000040001000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000040002000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000040003000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000040004000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000040005000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000040006000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000040007000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000040008000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000050001000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000050002000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000050003000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000050004000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000050005000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000050006000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000050007000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000050008000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000050009000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000050010000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000060001000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000060002000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560003000000070001000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560101000000110008000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560101000000110023000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560101000000480017000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560101000000860017000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560101000000880003000000000": {
+      "geometryStatus": "MINIMAL_VARIATION",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560101000000880024000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "182560101000001120021000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "184790001000000210018000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "184790001000000260012000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920001000000010025000000000": {
+      "geometryStatus": "MINIMAL_VARIATION",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920001000000020180000000000": {
+      "geometryStatus": "MINIMAL_VARIATION",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920001000000060039000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920001000000060040000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920001000000060047000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920001000000060048000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920001000000060050000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920001000000060051000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920001000000060315000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920001000000060361000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920001000000120078000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920001000000130002000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920002000000020113000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920002000000030063000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920002000000030301000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920002000000030309000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "185920002000000030540000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920002000000030542000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920002000000030545000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920002000000030552000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920002000000030554000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920002000000030570000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920002000000030574000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920002000000030577000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920002000000030578000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920002000000030611000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000010004000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000010145000000000": {
+      "geometryStatus": "MINIMAL_VARIATION",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000010204000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000010228000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000030005000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000030144000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000030157000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000030167000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000030263000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000040023000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000040028000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000040173000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000040184000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000040287000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000040289000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000040290000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000040291000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000050017000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000050028000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000050029000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000050030000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000050032000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000050040000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000050050000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000050242000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000050272000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000050349000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000060058000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000060060000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000060061000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000060128000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000070013000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000070015000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000080072000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920003000000090209000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "COMMERCIAL_SENSITIVE",
+      "reasonCodes": []
+    },
+    "185920004000000010091000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920004000000010092000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920004000000010106000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920004000000010107000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920004000000010108000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920004000000010312000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920004000000010330000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920004000000010334000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000000040034000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000000220011000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "COMMERCIAL_SENSITIVE",
+      "reasonCodes": []
+    },
+    "185920101000000250010000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000000250012000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000000250016000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000000250031000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000000330007000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "185920101000000330008000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "185920101000000330021000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "185920101000000330023000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "185920101000000380017000000000": {
+      "geometryStatus": "MINIMAL_VARIATION",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000000380018000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000000380035000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000000390016000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000000390034000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000000390040000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000000390042000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000000390043000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000000410034000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000000410036000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "185920101000000420007000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000000420038000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000000510062000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000000540003000000000": {
+      "geometryStatus": "MINIMAL_VARIATION",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000000590005000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "185920101000000680001000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000000780002000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000000780007000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000001040012000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "185920101000001630015000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000001730003000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000001880004000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000001880031000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "185920101000001880032000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "185920101000002730001000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000002730003000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000002730004000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920101000002730005000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920601000000040001000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920601000000040002000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920601000000040003000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920601000000040004000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "185920601000000130001000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "185920601000000130002000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "185920601000000130003000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "185920601000000130004000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "185920601000000130005000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "185920601000000130006000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "185920601000000130007000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "185920601000000130008000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "185920601000000130009000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "185920601000000150003000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "186100002000000330056000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "186100002000000370021000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "186100002000000420431000000000": {
+      "geometryStatus": "MINIMAL_VARIATION",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "186100003000000110002000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "186100100000000310017000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "186100100000000760002000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "186100100000000760003000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000010105000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000010107000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000010354000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000010390000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000010477000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000010480000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000010493000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000010494000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000010495000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000010855000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000010856000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000010857000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000011229000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000011420000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "COMMERCIAL_SENSITIVE",
+      "reasonCodes": []
+    },
+    "187530001000000011723000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000011724000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000011725000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000011726000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000011783000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000020014000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000020015000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000020024000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000020028000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000020029000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000020056000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000020057000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000020331000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000020348000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000020349000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000020353000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000020373000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000020379000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000020463000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000020467000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000020476000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000030093000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000030094000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000030095000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000030130000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000030138000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000040396000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000040399000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000390052000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000490045000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000530014000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560032000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560080000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560089000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560091000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560092000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560093000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560094000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560095000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560096000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560097000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560098000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560099000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560100000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560101000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560102000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560103000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560104000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560105000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560106000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560107000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560108000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560109000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560110000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560111000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560112000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560113000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560114000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560115000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560116000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560117000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560118000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560119000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560120000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560121000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560122000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000560123000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000670002000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000740017000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530001000000740021000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530002000000010117000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530002000000010210000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530002000000020032000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530002000000020033000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530002000000020034000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530002000000020037000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530002000000020038000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530002000000020067000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530002000000020070000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530002000000020139000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530003000000030024000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530003000000030025000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530003000000030077000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530003000000030097000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530003000000030098000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530003000000040069000000000": {
+      "geometryStatus": "MINIMAL_VARIATION",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530003000000040117000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530003000000050010000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530003000000050012000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530003000000050017000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530003000000050019000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530003000000050020000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530003000000050022000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530003000000060037000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530003000000060064000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530004000000170214000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530004000000210001000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530004000000210010000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530004000000320051000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530004000000430012000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530004000000430050000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530004000000430051000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530004000000430052000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530004000000430053000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530004000000460006000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530004000000460011000000000": {
+      "geometryStatus": "MINIMAL_VARIATION",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530004000000470018000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530004000000470021000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530004000000480009000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530004000000480024000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530004000000530027000000000": {
+      "geometryStatus": "MINIMAL_VARIATION",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530005000000060024000000000": {
+      "geometryStatus": "MINIMAL_VARIATION",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530005000000160037000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530005000000170031000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530005000000170032000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530005000000290003000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530005000000290013000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530005000000310001000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530005000000360015000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "COMMERCIAL_SENSITIVE",
+      "reasonCodes": []
+    },
+    "187530005000000430003000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530006000000040020000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530007000000280010000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "COMMERCIAL_SENSITIVE",
+      "reasonCodes": []
+    },
+    "187530007000000330031000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530008000000060048000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530008000000100109000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530008000000160012000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530008000000200054000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530008000000200055000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530008000000240070000000000": {
+      "geometryStatus": "MINIMAL_VARIATION",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530008000000260041000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530008000000260042000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530009000000030011000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530009000000030014000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530009000000030016000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530010000000120081000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530010000000140023000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530010000000260001000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530010000000260002000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530010000000340008000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530011000000010000000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530100000000000000000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "COMMERCIAL_SENSITIVE",
+      "reasonCodes": []
+    },
+    "187530101000000030046000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000000120003000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000000120019000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000000120027000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000000120028000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000000120031000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000000200032000000000": {
+      "geometryStatus": "MINIMAL_VARIATION",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000000470020000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000000550019000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000000570008000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000000580017000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000000800024000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000000910003000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000000910005000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000000910008000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000000910009000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000002110004000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000002110009000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000002110010000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000002110011000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000002110012000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000002200003000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000002900008000000000": {
+      "geometryStatus": "MINIMAL_VARIATION",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000002910004000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000003210009000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000003210010000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000003230004000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000003830015000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000003830028000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000003990019000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000004560001000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000004600016000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000005750001000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000005750002000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000005750003000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "COMMERCIAL_SENSITIVE",
+      "reasonCodes": []
+    },
+    "187530101000005750004000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000005750005000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000005750006000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000005750007000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000005750008000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000005750009000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000005750010000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000005750011000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000005750012000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000005750013000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000005810007000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000005810010000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000005810011000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000006190002000000000": {
+      "geometryStatus": "SEPARATE",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000006300001000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "COMMERCIAL_SENSITIVE",
+      "reasonCodes": []
+    },
+    "187530101000006300002000000000": {
+      "geometryStatus": "MINIMAL_VARIATION",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530101000006330003000000000": {
+      "geometryStatus": "MINIMAL_VARIATION",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "187530101000006440008000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530201000000050019000000000": {
+      "geometryStatus": "MINIMAL_VARIATION",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530800000000080002000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "187530800000000250013000000000": {
+      "geometryStatus": "MINIMAL_VARIATION",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "188600002000000210001000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "188600002000000430004000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "188600002000000540048000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "188600002000000640039000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "188600002000000640056000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "188600002000000690028000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "188600002000000760012000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "188600002000000770013000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "188600002000000820011000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "188600101000000040009000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "188600101000000040011000000000": {
+      "geometryStatus": "EXACT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    },
+    "188600101000000110029000000000": {
+      "geometryStatus": "MINIMAL_VARIATION",
+      "attributeStatus": "NONE",
+      "reasonCodes": []
+    },
+    "188600101000000390018000000000": {
+      "geometryStatus": "MATERIAL_CONFLICT",
+      "attributeStatus": "COMPLEMENTARY",
+      "reasonCodes": []
+    }
+  }
+}

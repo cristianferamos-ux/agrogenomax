@@ -5,6 +5,7 @@ import {
   getMunicipalCoverageByCode,
 } from '../data/catastroxCoberturaMunicipal.js';
 import { catastroxQuery as query } from '../catastroxDb.js';
+import { createCatastroxResolverShadow } from '../services/catastrox/catastroxResolverShadow.js';
 
 const router = Router();
 
@@ -14,6 +15,9 @@ const LOOKUP_PREVIEW_TTL_MS = 30 * 60 * 1000;
 const lookupPreviewStore = new Map();
 const AUDIT_DOWNLOADS_ENABLED = String(process.env.CATASTROX_AUDIT_DOWNLOADS || '').toLowerCase() === 'true';
 const ADVANCED_LOOKUP_ENABLED = String(process.env.CATASTROX_ADVANCED_LOOKUP_ENABLED || '').toLowerCase() === 'true';
+// Modo sombra del resolver de duplicados: desactivado por defecto. Solo observa;
+// nunca decide la respuesta de /lookup. Ver docs/catastrox/CATASTROX_RESOLVER_SHADOW_MODE_V1.md.
+const RESOLVER_SHADOW_ENABLED = String(process.env.CATASTROX_RESOLVER_SHADOW_ENABLED || '').toLowerCase() === 'true';
 const TECHNICAL_VEREDA_PATTERN = /^\d+[A-Z]{2}$/i;
 const CATASTROX_ORIGEN_NACIONAL_PROJ =
   '+proj=tmerc +lat_0=4 +lon_0=-73 +k=0.9992 +x_0=5000000 +y_0=2000000 +ellps=GRS80 +units=m +no_defs +type=crs';
@@ -56,6 +60,20 @@ function isLocalAuditRequest(req) {
   const forwardedHost = String(req.headers['x-forwarded-host'] || '').split(':')[0];
   const candidates = [host, forwardedHost].filter(Boolean);
   return candidates.some((value) => ['localhost', '127.0.0.1', '::1'].includes(value));
+}
+
+// Direcciones de loopback aceptadas para los endpoints locales del modo sombra
+// del resolver. A diferencia de isLocalAuditRequest (que confia en el header
+// Host), esta guarda compara exclusivamente contra la conexion TCP real
+// (req.socket.remoteAddress) — nunca contra Host, X-Forwarded-*, Origin,
+// Referer ni req.hostname, que son valores que el cliente controla libremente.
+// No modifica la politica global de "trust proxy" de Express: lee el socket
+// subyacente directamente, sin pasar por la capa de confianza de proxies.
+const LOCAL_SOCKET_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+
+export function isLocalSocketRequest(req) {
+  const remoteAddress = req?.socket?.remoteAddress || req?.connection?.remoteAddress || '';
+  return LOCAL_SOCKET_ADDRESSES.has(remoteAddress);
 }
 
 function normalizeRingForSvg(geometry) {
@@ -365,6 +383,7 @@ async function findCleanPredioByPoint(lng, lat) {
        select
          p.codigo_predial,
          p.zona,
+         p.fid,
          ST_Multi(
            ST_CollectionExtract(
              case
@@ -374,11 +393,12 @@ async function findCleanPredioByPoint(lng, lat) {
              3
            )
          ) as lookup_geom
-       from catastrox_clean.v_predios_enriquecidos p
+       from catastrox_clean.predios p
      )
      select
        c.codigo_predial,
-       c.zona
+       c.zona,
+       c.fid
      from candidatos c, punto p
      where c.lookup_geom is not null
        and not ST_IsEmpty(c.lookup_geom)
@@ -400,6 +420,47 @@ async function findCleanPredioByPoint(lng, lat) {
   return result.rows[0] || null;
 }
 
+// Candidatos tecnicos de solo lectura para el modo sombra del resolver: unica
+// consulta que el motor de decision puede recibir para EXACT + NONE. Nunca se
+// mezclan candidatos legacy con candidatos clean (source siempre 'clean' aqui).
+async function cleanCandidateProvider(codigoPredial) {
+  const result = await query(
+    `select
+       'clean' as source,
+       fid::text as source_record_id
+     from catastrox_clean.predios
+     where codigo_predial = $1
+     order by fid`,
+    [codigoPredial],
+  );
+
+  return result.rows.map((row) => ({ source: row.source, sourceRecordId: row.source_record_id }));
+}
+
+// Instancia unica del servicio de modo sombra. Desactivado por defecto
+// (RESOLVER_SHADOW_ENABLED=false). Nunca tiene autoridad sobre /lookup: solo
+// observa y registra en un bufer en memoria (ver FASE 4/7 del modo sombra).
+const resolverShadow = createCatastroxResolverShadow({
+  enabled: RESOLVER_SHADOW_ENABLED,
+  candidateProvider: cleanCandidateProvider,
+  maxEntries: 200,
+});
+
+// Dispara la evaluacion en modo sombra sin bloquear ni retrasar la respuesta ya
+// enviada a /lookup. No usa await: setImmediate desacopla la ejecucion del ciclo
+// de eventos actual, de modo que esta funcion siempre retorna de forma
+// sincrona antes de que la evaluacion sombra corra. Cualquier rechazo de la
+// promesa devuelta por evaluateLookupInShadow se captura aqui mismo (.catch),
+// por lo que nunca se propaga como unhandledRejection ni llega a /lookup.
+// Recibe la instancia de sombra como parametro (en vez de cerrar sobre la
+// instancia del modulo) para que este disparador se pueda probar de forma
+// aislada con una instancia simulada.
+export function scheduleResolverShadowEvaluation(shadowInstance, input) {
+  setImmediate(() => {
+    shadowInstance.evaluateLookupInShadow(input).catch(() => {});
+  });
+}
+
 router.post('/lookup', async (req, res, next) => {
   try {
     const lat = parseCoordinate(req.body?.lat, 'lat');
@@ -412,6 +473,7 @@ router.post('/lookup', async (req, res, next) => {
        catastro as (
          select
            c.id,
+           c.codigo as codigo_predial,
            c.codigo_municipio,
            c.codigo_departamento,
            c.shape_area,
@@ -429,6 +491,7 @@ router.post('/lookup', async (req, res, next) => {
        predio as (
          select
            c.id,
+           c.codigo_predial,
            c.codigo_municipio,
            c.codigo_departamento,
            c.shape_area
@@ -507,6 +570,13 @@ router.post('/lookup', async (req, res, next) => {
           previewMessage: 'Vista previa protegida del predio identificado.',
         },
       });
+
+      scheduleResolverShadowEvaluation(resolverShadow, {
+        lookupId,
+        codigoPredial: row.codigo_predial || null,
+        currentSource: 'legacy',
+        currentSourceRecordId: row.id != null ? String(row.id) : null,
+      });
       return;
     }
 
@@ -548,6 +618,13 @@ router.post('/lookup', async (req, res, next) => {
           previewGeometryUrl: `/api/catastrox/lookups/${encodeURIComponent(lookupId)}/preview-geometry`,
           previewMessage: 'Vista previa protegida del predio identificado.',
         },
+      });
+
+      scheduleResolverShadowEvaluation(resolverShadow, {
+        lookupId,
+        codigoPredial: cleanPredio.codigo_predial || null,
+        currentSource: 'clean',
+        currentSourceRecordId: cleanPredio.fid != null ? String(cleanPredio.fid) : null,
       });
       return;
     }
@@ -1034,6 +1111,40 @@ router.post('/advanced/lookup', async (req, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+router.get('/audit/resolver-shadow', (req, res) => {
+  if (!isLocalSocketRequest(req)) {
+    res.status(404).json({
+      found: false,
+      status: 'RESOLVER_SHADOW_AUDIT_DISABLED',
+    });
+    return;
+  }
+
+  const summary = resolverShadow.getShadowSummary();
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({
+    enabled: summary.enabled,
+    matrixVersion: summary.matrixVersion,
+    matrixCounts: summary.matrixCounts,
+    summary,
+    evaluations: resolverShadow.getShadowEvaluations(),
+  });
+});
+
+router.delete('/audit/resolver-shadow', (req, res) => {
+  if (!isLocalSocketRequest(req)) {
+    res.status(404).json({
+      found: false,
+      status: 'RESOLVER_SHADOW_AUDIT_DISABLED',
+    });
+    return;
+  }
+
+  resolverShadow.clearShadowEvaluations();
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ cleared: true });
 });
 
 export default router;
