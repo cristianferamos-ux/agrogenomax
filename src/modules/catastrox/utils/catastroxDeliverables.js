@@ -65,8 +65,8 @@ const TECHNICAL_LAYOUT = {
 const TABLE_LAYOUT = {
   page: { x: 0, y: 0, width: PAGE.width, height: PAGE.height },
   header: { x: 22, y: 20, width: 748, height: 84 },
-  mapArea: { x: 24, y: 116, width: 744, height: 420 },
-  bottomPanel: { x: 24, y: 542, width: 744, height: 26 },
+  mapArea: { x: 24, y: 116, width: 744, height: 416 },
+  bottomPanel: { x: 24, y: 536, width: 744, height: 32 },
   footer: UNIFIED_FOOTER_RECT,
 };
 
@@ -1070,9 +1070,8 @@ function setFont(context, size, weight = 400) {
   context.font = `${weight} ${size}px ${activePdfFontStack}`;
 }
 
-function drawWrappedText(context, text, x, y, maxWidth, lineHeight, color = '#0f172a', weight = 400, size = 10) {
+function measureWrappedText(context, text, maxWidth, lineHeight, weight = 400, size = 10) {
   setFont(context, size, weight);
-  context.fillStyle = color;
   const words = cleanText(text).split(/\s+/).filter(Boolean);
   const lines = [];
   let current = '';
@@ -1088,11 +1087,25 @@ function drawWrappedText(context, text, x, y, maxWidth, lineHeight, color = '#0f
   }
   if (current) lines.push(current);
 
+  return {
+    lines,
+    lineCount: lines.length,
+    height: lines.length * lineHeight,
+  };
+}
+
+function drawWrappedText(context, text, x, y, maxWidth, lineHeight, color = '#0f172a', weight = 400, size = 10) {
+  const measurement = measureWrappedText(context, text, maxWidth, lineHeight, weight, size);
+  context.fillStyle = color;
+  const { lines } = measurement;
   lines.forEach((line, index) => {
     context.fillText(line, x, y + index * lineHeight);
   });
 
-  return { lines, height: lines.length * lineHeight };
+  return {
+    ...measurement,
+    renderedBottom: y + measurement.height,
+  };
 }
 
 function chunkArray(values, chunkSize) {
@@ -1295,6 +1308,83 @@ function drawPanel(context, rect, title) {
   context.fillStyle = '#ffffff';
   setFont(context, 10, 700);
   context.fillText(title, rect.x + 12, rect.y + 16);
+}
+
+function buildPanelBodyRect(rect, options = {}) {
+  const {
+    paddingX = PDF_LAYOUT_GRID.panelPaddingX,
+    topOffset = 40,
+    bottomPadding = PDF_LAYOUT_GRID.minBottomPadding,
+  } = options;
+  return {
+    x: rect.x + paddingX,
+    y: rect.y + topOffset,
+    width: rect.width - paddingX * 2,
+    topOffset,
+    bottomPadding,
+    bottom: rect.y + rect.height - bottomPadding,
+  };
+}
+
+function measureBulletList(context, items, width, options = {}) {
+  const {
+    bulletTextOffset = 14,
+    lineHeight = 14,
+    itemGap = 8,
+    minItemHeight = 22,
+    weight = 400,
+    size = 10.5,
+  } = options;
+
+  const entries = items.map((item) => {
+    const textMetrics = measureWrappedText(context, item, width - bulletTextOffset, lineHeight, weight, size);
+    const consumedHeight = Math.max(minItemHeight, textMetrics.height + itemGap);
+    return {
+      item,
+      textMetrics,
+      consumedHeight,
+    };
+  });
+
+  return {
+    entries,
+    totalHeight: entries.reduce((sum, entry) => sum + entry.consumedHeight, 0),
+  };
+}
+
+function drawBullets(context, items, x, y, width, color, options = {}) {
+  const metrics = measureBulletList(context, items, width, options);
+  let cursorY = y;
+  metrics.entries.forEach((entry) => {
+    context.fillStyle = color;
+    context.fillRect(x, cursorY - 7, 6, 6);
+    drawWrappedText(
+      context,
+      entry.item,
+      x + (options.bulletTextOffset ?? 14),
+      cursorY,
+      width - (options.bulletTextOffset ?? 14),
+      options.lineHeight ?? 14,
+      '#243446',
+      options.weight ?? 400,
+      options.size ?? 10.5,
+    );
+    cursorY += entry.consumedHeight;
+  });
+  return {
+    ...metrics,
+    renderedBottom: cursorY,
+  };
+}
+
+function computeBulletPanelHeight(context, items, rectWidth, options = {}) {
+  const body = buildPanelBodyRect({ x: 0, y: 0, width: rectWidth, height: 0 }, options.bodyOptions);
+  const metrics = measureBulletList(context, items, body.width, options.listOptions);
+  return {
+    body,
+    metrics,
+    requiredHeight: body.topOffset + metrics.totalHeight + body.bottomPadding,
+  };
 }
 
 function tileUrl(template, z, x, y) {
@@ -1956,16 +2046,6 @@ function buildAutomaticRecommendations(predio) {
   return recommendations;
 }
 
-function drawBullets(context, items, x, y, width, color) {
-  let cursorY = y;
-  items.forEach((item) => {
-    context.fillStyle = color;
-    context.fillRect(x, cursorY - 7, 6, 6);
-    const result = drawWrappedText(context, item, x + 14, cursorY, width - 14, 14, '#243446', 400, 10.5);
-    cursorY += Math.max(22, result.height + 8);
-  });
-}
-
 function todayDisplayDate() {
   const now = new Date();
   return new Intl.DateTimeFormat('es-CO', {
@@ -2323,19 +2403,127 @@ function drawClasificacionPanel(context, rect, predio, options = {}) {
   return tiposCursorY;
 }
 
-function drawFuentePanel(context, rect, predio) {
+function buildFuentePanelText(predio) {
+  return `${formatFuenteDisplay(predio.fuente)}. Este documento fue elaborado por CatastroX mediante el procesamiento, organización y presentación de información catastral pública disponible en el Geoportal del IGAC. Fecha de procesamiento: ${formatFechaProcesoDisplay(predio.fechaProceso)}.`;
+}
+
+function measureFuentePanel(context, rect, predio, options = {}) {
+  const body = buildPanelBodyRect(rect, {
+    paddingX: options.paddingX ?? PDF_LAYOUT_GRID.panelPaddingX,
+    topOffset: options.topOffset ?? 36,
+    bottomPadding: options.bottomPadding ?? 12,
+  });
+  const text = buildFuentePanelText(predio);
+  const textMetrics = measureWrappedText(
+    context,
+    text,
+    body.width,
+    options.lineHeight ?? 13,
+    options.weight ?? 400,
+    options.size ?? 11,
+  );
+  return {
+    text,
+    body,
+    textMetrics,
+    requiredHeight: body.topOffset + textMetrics.height + body.bottomPadding,
+    renderedBottom: body.y + textMetrics.height,
+  };
+}
+
+function drawFuentePanel(context, rect, predio, options = {}) {
+  const metrics = measureFuentePanel(context, rect, predio, options);
   drawPanel(context, rect, 'FUENTE');
   drawWrappedText(
     context,
-    `${formatFuenteDisplay(predio.fuente)}. Este documento fue elaborado por CatastroX mediante el procesamiento, organización y presentación de información catastral pública disponible en el Geoportal del IGAC. Fecha de procesamiento: ${formatFechaProcesoDisplay(predio.fechaProceso)}.`,
-    rect.x + PDF_LAYOUT_GRID.panelPaddingX,
-    rect.y + 40,
-    rect.width - PDF_LAYOUT_GRID.panelPaddingX * 2,
-    14,
+    metrics.text,
+    metrics.body.x,
+    metrics.body.y,
+    metrics.body.width,
+    options.lineHeight ?? 13,
     '#243446',
-    400,
-    11,
+    options.weight ?? 400,
+    options.size ?? 11,
   );
+  return metrics;
+}
+
+function buildUsoAlcancePageLayout(context, predio) {
+  const isProfessionalPackage = predio.deliverablePackageId === 'profesional';
+  const deliveredFiles = [
+    'PDF: resumen comercial, ficha técnica y plano predial con puntos y distancias.',
+    'KML: polígono del predio para Google Earth y aplicaciones compatibles.',
+    'KMZ: versión comprimida del KML, lista para compartir.',
+  ];
+  if (isProfessionalPackage) {
+    deliveredFiles.push('CSV: tabla completa de vértices con coordenadas Este y Norte en MAGNA-SIRGAS 2018 / Origen-Nacional (EPSG:9377).');
+  }
+
+  const instructions = [
+    'Abra el archivo KML o KMZ en Google Earth o una aplicación compatible.',
+    'Verifique visualmente la ubicación del polígono sobre el mapa.',
+    'Utilícelo como apoyo de consulta y planeación técnica o comercial.',
+  ];
+  const scopeItems = [
+    'No reemplaza certificados oficiales del IGAC, gestor catastral ni oficina de registro.',
+    'No reemplaza levantamientos topográficos ni actos de deslinde o amojonamiento.',
+    'Los usos normativos del suelo están sujetos al POT, PBOT o EOT municipal vigente.',
+    'Decisiones jurídicas, registrales o de linderos requieren validación de autoridad competente.',
+  ];
+  const footerGap = 18;
+  const middleGap = 14;
+  const availableBottom = UNIFIED_FOOTER_RECT.y - footerGap;
+  const topRect = { x: 24, y: 126, width: 744, height: 0 };
+  const topMetrics = computeBulletPanelHeight(context, deliveredFiles, topRect.width, {});
+  const topPanel = { ...topRect, height: Math.max(110, Math.ceil(topMetrics.requiredHeight)) };
+  const topListStartY = topPanel.y + topMetrics.body.topOffset;
+  const lowerPanelY = topPanel.y + topPanel.height + middleGap;
+  const lowerPanelWidth = 360;
+  const lowerGap = 24;
+  const lowerAvailableHeight = availableBottom - lowerPanelY;
+  const leftMetrics = computeBulletPanelHeight(context, instructions, lowerPanelWidth, {});
+  const rightMetrics = computeBulletPanelHeight(context, scopeItems, lowerPanelWidth, {});
+  const lowerPanelHeight = Math.max(
+    236,
+    Math.ceil(Math.max(leftMetrics.requiredHeight, rightMetrics.requiredHeight)),
+  );
+  const fittedLowerPanelHeight = Math.min(lowerPanelHeight, lowerAvailableHeight);
+  return {
+    deliveredFiles,
+    instructions,
+    scopeItems,
+    topPanel,
+    topListStartY,
+    lowerLeftPanel: { x: 24, y: lowerPanelY, width: lowerPanelWidth, height: fittedLowerPanelHeight },
+    lowerRightPanel: { x: 24 + lowerPanelWidth + lowerGap, y: lowerPanelY, width: lowerPanelWidth, height: fittedLowerPanelHeight },
+    deliveredBottomLimit: topPanel.y + topPanel.height - topMetrics.body.bottomPadding,
+    lowerBottomLimit: lowerPanelY + fittedLowerPanelHeight - PDF_LAYOUT_GRID.minBottomPadding,
+    topMetrics,
+    leftMetrics,
+    rightMetrics,
+  };
+}
+
+function buildExecutiveBottomNoteLayout(context, text, rect, options = {}) {
+  const body = buildPanelBodyRect(rect, {
+    paddingX: options.paddingX ?? 0,
+    topOffset: options.topOffset ?? 6,
+    bottomPadding: options.bottomPadding ?? 4,
+  });
+  const textMetrics = measureWrappedText(
+    context,
+    text,
+    body.width,
+    options.lineHeight ?? 10,
+    options.weight ?? 400,
+    options.size ?? 9,
+  );
+  return {
+    body,
+    textMetrics,
+    renderedBottom: body.y + textMetrics.height,
+    requiredHeight: body.topOffset + textMetrics.height + body.bottomPadding,
+  };
 }
 
 function buildFichaTecnicaSinglePageCanvas(predio, pageLabel) {
@@ -2344,7 +2532,7 @@ function buildFichaTecnicaSinglePageCanvas(predio, pageLabel) {
 
   drawIdentificacionPanel(context, { x: 24, y: 126, width: 360, height: 356 }, predio, { labelValueGap: 13, fieldGap: 24, fieldHeight: 34 });
   drawCaracteristicasFisicasPanel(context, { x: 408, y: 126, width: 360, height: 168 }, predio, { labelValueGap: 13, fieldGap: 24 });
-  drawClasificacionPanel(context, { x: 408, y: 302, width: 360, height: 198 }, predio, {
+  const clasificacionBottomY = drawClasificacionPanel(context, { x: 408, y: 302, width: 360, height: 198 }, predio, {
     usoLineHeight: 13,
     usoItemGap: 4,
     sectionGap: 4,
@@ -2352,7 +2540,12 @@ function buildFichaTecnicaSinglePageCanvas(predio, pageLabel) {
     tiposLineGap: 0,
     labelValueGap: 12,
   });
-  drawFuentePanel(context, { x: 24, y: 500, width: 744, height: 66 }, predio);
+  const fuenteProbeRect = { x: 24, y: 0, width: 744, height: 0 };
+  const fuenteProbe = measureFuentePanel(context, fuenteProbeRect, predio);
+  const fuenteY = Math.max(478, Math.ceil(clasificacionBottomY + 6));
+  const fuenteMaxHeight = UNIFIED_FOOTER_RECT.y - 10 - fuenteY;
+  const fuenteHeight = Math.max(Math.min(fuenteProbe.requiredHeight, fuenteMaxHeight), 66);
+  drawFuentePanel(context, { x: 24, y: fuenteY, width: 744, height: fuenteHeight }, predio);
 
   drawLegalFooter(context, UNIFIED_FOOTER_RECT);
   return canvas;
@@ -2376,7 +2569,9 @@ function buildFichaTecnicaSplitPageCanvases(predio, pageLabelA, pageLabelB) {
   const fuenteGap = 16;
   const fuenteBottomGap = 16;
   const fuenteY = Math.max(430, Math.ceil(clasificacionBottomY + fuenteGap));
-  const fuenteHeight = Math.max(72, UNIFIED_FOOTER_RECT.y - fuenteBottomGap - fuenteY);
+  const fuenteProbe = measureFuentePanel(contextB, { x: 24, y: 0, width: 744, height: 0 }, predio);
+  const fuenteAvailableHeight = UNIFIED_FOOTER_RECT.y - fuenteBottomGap - fuenteY;
+  const fuenteHeight = Math.max(72, Math.min(fuenteProbe.requiredHeight, fuenteAvailableHeight));
   drawFuentePanel(contextB, { x: 24, y: fuenteY, width: 744, height: fuenteHeight }, predio);
   drawLegalFooter(contextB, UNIFIED_FOOTER_RECT);
 
@@ -2394,33 +2589,19 @@ function buildUsoAlcancePageCanvas(predio, pageLabel) {
   const { canvas, context } = createPageCanvas();
   drawHeader(context, predio, pageLabel, 'USO, ALCANCE Y ADVERTENCIAS', TABLE_LAYOUT);
 
-  const isProfessionalPackage = predio.deliverablePackageId === 'profesional';
-  const deliveredFiles = [
-    'PDF: resumen comercial, ficha técnica y plano predial con puntos y distancias.',
-    'KML: polígono del predio para Google Earth y aplicaciones compatibles.',
-    'KMZ: versión comprimida del KML, lista para compartir.',
-  ];
-  if (isProfessionalPackage) {
-    deliveredFiles.push('CSV: tabla completa de vértices con coordenadas Este y Norte en MAGNA-SIRGAS 2018 / Origen-Nacional (EPSG:9377).');
-  }
+  const layout = buildUsoAlcancePageLayout(context, predio);
 
-  drawPanel(context, { x: 24, y: 126, width: 744, height: 110 }, 'ARCHIVOS ENTREGADOS');
-  drawBullets(context, deliveredFiles, 48, 172, 700, '#00aeea');
+  drawPanel(context, layout.topPanel, 'ARCHIVOS ENTREGADOS');
+  const deliveredBody = buildPanelBodyRect(layout.topPanel);
+  drawBullets(context, layout.deliveredFiles, layout.topPanel.x + 24, deliveredBody.y, deliveredBody.width, '#00aeea');
 
-  drawPanel(context, { x: 24, y: 250, width: 360, height: 236 }, 'CÓMO UTILIZARLOS');
-  drawBullets(context, [
-    'Abra el archivo KML o KMZ en Google Earth o una aplicación compatible.',
-    'Verifique visualmente la ubicación del polígono sobre el mapa.',
-    'Utilícelo como apoyo de consulta y planeación técnica o comercial.',
-  ], 48, 296, 332, '#8bcf2b');
+  drawPanel(context, layout.lowerLeftPanel, 'CÓMO UTILIZARLOS');
+  const leftBody = buildPanelBodyRect(layout.lowerLeftPanel);
+  drawBullets(context, layout.instructions, layout.lowerLeftPanel.x + 24, leftBody.y, leftBody.width, '#8bcf2b');
 
-  drawPanel(context, { x: 408, y: 250, width: 360, height: 236 }, 'ALCANCE Y VALIDACIÓN OFICIAL');
-  drawBullets(context, [
-    'No reemplaza certificados oficiales del IGAC, gestor catastral ni oficina de registro.',
-    'No reemplaza levantamientos topográficos ni actos de deslinde o amojonamiento.',
-    'Los usos normativos del suelo están sujetos al POT, PBOT o EOT municipal vigente.',
-    'Decisiones jurídicas, registrales o de linderos requieren validación de autoridad competente.',
-  ], 424, 296, 332, '#00aeea');
+  drawPanel(context, layout.lowerRightPanel, 'ALCANCE Y VALIDACIÓN OFICIAL');
+  const rightBody = buildPanelBodyRect(layout.lowerRightPanel);
+  drawBullets(context, layout.scopeItems, layout.lowerRightPanel.x + 16, rightBody.y, rightBody.width, '#00aeea');
 
   drawLegalFooter(context, UNIFIED_FOOTER_RECT);
   return canvas;
@@ -2792,13 +2973,16 @@ function buildExecutiveTablePageCanvas(predio, pageLabel, rows, startIndex = 0, 
     visibleRows,
   );
 
+  const bottomNote =
+    'La tabla ejecutiva compila en una sola vista los puntos visibles del plano, sus coordenadas y la distancia entre tramos consecutivos. La geometría completa del predio permanece disponible en los archivos KML y KMZ descargables.';
+  const bottomNoteLayout = buildExecutiveBottomNoteLayout(context, bottomNote, TABLE_LAYOUT.bottomPanel);
   drawWrappedText(
     context,
-    'La tabla ejecutiva compila en una sola vista los puntos visibles del plano, sus coordenadas y la distancia entre tramos consecutivos. La geometría completa del predio permanece disponible en los archivos KML y KMZ descargables.',
-    TABLE_LAYOUT.bottomPanel.x,
-    TABLE_LAYOUT.bottomPanel.y + 12,
-    TABLE_LAYOUT.bottomPanel.width,
-    12,
+    bottomNote,
+    bottomNoteLayout.body.x,
+    bottomNoteLayout.body.y,
+    bottomNoteLayout.body.width,
+    10,
     '#334155',
     400,
     9,
@@ -4351,3 +4535,11 @@ export function buildCatastroXRegressionSnapshot(source) {
     regressionMetrics: technicalSnapshot.regressionMetrics,
   };
 }
+
+export {
+  buildExecutiveBottomNoteLayout,
+  buildUsoAlcancePageLayout,
+  computeBulletPanelHeight,
+  measureFuentePanel,
+  measureWrappedText,
+};

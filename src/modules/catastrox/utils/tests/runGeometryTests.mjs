@@ -22,6 +22,7 @@ const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', '..');
 
 const TEST_FILES = [
   '/src/modules/catastrox/utils/__tests__/buildTechnicalPolygonSubpaths.test.js',
+  '/src/modules/catastrox/utils/__tests__/pdfPanelLayout.test.js',
   '/src/modules/catastrox/utils/__tests__/shapefileRingOrientation.test.js',
   '/src/modules/catastrox/utils/__tests__/projectedGeometryExports.test.js',
 ];
