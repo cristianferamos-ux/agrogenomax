@@ -12,7 +12,10 @@ const router = Router();
 const CATASTROX_LEGAL_NOTICE =
   'CatastroX realiza análisis técnico sobre información geográfica y catastral pública disponible. No reemplaza certificados oficiales del IGAC, gestor catastral, oficina de registro ni autoridad competente.';
 const LOOKUP_PREVIEW_TTL_MS = 30 * 60 * 1000;
+const LOOKUP_BY_CODE_RATE_WINDOW_MS = 10 * 60 * 1000;
+const LOOKUP_BY_CODE_RATE_MAX_REQUESTS = 30;
 const lookupPreviewStore = new Map();
+const lookupByCodeRateStore = new Map();
 const AUDIT_DOWNLOADS_ENABLED = String(process.env.CATASTROX_AUDIT_DOWNLOADS || '').toLowerCase() === 'true';
 const ADVANCED_LOOKUP_ENABLED = String(process.env.CATASTROX_ADVANCED_LOOKUP_ENABLED || '').toLowerCase() === 'true';
 // Modo sombra del resolver de duplicados: desactivado por defecto. Solo observa;
@@ -57,6 +60,19 @@ function resolveLookupPreview(lookupId) {
   return record;
 }
 
+export function __getLookupPreviewForTests(lookupId) {
+  return lookupPreviewStore.get(lookupId) || null;
+}
+
+export function __clearLookupStateForTests() {
+  lookupPreviewStore.clear();
+  lookupByCodeRateStore.clear();
+}
+
+export function __getLookupByCodeRateStoreSizeForTests() {
+  return lookupByCodeRateStore.size;
+}
+
 function isLocalAuditRequest(req) {
   const host = String(req.hostname || req.headers.host || '').split(':')[0];
   const forwardedHost = String(req.headers['x-forwarded-host'] || '').split(':')[0];
@@ -76,6 +92,38 @@ const LOCAL_SOCKET_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
 export function isLocalSocketRequest(req) {
   const remoteAddress = req?.socket?.remoteAddress || req?.connection?.remoteAddress || '';
   return LOCAL_SOCKET_ADDRESSES.has(remoteAddress);
+}
+
+function buildLookupByCodeRateKey(req) {
+  return req?.ip || req?.socket?.remoteAddress || req?.connection?.remoteAddress || 'unknown';
+}
+
+export function purgeExpiredLookupByCodeRateEntries(now = Date.now()) {
+  for (const [key, value] of lookupByCodeRateStore.entries()) {
+    if (!value || now - value.windowStart >= LOOKUP_BY_CODE_RATE_WINDOW_MS) {
+      lookupByCodeRateStore.delete(key);
+    }
+  }
+}
+
+export function enforceLookupByCodeRateLimit(req, now = Date.now()) {
+  purgeExpiredLookupByCodeRateEntries(now);
+  const key = buildLookupByCodeRateKey(req);
+  const existing = lookupByCodeRateStore.get(key);
+
+  if (!existing || now - existing.windowStart >= LOOKUP_BY_CODE_RATE_WINDOW_MS) {
+    lookupByCodeRateStore.set(key, { windowStart: now, count: 1 });
+    return;
+  }
+
+  if (existing.count >= LOOKUP_BY_CODE_RATE_MAX_REQUESTS) {
+    throw Object.assign(
+      new Error('La consulta por número predial no está disponible en este momento. Intenta nuevamente más tarde.'),
+      { status: 429, publicCode: 'RATE_LIMITED_CADASTRAL_LOOKUP' },
+    );
+  }
+
+  existing.count += 1;
 }
 
 function normalizeRingForSvg(geometry) {
@@ -233,6 +281,220 @@ function buildQueryPoint(lat, lng) {
     lat: Number(lat),
     lng: Number(lng),
   };
+}
+
+export function normalizeCadastralCodeInput(value) {
+  if (value === undefined || value === null) return '';
+  return String(value).trim().replace(/[\s-]+/g, '');
+}
+
+export function validateCadastralCodeInput(value) {
+  const normalized = normalizeCadastralCodeInput(value);
+
+  if (!/^(?:\d{20}|\d{30})$/.test(normalized)) {
+    throw Object.assign(new Error('El número predial debe contener exactamente 20 o 30 dígitos.'), {
+      status: 400,
+      publicCode: 'INVALID_CADASTRAL_CODE',
+      publicMessage: 'El número predial debe contener exactamente 20 o 30 dígitos.',
+    });
+  }
+
+  return normalized;
+}
+
+export function buildLookupByCodeQuery(normalizedCode) {
+  const column = normalizedCode.length === 20 ? 'codigo_anterior' : 'codigo_predial';
+
+  return {
+    column,
+    sql: `select
+            p.codigo_predial,
+            p.codigo_anterior,
+            p.municipio_dane,
+            p.municipio_nombre,
+            p.departamento_nombre,
+            p.zona,
+        ST_Y(
+          ST_Transform(
+            ST_SetSRID(ST_PointOnSurface(p.geom), 0),
+            '${CATASTROX_ORIGEN_NACIONAL_PROJ}',
+            4326
+          )
+        ) as query_lat,
+        ST_X(
+          ST_Transform(
+            ST_SetSRID(ST_PointOnSurface(p.geom), 0),
+            '${CATASTROX_ORIGEN_NACIONAL_PROJ}',
+            4326
+          )
+        ) as query_lng,
+            round(ST_Area(p.geom)::numeric, 6) as area_m2_exact,
+            round(ST_Perimeter(p.geom)::numeric, 6) as perimetro_m_exact,
+            ST_NumGeometries(ST_Multi(p.geom)) as part_count,
+            ST_AsText(ST_Envelope(p.geom)) as bbox_wkt,
+            md5(encode(ST_AsEWKB(ST_Force2D(p.geom)), 'hex')) as geometry_fingerprint
+          from catastrox_clean.predios p
+          where ${column} = $1`,
+    params: [normalizedCode],
+  };
+}
+
+function canonicalText(value) {
+  return toNullableString(value) || '';
+}
+
+function buildCandidateGeometrySignature(row) {
+  return [
+    canonicalText(row.codigo_predial),
+    canonicalText(row.municipio_dane),
+    canonicalText(row.municipio_nombre),
+    canonicalText(row.departamento_nombre),
+    canonicalText(row.zona),
+    canonicalText(row.geometry_fingerprint),
+  ].join('|');
+}
+
+function isCanonicalPredialCode(value) {
+  return /^[0-9]{30}$/.test(canonicalText(value));
+}
+
+export function resolveExactFullResultByCodeRows(rows, normalizedCode) {
+  const resolution = resolveLookupByCodeCandidates(rows, normalizedCode);
+  if (resolution.outcome !== 'resolved') {
+    return resolution;
+  }
+
+  const signature = buildCandidateGeometrySignature(rows[0]);
+  const selectedRow = rows.find((row) => buildCandidateGeometrySignature(row) === signature) || rows[0];
+
+  return {
+    ...resolution,
+    row: selectedRow,
+  };
+}
+
+export function resolveLookupByCodeCandidates(rows, normalizedCode) {
+  const candidates = Array.isArray(rows) ? rows : [];
+
+  if (!candidates.length) {
+    return {
+      outcome: 'not_found',
+      normalizedCode,
+      searchLength: normalizedCode.length,
+    };
+  }
+
+  const canonicalCodes = new Set(candidates.map((row) => canonicalText(row.codigo_predial)).filter(Boolean));
+  if (canonicalCodes.size !== 1) {
+    return {
+      outcome: 'ambiguous',
+      reason: 'MULTIPLE_CANONICAL_CODES',
+      normalizedCode,
+      searchLength: normalizedCode.length,
+    };
+  }
+
+  const municipalities = new Set(candidates.map((row) => canonicalText(row.municipio_nombre)));
+  const departments = new Set(candidates.map((row) => canonicalText(row.departamento_nombre)));
+  const zones = new Set(candidates.map((row) => canonicalText(row.zona)));
+  const geometrySignatures = new Set(candidates.map(buildCandidateGeometrySignature));
+
+  if (municipalities.size > 1 || departments.size > 1 || zones.size > 1 || geometrySignatures.size > 1) {
+    return {
+      outcome: 'ambiguous',
+      reason: 'CONFLICTING_TERRITORIAL_OR_GEOMETRY_DATA',
+      normalizedCode,
+      searchLength: normalizedCode.length,
+    };
+  }
+
+  const baseRow = candidates[0];
+  return {
+    outcome: 'resolved',
+    normalizedCode,
+    searchLength: normalizedCode.length,
+    canonicalCode: canonicalText(baseRow.codigo_predial),
+    candidate: {
+      codigoPredial: canonicalText(baseRow.codigo_predial),
+      codigoAnterior: canonicalText(baseRow.codigo_anterior),
+      municipioDane: canonicalText(baseRow.municipio_dane),
+      municipio: canonicalText(baseRow.municipio_nombre),
+      departamento: canonicalText(baseRow.departamento_nombre),
+      zona: canonicalText(baseRow.zona),
+      queryPoint: buildQueryPoint(baseRow.query_lat, baseRow.query_lng),
+    },
+  };
+}
+
+export async function findPredioByCadastralCode(normalizedCode, queryImpl = query) {
+  const { sql, params, column } = buildLookupByCodeQuery(normalizedCode);
+  const result = await queryImpl(sql, params);
+  return {
+    column,
+    ...resolveLookupByCodeCandidates(result.rows, normalizedCode),
+  };
+}
+
+function buildLookupByCodeMunicipio(candidate) {
+  return {
+    codigoMunicipio: canonicalText(candidate?.municipioDane),
+    municipio: canonicalText(candidate?.municipio),
+    departamento: canonicalText(candidate?.departamento),
+    gestorCatastral: null,
+  };
+}
+
+function buildLookupByCodeFoundResponse(lookupId, candidate) {
+  const municipio = buildLookupByCodeMunicipio(candidate);
+  const coverage = resolveCoverageStatus({
+    municipio,
+    lat: candidate.queryPoint.lat,
+    lng: candidate.queryPoint.lng,
+  });
+
+  return {
+    lookup_id: lookupId,
+    routeId: lookupId,
+    found: true,
+    status: 'FOUND',
+    municipio: candidate.municipio || null,
+    departamento: candidate.departamento || null,
+    tipoZona: candidate.zona || null,
+    gestor: null,
+    canPurchase: true,
+    commercialMessage:
+      'Predio identificado. Para conocer área, perímetro, códigos prediales, plano y archivos descargables, seleccione un paquete.',
+    legalNotice: CATASTROX_LEGAL_NOTICE,
+    coverage: {
+      municipio: coverage?.municipio || municipio?.municipio || null,
+      departamento: coverage?.departamento || municipio?.departamento || null,
+      gestorCatastral: coverage?.gestorCatastral || municipio?.gestorCatastral || null,
+      estadoCobertura: coverage?.estadoCobertura || null,
+    },
+    predio: {
+      lookup_id: lookupId,
+      routeId: lookupId,
+      municipio: candidate.municipio || null,
+      departamento: candidate.departamento || null,
+      tipoZona: candidate.zona || null,
+      gestor: null,
+      estadoPredial:
+        'Predio identificado. Información detallada disponible únicamente al activar un paquete.',
+      previewMapUrl: `/api/catastrox/lookups/${encodeURIComponent(lookupId)}/preview-map`,
+      previewGeometryUrl: `/api/catastrox/lookups/${encodeURIComponent(lookupId)}/preview-geometry`,
+      previewMessage: 'Vista previa protegida del predio identificado.',
+    },
+  };
+}
+
+export function createLookupByCodeSuccessState(lookupId, normalizedCode, candidate) {
+  rememberAdvancedLookupPreview(lookupId, candidate.codigoPredial, {
+    queryPoint: candidate.queryPoint,
+    searchType: 'code',
+    queriedCode: normalizedCode,
+  });
+
+  return buildLookupByCodeFoundResponse(lookupId, candidate);
 }
 
 function normalizeMunicipioRow(row) {
@@ -827,6 +1089,60 @@ router.post('/lookup', async (req, res, next) => {
   }
 });
 
+router.post('/lookup-by-code', async (req, res, next) => {
+  try {
+    enforceLookupByCodeRateLimit(req);
+
+    const normalizedCode = validateCadastralCodeInput(req.body?.codigo);
+    const result = await findPredioByCadastralCode(normalizedCode);
+
+    if (result.outcome === 'not_found') {
+      res.status(404).json({
+        ok: false,
+        code: 'CADASTRAL_CODE_NOT_FOUND',
+        message: 'No se encontró un predio asociado con este número predial.',
+        canPurchase: false,
+      });
+      return;
+    }
+
+    if (result.outcome !== 'resolved') {
+      res.status(409).json({
+        ok: false,
+        code: 'REQUIRES_TECHNICAL_VALIDATION',
+        message:
+          'Este número predial está asociado con varios registros catastrales. Ubique el predio mediante coordenadas o solicite validación técnica.',
+        canPurchase: false,
+      });
+      return;
+    }
+
+    const lookupId = buildLookupId();
+    res.json(createLookupByCodeSuccessState(lookupId, normalizedCode, result.candidate));
+  } catch (error) {
+    if (error?.publicCode === 'INVALID_CADASTRAL_CODE') {
+      res.status(400).json({
+        ok: false,
+        code: 'INVALID_CADASTRAL_CODE',
+        message: 'El número predial debe contener exactamente 20 o 30 dígitos.',
+      });
+      return;
+    }
+
+    if (error?.publicCode === 'RATE_LIMITED_CADASTRAL_LOOKUP') {
+      res.status(429).json({
+        ok: false,
+        code: 'RATE_LIMITED_CADASTRAL_LOOKUP',
+        message: 'La consulta por número predial no está disponible en este momento. Intenta nuevamente más tarde.',
+        canPurchase: false,
+      });
+      return;
+    }
+
+    next(error);
+  }
+});
+
 router.get('/lookups/:lookupId/preview-map', async (req, res, next) => {
   try {
     const lookupId = String(req.params?.lookupId || '').trim();
@@ -1033,7 +1349,7 @@ router.get('/lookups/:lookupId/preview-geometry', async (req, res, next) => {
   }
 });
 
-async function buildLookupFullResultPayload(lookupId) {
+export async function buildLookupFullResultPayload(lookupId) {
   const preview = resolveLookupPreview(lookupId);
 
   if (!preview) {
@@ -1046,9 +1362,10 @@ async function buildLookupFullResultPayload(lookupId) {
     };
   }
 
-  const CLEAN_FULL_RESULT_QUERY = `select
+const CLEAN_FULL_RESULT_QUERY = `select
          p.codigo_predial,
          p.codigo_anterior,
+         p.municipio_dane,
          p.departamento_nombre,
          p.municipio_nombre,
          p.zona,
@@ -1062,6 +1379,23 @@ async function buildLookupFullResultPayload(lookupId) {
          p.area_terreno_ha,
          ST_Area(p.geom) as area_m2_exact,
          ST_Perimeter(p.geom) as perimetro_m,
+         ST_NumGeometries(ST_Multi(p.geom)) as part_count,
+         ST_AsText(ST_Envelope(p.geom)) as bbox_wkt,
+         md5(encode(ST_AsEWKB(ST_Force2D(p.geom)), 'hex')) as geometry_fingerprint,
+         ST_Y(
+           ST_Transform(
+             ST_SetSRID(ST_PointOnSurface(p.geom), 0),
+             $2,
+             4326
+           )
+         ) as query_lat,
+         ST_X(
+           ST_Transform(
+             ST_SetSRID(ST_PointOnSurface(p.geom), 0),
+             $2,
+             4326
+           )
+         ) as query_lng,
          p.destino_economico_nombre,
          p.uso_1_nombre,
          p.uso_2_nombre,
@@ -1104,7 +1438,7 @@ async function buildLookupFullResultPayload(lookupId) {
          )::json as geometry
        from catastrox_clean.v_predios_enriquecidos p
         where p.codigo_predial = $1
-        limit 1`;
+        `;
 
   const CLEAN_FULL_RESULT_BY_POINT_QUERY = `select
          p.codigo_predial,
@@ -1165,7 +1499,10 @@ async function buildLookupFullResultPayload(lookupId) {
        from catastrox_clean.v_predios_enriquecidos p
        where ST_Covers(
          p.geom,
-         ST_SetSRID(ST_Transform(ST_SetSRID(ST_Point($1, $2), 4326), $3), 9377)
+            ST_Transform(
+              ST_SetSRID(ST_Point($1, $2), 4326),
+              '${CATASTROX_ORIGEN_NACIONAL_PROJ}'
+            )
        )
        order by p.area_terreno_m2 asc nulls last
        limit 1`;
@@ -1205,7 +1542,21 @@ async function buildLookupFullResultPayload(lookupId) {
 
   if (preview.codigoPredial) {
     const cleanResult = await query(CLEAN_FULL_RESULT_QUERY, [preview.codigoPredial, CATASTROX_ORIGEN_NACIONAL_PROJ]);
-    if (cleanResult.rows[0] && isValidPredioGeometry(cleanResult.rows[0].geometry)) {
+    if (preview.searchType === 'code' && isCanonicalPredialCode(preview.codigoPredial)) {
+      const exactResolution = resolveExactFullResultByCodeRows(cleanResult.rows, preview.codigoPredial);
+      if (exactResolution.outcome === 'resolved' && exactResolution.row && isValidPredioGeometry(exactResolution.row.geometry)) {
+        source = 'clean';
+        row = exactResolution.row;
+      } else if (exactResolution.outcome === 'ambiguous') {
+        return {
+          errorStatus: 409,
+          payload: {
+            found: false,
+            status: 'REQUIRES_TECHNICAL_VALIDATION',
+          },
+        };
+      }
+    } else if (cleanResult.rows[0] && isValidPredioGeometry(cleanResult.rows[0].geometry)) {
       source = 'clean';
       row = cleanResult.rows[0];
     }
