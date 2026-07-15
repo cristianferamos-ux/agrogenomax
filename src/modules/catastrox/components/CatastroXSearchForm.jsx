@@ -178,8 +178,8 @@ export default function CatastroXSearchForm() {
     <div className="catastrox-search-stack">
       <form className="catastrox-card catastrox-search-toolbar" onSubmit={handleSubmit}>
         <div className="catastrox-section-heading">
-          <span>Consulta predial</span>
-          <h2>{searchMode === SEARCH_MODE.CADASTRAL_CODE ? 'Busque por número predial' : 'Ingrese coordenadas o capture su ubicación actual'}</h2>
+          <span>Método de consulta</span>
+          <h2>{searchMode === SEARCH_MODE.CADASTRAL_CODE ? 'Busque con número predial' : 'Use coordenadas o su ubicación actual'}</h2>
         </div>
         <p className="catastrox-copy">
           {searchMode === SEARCH_MODE.CADASTRAL_CODE
@@ -207,8 +207,8 @@ export default function CatastroXSearchForm() {
           </button>
         </div>
         {searchMode === SEARCH_MODE.CADASTRAL_CODE ? (
-          <div className="catastrox-search-toolbar-row is-code">
-            <label className="catastrox-field catastrox-search-mode-panel">
+          <div className="catastrox-search-mode-panel catastrox-search-mode-panel--code">
+            <label className="catastrox-field">
               <span>Número predial</span>
               <input
                 type="text"
@@ -225,32 +225,34 @@ export default function CatastroXSearchForm() {
               />
               <small className="catastrox-search-field-help">{CADASTRAL_CODE_HELP}</small>
             </label>
-            <button type="submit" className="catastrox-button" disabled={loading}>
+            <button type="submit" className="catastrox-button catastrox-search-submit" disabled={loading}>
               <Search size={18} /> {loading ? 'Buscando...' : 'Buscar predio'}
             </button>
           </div>
         ) : (
-          <div className="catastrox-search-toolbar-row">
-            <button type="button" className="catastrox-button is-secondary" onClick={handleUseCurrentLocation} disabled={locating || loading}>
+          <div className="catastrox-search-coordinates-layout">
+            <button type="button" className="catastrox-button is-secondary catastrox-search-geo" onClick={handleUseCurrentLocation} disabled={locating || loading}>
               <LocateFixed size={18} /> {locating ? 'Ubicando...' : 'Usar mi ubicación actual'}
             </button>
-            <label className="catastrox-field">
-              <span>Latitud</span>
-              <input
-                placeholder="Ej. 1.258651"
-                value={draftCoords.lat}
-                onChange={(event) => updateDraftCoords({ ...draftCoords, lat: event.target.value })}
-              />
-            </label>
-            <label className="catastrox-field">
-              <span>Longitud</span>
-              <input
-                placeholder="Ej. -75.821317"
-                value={draftCoords.lng}
-                onChange={(event) => updateDraftCoords({ ...draftCoords, lng: event.target.value })}
-              />
-            </label>
-            <button type="submit" className="catastrox-button" disabled={loading}>
+            <div className="catastrox-search-toolbar-row catastrox-search-toolbar-row--coordinates">
+              <label className="catastrox-field">
+                <span>Latitud</span>
+                <input
+                  placeholder="Ej. 1.258651"
+                  value={draftCoords.lat}
+                  onChange={(event) => updateDraftCoords({ ...draftCoords, lat: event.target.value })}
+                />
+              </label>
+              <label className="catastrox-field">
+                <span>Longitud</span>
+                <input
+                  placeholder="Ej. -75.821317"
+                  value={draftCoords.lng}
+                  onChange={(event) => updateDraftCoords({ ...draftCoords, lng: event.target.value })}
+                />
+              </label>
+            </div>
+            <button type="submit" className="catastrox-button catastrox-search-submit" disabled={loading}>
               <Search size={18} /> {loading ? 'Consultando...' : 'Consultar predio'}
             </button>
           </div>

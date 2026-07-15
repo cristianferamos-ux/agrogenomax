@@ -12,9 +12,9 @@
   position: sticky;
   top: 0;
   z-index: 30;
-  display: grid;
-  grid-template-columns: auto 1fr auto;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 1rem;
   padding: 1rem clamp(1rem, 4vw, 3rem);
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
@@ -23,15 +23,12 @@
 }
 
 .catastrox-back,
-.catastrox-brand,
-.catastrox-header nav,
-.catastrox-header nav a {
+.catastrox-brand {
   display: flex;
   align-items: center;
 }
 
-.catastrox-back,
-.catastrox-header nav a {
+.catastrox-back {
   gap: 0.45rem;
   color: #c9d8ea;
   font-weight: 800;
@@ -39,18 +36,17 @@
   transition: color 180ms ease, background 180ms ease;
 }
 
-.catastrox-back:hover,
-.catastrox-header nav a:hover {
+.catastrox-back:hover {
   color: #9cff1a;
 }
 
 .catastrox-brand {
-  justify-self: center;
-  gap: 0.7rem;
+  flex: 0 0 auto;
+  gap: 0.8rem;
   text-decoration: none;
 }
 
-.catastrox-brand span {
+.catastrox-brand-mark {
   display: grid;
   place-items: center;
   width: 2.5rem;
@@ -63,6 +59,8 @@
 }
 
 .catastrox-brand strong {
+  display: inline-flex;
+  align-items: baseline;
   color: #ffffff;
   font-family: Space Grotesk, Inter, sans-serif;
   font-size: 1.1rem;
@@ -123,6 +121,11 @@
   gap: 1rem;
 }
 
+.catastrox-page-search {
+  max-width: 1380px;
+  gap: 1rem;
+}
+
 .catastrox-page-actions-shell {
   padding-top: 0;
 }
@@ -158,7 +161,7 @@
 }
 
 .catastrox-page-title h1 {
-  font-size: clamp(2.2rem, 5vw, 4.6rem);
+  font-size: clamp(2.6rem, 5vw, 4.1rem);
 }
 
 .catastrox-page-title p,
@@ -168,6 +171,15 @@
   margin: 0;
   color: #c9d8ea;
   line-height: 1.7;
+}
+
+.catastrox-page-search .catastrox-page-title {
+  gap: 0.4rem;
+}
+
+.catastrox-page-search .catastrox-page-title p {
+  max-width: 72ch;
+  line-height: 1.6;
 }
 
 .catastrox-hero {
@@ -747,21 +759,31 @@
 
 .catastrox-search-stack {
   display: grid;
-  gap: 1rem;
+  grid-template-columns: minmax(340px, 0.84fr) minmax(0, 1.06fr);
+  gap: 1.25rem;
+  align-items: stretch;
 }
 
 .catastrox-search-toolbar {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 1rem;
+  min-height: 430px;
 }
 
 .catastrox-search-mode-switch {
   display: inline-flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+  width: 100%;
 }
 
 .catastrox-search-mode-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 220px;
+  min-width: 0;
   border: 1px solid rgba(0, 245, 255, 0.22);
   background: rgba(5, 18, 14, 0.82);
   color: rgba(233, 244, 240, 0.88);
@@ -793,13 +815,19 @@
 
 .catastrox-search-toolbar-row {
   display: grid;
-  grid-template-columns: minmax(220px, auto) repeat(2, minmax(180px, 1fr)) minmax(200px, auto);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.85rem;
   align-items: end;
 }
 
-.catastrox-search-toolbar-row.is-code {
-  grid-template-columns: minmax(0, 1fr) minmax(220px, auto);
+.catastrox-search-coordinates-layout,
+.catastrox-search-mode-panel--code {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.catastrox-search-mode-panel--code {
+  align-content: start;
 }
 
 .catastrox-search-mode-panel {
@@ -815,6 +843,72 @@
 
 .catastrox-map-instructions {
   gap: 0.85rem;
+}
+
+.catastrox-search-toolbar .catastrox-button,
+.catastrox-search-toolbar .catastrox-field,
+.catastrox-search-toolbar .catastrox-field input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.catastrox-search-submit,
+.catastrox-search-geo {
+  width: 100%;
+}
+
+.catastrox-search-stack > .catastrox-map {
+  min-height: 430px;
+  height: 100%;
+}
+
+@media (min-width: 981px) and (min-height: 720px) {
+  .catastrox-page-search {
+    min-height: calc(100svh - 5rem);
+    grid-template-rows: auto minmax(390px, 1fr);
+    gap: 0.8rem;
+    padding-top: clamp(0.75rem, 1.8vw, 1.25rem);
+    padding-bottom: clamp(0.75rem, 1.8vw, 1.25rem);
+  }
+
+  .catastrox-page-search .catastrox-page-title {
+    gap: 0.3rem;
+  }
+
+  .catastrox-page-search .catastrox-page-title p {
+    line-height: 1.5;
+  }
+
+  .catastrox-search-stack {
+    min-height: 0;
+    height: 100%;
+    gap: 1rem;
+  }
+
+  .catastrox-search-toolbar {
+    min-height: 0;
+    height: 100%;
+    gap: 0.85rem;
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+  }
+
+  .catastrox-search-stack > .catastrox-map {
+    min-height: 0;
+    height: 100%;
+  }
+
+  .catastrox-search-stack > .catastrox-map,
+  .catastrox-search-toolbar {
+    min-height: clamp(390px, 100%, 470px);
+  }
+
+  .catastrox-map-canvas,
+  .catastrox-leaflet-map {
+    min-height: 0;
+    height: 100%;
+  }
 }
 
 .catastrox-leaflet-map {
@@ -1052,16 +1146,12 @@ iframe[src*="wompi.co/p/"] {
 
 @media (max-width: 980px) {
   .catastrox-header {
-    grid-template-columns: 1fr;
-    justify-items: start;
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .catastrox-brand {
     justify-self: start;
-  }
-
-  .catastrox-header nav {
-    justify-content: flex-start;
   }
 
   .catastrox-hero,
@@ -1069,15 +1159,21 @@ iframe[src*="wompi.co/p/"] {
   .catastrox-result-layout,
   .catastrox-search,
   .catastrox-form,
-  .catastrox-search-toolbar-row {
+  .catastrox-search-toolbar-row,
+  .catastrox-search-stack {
     grid-template-columns: 1fr;
+  }
+
+  .catastrox-search-toolbar {
+    min-height: auto;
   }
 
   .catastrox-result-map-shell .catastrox-protected-preview-frame {
     min-height: 420px;
   }
 
-  .catastrox-search-toolbar-row.is-code {
+  .catastrox-search-toolbar-row.is-code,
+  .catastrox-search-toolbar-row--coordinates {
     grid-template-columns: 1fr;
   }
 
@@ -1095,11 +1191,11 @@ iframe[src*="wompi.co/p/"] {
 
   .catastrox-map,
   .catastrox-leaflet-map {
-    min-height: 440px;
+    min-height: 360px;
   }
 
   .catastrox-map-canvas {
-    min-height: 440px;
+    min-height: 360px;
   }
 }
 
@@ -1126,6 +1222,10 @@ iframe[src*="wompi.co/p/"] {
 
   .catastrox-leaflet-map {
     min-height: 360px;
+  }
+
+  .catastrox-page-title h1 {
+    font-size: clamp(2.3rem, 10vw, 3.2rem);
   }
 
   .catastrox-map-canvas {
