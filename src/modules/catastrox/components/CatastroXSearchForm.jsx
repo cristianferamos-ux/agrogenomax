@@ -104,6 +104,15 @@ export default function CatastroXSearchForm() {
 
       navigate('/catastrox/resultado/no-found');
     } catch (error) {
+      if (typeof window !== 'undefined' && ['127.0.0.1', 'localhost'].includes(window.location.hostname)) {
+        console.error('[CatastroX lookup failure]', JSON.stringify({
+          endpoint: '/api/catastrox/lookup',
+          status: error?.status || 0,
+          code: error?.code || 'UNKNOWN',
+          message: error?.message || 'Error sin mensaje',
+          responseBody: error?.payload || null,
+        }));
+      }
       if (error instanceof CatastroxApiError) {
         setErrorMessage(getPublicLookupErrorMessage(error));
       } else {

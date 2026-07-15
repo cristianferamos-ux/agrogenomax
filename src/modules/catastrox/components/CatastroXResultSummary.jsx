@@ -16,18 +16,24 @@ function isUrbanZona(predio) {
   return /urbano/i.test(String(predio?.tipoZona || predio?.zona || ''));
 }
 
-// Regla 6.5: predios urbanos con area < 10.000 m2 muestran solo m2; >= 10.000 m2 muestran
-// m2 como principal y ha como complementaria. Rural conserva ha + m2 por separado.
+function formatZonaDisplay(predio) {
+  const rawValue = predio?.tipoZona || predio?.zona;
+  if (rawValue === null || rawValue === undefined || rawValue === '') return 'No registrada';
+  const value = String(rawValue).trim();
+  if (!value) return 'No registrada';
+  return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
+}
+
+// Regla única de presentación de área:
+// - areaM2 < 10.000: solo m²
+// - areaM2 >= 10.000: ha como unidad principal y m² como complemento
 function buildAreaRows(predio) {
-  if (isUrbanZona(predio)) {
-    const areaRows = [['Área total', formatMetric(predio.areaM2, 'm²')]];
-    if (Number(predio.areaM2) >= 10000) {
-      areaRows.push(['Área total (ha)', formatMetric(predio.areaHa, 'ha')]);
-    }
-    return areaRows;
+  if (Number(predio.areaM2) < 10000) {
+    return [['Área total', formatMetric(predio.areaM2, 'm²')]];
   }
+
   return [
-    ['Área total en hectáreas', formatMetric(predio.areaHa, 'ha')],
+    ['Área total', formatMetric(predio.areaHa, 'ha')],
     ['Área total en m²', formatMetric(predio.areaM2, 'm²')],
   ];
 }
@@ -54,6 +60,7 @@ export default function CatastroXResultSummary({ predio, mode = 'free' }) {
       ? [
           ['Municipio', formatText(predio.municipio)],
           ['Departamento', formatText(predio.departamento)],
+          ['Zona', formatZonaDisplay(predio)],
         ]
       : [
           ['Municipio', formatText(predio.municipio)],
@@ -64,7 +71,7 @@ export default function CatastroXResultSummary({ predio, mode = 'free' }) {
             ? [[veredaDisplay.secondaryLabel, veredaDisplay.secondaryValue]]
             : []),
           ...buildAreaRows(predio),
-          ['Perímetro', formatMetric(predio.perimetroM, 'm')],
+          ['Perímetro cartográfico total', formatMetric(predio.perimetroM, 'm')],
           ['Código predial', formatText(predio.codigoPredial)],
           ['Código anterior', formatText(predio.codigoAnterior)],
           ['Estado predial', formatText(predio.estadoPredial)],

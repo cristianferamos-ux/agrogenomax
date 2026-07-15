@@ -1,9 +1,7 @@
 import { CATASTROX_STATUS } from '../data/catastroxMockData.js';
 import { getCatastroxResultById, lookupPredioMock } from './catastroxMockService.js';
 
-const CONFIGURED_API_BASE = import.meta.env.VITE_API_URL || import.meta.env.VITE_AGX_API_URL || '';
-const LOCAL_API_BASE = '/api';
-const LOCAL_DEV_API_BASES = ['http://127.0.0.1:3001/api', 'http://localhost:3001/api'];
+const API_BASE = import.meta.env.VITE_API_URL || import.meta.env.VITE_AGX_API_URL || '/api';
 const AUDIT_DOWNLOADS_ENABLED = String(import.meta.env.VITE_CATASTROX_AUDIT_DOWNLOADS || '').toLowerCase() === 'true';
 
 export const CATASTROX_LOOKUP_STORAGE_KEY = 'catastrox_last_lookup';
@@ -34,7 +32,7 @@ function normalizeApiBase(value) {
 }
 
 function buildApiUrl(apiBase, path) {
-  const normalizedBase = normalizeApiBase(apiBase || LOCAL_API_BASE);
+  const normalizedBase = normalizeApiBase(apiBase || API_BASE);
   return `${normalizedBase}${path}`;
 }
 
@@ -42,9 +40,9 @@ function buildApiResourceUrl(apiBase, resourcePath, fallbackPath) {
   const resource = cleanText(resourcePath) || fallbackPath;
   if (/^https?:\/\//i.test(resource)) return resource;
 
-  const normalizedBase = normalizeApiBase(apiBase || LOCAL_API_BASE);
+  const normalizedBase = normalizeApiBase(apiBase || API_BASE);
   if (resource.startsWith('/api/')) {
-    if (normalizedBase === LOCAL_API_BASE) return resource;
+    if (normalizedBase === '/api') return resource;
     return `${normalizedBase.replace(/\/api$/, '')}${resource}`;
   }
 
@@ -57,43 +55,27 @@ function isLocalHostname() {
   return ['localhost', '127.0.0.1'].includes(window.location.hostname);
 }
 
-function runtimeApiBaseFromQuery() {
-  if (typeof window === 'undefined') return '';
-
-  const params = new URLSearchParams(window.location.search);
-  const urlParam = params.get('agx_api_url') || params.get('apiUrl');
-  if (!urlParam) return '';
-
-  const normalized = normalizeApiBase(urlParam);
-  window.localStorage?.setItem('agx_api_url', normalized);
-  return normalized;
-}
-
-function runtimeApiBaseFromStorage() {
-  if (typeof window === 'undefined') return '';
-  return normalizeApiBase(window.localStorage?.getItem('agx_api_url'));
-}
-
 function getApiBaseCandidates() {
-  const configuredApiBase = normalizeApiBase(CONFIGURED_API_BASE);
-  const queryApiBase = runtimeApiBaseFromQuery();
-  const storageApiBase = runtimeApiBaseFromStorage();
-  const candidates = [];
+  const primaryBase = normalizeApiBase(API_BASE);
+  const candidates = [primaryBase];
 
-  if (queryApiBase) candidates.push(queryApiBase);
-  if (configuredApiBase) candidates.push(configuredApiBase);
-  if (storageApiBase && storageApiBase !== queryApiBase && storageApiBase !== configuredApiBase) {
-    candidates.push(storageApiBase);
-  }
-
-  if (isLocalHostname()) {
-    candidates.push(LOCAL_API_BASE);
-    candidates.push(...LOCAL_DEV_API_BASES);
-  } else if (!configuredApiBase) {
+  if (isLocalHostname() && primaryBase !== '/api') {
     candidates.push('/api');
   }
 
   return [...new Set(candidates.filter(Boolean))];
+}
+
+function logLookupFailure(error, responseBody = null) {
+  if (!import.meta.env.DEV) return;
+  console.error('[CatastroX lookup failure]', {
+    endpoint: error?.url || null,
+    status: error?.status || 0,
+    code: error?.code || 'UNKNOWN',
+    message: error?.message || 'Error sin mensaje',
+    responseBody,
+    error: error?.payload || null,
+  });
 }
 
 function parseCoordinate(value, label) {
@@ -174,6 +156,8 @@ function buildRealPredio(predio = {}, coords, queryPoint, apiBase, payload = {})
     estadoLabel: 'Predio identificado',
     municipio: cleanText(predio.municipio) || cleanText(payload.municipio) || null,
     departamento: cleanText(predio.departamento) || cleanText(payload.departamento) || null,
+    zona: cleanText(predio.zona) || cleanText(predio.tipoZona) || cleanText(payload.zona) || cleanText(payload.tipoZona) || null,
+    tipoZona: cleanText(predio.tipoZona) || cleanText(predio.zona) || cleanText(payload.tipoZona) || cleanText(payload.zona) || null,
     gestor: cleanText(predio.gestor) || cleanText(payload.gestor) || null,
     estadoPredial:
       predio.estadoPredial ||
@@ -218,6 +202,7 @@ function buildAuditLookup(payload, routeId) {
   );
   const codigoAnterior = cleanText(predio.codigoAnterior || predio.codigo_anterior || storedPredio.codigoAnterior);
   const geometry = predio.geometry || predio.polygonGeoJson?.geometry || predio.polygonGeoJson || null;
+  const projectedGeometry = predio.projectedGeometry || predio.projected_geometry || null;
 
   return {
     found: true,
@@ -240,6 +225,7 @@ function buildAuditLookup(payload, routeId) {
       codigo_predial: codigoPredial || predio.id || routeId,
       codigoAnterior: codigoAnterior || 'No disponible',
       codigo_anterior: codigoAnterior || '',
+      projectedGeometry,
       geometry,
       polygonGeoJson: predio.polygonGeoJson || geometry,
       estado: CATASTROX_STATUS.IDENTIFICADO,
@@ -310,6 +296,7 @@ export function mergeAuditFullResultWithAdvanced(fullResult, advancedPayload) {
 
   // Geometria: siempre viene de fullResult (audit/full-result). advanced/lookup nunca la trae.
   const geometry = fullPredio.geometry || fullPredio.polygonGeoJson?.geometry || fullPredio.polygonGeoJson || null;
+  const projectedGeometry = fullPredio.projectedGeometry || fullPredio.projected_geometry || null;
 
   // Codigo predial: prioriza advanced (catastrox_clean), luego fullResult. Nunca routeId/lookup_id.
   const codigoPredial = cleanText(
@@ -339,6 +326,7 @@ export function mergeAuditFullResultWithAdvanced(fullResult, advancedPayload) {
       areaHa: Number(fullPredio.areaHa ?? 0),
       areaM2: Number(fullPredio.areaM2 ?? 0),
       perimetroM: Number(fullPredio.perimetroM ?? 0),
+      projectedGeometry,
       geometry,
       polygonGeoJson: fullPredio.polygonGeoJson || geometry,
       source: 'audit-local-advanced',
@@ -501,100 +489,96 @@ export async function lookupPredio({ lat, lng }) {
   const parsedLat = parseCoordinate(lat, 'lat');
   const parsedLng = parseCoordinate(lng, 'lng');
   const coords = { lat: parsedLat, lng: parsedLng };
-  let lastError = null;
+  const apiBase = normalizeApiBase(API_BASE);
+  const url = `${apiBase}/catastrox/lookup`;
+  let response;
 
-  for (const apiBase of getApiBaseCandidates()) {
-    const url = `${apiBase}/catastrox/lookup`;
-    let response;
-
-    try {
-      response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lat: parsedLat, lng: parsedLng }),
-      });
-    } catch (error) {
-      lastError = new CatastroxApiError('No fue posible conectar con el servicio catastral.', {
-        code: 'API_UNAVAILABLE',
-        url,
-        payload: error,
-      });
-      continue;
-    }
-
-    const contentType = response.headers.get('content-type') || '';
-    const payload = contentType.includes('application/json') ? await response.json() : null;
-
-    if (response.status === 404) {
-      if (isLookupNotFoundPayload(payload)) {
-        const notFoundLookup = buildNotFoundLookup(coords, payload);
-        persistLookupResult(notFoundLookup);
-        return notFoundLookup;
-      }
-
-      lastError = new CatastroxApiError('El servicio catastral no respondió con un resultado válido.', {
-        code: 'ENDPOINT_NOT_FOUND',
-        status: response.status,
-        url,
-        payload,
-      });
-      continue;
-    }
-
-    if (!response.ok) {
-      throw new CatastroxApiError(payload?.error || 'Error al consultar CatastroX.', {
-        code: response.status >= 500 ? 'API_ERROR' : 'BAD_REQUEST',
-        status: response.status,
-        url,
-        payload,
-      });
-    }
-
-    if (!payload || typeof payload !== 'object') {
-      lastError = new CatastroxApiError('El servicio catastral no respondió con un resultado válido.', {
-        code: 'INVALID_LOOKUP_RESPONSE',
-        status: response.status,
-        url,
-        payload,
-      });
-      continue;
-    }
-
-    const predioPayload = payload.predio || {};
-    const normalized = {
-      found: true,
-      status: payload?.status || 'FOUND',
-      queryPoint: normalizeQueryPoint(payload?.queryPoint, coords),
-      municipio: cleanText(payload?.municipio) || cleanText(predioPayload?.municipio) || null,
-      departamento: cleanText(payload?.departamento) || cleanText(predioPayload?.departamento) || null,
-      gestor: cleanText(payload?.gestor) || cleanText(predioPayload?.gestor) || null,
-      lookup_id: payload.lookup_id || predioPayload?.lookup_id || null,
-      routeId: payload.routeId || payload.lookup_id || predioPayload?.routeId,
-      source: 'api',
-      canPurchase: payload?.canPurchase === true,
-      commercialMessage: payload?.commercialMessage || payload?.message || '',
-      legalNotice: payload?.legalNotice || '',
-      coverage: payload?.coverage || null,
-      predio: buildRealPredio(predioPayload, coords, payload?.queryPoint, apiBase, payload),
-    };
-    persistLookupResult(normalized);
-    return normalized;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lat: parsedLat, lng: parsedLng }),
+    });
+  } catch (error) {
+    const apiError = new CatastroxApiError('No fue posible conectar con el servicio catastral.', {
+      code: 'API_UNAVAILABLE',
+      url,
+      payload: error,
+    });
+    logLookupFailure(apiError);
+    throw apiError;
   }
 
-  throw lastError || new CatastroxApiError('No fue posible conectar con el servicio catastral.', { code: 'API_UNAVAILABLE' });
+  const contentType = response.headers.get('content-type') || '';
+  const payload = contentType.includes('application/json') ? await response.json() : null;
+
+  if (response.status === 404) {
+    if (isLookupNotFoundPayload(payload)) {
+      const notFoundLookup = buildNotFoundLookup(coords, payload);
+      persistLookupResult(notFoundLookup);
+      return notFoundLookup;
+    }
+
+    const apiError = new CatastroxApiError('El servicio catastral no respondió con un resultado válido.', {
+      code: 'ENDPOINT_NOT_FOUND',
+      status: response.status,
+      url,
+      payload,
+    });
+    logLookupFailure(apiError, payload);
+    throw apiError;
+  }
+
+  if (!response.ok) {
+    const apiError = new CatastroxApiError(payload?.error || 'Error al consultar CatastroX.', {
+      code: response.status >= 500 ? 'API_ERROR' : 'BAD_REQUEST',
+      status: response.status,
+      url,
+      payload,
+    });
+    logLookupFailure(apiError, payload);
+    throw apiError;
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    const apiError = new CatastroxApiError('El servicio catastral no respondió con un resultado válido.', {
+      code: 'INVALID_LOOKUP_RESPONSE',
+      status: response.status,
+      url,
+      payload,
+    });
+    logLookupFailure(apiError, payload);
+    throw apiError;
+  }
+
+  const predioPayload = payload.predio || {};
+  const normalized = {
+    found: true,
+    status: payload?.status || 'FOUND',
+    queryPoint: normalizeQueryPoint(payload?.queryPoint, coords),
+    municipio: cleanText(payload?.municipio) || cleanText(predioPayload?.municipio) || null,
+    departamento: cleanText(payload?.departamento) || cleanText(predioPayload?.departamento) || null,
+    gestor: cleanText(payload?.gestor) || cleanText(predioPayload?.gestor) || null,
+    lookup_id: payload.lookup_id || predioPayload?.lookup_id || null,
+    routeId: payload.routeId || payload.lookup_id || predioPayload?.routeId,
+    source: 'api',
+    canPurchase: payload?.canPurchase === true,
+    commercialMessage: payload?.commercialMessage || payload?.message || '',
+    legalNotice: payload?.legalNotice || '',
+    coverage: payload?.coverage || null,
+    predio: buildRealPredio(predioPayload, coords, payload?.queryPoint, apiBase, payload),
+  };
+  persistLookupResult(normalized);
+  return normalized;
 }
 
-export async function fetchCatastroxAuditFullResult(routeId) {
-  if (!isCatastroxAuditDownloadsAvailable()) {
-    throw new CatastroxApiError('El modo auditoría local no está habilitado.', {
-      code: 'AUDIT_DOWNLOADS_DISABLED',
-      status: 404,
-    });
+async function fetchCatastroxFullResultByPath(routeId, pathBuilder, unavailableMessage, disabledError = null) {
+  if (disabledError) {
+    throw disabledError;
   }
-
   const lookupId = String(routeId || '').trim();
   if (!lookupId) {
-    throw new CatastroxApiError('No hay identificador de consulta para auditoría.', {
+    throw new CatastroxApiError('No hay identificador de consulta para generar entregables.', {
       code: 'MISSING_LOOKUP_ID',
       status: 400,
     });
@@ -603,7 +587,7 @@ export async function fetchCatastroxAuditFullResult(routeId) {
   let lastError = null;
 
   for (const apiBase of getApiBaseCandidates()) {
-    const url = `${apiBase}/catastrox/audit/lookups/${encodeURIComponent(lookupId)}/full-result`;
+    const url = `${apiBase}${pathBuilder(lookupId)}`;
     let response;
 
     try {
@@ -612,8 +596,8 @@ export async function fetchCatastroxAuditFullResult(routeId) {
         headers: { 'Accept': 'application/json' },
       });
     } catch (error) {
-      lastError = new CatastroxApiError('No fue posible conectar con el endpoint local de auditoría.', {
-        code: 'AUDIT_API_UNAVAILABLE',
+      lastError = new CatastroxApiError(unavailableMessage, {
+        code: 'FULL_RESULT_API_UNAVAILABLE',
         url,
         payload: error,
       });
@@ -624,8 +608,8 @@ export async function fetchCatastroxAuditFullResult(routeId) {
     const payload = contentType.includes('application/json') ? await response.json() : null;
 
     if (!response.ok) {
-      lastError = new CatastroxApiError(payload?.error || 'Auditoría local no disponible para esta consulta.', {
-        code: payload?.status || 'AUDIT_API_ERROR',
+      lastError = new CatastroxApiError(payload?.error || 'No fue posible cargar el detalle completo del predio para generar entregables.', {
+        code: payload?.status || 'FULL_RESULT_API_ERROR',
         status: response.status,
         url,
         payload,
@@ -636,9 +620,97 @@ export async function fetchCatastroxAuditFullResult(routeId) {
     return buildAuditLookup(payload, lookupId);
   }
 
-  throw lastError || new CatastroxApiError('No fue posible cargar datos completos de auditoría.', {
-    code: 'AUDIT_API_UNAVAILABLE',
+  throw lastError || new CatastroxApiError('No fue posible cargar el detalle completo del predio.', {
+    code: 'FULL_RESULT_API_UNAVAILABLE',
   });
+}
+
+export async function fetchCatastroxLookupFullResult(routeId) {
+  return fetchCatastroxFullResultByPath(
+    routeId,
+    (lookupId) => `/catastrox/lookups/${encodeURIComponent(lookupId)}/full-result`,
+    'No fue posible conectar con el endpoint local de detalle del predio.',
+  );
+}
+
+export async function fetchCatastroxAuditFullResult(routeId) {
+  return fetchCatastroxFullResultByPath(
+    routeId,
+    (lookupId) => `/catastrox/audit/lookups/${encodeURIComponent(lookupId)}/full-result`,
+    'No fue posible conectar con el endpoint local de auditoría.',
+    !isCatastroxAuditDownloadsAvailable()
+      ? new CatastroxApiError('El modo auditoría local no está habilitado.', {
+          code: 'AUDIT_DOWNLOADS_DISABLED',
+          status: 404,
+        })
+      : null,
+  );
+}
+
+function resolveLookupCoordinates(...candidates) {
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    if (Array.isArray(candidate) && candidate.length >= 2) {
+      const [lat, lng] = candidate;
+      if (Number.isFinite(Number(lat)) && Number.isFinite(Number(lng))) {
+        return { lat: Number(lat), lng: Number(lng) };
+      }
+    }
+    if (typeof candidate === 'object') {
+      const lat = Number(candidate.lat ?? candidate.latitude);
+      const lng = Number(candidate.lng ?? candidate.lon ?? candidate.longitude);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        return { lat, lng };
+      }
+    }
+  }
+  return null;
+}
+
+export async function hydrateLookupForDeliverables(lookup, { useAuditEndpoint = false } = {}) {
+  const originalLookupId = cleanText(lookup?.routeId || lookup?.lookup_id || lookup?.predio?.routeId || lookup?.predio?.lookup_id || lookup?.predio?.id);
+  if (!originalLookupId) {
+    throw new CatastroxApiError('No hay identificador de consulta para preparar los entregables.', {
+      code: 'MISSING_LOOKUP_ID',
+      status: 400,
+    });
+  }
+
+  let fullLookup;
+  if (useAuditEndpoint) {
+    fullLookup = await fetchCatastroxAuditFullResult(originalLookupId);
+  } else {
+    try {
+      fullLookup = await fetchCatastroxLookupFullResult(originalLookupId);
+    } catch (error) {
+      if (!isCatastroxAuditDownloadsAvailable() || ![404, 502, 503].includes(Number(error?.status))) {
+        throw error;
+      }
+      fullLookup = await fetchCatastroxAuditFullResult(originalLookupId);
+    }
+  }
+
+  const coordinates = resolveLookupCoordinates(
+    lookup?.predio?.queryPoint,
+    lookup?.queryPoint,
+    lookup?.predio?.referencePoint,
+    fullLookup?.predio?.queryPoint,
+    fullLookup?.queryPoint,
+  );
+
+  if (!coordinates || !isCatastroxAuditDownloadsAvailable()) {
+    return fullLookup;
+  }
+
+  try {
+    const advancedLookup = await fetchCatastroxAdvancedLookup({
+      ...coordinates,
+      lookup_id: originalLookupId,
+    });
+    return mergeAuditFullResultWithAdvanced(fullLookup, advancedLookup);
+  } catch {
+    return fullLookup;
+  }
 }
 
 export async function fetchCatastroxAdvancedLookup({ lat, lng, lookup_id, routeId }) {

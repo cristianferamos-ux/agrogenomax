@@ -26,21 +26,23 @@ function buildLookupId() {
   return `cx-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function rememberLookupPreview(lookupId, predioId) {
+function rememberLookupPreview(lookupId, predioId, extras = null) {
   const existing = lookupPreviewStore.get(lookupId);
   lookupPreviewStore.set(lookupId, {
     ...(existing || {}),
     predioId,
+    ...(extras || {}),
     createdAt: Date.now(),
   });
 }
 
-function rememberAdvancedLookupPreview(lookupId, codigoPredial) {
+function rememberAdvancedLookupPreview(lookupId, codigoPredial, extras = null) {
   const existing = lookupPreviewStore.get(lookupId);
   lookupPreviewStore.set(lookupId, {
     ...(existing || {}),
     source: 'clean',
     codigoPredial,
+    ...(extras || {}),
     createdAt: Date.now(),
   });
 }
@@ -626,17 +628,21 @@ router.post('/lookup', async (req, res, next) => {
            ) as lookup_geom
          from gis.catastro_caqueta c
        ),
-       predio as (
-         select
-           c.id,
-           c.codigo_predial,
-           c.codigo_municipio,
-           c.codigo_departamento,
-           c.shape_area
-         from catastro c, punto p
-         where c.lookup_geom is not null
-           and not ST_IsEmpty(c.lookup_geom)
-           and (
+        predio as (
+          select
+            c.id,
+            c.codigo_predial,
+            c.codigo_municipio,
+            c.codigo_departamento,
+            c.shape_area,
+            clean.zona
+          from catastro c
+          cross join punto p
+          left join catastrox_clean.v_predios_enriquecidos clean
+            on clean.codigo_predial = c.codigo_predial
+          where c.lookup_geom is not null
+            and not ST_IsEmpty(c.lookup_geom)
+            and (
              ST_Covers(c.lookup_geom, p.geom)
              or ST_Intersects(c.lookup_geom, p.geom)
            )
@@ -675,7 +681,10 @@ router.post('/lookup', async (req, res, next) => {
       const municipio = normalizeMunicipioRow(row);
       const coverage = resolveCoverageStatus({ municipio, lat, lng });
       const lookupId = buildLookupId();
-      rememberLookupPreview(lookupId, row.id);
+      rememberLookupPreview(lookupId, row.id, {
+        codigoPredial: row.codigo || row.codigo_predial || null,
+        queryPoint: buildQueryPoint(lat, lng),
+      });
 
       res.json({
         lookup_id: lookupId,
@@ -684,6 +693,7 @@ router.post('/lookup', async (req, res, next) => {
         status: 'FOUND',
         municipio: toNullableString(row.mpnombre),
         departamento: toNullableString(row.depto),
+        tipoZona: toNullableString(row.zona),
         gestor: toNullableString(row.gestor),
         canPurchase: true,
         commercialMessage:
@@ -700,6 +710,7 @@ router.post('/lookup', async (req, res, next) => {
           routeId: lookupId,
           municipio: toNullableString(row.mpnombre),
           departamento: toNullableString(row.depto),
+          tipoZona: toNullableString(row.zona),
           gestor: toNullableString(row.gestor),
           estadoPredial:
             'Predio identificado. Información detallada disponible únicamente al activar un paquete.',
@@ -730,7 +741,9 @@ router.post('/lookup', async (req, res, next) => {
       const municipio = await findMunicipioByPoint(lng, lat);
       const coverage = municipio ? resolveCoverageStatus({ municipio, lat, lng }) : null;
       const lookupId = buildLookupId();
-      rememberAdvancedLookupPreview(lookupId, cleanPredio.codigo_predial);
+      rememberAdvancedLookupPreview(lookupId, cleanPredio.codigo_predial, {
+        queryPoint: buildQueryPoint(lat, lng),
+      });
 
       res.json({
         lookup_id: lookupId,
@@ -739,6 +752,7 @@ router.post('/lookup', async (req, res, next) => {
         status: 'FOUND',
         municipio: toNullableString(municipio?.municipio),
         departamento: toNullableString(municipio?.departamento),
+        tipoZona: toNullableString(cleanPredio.zona),
         gestor: toNullableString(municipio?.gestorCatastral),
         canPurchase: true,
         commercialMessage:
@@ -755,6 +769,7 @@ router.post('/lookup', async (req, res, next) => {
           routeId: lookupId,
           municipio: toNullableString(municipio?.municipio),
           departamento: toNullableString(municipio?.departamento),
+          tipoZona: toNullableString(cleanPredio.zona),
           gestor: toNullableString(municipio?.gestorCatastral),
           estadoPredial:
             'Predio identificado. Información detallada disponible únicamente al activar un paquete.',
@@ -824,49 +839,77 @@ router.get('/lookups/:lookupId/preview-map', async (req, res, next) => {
 
     const previewResult = preview.source === 'clean'
       ? await query(
-          `select
-             ST_AsGeoJSON(
-               ST_SimplifyPreserveTopology(
-                 ST_Transform(
-                   ST_Multi(
-                     ST_CollectionExtract(
-                       case
-                         when ST_IsValid(p.geom) then p.geom
-                         else ST_MakeValid(p.geom)
-                       end,
-                       3
-                     )
-                   ),
-                   $2,
-                   4326
-                 ),
-                 0.00003
-               )
-             )::json as preview_geometry
-           from catastrox_clean.v_predios_enriquecidos p
-           where p.codigo_predial = $1
-           limit 1`,
-          [preview.codigoPredial, CATASTROX_ORIGEN_NACIONAL_PROJ],
-        )
-      : await query(
-          `select
-             ST_AsGeoJSON(
-               ST_SimplifyPreserveTopology(
+          `with source as (
+             select
+               ST_Transform(
                  ST_Multi(
                    ST_CollectionExtract(
                      case
-                       when ST_IsValid(c.geom) then c.geom
-                       else ST_MakeValid(c.geom)
+                       when ST_IsValid(p.geom) then p.geom
+                       else ST_MakeValid(p.geom)
                      end,
                      3
                    )
                  ),
-                 0.00003
-               )
+                 $2,
+                 4326
+               ) as geom
+             from catastrox_clean.v_predios_enriquecidos p
+             where p.codigo_predial = $1
+             limit 1
+           ),
+           metrics as (
+             select
+               geom,
+               ST_Area(geom::geography) as area_m2,
+               ST_NPoints(geom) as point_count
+             from source
+             where geom is not null and not ST_IsEmpty(geom)
+           )
+           select
+             ST_AsGeoJSON(
+               case
+                 when area_m2 <= 2500 or point_count <= 12 then ST_SnapToGrid(geom, 0.00001)
+                 else ST_SimplifyPreserveTopology(ST_SnapToGrid(geom, 0.00003), 0.00003)
+               end,
+               5
              )::json as preview_geometry
-           from gis.catastro_caqueta c
-           where c.id = $1
-           limit 1`,
+           from metrics`,
+          [preview.codigoPredial, CATASTROX_ORIGEN_NACIONAL_PROJ],
+        )
+      : await query(
+          `with source as (
+             select
+               ST_Multi(
+                 ST_CollectionExtract(
+                   case
+                     when ST_IsValid(c.geom) then c.geom
+                     else ST_MakeValid(c.geom)
+                   end,
+                   3
+                 )
+               ) as geom
+             from gis.catastro_caqueta c
+             where c.id = $1
+             limit 1
+           ),
+           metrics as (
+             select
+               geom,
+               ST_Area(geom::geography) as area_m2,
+               ST_NPoints(geom) as point_count
+             from source
+             where geom is not null and not ST_IsEmpty(geom)
+           )
+           select
+             ST_AsGeoJSON(
+               case
+                 when area_m2 <= 2500 or point_count <= 12 then ST_SnapToGrid(geom, 0.00001)
+                 else ST_SimplifyPreserveTopology(ST_SnapToGrid(geom, 0.00003), 0.00003)
+               end,
+               5
+             )::json as preview_geometry
+           from metrics`,
           [preview.predioId],
         );
     const pathData = normalizeRingForSvg(previewResult.rows[0]?.preview_geometry);
@@ -911,14 +954,21 @@ router.get('/lookups/:lookupId/preview-geometry', async (req, res, next) => {
              where p.codigo_predial = $1
              limit 1
            ),
-           degraded as (
+           metrics as (
              select
-               ST_SimplifyPreserveTopology(
-                 ST_SnapToGrid(geom, 0.00008),
-                 0.00008
-               ) as geom
+               geom,
+               ST_Area(geom::geography) as area_m2,
+               ST_NPoints(geom) as point_count
              from source
              where geom is not null and not ST_IsEmpty(geom)
+           ),
+           degraded as (
+             select
+               case
+                 when area_m2 <= 2500 or point_count <= 12 then ST_SnapToGrid(geom, 0.00001)
+                 else ST_SimplifyPreserveTopology(ST_SnapToGrid(geom, 0.00008), 0.00008)
+               end as geom
+             from metrics
            )
            select ST_AsGeoJSON(geom, 5)::json as preview_geometry
            from degraded`,
@@ -940,14 +990,21 @@ router.get('/lookups/:lookupId/preview-geometry', async (req, res, next) => {
              where c.id = $1
              limit 1
            ),
-           degraded as (
+           metrics as (
              select
-               ST_SimplifyPreserveTopology(
-                 ST_SnapToGrid(geom, 0.00008),
-                 0.00008
-               ) as geom
+               geom,
+               ST_Area(geom::geography) as area_m2,
+               ST_NPoints(geom) as point_count
              from source
              where geom is not null and not ST_IsEmpty(geom)
+           ),
+           degraded as (
+             select
+               case
+                 when area_m2 <= 2500 or point_count <= 12 then ST_SnapToGrid(geom, 0.00001)
+                 else ST_SimplifyPreserveTopology(ST_SnapToGrid(geom, 0.00008), 0.00008)
+               end as geom
+             from metrics
            )
            select ST_AsGeoJSON(geom, 5)::json as preview_geometry
            from degraded`,
@@ -976,28 +1033,20 @@ router.get('/lookups/:lookupId/preview-geometry', async (req, res, next) => {
   }
 });
 
-router.get('/audit/lookups/:lookupId/full-result', async (req, res, next) => {
-  try {
-    if (!AUDIT_DOWNLOADS_ENABLED || !isLocalAuditRequest(req)) {
-      res.status(404).json({
-        found: false,
-        status: 'AUDIT_DOWNLOADS_DISABLED',
-      });
-      return;
-    }
+async function buildLookupFullResultPayload(lookupId) {
+  const preview = resolveLookupPreview(lookupId);
 
-    const lookupId = String(req.params?.lookupId || '').trim();
-    const preview = resolveLookupPreview(lookupId);
-
-    if (!preview) {
-      res.status(404).json({
+  if (!preview) {
+    return {
+      errorStatus: 404,
+      payload: {
         found: false,
         status: 'LOOKUP_NOT_FOUND',
-      });
-      return;
-    }
+      },
+    };
+  }
 
-    const CLEAN_FULL_RESULT_QUERY = `select
+  const CLEAN_FULL_RESULT_QUERY = `select
          p.codigo_predial,
          p.codigo_anterior,
          p.departamento_nombre,
@@ -1011,6 +1060,7 @@ router.get('/audit/lookups/:lookupId/full-result', async (req, res, next) => {
          p.manzana_codigo,
          p.area_terreno_m2,
          p.area_terreno_ha,
+         ST_Area(p.geom) as area_m2_exact,
          ST_Perimeter(p.geom) as perimetro_m,
          p.destino_economico_nombre,
          p.uso_1_nombre,
@@ -1021,6 +1071,22 @@ router.get('/audit/lookups/:lookupId/full-result', async (req, res, next) => {
          p.tipos_construccion_resumen,
          p.fuente,
          p.fecha_proceso,
+         ST_AsGeoJSON(
+           ST_SetSRID(
+             ST_Force2D(
+               ST_Multi(
+                 ST_CollectionExtract(
+                   case
+                     when ST_IsValid(p.geom) then p.geom
+                     else ST_MakeValid(p.geom)
+                   end,
+                   3
+                 )
+               )
+             ),
+             0
+           )
+         )::json as projected_geometry,
          ST_AsGeoJSON(
            ST_Transform(
              ST_Multi(
@@ -1037,10 +1103,74 @@ router.get('/audit/lookups/:lookupId/full-result', async (req, res, next) => {
            )
          )::json as geometry
        from catastrox_clean.v_predios_enriquecidos p
-       where p.codigo_predial = $1
+        where p.codigo_predial = $1
+        limit 1`;
+
+  const CLEAN_FULL_RESULT_BY_POINT_QUERY = `select
+         p.codigo_predial,
+         p.codigo_anterior,
+         p.departamento_nombre,
+         p.municipio_nombre,
+         p.zona,
+         p.nombre_predio,
+         p.direccion_real,
+         p.vereda_nombre,
+         p.barrio_nombre,
+         p.sector_codigo,
+         p.manzana_codigo,
+         p.area_terreno_m2,
+         p.area_terreno_ha,
+         ST_Area(p.geom) as area_m2_exact,
+         ST_Perimeter(p.geom) as perimetro_m,
+         p.destino_economico_nombre,
+         p.uso_1_nombre,
+         p.uso_2_nombre,
+         p.uso_3_nombre,
+         p.numero_construcciones,
+         p.area_construida_m2,
+         p.tipos_construccion_resumen,
+         p.fuente,
+         p.fecha_proceso,
+         ST_AsGeoJSON(
+           ST_SetSRID(
+             ST_Force2D(
+               ST_Multi(
+                 ST_CollectionExtract(
+                   case
+                     when ST_IsValid(p.geom) then p.geom
+                     else ST_MakeValid(p.geom)
+                   end,
+                   3
+                 )
+               )
+             ),
+             0
+           )
+         )::json as projected_geometry,
+         ST_AsGeoJSON(
+           ST_Transform(
+             ST_Multi(
+               ST_CollectionExtract(
+                 case
+                   when ST_IsValid(p.geom) then p.geom
+                   else ST_MakeValid(p.geom)
+                 end,
+                 3
+               )
+             ),
+             $3,
+             4326
+           )
+         )::json as geometry
+       from catastrox_clean.v_predios_enriquecidos p
+       where ST_Covers(
+         p.geom,
+         ST_SetSRID(ST_Transform(ST_SetSRID(ST_Point($1, $2), 4326), $3), 9377)
+       )
+       order by p.area_terreno_m2 asc nulls last
        limit 1`;
 
-    const LEGACY_FULL_RESULT_QUERY = `select
+  const LEGACY_FULL_RESULT_QUERY = `select
          c.id,
          c.codigo,
          c.codigo_anterior,
@@ -1049,16 +1179,18 @@ router.get('/audit/lookups/:lookupId/full-result', async (req, res, next) => {
          c.shape_area,
          c.shape_length,
          ST_AsGeoJSON(
-           ST_Multi(
-             ST_CollectionExtract(
+            ST_Multi(
+              ST_CollectionExtract(
                case
                  when ST_IsValid(c.geom) then c.geom
                  else ST_MakeValid(c.geom)
                end,
                3
              )
-           )
-         )::json as geometry,
+            )
+          )::json as geometry,
+         ST_Y(ST_PointOnSurface(c.geom)) as query_lat,
+         ST_X(ST_PointOnSurface(c.geom)) as query_lng,
          m.mpnombre,
          m.depto,
          m.gestor
@@ -1066,41 +1198,74 @@ router.get('/audit/lookups/:lookupId/full-result', async (req, res, next) => {
        left join gis.municipios_colombia m
          on m.mpcodigo = c.codigo_municipio
        where c.id = $1
-       limit 1`;
+        limit 1`;
 
-    let source = null;
-    let row = null;
+  let source = null;
+  let row = null;
 
-    if (preview.codigoPredial) {
-      const cleanResult = await query(CLEAN_FULL_RESULT_QUERY, [preview.codigoPredial, CATASTROX_ORIGEN_NACIONAL_PROJ]);
-      if (cleanResult.rows[0] && isValidPredioGeometry(cleanResult.rows[0].geometry)) {
-        source = 'clean';
-        row = cleanResult.rows[0];
-      }
+  if (preview.codigoPredial) {
+    const cleanResult = await query(CLEAN_FULL_RESULT_QUERY, [preview.codigoPredial, CATASTROX_ORIGEN_NACIONAL_PROJ]);
+    if (cleanResult.rows[0] && isValidPredioGeometry(cleanResult.rows[0].geometry)) {
+      source = 'clean';
+      row = cleanResult.rows[0];
     }
+  }
 
-    if (!row && preview.predioId) {
-      const legacyResult = await query(LEGACY_FULL_RESULT_QUERY, [preview.predioId]);
-      if (legacyResult.rows[0] && isValidPredioGeometry(legacyResult.rows[0].geometry)) {
-        source = 'legacy';
-        row = legacyResult.rows[0];
-      }
+  if (!row && preview.predioId) {
+    const legacyResult = await query(LEGACY_FULL_RESULT_QUERY, [preview.predioId]);
+    if (legacyResult.rows[0] && isValidPredioGeometry(legacyResult.rows[0].geometry)) {
+      source = 'legacy';
+      row = legacyResult.rows[0];
     }
+  }
 
-    if (!row) {
-      res.status(404).json({
+  if (
+    source === 'legacy'
+    && Number.isFinite(Number(preview?.queryPoint?.lng))
+    && Number.isFinite(Number(preview?.queryPoint?.lat))
+  ) {
+    const cleanPointResult = await query(CLEAN_FULL_RESULT_BY_POINT_QUERY, [
+      Number(preview.queryPoint.lng),
+      Number(preview.queryPoint.lat),
+      CATASTROX_ORIGEN_NACIONAL_PROJ,
+    ]);
+    if (cleanPointResult.rows[0] && isValidPredioGeometry(cleanPointResult.rows[0].geometry)) {
+      source = 'clean';
+      row = cleanPointResult.rows[0];
+    }
+  }
+
+  if (
+    source === 'legacy'
+    && Number.isFinite(Number(row?.query_lng))
+    && Number.isFinite(Number(row?.query_lat))
+  ) {
+    const cleanPointResult = await query(CLEAN_FULL_RESULT_BY_POINT_QUERY, [
+      Number(row.query_lng),
+      Number(row.query_lat),
+      CATASTROX_ORIGEN_NACIONAL_PROJ,
+    ]);
+    if (cleanPointResult.rows[0] && isValidPredioGeometry(cleanPointResult.rows[0].geometry)) {
+      source = 'clean';
+      row = cleanPointResult.rows[0];
+    }
+  }
+
+  if (!row) {
+    return {
+      errorStatus: 404,
+      payload: {
         found: false,
         status: 'FULL_RESULT_UNAVAILABLE',
-      });
-      return;
-    }
+      },
+    };
+  }
 
-    res.setHeader('Cache-Control', 'no-store');
-    res.json({
+  return {
+    errorStatus: null,
+    payload: {
       found: true,
-      status: 'AUDIT_FULL_RESULT',
-      audit: true,
-      localOnly: true,
+      status: 'FULL_RESULT_READY',
       legalNotice: CATASTROX_LEGAL_NOTICE,
       predio: {
         id: source === 'clean' ? row.codigo_predial : row.id,
@@ -1118,8 +1283,8 @@ router.get('/audit/lookups/:lookupId/full-result', async (req, res, next) => {
         barrioNombre: toNullableString(row.barrio_nombre),
         sectorCodigo: toNullableString(row.sector_codigo),
         manzanaCodigo: toNullableString(row.manzana_codigo),
-        areaM2: Number(row.shape_area || row.area_terreno_m2 || 0),
-        areaHa: Number(row.area_terreno_ha || (Number(row.shape_area || 0) / 10000)),
+        areaM2: Number(row.area_m2_exact || row.shape_area || row.area_terreno_m2 || 0),
+        areaHa: Number(row.area_terreno_ha || (Number(row.area_m2_exact || row.shape_area || 0) / 10000)),
         perimetroM: Number(row.shape_length || row.perimetro_m || 0),
         estadoPredial: 'Predio identificado en la base catastral consultada.',
         tipoZona: toNullableString(row.zona) || 'Rural',
@@ -1132,13 +1297,63 @@ router.get('/audit/lookups/:lookupId/full-result', async (req, res, next) => {
         tiposConstruccionResumen: toNullableString(row.tipos_construccion_resumen),
         fuente: toNullableString(row.fuente),
         fechaProceso: toNullableString(row.fecha_proceso),
+        projectedGeometry: source === 'clean' ? row.projected_geometry : null,
         geometry: row.geometry,
         polygonGeoJson: {
           type: 'Feature',
           properties: {},
           geometry: row.geometry,
         },
-      },
+        },
+    },
+  };
+}
+
+router.get('/lookups/:lookupId/full-result', async (req, res, next) => {
+  try {
+    const lookupId = String(req.params?.lookupId || '').trim();
+    const result = await buildLookupFullResultPayload(lookupId);
+
+    if (result.errorStatus) {
+      res.status(result.errorStatus).json(result.payload);
+      return;
+    }
+
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      ...result.payload,
+      lookupId,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/audit/lookups/:lookupId/full-result', async (req, res, next) => {
+  try {
+    if (!AUDIT_DOWNLOADS_ENABLED || !isLocalAuditRequest(req)) {
+      res.status(404).json({
+        found: false,
+        status: 'AUDIT_DOWNLOADS_DISABLED',
+      });
+      return;
+    }
+
+    const lookupId = String(req.params?.lookupId || '').trim();
+    const result = await buildLookupFullResultPayload(lookupId);
+
+    if (result.errorStatus) {
+      res.status(result.errorStatus).json(result.payload);
+      return;
+    }
+
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      ...result.payload,
+      status: 'AUDIT_FULL_RESULT',
+      audit: true,
+      localOnly: true,
+      lookupId,
     });
   } catch (error) {
     next(error);
@@ -1215,7 +1430,9 @@ router.post('/advanced/lookup', async (req, res, next) => {
 
     const requestedLookupId = String(req.body?.lookup_id || req.body?.routeId || '').trim();
     const lookupId = requestedLookupId || buildLookupId();
-    rememberAdvancedLookupPreview(lookupId, row.codigo_predial);
+    rememberAdvancedLookupPreview(lookupId, row.codigo_predial, {
+      queryPoint: buildQueryPoint(lat, lng),
+    });
 
     res.setHeader('Cache-Control', 'no-store');
     res.json({

@@ -13,7 +13,7 @@ export const CATASTROX_CONTACT = {
 };
 
 export const CATASTROX_LEGAL_NOTICE =
-  'CatastroX realiza análisis técnico sobre información geográfica y catastral pública disponible. No reemplaza certificados oficiales del IGAC, gestor catastral, oficina de registro ni autoridad competente.';
+  'CatastroX realiza análisis técnico con información geográfica y catastral pública disponible. No reemplaza certificados oficiales ni decisiones de autoridad competente.';
 
 function buildMockPolygon(vertices) {
   const coordinates = vertices.map(([, lat, lng]) => [Number(lng), Number(lat)]);

@@ -1,23 +1,19 @@
 import { ArrowRight, Lock } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
+import CatastroXCommercialTransparency from '../components/CatastroXCommercialTransparency.jsx';
 import CatastroXDisclaimer from '../components/CatastroXDisclaimer.jsx';
 import CatastroXMockMap from '../components/CatastroXMockMap.jsx';
 import CatastroXPageActions from '../components/CatastroXPageActions.jsx';
-import CatastroXPlanCard from '../components/CatastroXPlanCard.jsx';
+import CatastroXPackageCards from '../components/CatastroXPackageCards.jsx';
 import CatastroXResultSummary from '../components/CatastroXResultSummary.jsx';
 import CatastroXWhatsAppCTA from '../components/CatastroXWhatsAppCTA.jsx';
-import {
-  formatCatastroxPackagePrice,
-  getCatastroxPackageRoute,
-  getCatastroxPackages,
-} from '../config/catastroxPackages.js';
 import { getCatastroXCommercialStatus } from '../config/catastroxContact.js';
 import { CATASTROX_STATUS } from '../data/catastroxMockData.js';
 import { resolveLookupForRoute } from '../services/catastroxApi.js';
 
 const LOCKED_ITEMS = [
   'Área total',
-  'Perímetro',
+  'Perímetro cartográfico total',
   'Código predial',
   'Código anterior',
   'Plano digital',
@@ -133,7 +129,6 @@ export default function CatastroXResultPage() {
   const isTechnicalReview =
     !found || isTechnicalReviewStatus(effectiveStatus) || isTechnicalReviewStatus(predio.estado);
   const specialCopy = buildSpecialCopy({ status: effectiveStatus, municipio, departamento, found });
-  const packages = getCatastroxPackages();
 
   return (
     <section className="catastrox-page catastrox-result-free-page">
@@ -202,22 +197,8 @@ export default function CatastroXResultPage() {
           <p className="catastrox-copy">
             Elija el paquete según el uso que necesita: plano digital, archivos para Google Earth o formatos técnicos para trabajo profesional.
           </p>
-          <div className="catastrox-grid">
-            {packages.map((pkg) => (
-              <CatastroXPlanCard
-                key={pkg.id}
-                title={pkg.title}
-                subtitle={pkg.label}
-                price={formatCatastroxPackagePrice(pkg.priceCop)}
-                description={pkg.description}
-                to={getCatastroxPackageRoute(pkg.id, routeId)}
-                tone={pkg.tone}
-                features={pkg.features}
-                ctaLabel={`Comprar ${pkg.label}`}
-                recommended={pkg.id === 'plus'}
-              />
-            ))}
-          </div>
+          <CatastroXPackageCards routeId={routeId} />
+          <CatastroXCommercialTransparency />
           <div className="catastrox-action-row">
             <Link className="catastrox-button is-secondary" to="/catastrox/planes">
               Comparar paquetes

@@ -39,6 +39,10 @@ const LABELS_TILE_URL =
   'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}';
 
 const PAGE = { width: 792, height: 612, scale: 2 };
+const CARTOGRAPHIC_TOTAL_PERIMETER_LABEL = 'Perímetro cartográfico total';
+const LEGAL_FOOTER_TEXT =
+  'CatastroX realiza análisis técnico sobre información geográfica y catastral pública disponible. Este documento no reemplaza certificados oficiales del IGAC, gestor catastral, oficina de registro ni autoridad competente.';
+const UNIFIED_FOOTER_RECT = { x: 24, y: 576, width: 744, height: 20 };
 
 const SATELLITE_LAYOUT = {
   page: { x: 0, y: 0, width: PAGE.width, height: PAGE.height },
@@ -46,7 +50,7 @@ const SATELLITE_LAYOUT = {
   mapArea: { x: 24, y: 112, width: 446, height: 394 },
   rightPanel: { x: 484, y: 112, width: 284, height: 394 },
   bottomPanel: { x: 24, y: 516, width: 744, height: 52 },
-  footer: { x: 24, y: 580, width: 744, height: 16 },
+  footer: UNIFIED_FOOTER_RECT,
 };
 
 const TECHNICAL_LAYOUT = {
@@ -54,16 +58,16 @@ const TECHNICAL_LAYOUT = {
   header: { x: 22, y: 20, width: 748, height: 84 },
   mapArea: { x: 24, y: 108, width: 546, height: 450 },
   rightPanel: { x: 584, y: 108, width: 184, height: 450 },
-  bottomPanel: { x: 24, y: 566, width: 744, height: 24 },
-  footer: { x: 24, y: 592, width: 744, height: 10 },
+  bottomPanel: { x: 24, y: 546, width: 744, height: 22 },
+  footer: UNIFIED_FOOTER_RECT,
 };
 
 const TABLE_LAYOUT = {
   page: { x: 0, y: 0, width: PAGE.width, height: PAGE.height },
   header: { x: 22, y: 20, width: 748, height: 84 },
   mapArea: { x: 24, y: 116, width: 744, height: 420 },
-  bottomPanel: { x: 24, y: 548, width: 744, height: 30 },
-  footer: { x: 24, y: 582, width: 744, height: 14 },
+  bottomPanel: { x: 24, y: 542, width: 744, height: 26 },
+  footer: UNIFIED_FOOTER_RECT,
 };
 
 const CUSTOM_PDF_FONT_FAMILY = 'CatastroXArial';
@@ -99,6 +103,16 @@ function formatNumber(value, decimals = 2) {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   });
+}
+
+function formatAreaM2Exact(value) {
+  return `${formatNumber(value, 2)} m²`;
+}
+
+function formatPlainDecimal(value, decimals) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return '';
+  return parsed.toFixed(decimals);
 }
 
 function formatNumberOrUnavailable(value, { decimals = 2, suffix = '', emptyLabel = 'No disponible' } = {}) {
@@ -350,32 +364,26 @@ function isUrbanZona(predio) {
   return /urbano/i.test(cleanText(predio?.tipoZona || predio?.zona));
 }
 
-// Umbral (m2) a partir del cual un predio urbano muestra hectareas ademas de m2.
-const URBAN_AREA_HA_THRESHOLD_M2 = 10000;
+// Regla única de presentación de área:
+// - areaM2 < 10.000: solo m²
+// - areaM2 >= 10.000: ha como unidad principal y m² como complemento
+const AREA_HA_THRESHOLD_M2 = 10000;
 
-// Regla 6.5: predios urbanos con area < 10.000 m2 muestran unicamente m2; >= 10.000 m2
-// muestran m2 como unidad principal y ha como complementaria. Predios rurales conservan
-// la logica aprobada (ha y m2 siempre visibles por separado).
 function buildAreaDisplayFields(predio, { haLabel = 'Área en hectáreas', m2Label = 'Área en metros cuadrados', combinedLabel = 'Área total' } = {}) {
-  if (isUrbanZona(predio)) {
-    if (Number(predio.areaM2) < URBAN_AREA_HA_THRESHOLD_M2) {
-      return [{ label: combinedLabel, value: `${formatNumber(predio.areaM2)} m²` }];
-    }
-    return [
-      { label: combinedLabel, value: `${formatNumber(predio.areaM2)} m²` },
-      { label: `${combinedLabel} (ha)`, value: `${formatNumber(predio.areaHa)} ha` },
-    ];
+  if (Number(predio.areaM2) < AREA_HA_THRESHOLD_M2) {
+    return [{ label: combinedLabel, value: formatAreaM2Exact(predio.areaM2) }];
   }
+
   return [
     { label: haLabel, value: `${formatNumber(predio.areaHa)} ha` },
-    { label: m2Label, value: `${formatNumber(predio.areaM2)} m²` },
+    { label: m2Label, value: formatAreaM2Exact(predio.areaM2) },
   ];
 }
 
 // Version de una sola linea para tarjetas compactas (pagina 1, KML) donde solo cabe un valor.
 function buildAreaPrimaryDisplay(predio) {
-  if (isUrbanZona(predio) && Number(predio.areaM2) < URBAN_AREA_HA_THRESHOLD_M2) {
-    return `${formatNumber(predio.areaM2)} m²`;
+  if (Number(predio.areaM2) < AREA_HA_THRESHOLD_M2) {
+    return formatAreaM2Exact(predio.areaM2);
   }
   return `${formatNumber(predio.areaHa)} ha`;
 }
@@ -543,6 +551,7 @@ function normalizePredioForDeliverables(source) {
     tiposConstruccionResumen: resolveTipoConstruccionResumen(predio),
     fuente: cleanText(predio.fuente, 'No disponible'),
     fechaProceso: cleanText(predio.fechaProceso || predio.fecha_proceso, 'No disponible'),
+    deliverablePackageId: cleanText(predio.deliverablePackageId || source?.deliverablePackageId),
     queryPoint: predio.queryPoint || source?.queryPoint || null,
     geometry,
     geometryParts,
@@ -553,6 +562,203 @@ function normalizePredioForDeliverables(source) {
     displayVertices: displayGeometry.displayVertices,
     displayRingReport: displayGeometry.report,
   };
+}
+
+function getGeometryMetricBbox(geometryParts = []) {
+  const points = geometryParts.flatMap((part) => [part.outerRing, ...(part.innerRings || [])]).flat();
+  const xs = points.map((pt) => pt[0]);
+  const ys = points.map((pt) => pt[1]);
+  return {
+    minX: Math.min(...xs),
+    maxX: Math.max(...xs),
+    minY: Math.min(...ys),
+    maxY: Math.max(...ys),
+  };
+}
+
+export function assertProjectedGeometryFor9377(geometryParts = []) {
+  if (!geometryParts.length) {
+    throw new Error('ProjectedGeometry no disponible para exportar archivos tecnicos en EPSG:9377.');
+  }
+
+  const bbox = getGeometryMetricBbox(geometryParts);
+  const looksLikeLonLat =
+    Math.abs(bbox.minX) <= 180 &&
+    Math.abs(bbox.maxX) <= 180 &&
+    Math.abs(bbox.minY) <= 90 &&
+    Math.abs(bbox.maxY) <= 90;
+
+  if (looksLikeLonLat) {
+    throw new Error('ProjectedGeometry invalida: el bbox sigue en coordenadas geograficas y no en EPSG:9377.');
+  }
+
+  return bbox;
+}
+
+function normalizePredioForProjectedGis(source, { requireProjectedGeometry = false } = {}) {
+  const base = normalizePredioForDeliverables(source);
+  const predio = source?.predio || source || {};
+  const projectedGeometry =
+    predio.projectedGeometry ||
+    predio.projectedGeoJson?.geometry ||
+    predio.projectedGeoJson ||
+    null;
+
+  if (!projectedGeometry) {
+    if (requireProjectedGeometry) {
+      throw new Error('ProjectedGeometry no disponible para exportar archivos tecnicos en EPSG:9377.');
+    }
+    return base;
+  }
+
+  const geometryParts = normalizePolygonParts(projectedGeometry);
+  const projectedBbox = assertProjectedGeometryFor9377(geometryParts);
+  const ring = geometryParts[0]?.outerRing || normalizeRing(firstRing(projectedGeometry));
+  const mapRing = geometryParts.length ? buildMapRingFromParts(geometryParts) : ring;
+  const geometryBounds = geometryParts.length ? mergePartBounds(geometryParts) : getRingBounds(ring);
+
+  return {
+    ...base,
+    geometry: projectedGeometry,
+    projectedGeometry,
+    geometryParts,
+    geometryBounds,
+    projectedBbox,
+    mapRing,
+    ring,
+  };
+}
+
+function getCoordinateRingSets(projectedGeometry, geographicGeometry) {
+  const projectedParts = normalizePolygonParts(projectedGeometry);
+  const geographicParts = normalizePolygonParts(geographicGeometry);
+
+  if (!projectedParts.length) {
+    throw new Error('ProjectedGeometry no disponible para construir la tabla de coordenadas.');
+  }
+
+  if (!geographicParts.length) {
+    throw new Error('La geometría geográfica WGS84 no está disponible para completar latitud y longitud.');
+  }
+
+  if (projectedParts.length !== geographicParts.length) {
+    throw new Error('La geometría proyectada y la geográfica no coinciden en cantidad de polígonos.');
+  }
+
+  return projectedParts.map((projectedPart, partIndex) => {
+    const geographicPart = geographicParts[partIndex];
+    const projectedRings = [projectedPart.outerRing, ...(projectedPart.innerRings || [])].map(stripClosingPoint);
+    const geographicRings = [geographicPart.outerRing, ...(geographicPart.innerRings || [])].map(stripClosingPoint);
+
+    if (projectedRings.length !== geographicRings.length) {
+      throw new Error(`El polígono ${partIndex + 1} no coincide en cantidad de anillos entre EPSG:9377 y WGS84.`);
+    }
+
+    return projectedRings.map((projectedRing, ringIndex) => {
+      const geographicRing = geographicRings[ringIndex];
+      if (projectedRing.length !== geographicRing.length) {
+        throw new Error(`El anillo ${ringIndex + 1} del polígono ${partIndex + 1} no coincide en cantidad de vértices.`);
+      }
+
+      return {
+        projectedRing,
+        geographicRing,
+        type: ringIndex === 0 ? 'EXTERIOR' : 'INTERIOR',
+        ringLabel: ringIndex === 0 ? 'EXT1' : `INT${ringIndex}`,
+      };
+    });
+  });
+}
+
+function buildCoordinateCsvRows(source) {
+  const predio = normalizePredioForProjectedGis(source, { requireProjectedGeometry: true });
+  const geographicGeometry = source?.predio?.geometry || source?.geometry || null;
+  const coordinateRingSets = getCoordinateRingSets(predio.projectedGeometry, geographicGeometry);
+  const rows = [];
+
+  coordinateRingSets.forEach((rings, partIndex) => {
+    const polygonLabel = `POL${partIndex + 1}`;
+    let polygonVertexCounter = 1;
+
+    rings.forEach(({ projectedRing, geographicRing, type, ringLabel }) => {
+      const pointLabels = projectedRing.map(() => `${polygonLabel}-P${polygonVertexCounter++}`);
+      projectedRing.forEach((point, vertexIndex) => {
+        const nextIndex = (vertexIndex + 1) % projectedRing.length;
+        const geographicPoint = geographicRing[vertexIndex];
+        rows.push([
+          pointLabels[vertexIndex],
+          polygonLabel,
+          ringLabel,
+          type,
+          String(vertexIndex + 1),
+          formatPlainDecimal(point[1], 3),
+          formatPlainDecimal(point[0], 3),
+          formatPlainDecimal(geographicPoint[1], 7),
+          formatPlainDecimal(geographicPoint[0], 7),
+          pointLabels[nextIndex],
+          formatPlainDecimal(Math.hypot(projectedRing[nextIndex][0] - point[0], projectedRing[nextIndex][1] - point[1]), 2),
+          '9377',
+        ]);
+      });
+    });
+  });
+
+  return rows;
+}
+
+function buildCoordinatesCsvText(source) {
+  const header = [
+    'punto',
+    'poligono',
+    'anillo',
+    'tipo_anillo',
+    'secuencia',
+    'norte_m',
+    'este_m',
+    'latitud',
+    'longitud',
+    'siguiente_punto',
+    'distancia_m',
+    'epsg',
+  ];
+  const rows = buildCoordinateCsvRows(source);
+  return `\uFEFF${[header, ...rows].map((row) => row.join(';')).join('\r\n')}\r\n`;
+}
+
+function buildCoordinatesReadmeText() {
+  return [
+    'CATASTROX — TABLA DE COORDENADAS',
+    '',
+    'Sistema de referencia:',
+    'MAGNA-SIRGAS 2018 / Origen-Nacional',
+    '',
+    'Código EPSG:',
+    '9377',
+    '',
+    'Tipo de coordenadas:',
+    'Coordenadas planas proyectadas',
+    '',
+    'Unidades:',
+    'Metros',
+    '',
+    'Eje Este:',
+    'X',
+    '',
+    'Eje Norte:',
+    'Y',
+    '',
+    'Descripción:',
+    'El archivo CSV contiene todos los vértices disponibles de la geometría catastral procesada por CatastroX. Los polígonos, componentes y anillos se identifican de manera independiente.',
+    '',
+    'Advertencia:',
+    'La cantidad de decimales representa la precisión de almacenamiento y presentación del archivo; no constituye una garantía de exactitud topográfica, materialización física de linderos ni levantamiento en campo.',
+    '',
+    'Alcance:',
+    'La información sirve como apoyo técnico, informativo y comercial. No reemplaza certificados oficiales, levantamientos topográficos, deslindes, amojonamientos ni decisiones de la autoridad competente.',
+    '',
+    'MAGNA-SIRGAS 2018 / Origen-Nacional — EPSG:9377.',
+    '',
+  ].join('\r\n');
 }
 
 function wrapText(text, maxChars) {
@@ -1722,7 +1928,10 @@ function drawFieldGrid(context, rect, fields, options = {}) {
 }
 
 function buildAutomaticDiagnosis(predio) {
-  const areaLabel = Number.isFinite(predio.areaHa) && predio.areaHa > 0 ? `${formatNumber(predio.areaHa)} ha` : 'Sin dato';
+  const areaLabel =
+    Number.isFinite(predio.areaM2) && predio.areaM2 > 0
+      ? buildAreaPrimaryDisplay(predio)
+      : 'Sin dato';
   return [
     `La consulta identifica un predio individualizado con código predial ${predio.codigoPredial}.`,
     `El área estimada en la información catastral consultada es ${areaLabel} y el perímetro reportado es ${formatNumber(predio.perimetroM)} m.`,
@@ -1769,10 +1978,10 @@ function todayDisplayDate() {
 function drawLegalFooter(context, rect) {
   drawWrappedText(
     context,
-    'CatastroX realiza análisis técnico con información geográfica y catastral pública disponible. No reemplaza certificados oficiales del IGAC, gestor catastral, oficina de registro ni autoridad competente.',
-    rect.x,
+    LEGAL_FOOTER_TEXT,
+    rect.x + 16,
     rect.y,
-    rect.width,
+    rect.width - 32,
     10,
     '#334155',
     400,
@@ -1780,17 +1989,33 @@ function drawLegalFooter(context, rect) {
   );
 }
 
-function drawCommercialMetric(context, x, y, width, label, value, accent = '#00aeea') {
+function drawCommercialMetric(context, x, y, width, label, value, accent = '#00aeea', options = {}) {
+  const {
+    height = 58,
+    labelSize = 8.7,
+    labelLineHeight = 9.5,
+    valueSize = 12,
+    valueLineHeight = 13,
+  } = options;
   context.fillStyle = '#ffffff';
-  context.fillRect(x, y, width, 58);
+  context.fillRect(x, y, width, height);
   context.strokeStyle = '#d6dfef';
-  context.strokeRect(x, y, width, 58);
+  context.strokeRect(x, y, width, height);
   context.fillStyle = accent;
-  context.fillRect(x, y, 5, 58);
-  setFont(context, 8.7, 700);
-  context.fillStyle = '#52637d';
-  context.fillText(label.toUpperCase(), x + 14, y + 19);
-  drawWrappedText(context, value, x + 14, y + 40, width - 24, 13, '#0f172a', 700, 12);
+  context.fillRect(x, y, 5, height);
+  const labelResult = drawWrappedText(
+    context,
+    label.toUpperCase(),
+    x + 14,
+    y + 18,
+    width - 24,
+    labelLineHeight,
+    '#52637d',
+    700,
+    labelSize,
+  );
+  const valueY = y + (labelResult.lines.length > 1 ? 43 : 40);
+  drawWrappedText(context, value, x + 14, valueY, width - 24, valueLineHeight, '#0f172a', 700, valueSize);
 }
 
 function buildPlusSummaryPageCanvas(predio, layoutData, pageLabel = '1 de 6') {
@@ -1838,10 +2063,14 @@ function buildPlusSummaryPageCanvas(predio, layoutData, pageLabel = '1 de 6') {
   drawCommercialMetric(context, 212, 238, 172, 'Departamento', withKnownToponymAccents(predio.departamento));
   drawCommercialMetric(context, 24, 312, 172, 'Zona', toSentenceCase(predio.tipoZona), '#00aeea');
   drawCommercialMetric(context, 212, 312, 172, 'Área total', buildAreaPrimaryDisplay(predio), '#8bcf2b');
-  drawCommercialMetric(context, 24, 386, 172, 'Perímetro', `${formatNumber(predio.perimetroM)} m`, '#8bcf2b');
+  drawCommercialMetric(context, 24, 386, 172, CARTOGRAPHIC_TOTAL_PERIMETER_LABEL, `${formatNumber(predio.perimetroM)} m`, '#8bcf2b', { labelSize: 7.6 });
   drawCommercialMetric(context, 212, 386, 172, CONSTRUCTION_COUNT_LABEL_COMPACT, constructionLabel, '#8bcf2b');
   drawCommercialMetric(context, 24, 460, 172, 'Destinación catastral', toSentenceCase(predio.destinoEconomicoNombre) || 'Información no disponible', '#00aeea');
-  drawCommercialMetric(context, 212, 460, 172, 'Usos constructivos', buildUsosConstructivosResumen(predio), '#00aeea');
+  drawCommercialMetric(context, 212, 460, 172, 'Usos constructivos', buildUsosConstructivosResumen(predio), '#00aeea', {
+    height: 74,
+    valueSize: 10.2,
+    valueLineHeight: 11,
+  });
 
   context.fillStyle = '#f8fbff';
   context.fillRect(mapRect.x - 10, mapRect.y - 10, mapRect.width + 20, mapRect.height + 20);
@@ -1872,7 +2101,7 @@ function buildPlusSummaryPageCanvas(predio, layoutData, pageLabel = '1 de 6') {
       10.5,
     );
 
-    drawLegalFooter(context, { x: 24, y: 580, width: 744, height: 14 });
+    drawLegalFooter(context, UNIFIED_FOOTER_RECT);
     return canvas;
   });
 }
@@ -1907,7 +2136,7 @@ function buildDiagnosticPageCanvas(predio) {
     ...(!isUrban && veredaDisplay.isCadastralCode ? [[veredaDisplay.secondaryLabel, veredaDisplay.secondaryValue]] : []),
     ['Tipo de zona', predio.tipoZona],
     ...buildAreaDisplayFields(predio, { haLabel: 'Área total', m2Label: 'Área total m²' }).map(({ label, value }) => [label, value]),
-    ['Perímetro', `${formatNumber(predio.perimetroM)} m`],
+    [CARTOGRAPHIC_TOTAL_PERIMETER_LABEL, `${formatNumber(predio.perimetroM)} m`],
     ['Estado predial', predio.estadoPredial],
   ];
 
@@ -2042,7 +2271,7 @@ function drawCaracteristicasFisicasPanel(context, rect, predio, options = {}) {
   drawPanel(context, rect, 'CARACTERÍSTICAS FÍSICAS');
   const fields = [
     ...buildAreaDisplayFields(predio),
-    { label: 'Perímetro', value: `${formatNumber(predio.perimetroM)} m` },
+    { label: CARTOGRAPHIC_TOTAL_PERIMETER_LABEL, value: `${formatNumber(predio.perimetroM)} m` },
     { label: CONSTRUCTION_COUNT_LABEL, value: formatConstructionCount(predio.numeroConstrucciones) },
     { label: 'Área construida', value: formatNumberOrUnavailable(predio.areaConstruidaM2, { suffix: 'm²' }) },
   ];
@@ -2055,7 +2284,14 @@ function drawCaracteristicasFisicasPanel(context, rect, predio, options = {}) {
 }
 
 function drawClasificacionPanel(context, rect, predio, options = {}) {
-  const { usoLineHeight = 14, sectionGap = PDF_LAYOUT_GRID.sectionGap } = options;
+  const {
+    usoLineHeight = 14,
+    usoItemGap = 11,
+    sectionGap = PDF_LAYOUT_GRID.sectionGap,
+    tiposLineHeight = 15,
+    tiposLineGap = 3,
+    labelValueGap = 15,
+  } = options;
   drawPanel(context, rect, 'CLASIFICACIÓN Y CONSTRUCCIONES');
 
   const paddingX = PDF_LAYOUT_GRID.panelPaddingX;
@@ -2063,7 +2299,6 @@ function drawClasificacionPanel(context, rect, predio, options = {}) {
   const leftX = rect.x + paddingX;
   const rightX = leftX + colWidth + 24;
   const labelY = rect.y + 42;
-  const labelValueGap = 15;
 
   drawFieldLabel(context, leftX, labelY, 'DESTINACIÓN CATASTRAL');
   const destinacionResult = drawWrappedText(context, toSentenceCase(predio.destinoEconomicoNombre) || 'Información no disponible', leftX, labelY + labelValueGap, colWidth, 16, '#0f172a', 700, 13);
@@ -2072,7 +2307,7 @@ function drawClasificacionPanel(context, rect, predio, options = {}) {
   let usoCursorY = labelY + labelValueGap;
   buildUsosConstructivosList(predio).forEach((uso) => {
     const result = drawWrappedText(context, uso, rightX, usoCursorY, colWidth, usoLineHeight, '#0f172a', 700, 11.5);
-    usoCursorY += Math.max(usoLineHeight, result.height) + 11;
+    usoCursorY += Math.max(usoLineHeight, result.height) + usoItemGap;
   });
 
   const destinacionBottom = labelY + labelValueGap + Math.max(16, destinacionResult.height);
@@ -2081,8 +2316,8 @@ function drawClasificacionPanel(context, rect, predio, options = {}) {
   const tiposLines = formatTiposConstruccionDisplayLines(predio.tiposConstruccionResumen);
   let tiposCursorY = tiposY + labelValueGap;
   tiposLines.forEach((line) => {
-    const result = drawWrappedText(context, line, leftX, tiposCursorY, rect.width - paddingX * 2, 15, '#0f172a', 700, 11.5);
-    tiposCursorY += Math.max(15, result.height) + 3;
+    const result = drawWrappedText(context, line, leftX, tiposCursorY, rect.width - paddingX * 2, tiposLineHeight, '#0f172a', 700, 11.5);
+    tiposCursorY += Math.max(tiposLineHeight, result.height) + tiposLineGap;
   });
 
   return tiposCursorY;
@@ -2092,11 +2327,11 @@ function drawFuentePanel(context, rect, predio) {
   drawPanel(context, rect, 'FUENTE');
   drawWrappedText(
     context,
-    `${formatFuenteDisplay(predio.fuente)}. Fecha de procesamiento: ${formatFechaProcesoDisplay(predio.fechaProceso)}.`,
+    `${formatFuenteDisplay(predio.fuente)}. Este documento fue elaborado por CatastroX mediante el procesamiento, organización y presentación de información catastral pública disponible en el Geoportal del IGAC. Fecha de procesamiento: ${formatFechaProcesoDisplay(predio.fechaProceso)}.`,
     rect.x + PDF_LAYOUT_GRID.panelPaddingX,
-    rect.y + 42,
+    rect.y + 40,
     rect.width - PDF_LAYOUT_GRID.panelPaddingX * 2,
-    15,
+    14,
     '#243446',
     400,
     11,
@@ -2109,10 +2344,17 @@ function buildFichaTecnicaSinglePageCanvas(predio, pageLabel) {
 
   drawIdentificacionPanel(context, { x: 24, y: 126, width: 360, height: 356 }, predio, { labelValueGap: 13, fieldGap: 24, fieldHeight: 34 });
   drawCaracteristicasFisicasPanel(context, { x: 408, y: 126, width: 360, height: 168 }, predio, { labelValueGap: 13, fieldGap: 24 });
-  drawClasificacionPanel(context, { x: 408, y: 310, width: 360, height: 190 }, predio, { usoLineHeight: 13, sectionGap: 16 });
-  drawFuentePanel(context, { x: 24, y: 514, width: 744, height: 56 }, predio);
+  drawClasificacionPanel(context, { x: 408, y: 302, width: 360, height: 198 }, predio, {
+    usoLineHeight: 13,
+    usoItemGap: 4,
+    sectionGap: 4,
+    tiposLineHeight: 14,
+    tiposLineGap: 0,
+    labelValueGap: 12,
+  });
+  drawFuentePanel(context, { x: 24, y: 500, width: 744, height: 66 }, predio);
 
-  drawLegalFooter(context, { x: 24, y: 580, width: 744, height: 14 });
+  drawLegalFooter(context, UNIFIED_FOOTER_RECT);
   return canvas;
 }
 
@@ -2121,13 +2363,22 @@ function buildFichaTecnicaSplitPageCanvases(predio, pageLabelA, pageLabelB) {
   drawHeader(contextA, predio, pageLabelA, 'FICHA TÉCNICA Y CATASTRAL', TABLE_LAYOUT);
   drawIdentificacionPanel(contextA, { x: 24, y: 126, width: 360, height: 430 }, predio, { labelValueGap: 15, fieldGap: 28, fieldHeight: 40, columns: 1 });
   drawCaracteristicasFisicasPanel(contextA, { x: 408, y: 126, width: 360, height: 430 }, predio, { labelValueGap: 15, fieldGap: 40 });
-  drawLegalFooter(contextA, { x: 24, y: 580, width: 744, height: 14 });
+  drawLegalFooter(contextA, UNIFIED_FOOTER_RECT);
 
   const { canvas: canvasB, context: contextB } = createPageCanvas();
   drawHeader(contextB, predio, pageLabelB, 'FICHA TÉCNICA Y CATASTRAL (CONTINUACIÓN)', TABLE_LAYOUT);
-  drawClasificacionPanel(contextB, { x: 24, y: 126, width: 744, height: 260 }, predio, { usoLineHeight: 16, sectionGap: 24 });
-  drawFuentePanel(contextB, { x: 24, y: 404, width: 744, height: 70 }, predio);
-  drawLegalFooter(contextB, { x: 24, y: 580, width: 744, height: 14 });
+  const clasificacionBottomY = drawClasificacionPanel(
+    contextB,
+    { x: 24, y: 118, width: 744, height: 300 },
+    predio,
+    { usoLineHeight: 15, usoItemGap: 4, sectionGap: 4, tiposLineHeight: 14, tiposLineGap: 0, labelValueGap: 12 },
+  );
+  const fuenteGap = 16;
+  const fuenteBottomGap = 16;
+  const fuenteY = Math.max(430, Math.ceil(clasificacionBottomY + fuenteGap));
+  const fuenteHeight = Math.max(72, UNIFIED_FOOTER_RECT.y - fuenteBottomGap - fuenteY);
+  drawFuentePanel(contextB, { x: 24, y: fuenteY, width: 744, height: fuenteHeight }, predio);
+  drawLegalFooter(contextB, UNIFIED_FOOTER_RECT);
 
   return [canvasA, canvasB];
 }
@@ -2143,12 +2394,18 @@ function buildUsoAlcancePageCanvas(predio, pageLabel) {
   const { canvas, context } = createPageCanvas();
   drawHeader(context, predio, pageLabel, 'USO, ALCANCE Y ADVERTENCIAS', TABLE_LAYOUT);
 
-  drawPanel(context, { x: 24, y: 126, width: 744, height: 110 }, 'ARCHIVOS ENTREGADOS');
-  drawBullets(context, [
+  const isProfessionalPackage = predio.deliverablePackageId === 'profesional';
+  const deliveredFiles = [
     'PDF: resumen comercial, ficha técnica y plano predial con puntos y distancias.',
     'KML: polígono del predio para Google Earth y aplicaciones compatibles.',
     'KMZ: versión comprimida del KML, lista para compartir.',
-  ], 48, 172, 700, '#00aeea');
+  ];
+  if (isProfessionalPackage) {
+    deliveredFiles.push('CSV: tabla completa de vértices con coordenadas Este y Norte en MAGNA-SIRGAS 2018 / Origen-Nacional (EPSG:9377).');
+  }
+
+  drawPanel(context, { x: 24, y: 126, width: 744, height: 110 }, 'ARCHIVOS ENTREGADOS');
+  drawBullets(context, deliveredFiles, 48, 172, 700, '#00aeea');
 
   drawPanel(context, { x: 24, y: 250, width: 360, height: 236 }, 'CÓMO UTILIZARLOS');
   drawBullets(context, [
@@ -2165,7 +2422,7 @@ function buildUsoAlcancePageCanvas(predio, pageLabel) {
     'Decisiones jurídicas, registrales o de linderos requieren validación de autoridad competente.',
   ], 424, 296, 332, '#00aeea');
 
-  drawLegalFooter(context, { x: 24, y: 580, width: 744, height: 14 });
+  drawLegalFooter(context, UNIFIED_FOOTER_RECT);
   return canvas;
 }
 
@@ -2539,7 +2796,7 @@ function buildExecutiveTablePageCanvas(predio, pageLabel, rows, startIndex = 0, 
     context,
     'La tabla ejecutiva compila en una sola vista los puntos visibles del plano, sus coordenadas y la distancia entre tramos consecutivos. La geometría completa del predio permanece disponible en los archivos KML y KMZ descargables.',
     TABLE_LAYOUT.bottomPanel.x,
-    TABLE_LAYOUT.bottomPanel.y + 14,
+    TABLE_LAYOUT.bottomPanel.y + 12,
     TABLE_LAYOUT.bottomPanel.width,
     12,
     '#334155',
@@ -2547,17 +2804,7 @@ function buildExecutiveTablePageCanvas(predio, pageLabel, rows, startIndex = 0, 
     9,
   );
 
-  drawWrappedText(
-    context,
-    'CatastroX realiza análisis técnico sobre información geográfica y catastral pública disponible. Este documento no reemplaza certificados oficiales del IGAC, gestor catastral, oficina de registro ni autoridad competente.',
-    TABLE_LAYOUT.footer.x,
-    TABLE_LAYOUT.footer.y + 10,
-    TABLE_LAYOUT.footer.width,
-    10,
-    '#334155',
-    400,
-    8,
-  );
+  drawLegalFooter(context, TABLE_LAYOUT.footer);
 
   return {
     canvas,
@@ -3102,7 +3349,7 @@ async function buildSatellitePageCanvas(predio, layoutData, pageLabel = '1 de 3'
     { label: 'Municipio', value: predio.municipio },
     { label: 'Departamento', value: predio.departamento },
     ...buildAreaDisplayFields(predio, { haLabel: 'Área total', m2Label: 'Área total m²' }),
-    { label: 'Perímetro', value: `${formatNumber(predio.perimetroM)} m` },
+    { label: CARTOGRAPHIC_TOTAL_PERIMETER_LABEL, value: `${formatNumber(predio.perimetroM)} m` },
     { label: 'Estado predial', value: predio.estadoPredial },
   ], { labelSize: 9.1, valueSize: 11.5, labelGap: 12, rowGap: 31, lineHeight: 12.5 });
 
@@ -3119,17 +3366,7 @@ async function buildSatellitePageCanvas(predio, layoutData, pageLabel = '1 de 3'
     8.8,
   );
 
-  drawWrappedText(
-    context,
-    'CatastroX realiza análisis técnico sobre información geográfica y catastral pública disponible. Este documento no reemplaza certificados oficiales del IGAC, gestor catastral, oficina de registro ni autoridad competente.',
-    SATELLITE_LAYOUT.footer.x,
-    SATELLITE_LAYOUT.footer.y + 10,
-    SATELLITE_LAYOUT.footer.width,
-    10,
-    '#334155',
-    400,
-    8,
-  );
+  drawLegalFooter(context, SATELLITE_LAYOUT.footer);
 
   return canvas;
 }
@@ -3219,17 +3456,7 @@ async function buildTechnicalPagesCanvases(predio, layoutData, technicalPageLabe
     cotasDibujadas: technicalDimensionResult.placements.length,
     cotasOmitidasPorColision: technicalDimensionResult.omittedCount,
   });
-  drawWrappedText(
-    context,
-    'CatastroX realiza análisis técnico sobre información geográfica y catastral pública disponible. Este documento no reemplaza certificados oficiales del IGAC, gestor catastral, oficina de registro ni autoridad competente.',
-    TECHNICAL_LAYOUT.footer.x + 16,
-    TECHNICAL_LAYOUT.footer.y - 16,
-    TECHNICAL_LAYOUT.footer.width - 32,
-    10,
-    '#334155',
-    400,
-    8,
-  );
+  drawLegalFooter(context, TECHNICAL_LAYOUT.footer);
 
   const tableCanvases = buildExecutiveTablePagesCanvases(predio, referenceRows, referenceSegments, tableStartPage, totalDocumentPages);
   return [canvas, ...tableCanvases];
@@ -3398,7 +3625,7 @@ ${parts.map((part) => `      ${kmlPolygon(part)}`).join('\n')}
     veredaLine,
     `Código predial: ${predio.codigoPredial}.`,
     `Área total: ${buildAreaPrimaryDisplay(predio)}.`,
-    `Perímetro: ${formatNumber(predio.perimetroM)} m.`,
+    `${CARTOGRAPHIC_TOTAL_PERIMETER_LABEL}: ${formatNumber(predio.perimetroM)} m.`,
     `Destino económico: ${predio.destinoEconomicoNombre}.`,
     `Uso principal: ${predio.uso1Nombre}.`,
     `Registros constructivos asociados: ${formatConstructionCount(predio.numeroConstrucciones)}.`,
@@ -3449,7 +3676,11 @@ function buildZip(entries) {
 
   entries.forEach((entry) => {
     const nameBytes = textEncoder.encode(entry.name);
-    const dataBytes = entry.data instanceof Uint8Array ? entry.data : textEncoder.encode(entry.data);
+    const dataBytes = entry.data instanceof Uint8Array
+      ? entry.data
+      : ArrayBuffer.isView(entry.data)
+        ? new Uint8Array(entry.data.buffer, entry.data.byteOffset, entry.data.byteLength)
+        : textEncoder.encode(entry.data);
     const crc = crc32(dataBytes);
 
     const localHeader = concatUint8Arrays([
@@ -3593,8 +3824,10 @@ export function buildShapefileOrientedParts(geometryParts) {
   return oriented;
 }
 
+const MAGNA_SIRGAS_ORIGEN_NACIONAL_PRJ = 'PROJCS["MAGNA-SIRGAS / Origen-Nacional",GEOGCS["MAGNA-SIRGAS",DATUM["Marco_Geocentrico_Nacional_de_Referencia",SPHEROID["GRS 1980",6378137,298.257222101]],PRIMEM["Greenwich",0],UNIT["Degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",4],PARAMETER["central_meridian",-73],PARAMETER["scale_factor",0.9992],PARAMETER["false_easting",5000000],PARAMETER["false_northing",2000000],UNIT["Meter",1]]';
+
 function writeShapefileParts(source) {
-  const predio = normalizePredioForDeliverables(source);
+  const predio = normalizePredioForProjectedGis(source, { requireProjectedGeometry: true });
   const geometryParts = predio.geometryParts?.length
     ? predio.geometryParts
     : [{ outerRing: predio.ring, innerRings: [] }];
@@ -3655,11 +3888,14 @@ function writeShapefileParts(source) {
   shxView.setInt32(104, recordContentBytes / 2, false);
 
   const dbfFields = [
-    ['id', 'N', 8, 0, String(predio.id || 0)],
+    ['id', 'N', 8, 0, '1'],
     ['codigo', 'C', 40, 0, predio.codigoPredial],
     ['municipio', 'C', 32, 0, predio.municipio],
     ['depto', 'C', 32, 0, predio.departamento],
+    ['zona', 'C', 16, 0, predio.tipoZona || predio.zona || ''],
+    ['area_m2', 'N', 14, 2, Number(predio.areaM2 || 0).toFixed(2)],
     ['area_ha', 'N', 12, 2, Number(predio.areaHa || 0).toFixed(2)],
+    ['perim_m', 'N', 14, 2, Number(predio.perimetroM || 0).toFixed(2)],
   ];
   const headerLength = 32 + dbfFields.length * 32 + 1;
   const recordLength = 1 + dbfFields.reduce((sum, [, , size]) => sum + size, 0);
@@ -3697,15 +3933,15 @@ function writeShapefileParts(source) {
   });
   dbf[dbf.length - 1] = 0x1a;
 
-  const prj = textEncoder.encode(
-    'GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]',
-  );
+  const prj = textEncoder.encode(MAGNA_SIRGAS_ORIGEN_NACIONAL_PRJ);
+  const cpg = textEncoder.encode('UTF-8');
 
   return {
     shp: new Uint8Array(shp),
     shx: new Uint8Array(shx),
     dbf,
     prj,
+    cpg,
   };
 }
 
@@ -3713,6 +3949,15 @@ export function buildKmzBytes(source) {
   const predio = normalizePredioForDeliverables(source);
   const kmlText = buildKmlText(source);
   return buildZip([{ name: `${fileSafeCode(predio)}.kml`, data: textEncoder.encode(kmlText) }]);
+}
+
+export function buildCoordinatesZipBytes(source) {
+  const predio = normalizePredioForProjectedGis(source, { requireProjectedGeometry: true });
+  const stem = `${fileSafeCode(predio)}_coordenadas_epsg9377`;
+  return buildZip([
+    { name: `${stem}.csv`, data: textEncoder.encode(buildCoordinatesCsvText(source)) },
+    { name: 'LEEME_COORDENADAS.txt', data: textEncoder.encode(buildCoordinatesReadmeText()) },
+  ]);
 }
 
 export function buildShpZipBytes(source) {
@@ -3724,6 +3969,7 @@ export function buildShpZipBytes(source) {
     { name: `${stem}.shx`, data: parts.shx },
     { name: `${stem}.dbf`, data: parts.dbf },
     { name: `${stem}.prj`, data: parts.prj },
+    { name: `${stem}.cpg`, data: parts.cpg },
   ]);
 }
 
@@ -3733,6 +3979,44 @@ function dxfSafeText(value) {
 
 function dxfPair(code, value) {
   return `${code}\n${value}\n`;
+}
+
+function buildDxfSection(name, body = '') {
+  return [dxfPair(0, 'SECTION'), dxfPair(2, name), body, dxfPair(0, 'ENDSEC')].join('');
+}
+
+function buildDxfHeaderSection(bbox) {
+  return buildDxfSection(
+    'HEADER',
+    [
+      dxfPair(9, '$ACADVER'),
+      dxfPair(1, 'AC1009'),
+      dxfPair(9, '$EXTMIN'),
+      dxfPair(10, bbox.minLng),
+      dxfPair(20, bbox.minLat),
+      dxfPair(30, 0),
+      dxfPair(9, '$EXTMAX'),
+      dxfPair(10, bbox.maxLng),
+      dxfPair(20, bbox.maxLat),
+      dxfPair(30, 0),
+    ].join(''),
+  );
+}
+
+function buildDxfLtypeTable() {
+  return [
+    dxfPair(0, 'TABLE'),
+    dxfPair(2, 'LTYPE'),
+    dxfPair(70, 1),
+    dxfPair(0, 'LTYPE'),
+    dxfPair(2, 'CONTINUOUS'),
+    dxfPair(70, 64),
+    dxfPair(3, 'Solid line'),
+    dxfPair(72, 65),
+    dxfPair(73, 0),
+    dxfPair(40, 0),
+    dxfPair(0, 'ENDTAB'),
+  ].join('');
 }
 
 function dxfPointEntity(layer, x, y) {
@@ -3769,14 +4053,14 @@ function dxfTextEntity(layer, x, y, height, text, rotation = 0) {
   ].join('');
 }
 
-function buildDxfLayerTable(layerNames) {
-  const layerEntries = layerNames
-    .map((layerName) =>
+function buildDxfLayerTable(layerConfigs) {
+  const layerEntries = layerConfigs
+    .map(({ name, color = 7, flags = 0 }) =>
       [
         dxfPair(0, 'LAYER'),
-        dxfPair(2, layerName),
-        dxfPair(70, 0),
-        dxfPair(62, 7),
+        dxfPair(2, name),
+        dxfPair(70, flags),
+        dxfPair(62, color),
         dxfPair(6, 'CONTINUOUS'),
       ].join(''),
     )
@@ -3785,40 +4069,87 @@ function buildDxfLayerTable(layerNames) {
   return [
     dxfPair(0, 'TABLE'),
     dxfPair(2, 'LAYER'),
-    dxfPair(70, layerNames.length),
+    dxfPair(70, layerConfigs.length),
     layerEntries,
     dxfPair(0, 'ENDTAB'),
   ].join('');
 }
 
-function buildDxfPolylineEntity(layer, ring) {
-  const pairs = [
-    dxfPair(0, 'LWPOLYLINE'),
-    dxfPair(8, layer),
-    dxfPair(90, ring.length),
+function buildDxfStyleTable() {
+  return [
+    dxfPair(0, 'TABLE'),
+    dxfPair(2, 'STYLE'),
     dxfPair(70, 1),
-  ];
-
-  ring.forEach(([lng, lat]) => {
-    pairs.push(dxfPair(10, lng));
-    pairs.push(dxfPair(20, lat));
-  });
-
-  return pairs.join('');
+    dxfPair(0, 'STYLE'),
+    dxfPair(2, 'STANDARD'),
+    dxfPair(70, 0),
+    dxfPair(40, 0),
+    dxfPair(41, 1),
+    dxfPair(50, 0),
+    dxfPair(71, 0),
+    dxfPair(42, 0.2),
+    dxfPair(3, 'txt'),
+    dxfPair(4, ''),
+    dxfPair(0, 'ENDTAB'),
+  ].join('');
 }
 
-function buildDxfInfoEntities(predio, bbox, spanLng, spanLat) {
-  const textHeight = Math.max(spanLat * 0.03, 0.00008);
-  const lineGap = textHeight * 1.8;
-  const startX = bbox[2] + spanLng * 0.06;
-  const startY = bbox[3];
+function buildDxfTablesSection(layerConfigs) {
+  return buildDxfSection(
+    'TABLES',
+    [buildDxfLtypeTable(), buildDxfLayerTable(layerConfigs), buildDxfStyleTable()].join(''),
+  );
+}
+
+function stripClosingPoint(ring) {
+  if (!ring || ring.length < 2) return ring || [];
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  if (first[0] === last[0] && first[1] === last[1]) {
+    return ring.slice(0, -1);
+  }
+  return ring.slice();
+}
+
+function buildDxfPolylineEntity(layer, ring) {
+  const vertices = stripClosingPoint(ring);
+  const header = [
+    dxfPair(0, 'POLYLINE'),
+    dxfPair(8, layer),
+    dxfPair(66, 1),
+    dxfPair(70, 1),
+    dxfPair(10, 0),
+    dxfPair(20, 0),
+    dxfPair(30, 0),
+  ].join('');
+  const vertexPairs = vertices.map(([lng, lat]) => [
+    dxfPair(0, 'VERTEX'),
+    dxfPair(8, layer),
+    dxfPair(10, lng),
+    dxfPair(20, lat),
+    dxfPair(30, 0),
+    dxfPair(70, 0),
+  ].join('')).join('');
+  return [header, vertexPairs, dxfPair(0, 'SEQEND')].join('');
+}
+
+function buildDxfInfoEntities(predio, bbox, spanX, spanY) {
+  const textHeight = Math.min(Math.max(Math.min(spanY * 0.012, spanX * 0.008), 1.2), 6);
+  const lineGap = textHeight * 1.65;
+  const blockOffsetX = Math.max(spanX * 0.08, 12);
+  const blockOffsetY = Math.max(spanY * 0.03, 4);
+  const startX = bbox[2] + blockOffsetX;
+  const startY = bbox[3] - blockOffsetY;
   const infoLines = [
     `CODIGO PREDIAL: ${predio.codigoPredial}`,
     `MUNICIPIO: ${predio.municipio}`,
     `DEPARTAMENTO: ${predio.departamento}`,
-    `AREA: ${formatNumber(predio.areaHa)} ha`,
-    `PERIMETRO: ${formatNumber(predio.perimetroM)} m`,
-    'SISTEMA DE REFERENCIA: WGS84 GEOGRAFICO',
+    `AREA: ${buildAreaPrimaryDisplay(predio)}`,
+    `PERIMETRO CARTOGRAFICO TOTAL: ${formatNumber(predio.perimetroM)} m`,
+    'SISTEMA DE REFERENCIA: MAGNA-SIRGAS / ORIGEN-NACIONAL',
+    'EPSG: 9377',
+    'UNIDADES: METROS',
+    'CatastroX: informacion catastral publica procesada para consulta tecnica.',
   ];
 
   return infoLines
@@ -3826,73 +4157,57 @@ function buildDxfInfoEntities(predio, bbox, spanLng, spanLat) {
     .join('');
 }
 
-function buildDxfWarningEntities(bbox, spanLng, spanLat) {
-  const textHeight = Math.max(spanLat * 0.024, 0.000065);
-  const lineGap = textHeight * 1.7;
-  const startX = bbox[0];
-  const startY = bbox[1] - spanLat * 0.09;
-  const lines = [
-    'Coordenadas en WGS84 geograficas. Para uso profesional proyectar al sistema oficial correspondiente.',
-    'CatastroX realiza analisis tecnico sobre informacion geografica y catastral publica disponible.',
-    'Este documento no reemplaza certificados oficiales del IGAC, gestor catastral, oficina de registro ni autoridad competente.',
-  ];
-
-  return lines
-    .map((line, index) => dxfTextEntity('CATASTROX_ADVERTENCIA', startX, startY - lineGap * index, textHeight, line))
-    .join('');
-}
-
 export function buildDxfText(source) {
-  const predio = normalizePredioForDeliverables(source);
+  const predio = normalizePredioForProjectedGis(source, { requireProjectedGeometry: true });
   if (!predio.ring.length) {
     throw new Error('El predio no tiene geometria disponible para generar DXF.');
   }
 
-  const layoutData = buildLayoutData(predio, resolvePlanLayoutOptions(predio));
-  const { referencePoints = [], referenceRows = [] } = layoutData;
   const shapeRings = (predio.geometryParts?.length
     ? predio.geometryParts.flatMap((part) => [part.outerRing, ...(part.innerRings || [])])
     : [predio.ring]).filter((ring) => ring.length >= 4);
   const allDxfPoints = shapeRings.flat();
   const bbox = getRingBounds(allDxfPoints);
-  const spanLng = Math.max((bbox.maxLng || 0) - (bbox.minLng || 0), 0.0001);
-  const spanLat = Math.max((bbox.maxLat || 0) - (bbox.minLat || 0), 0.0001);
-  const vertexRadius = Math.max(Math.min(spanLng, spanLat) * 0.015, 0.00004);
-  const labelOffsetX = spanLng * 0.02;
-  const labelOffsetY = spanLat * 0.02;
-  const labelHeight = Math.max(spanLat * 0.028, 0.00007);
+  const spanX = Math.max((bbox.maxLng || 0) - (bbox.minLng || 0), 1);
+  const spanY = Math.max((bbox.maxLat || 0) - (bbox.minLat || 0), 1);
+  const vertexRadius = Math.min(Math.max(Math.min(spanX, spanY) * 0.004, 0.25), 2);
+  const labelOffsetX = Math.max(spanX * 0.008, 1.2);
+  const labelOffsetY = Math.max(spanY * 0.008, 1.2);
+  const labelHeight = Math.min(Math.max(Math.min(spanY * 0.01, spanX * 0.006), 1.2), 5);
 
-  const vertexEntities = referencePoints
-    .map((entry, index) => {
-      const point = entry.point || entry;
-      const label = referenceRows[index]?.point || `P${index + 1}`;
-      if (!Array.isArray(point) || point.length < 2) return '';
-      return [
-        dxfPointEntity('CATASTROX_VERTICES', point[0], point[1]),
-        dxfCircleEntity('CATASTROX_VERTICES', point[0], point[1], vertexRadius),
-        dxfTextEntity('CATASTROX_ETIQUETAS', point[0] + labelOffsetX, point[1] + labelOffsetY, labelHeight, label),
-      ].join('');
-    })
+  const vertexEntities = (predio.geometryParts?.length ? predio.geometryParts : [{ outerRing: predio.ring, innerRings: [] }])
+    .flatMap((part, partIndex) => stripClosingPoint(part.outerRing).map((point, vertexIndex) => ({
+      point,
+      label: `POL${partIndex + 1}-P${vertexIndex + 1}`,
+    })))
+    .map(({ point, label }) => [
+      dxfPointEntity('CATASTROX_VERTICES', point[0], point[1]),
+      dxfCircleEntity('CATASTROX_VERTICES', point[0], point[1], vertexRadius),
+      dxfTextEntity('CATASTROX_ETIQUETAS', point[0] + labelOffsetX, point[1] + labelOffsetY, labelHeight, label),
+    ].join(''))
     .join('');
 
-  const sections = [
-    '0\nSECTION\n2\nHEADER\n0\nENDSEC\n',
-    `0\nSECTION\n2\nTABLES\n${buildDxfLayerTable([
-      'CATASTROX_POLIGONO',
-      'CATASTROX_VERTICES',
-      'CATASTROX_ETIQUETAS',
-      'CATASTROX_INFO',
-      'CATASTROX_ADVERTENCIA',
-    ])}0\nENDSEC\n`,
-    `0\nSECTION\n2\nENTITIES\n${shapeRings.map((ring) => buildDxfPolylineEntity('CATASTROX_POLIGONO', ring)).join('')}${vertexEntities}${buildDxfInfoEntities(
-      predio,
-      [bbox.minLng, bbox.minLat, bbox.maxLng, bbox.maxLat],
-      spanLng,
-      spanLat,
-    )}${buildDxfWarningEntities([bbox.minLng, bbox.minLat, bbox.maxLng, bbox.maxLat], spanLng, spanLat)}0\nENDSEC\n0\nEOF\n`,
+  const layerConfigs = [
+    { name: 'CATASTROX_POLIGONO', color: 3 },
+    { name: 'CATASTROX_VERTICES', color: -8 },
+    { name: 'CATASTROX_ETIQUETAS', color: -6 },
+    { name: 'CATASTROX_INFO', color: -5 },
   ];
-
-  return sections.join('');
+  return [
+    buildDxfHeaderSection(bbox),
+    buildDxfTablesSection(layerConfigs),
+    buildDxfSection('BLOCKS'),
+    buildDxfSection(
+      'ENTITIES',
+      `${shapeRings.map((ring) => buildDxfPolylineEntity('CATASTROX_POLIGONO', ring)).join('')}${vertexEntities}${buildDxfInfoEntities(
+        predio,
+        [bbox.minLng, bbox.minLat, bbox.maxLng, bbox.maxLat],
+        spanX,
+        spanY,
+      )}`,
+    ),
+    dxfPair(0, 'EOF'),
+  ].join('');
 }
 
 function downloadBytes(bytes, filename, mimeType) {
@@ -3901,10 +4216,11 @@ function downloadBytes(bytes, filename, mimeType) {
   const anchor = document.createElement('a');
   anchor.href = href;
   anchor.download = filename;
+  anchor.style.display = 'none';
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
-  setTimeout(() => URL.revokeObjectURL(href), 0);
+  setTimeout(() => URL.revokeObjectURL(href), 1000);
 }
 
 function diagnosePlanPdfError(predio, error) {
@@ -3973,6 +4289,16 @@ export function downloadDxf(source) {
   } catch (error) {
     console.error('CatastroX DXF', error);
     window.alert('No fue posible generar el archivo DXF: geometría del predio no disponible o inválida.');
+  }
+}
+
+export function downloadCoordinatesZip(source) {
+  const predio = normalizePredioForDeliverables(source);
+  try {
+    downloadBytes(buildCoordinatesZipBytes(source), `${fileSafeCode(predio)}_coordenadas_epsg9377.zip`, 'application/zip');
+  } catch (error) {
+    console.error('CatastroX coordenadas EPSG:9377', error);
+    window.alert('No fue posible generar el ZIP de coordenadas: geometría del predio no disponible o inválida.');
   }
 }
 

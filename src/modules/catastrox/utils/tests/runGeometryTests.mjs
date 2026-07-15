@@ -12,6 +12,7 @@
 // para correr la suite y vive dentro de la carpeta de utils versionada: no depende de
 // audit_outputs/, scripts externos, copias manuales ni servidores previamente activos.
 import { createServer } from 'vite';
+import react from '@vitejs/plugin-react';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -22,11 +23,13 @@ const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', '..');
 const TEST_FILES = [
   '/src/modules/catastrox/utils/__tests__/buildTechnicalPolygonSubpaths.test.js',
   '/src/modules/catastrox/utils/__tests__/shapefileRingOrientation.test.js',
+  '/src/modules/catastrox/utils/__tests__/projectedGeometryExports.test.js',
 ];
 
 const server = await createServer({
   root: projectRoot,
-  configFile: path.resolve(projectRoot, 'vite.config.js'),
+  configFile: false,
+  plugins: [react()],
   server: { middlewareMode: true },
   appType: 'custom',
 });

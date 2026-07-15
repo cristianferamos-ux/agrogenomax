@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Wallet } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import CatastroXDisclaimer from '../components/CatastroXDisclaimer.jsx';
@@ -14,9 +14,7 @@ import {
 } from '../config/catastroxPackages.js';
 import { CATASTROX_STATUS } from '../data/catastroxMockData.js';
 import {
-  mergeAuditFullResultWithAdvanced,
-  fetchCatastroxAuditFullResult,
-  fetchCatastroxAdvancedLookup,
+  hydrateLookupForDeliverables,
   isCatastroxAuditDownloadsAvailable,
   resolveLookupForRoute,
   saveLastLookup,
@@ -33,6 +31,7 @@ import {
   startPackageCheckout,
 } from '../services/catastroxPaymentService.js';
 import {
+  downloadCoordinatesZip,
   downloadDxf,
   downloadKml,
   downloadKmz,
@@ -83,6 +82,10 @@ const DOWNLOAD_BUTTONS = {
     label: 'Descargar DXF',
     action: downloadDxf,
   },
+  coords9377: {
+    label: 'Descargar coordenadas',
+    action: downloadCoordinatesZip,
+  },
 };
 
 function buildDownloadsForPackage(packageId) {
@@ -94,17 +97,6 @@ function buildDownloadsForPackage(packageId) {
       ...DOWNLOAD_BUTTONS[downloadId],
     };
   });
-}
-
-function resolveLookupCoordinates(...candidates) {
-  for (const candidate of candidates) {
-    const lat = Number.parseFloat(candidate?.lat);
-    const lng = Number.parseFloat(candidate?.lng);
-    if (Number.isFinite(lat) && Number.isFinite(lng)) {
-      return { lat, lng };
-    }
-  }
-  return null;
 }
 
 function hasWompiIframe() {
@@ -170,8 +162,10 @@ export default function CatastroXPackagePage({ packageId }) {
   const pkg = getCatastroxPackage(packageId);
   const [checkoutState, setCheckoutState] = useState(null);
   const [auditLookup, setAuditLookup] = useState(null);
+  const [deliverableLookup, setDeliverableLookup] = useState(null);
   const [auditState, setAuditState] = useState(null);
   const [isLoadingAudit, setIsLoadingAudit] = useState(false);
+  const [isHydratingDeliverables, setIsHydratingDeliverables] = useState(false);
   const [pendingPackageId, setPendingPackageId] = useState(null);
   const [, setPurchaseVersion] = useState(0);
   const [isStartingCheckout, setIsStartingCheckout] = useState(false);
@@ -228,7 +222,7 @@ export default function CatastroXPackagePage({ packageId }) {
   }
 
   const auditAvailable = isCatastroxAuditDownloadsAvailable();
-  const effectiveLookup = auditLookup || lookup;
+  const effectiveLookup = auditLookup || deliverableLookup || lookup;
   const predio = effectiveLookup.predio;
   const routeId = predio.routeId || predio.id;
   const purchasedPackage = getPurchasedPackageForLookup(effectiveLookup);
@@ -262,44 +256,46 @@ export default function CatastroXPackagePage({ packageId }) {
     return actions;
   }, [routeId]);
 
+  const ensureDeliverableLookup = async ({ useAuditEndpoint = false } = {}) => {
+    const baseLookup = auditLookup || deliverableLookup || lookup;
+    if (baseLookup?.predio?.projectedGeometry) {
+      return baseLookup;
+    }
+
+    const hydratedLookup = await hydrateLookupForDeliverables(baseLookup, { useAuditEndpoint });
+    setDeliverableLookup(hydratedLookup);
+    saveLastLookup(hydratedLookup);
+    return hydratedLookup;
+  };
+
+  useEffect(() => {
+    if (!isPaid || auditLookup || deliverableLookup?.predio?.projectedGeometry || lookup?.predio?.projectedGeometry) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    void ensureDeliverableLookup({ useAuditEndpoint: false })
+      .catch(() => {})
+      .then((hydrated) => {
+        if (cancelled || !hydrated) return;
+        setDeliverableLookup((current) => current || hydrated);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [auditLookup, deliverableLookup, isPaid, lookup]);
+
   const handleEnableAuditDownloads = async () => {
     try {
       setIsLoadingAudit(true);
       setAuditState(null);
-      const originalLookupId = lookup.routeId || lookup.lookup_id || id;
-      let fullLookup = null;
-      let advancedLookup = null;
-      let coordinates = resolveLookupCoordinates(
-        lookup?.predio?.queryPoint,
-        lookup?.queryPoint,
-        lookup?.predio?.referencePoint,
-      );
-
-      fullLookup = await fetchCatastroxAuditFullResult(originalLookupId);
-      coordinates = resolveLookupCoordinates(
-        fullLookup?.predio?.queryPoint,
-        fullLookup?.queryPoint,
-        coordinates,
-      );
-
-      if (coordinates) {
-        try {
-          advancedLookup = await fetchCatastroxAdvancedLookup({
-            ...coordinates,
-            lookup_id: originalLookupId,
-          });
-        } catch {
-          advancedLookup = null;
-        }
-      }
-
-      const enrichedLookup = advancedLookup
-        ? mergeAuditFullResultWithAdvanced(fullLookup, advancedLookup)
-        : fullLookup;
+      const enrichedLookup = await ensureDeliverableLookup({ useAuditEndpoint: true });
       setAuditLookup(enrichedLookup);
       setAuditState({
         status: 'ready',
-        message: advancedLookup
+        message: enrichedLookup?.predio?.source === 'audit-local-clean'
           ? 'Modo auditoría local activo con motor avanzado CatastroX Clean. Descargas habilitadas solo para revisión en este equipo.'
           : 'Modo auditoría local activo. Descargas habilitadas solo para revisión en este equipo.',
       });
@@ -310,6 +306,45 @@ export default function CatastroXPackagePage({ packageId }) {
       });
     } finally {
       setIsLoadingAudit(false);
+    }
+  };
+
+  const handleDownload = async (action, fileType) => {
+    const useAuditEndpoint = fileType === 'coords9377' ? false : isAuditUnlocked;
+    try {
+      if (packageId === CATASTROX_PACKAGE_IDS.PROFESIONAL && !isAuditUnlocked) {
+        setIsHydratingDeliverables(true);
+      }
+      const source = await ensureDeliverableLookup({ useAuditEndpoint });
+      const sourceWithPackage = {
+        ...source,
+        deliverablePackageId: packageId,
+        predio: {
+          ...(source?.predio || {}),
+          deliverablePackageId: packageId,
+        },
+      };
+      await action(sourceWithPackage);
+    } catch (error) {
+      const endpoint = useAuditEndpoint
+        ? `/api/catastrox/audit/lookups/${encodeURIComponent(routeId)}/full-result`
+        : `/api/catastrox/lookups/${encodeURIComponent(routeId)}/full-result`;
+      console.error('[CatastroX download failure]', {
+        packageId,
+        fileType,
+        lookupId: routeId,
+        endpoint,
+        status: error?.status || null,
+        error,
+      });
+      const message = 'No fue posible preparar este archivo. Intenta nuevamente.';
+      if (useAuditEndpoint) {
+        setAuditState({ status: 'error', message });
+      } else {
+        setCheckoutState({ status: 'error', message });
+      }
+    } finally {
+      setIsHydratingDeliverables(false);
     }
   };
 
@@ -556,7 +591,15 @@ export default function CatastroXPackagePage({ packageId }) {
           </div>
           <div className="catastrox-action-row">
             {visibleDownloads.map((item) => (
-              <CatastroXDownloadMock key={item.id} label={item.label} onClick={() => item.action(effectiveLookup)} />
+              <CatastroXDownloadMock
+                key={item.id}
+                label={
+                  isHydratingDeliverables && packageId === CATASTROX_PACKAGE_IDS.PROFESIONAL
+                    ? `${item.label}...`
+                    : item.label
+                }
+                onClick={() => handleDownload(item.action, item.id)}
+              />
             ))}
           </div>
         </section>
@@ -579,7 +622,11 @@ export default function CatastroXPackagePage({ packageId }) {
           ) : (
             <div className="catastrox-action-row">
               {visibleDownloads.map((item) => (
-                <CatastroXDownloadMock key={`audit-${item.id}`} label={`${item.label} audit`} onClick={() => item.action(effectiveLookup)} />
+                <CatastroXDownloadMock
+                  key={`audit-${item.id}`}
+                  label={`${item.label} audit`}
+                  onClick={() => handleDownload(item.action, item.id)}
+                />
               ))}
             </div>
           )}

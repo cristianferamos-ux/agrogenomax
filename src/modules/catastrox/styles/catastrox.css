@@ -477,6 +477,69 @@
   line-height: 1.55;
 }
 
+.catastrox-transparency-block {
+  display: grid;
+  gap: 0.85rem;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 1280px;
+  margin: -0.75rem auto 0;
+  padding: 0 clamp(1rem, 4vw, 3rem) clamp(1rem, 3vw, 2rem);
+}
+
+.catastrox-transparency-note,
+.catastrox-transparency-details {
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.9rem;
+  background: rgba(4, 10, 12, 0.62);
+  color: #c9d8ea;
+  line-height: 1.65;
+}
+
+.catastrox-transparency-note {
+  margin: 0;
+  padding: 1rem 1.1rem;
+  font-size: 0.96rem;
+}
+
+.catastrox-transparency-block a {
+  color: #9cff1a;
+  font-weight: 850;
+  text-decoration: none;
+}
+
+.catastrox-transparency-block a:hover,
+.catastrox-transparency-block a:focus-visible {
+  text-decoration: underline;
+}
+
+.catastrox-transparency-details {
+  padding: 0.95rem 1.1rem;
+}
+
+.catastrox-transparency-details summary {
+  cursor: pointer;
+  color: #eaf6ff;
+  font-family: Space Grotesk, Inter, sans-serif;
+  font-weight: 900;
+}
+
+.catastrox-transparency-details summary:focus-visible {
+  outline: 2px solid rgba(156, 255, 26, 0.75);
+  outline-offset: 0.25rem;
+}
+
+.catastrox-transparency-details div {
+  display: grid;
+  gap: 0.75rem;
+  padding-top: 0.85rem;
+}
+
+.catastrox-transparency-details p {
+  margin: 0;
+}
+
 .catastrox-status {
   display: inline-flex;
   align-items: center;
@@ -1022,5 +1085,18 @@ iframe[src*="wompi.co/p/"] {
 
   .catastrox-result-map-shell .catastrox-protected-preview-frame {
     min-height: 360px;
+  }
+
+  .catastrox-transparency-block {
+    justify-self: start;
+    width: calc(100vw - 2rem);
+    max-width: calc(100vw - 2rem);
+    margin: 0;
+    padding: 0 0 1rem;
+  }
+
+  .catastrox-transparency-note,
+  .catastrox-transparency-details {
+    overflow-wrap: anywhere;
   }
 }
