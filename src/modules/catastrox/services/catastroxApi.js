@@ -126,6 +126,17 @@ function cleanText(value) {
   return String(value).trim();
 }
 
+export function resolveLookupId(payload = {}) {
+  return cleanText(
+    payload?.lookupId ||
+      payload?.lookup_id ||
+      payload?.routeId ||
+      payload?.predio?.lookupId ||
+      payload?.predio?.lookup_id ||
+      payload?.predio?.routeId,
+  ) || null;
+}
+
 function normalizeQueryPoint(queryPoint, fallback) {
   const lat = Number.parseFloat(queryPoint?.lat ?? fallback?.lat);
   const lng = Number.parseFloat(queryPoint?.lng ?? fallback?.lng);
@@ -138,12 +149,7 @@ function normalizeQueryPoint(queryPoint, fallback) {
 }
 
 function buildRealPredio(predio = {}, coords, queryPoint, apiBase, payload = {}) {
-  const routeId =
-    predio.routeId ||
-    predio.lookup_id ||
-    payload.routeId ||
-    payload.lookup_id ||
-    `lookup-${Date.now()}`;
+  const routeId = resolveLookupId({ ...payload, predio }) || `lookup-${Date.now()}`;
   const resolvedQueryPoint = normalizeQueryPoint(queryPoint, coords);
   const previewPath = `/catastrox/lookups/${encodeURIComponent(routeId)}/preview-map`;
   const previewGeometryPath = `/catastrox/lookups/${encodeURIComponent(routeId)}/preview-geometry`;
@@ -186,6 +192,45 @@ function buildRealPredio(predio = {}, coords, queryPoint, apiBase, payload = {})
 
 export function isCatastroxAuditDownloadsAvailable() {
   return AUDIT_DOWNLOADS_ENABLED && isLocalHostname();
+}
+
+function getLookupByCodePublicMessage(payload, status) {
+  const code = cleanText(payload?.code).toUpperCase();
+  if (code === 'INVALID_CADASTRAL_CODE' || status === 400) {
+    return 'El número predial debe contener exactamente 20 o 30 dígitos.';
+  }
+  if (code === 'CADASTRAL_CODE_NOT_FOUND' || status === 404) {
+    return 'No se encontró un predio asociado con este número predial.';
+  }
+  if (code === 'REQUIRES_TECHNICAL_VALIDATION' || status === 409) {
+    return 'Este número predial está asociado con varios registros catastrales. Ubique el predio mediante coordenadas o solicite validación técnica.';
+  }
+  if (code === 'RATE_LIMITED_CADASTRAL_LOOKUP' || status === 429) {
+    return 'La consulta por número predial no está disponible en este momento. Intenta nuevamente más tarde.';
+  }
+  return 'No fue posible completar la consulta por número predial.';
+}
+
+function buildSuccessfulLookupResult(payload, coords, apiBase) {
+  const predioPayload = payload.predio || {};
+  const lookupId = resolveLookupId(payload);
+
+  return {
+    found: true,
+    status: payload?.status || 'FOUND',
+    queryPoint: normalizeQueryPoint(payload?.queryPoint, coords),
+    municipio: cleanText(payload?.municipio) || cleanText(predioPayload?.municipio) || null,
+    departamento: cleanText(payload?.departamento) || cleanText(predioPayload?.departamento) || null,
+    gestor: cleanText(payload?.gestor) || cleanText(predioPayload?.gestor) || null,
+    lookup_id: lookupId,
+    routeId: lookupId,
+    source: 'api',
+    canPurchase: payload?.canPurchase === true,
+    commercialMessage: payload?.commercialMessage || payload?.message || '',
+    legalNotice: payload?.legalNotice || '',
+    coverage: payload?.coverage || null,
+    predio: buildRealPredio(predioPayload, coords, payload?.queryPoint, apiBase, payload),
+  };
 }
 
 function buildAuditLookup(payload, routeId) {
@@ -551,23 +596,88 @@ export async function lookupPredio({ lat, lng }) {
     throw apiError;
   }
 
-  const predioPayload = payload.predio || {};
-  const normalized = {
-    found: true,
-    status: payload?.status || 'FOUND',
-    queryPoint: normalizeQueryPoint(payload?.queryPoint, coords),
-    municipio: cleanText(payload?.municipio) || cleanText(predioPayload?.municipio) || null,
-    departamento: cleanText(payload?.departamento) || cleanText(predioPayload?.departamento) || null,
-    gestor: cleanText(payload?.gestor) || cleanText(predioPayload?.gestor) || null,
-    lookup_id: payload.lookup_id || predioPayload?.lookup_id || null,
-    routeId: payload.routeId || payload.lookup_id || predioPayload?.routeId,
-    source: 'api',
-    canPurchase: payload?.canPurchase === true,
-    commercialMessage: payload?.commercialMessage || payload?.message || '',
-    legalNotice: payload?.legalNotice || '',
-    coverage: payload?.coverage || null,
-    predio: buildRealPredio(predioPayload, coords, payload?.queryPoint, apiBase, payload),
-  };
+  const normalized = buildSuccessfulLookupResult(payload, coords, apiBase);
+  persistLookupResult(normalized);
+  return normalized;
+}
+
+export async function lookupPredioByCode({ codigo }) {
+  const rawCode = String(codigo ?? '');
+  const apiBase = normalizeApiBase(API_BASE);
+  const url = `${apiBase}/catastrox/lookup-by-code`;
+  let response;
+
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ codigo: rawCode }),
+    });
+  } catch (error) {
+    const apiError = new CatastroxApiError('No fue posible conectar con el servicio catastral.', {
+      code: 'API_UNAVAILABLE',
+      url,
+      payload: error,
+    });
+    logLookupFailure(apiError);
+    throw apiError;
+  }
+
+  const contentType = response.headers.get('content-type') || '';
+  let payload = null;
+
+  if (contentType.includes('application/json')) {
+    try {
+      payload = await response.json();
+    } catch (error) {
+      const apiError = new CatastroxApiError('El servicio catastral no respondió con un resultado válido.', {
+        code: 'INVALID_LOOKUP_RESPONSE',
+        status: response.status,
+        url,
+        payload: error,
+      });
+      logLookupFailure(apiError);
+      throw apiError;
+    }
+  }
+
+  if (!response.ok) {
+    const message = getLookupByCodePublicMessage(payload, response.status);
+    const apiError = new CatastroxApiError(message, {
+      code: cleanText(payload?.code) || (response.status >= 500 ? 'API_ERROR' : 'BAD_REQUEST'),
+      status: response.status,
+      url,
+      payload,
+    });
+    logLookupFailure(apiError, payload);
+    throw apiError;
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    const apiError = new CatastroxApiError('El servicio catastral no respondió con un resultado válido.', {
+      code: 'INVALID_LOOKUP_RESPONSE',
+      status: response.status,
+      url,
+      payload,
+    });
+    logLookupFailure(apiError, payload);
+    throw apiError;
+  }
+
+  const lookupId = resolveLookupId(payload);
+
+  if (payload?.found !== true || !lookupId) {
+    const apiError = new CatastroxApiError('El servicio catastral no respondió con un resultado válido.', {
+      code: 'INVALID_LOOKUP_RESPONSE',
+      status: response.status,
+      url,
+      payload,
+    });
+    logLookupFailure(apiError, payload);
+    throw apiError;
+  }
+
+  const normalized = buildSuccessfulLookupResult(payload, null, apiBase);
   persistLookupResult(normalized);
   return normalized;
 }

@@ -6,8 +6,8 @@ export default function CatastroXSearchPage() {
     <section className="catastrox-page">
       <div className="catastrox-page-title">
         <span>Buscar predio</span>
-        <h1>Consulta por coordenadas</h1>
-        <p>Ubique su predio en el mapa, capture latitud y longitud y confirme la ubicación de su consulta antes de continuar.</p>
+        <h1>Consulta por coordenadas o número predial</h1>
+        <p>Ubique su predio en el mapa o ingrese su número predial para continuar hacia el resultado comercial protegido.</p>
       </div>
       <CatastroXPageActions actions={[{ label: 'Volver a CatastroX', to: '/catastrox', tone: 'ghost' }]} />
       <CatastroXSearchForm />

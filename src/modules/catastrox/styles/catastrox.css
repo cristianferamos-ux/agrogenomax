@@ -755,11 +755,62 @@
   gap: 1rem;
 }
 
+.catastrox-search-mode-switch {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.catastrox-search-mode-option {
+  border: 1px solid rgba(0, 245, 255, 0.22);
+  background: rgba(5, 18, 14, 0.82);
+  color: rgba(233, 244, 240, 0.88);
+  border-radius: 999px;
+  padding: 0.8rem 1.15rem;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 180ms ease, background 180ms ease, color 180ms ease, transform 180ms ease;
+}
+
+.catastrox-search-mode-option:hover:not(:disabled),
+.catastrox-search-mode-option:focus-visible {
+  border-color: rgba(0, 245, 255, 0.52);
+  color: #f8fffc;
+  outline: none;
+}
+
+.catastrox-search-mode-option.is-active {
+  background: linear-gradient(135deg, rgba(0, 245, 255, 0.18), rgba(179, 255, 0, 0.14));
+  border-color: rgba(179, 255, 0, 0.42);
+  color: #f8fffc;
+}
+
+.catastrox-search-mode-option:disabled {
+  opacity: 0.66;
+  cursor: wait;
+}
+
 .catastrox-search-toolbar-row {
   display: grid;
   grid-template-columns: minmax(220px, auto) repeat(2, minmax(180px, 1fr)) minmax(200px, auto);
   gap: 0.85rem;
   align-items: end;
+}
+
+.catastrox-search-toolbar-row.is-code {
+  grid-template-columns: minmax(0, 1fr) minmax(220px, auto);
+}
+
+.catastrox-search-mode-panel {
+  min-width: 0;
+}
+
+.catastrox-search-field-help {
+  display: block;
+  margin-top: 0.5rem;
+  color: rgba(213, 225, 220, 0.72);
+  line-height: 1.45;
 }
 
 .catastrox-map-instructions {
@@ -1024,6 +1075,10 @@ iframe[src*="wompi.co/p/"] {
 
   .catastrox-result-map-shell .catastrox-protected-preview-frame {
     min-height: 420px;
+  }
+
+  .catastrox-search-toolbar-row.is-code {
+    grid-template-columns: 1fr;
   }
 
   #catastrox-packages .catastrox-grid {
