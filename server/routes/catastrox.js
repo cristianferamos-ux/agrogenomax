@@ -39,7 +39,7 @@ function rememberLookupPreview(lookupId, predioId, extras = null) {
   });
 }
 
-function rememberAdvancedLookupPreview(lookupId, codigoPredial, extras = null) {
+export function rememberAdvancedLookupPreview(lookupId, codigoPredial, extras = null) {
   const existing = lookupPreviewStore.get(lookupId);
   lookupPreviewStore.set(lookupId, {
     ...(existing || {}),
@@ -47,6 +47,18 @@ function rememberAdvancedLookupPreview(lookupId, codigoPredial, extras = null) {
     codigoPredial,
     ...(extras || {}),
     createdAt: Date.now(),
+  });
+}
+
+// Persistencia del preview clean originado por una busqueda por coordenadas
+// (POST /lookup, rama findCleanPredioByPoint). Unico punto responsable de
+// conservar codigo_predial, construir queryPoint y normalizar fid a string
+// -- extraida para que el handler de la ruta y las pruebas ejerciten
+// exactamente la misma logica (ver CX-LOGIC-001).
+export function rememberCleanLookupPreviewFromPoint(lookupId, cleanPredio, lat, lng) {
+  rememberAdvancedLookupPreview(lookupId, cleanPredio.codigo_predial, {
+    queryPoint: buildQueryPoint(lat, lng),
+    fid: cleanPredio.fid != null ? String(cleanPredio.fid) : null,
   });
 }
 
@@ -1003,9 +1015,7 @@ router.post('/lookup', async (req, res, next) => {
       const municipio = await findMunicipioByPoint(lng, lat);
       const coverage = municipio ? resolveCoverageStatus({ municipio, lat, lng }) : null;
       const lookupId = buildLookupId();
-      rememberAdvancedLookupPreview(lookupId, cleanPredio.codigo_predial, {
-        queryPoint: buildQueryPoint(lat, lng),
-      });
+      rememberCleanLookupPreviewFromPoint(lookupId, cleanPredio, lat, lng);
 
       res.json({
         lookup_id: lookupId,
@@ -1349,7 +1359,7 @@ router.get('/lookups/:lookupId/preview-geometry', async (req, res, next) => {
   }
 });
 
-export async function buildLookupFullResultPayload(lookupId) {
+export async function buildLookupFullResultPayload(lookupId, queryImpl = query) {
   const preview = resolveLookupPreview(lookupId);
 
   if (!preview) {
@@ -1537,12 +1547,103 @@ const CLEAN_FULL_RESULT_QUERY = `select
        where c.id = $1
         limit 1`;
 
+  // Identidad tecnica minima (fid + huella geometrica) contra la tabla base
+  // catastrox_clean.predios, cuyo esquema (fid, geom) ya se usa con exito en
+  // findCleanPredioByPoint (linea ~648-665). No se asume que la vista
+  // enriquecida catastrox_clean.v_predios_enriquecidos exponga "fid" -- esa
+  // suposicion no se puede verificar sin conectarse a la base de datos, y un
+  // supuesto incorrecto rompería en runtime cada busqueda por punto. Por eso
+  // la identidad se ancla en la tabla base (fid, probado) y se cruza contra
+  // CLEAN_FULL_RESULT_QUERY por geometry_fingerprint, reutilizando el mismo
+  // mecanismo de huella que ya usa resolveExactFullResultByCodeRows para la
+  // rama de busqueda por codigo.
+  const CLEAN_FID_IDENTITY_QUERY = `select
+         fid,
+         codigo_predial,
+         md5(encode(ST_AsEWKB(ST_Force2D(geom)), 'hex')) as geometry_fingerprint
+       from catastrox_clean.predios
+       where fid = $1`;
+
+  // Reselecciona de forma deterministica (ST_Covers + area ascendente, sin
+  // depender de orden fisico de filas) usando el punto original de la
+  // busqueda. Se usa unicamente cuando la identidad exacta (fid) no esta
+  // disponible o ya no puede confirmarse -- nunca como sustituto silencioso
+  // de una fila arbitraria.
+  async function reselectCleanRowByQueryPoint() {
+    if (
+      !Number.isFinite(Number(preview?.queryPoint?.lng))
+      || !Number.isFinite(Number(preview?.queryPoint?.lat))
+    ) {
+      return null;
+    }
+
+    const spatialResult = await queryImpl(CLEAN_FULL_RESULT_BY_POINT_QUERY, [
+      Number(preview.queryPoint.lng),
+      Number(preview.queryPoint.lat),
+      CATASTROX_ORIGEN_NACIONAL_PROJ,
+    ]);
+    const spatialRow = spatialResult.rows[0];
+    return spatialRow && isValidPredioGeometry(spatialRow.geometry) ? spatialRow : null;
+  }
+
+  // Resuelve la fila completa que conserva la identidad exacta del fid
+  // originalmente seleccionado por la busqueda por punto. Nunca toma
+  // rows[0] de CLEAN_FULL_RESULT_QUERY por posicion. geometry_fingerprint
+  // NO se asume como identidad unica: dos fid distintos pueden compartir
+  // geometria byte a byte identica (misma huella) con atributos
+  // enriquecidos distintos (municipio, direccion, nombre) bajo el mismo
+  // codigo_predial -- caso real documentado en
+  // docs/catastrox/CATASTROX_RESOLUTION_POLICY_V1.md (duplicados
+  // geometryStatus=EXACT con attributeStatus != NONE). Por eso se recogen
+  // TODAS las filas cuya huella coincide, no solo la primera.
+  async function resolveCleanRowByFid(fid) {
+    const fidIdentityResult = await queryImpl(CLEAN_FID_IDENTITY_QUERY, [fid]);
+    const fidIdentity = fidIdentityResult.rows[0];
+    if (!fidIdentity) {
+      return { row: null, conflict: false };
+    }
+
+    const codigoPredialForQuery = canonicalText(fidIdentity.codigo_predial);
+    if (!codigoPredialForQuery) {
+      return { row: null, conflict: false };
+    }
+
+    const cleanResult = await queryImpl(CLEAN_FULL_RESULT_QUERY, [codigoPredialForQuery, CATASTROX_ORIGEN_NACIONAL_PROJ]);
+    const matches = cleanResult.rows.filter(
+      (candidate) => canonicalText(candidate.geometry_fingerprint) === canonicalText(fidIdentity.geometry_fingerprint),
+    );
+
+    if (matches.length > 1) {
+      // Mas de una fila comparte la misma huella geometrica: no hay forma
+      // segura de saber cual de ellas corresponde al fid original. Nunca
+      // se elige una por posicion -- se trata como conflicto explicito,
+      // igual que la rama de busqueda por codigo trata los duplicados con
+      // atributos territoriales/geometricos contradictorios.
+      return { row: null, conflict: true };
+    }
+
+    const matchedRow = matches[0];
+
+    if (!matchedRow || !isValidPredioGeometry(matchedRow.geometry)) {
+      return { row: null, conflict: false };
+    }
+
+    if (preview.codigoPredial && canonicalText(matchedRow.codigo_predial) !== canonicalText(preview.codigoPredial)) {
+      // El fid original ya no corresponde al codigo_predial que el preview
+      // guardo (dato cambio entre el /lookup inicial y este /full-result).
+      // No se responde FOUND en silencio con una fila no verificada.
+      return { row: null, conflict: true };
+    }
+
+    return { row: matchedRow, conflict: false };
+  }
+
   let source = null;
   let row = null;
 
   if (preview.codigoPredial) {
-    const cleanResult = await query(CLEAN_FULL_RESULT_QUERY, [preview.codigoPredial, CATASTROX_ORIGEN_NACIONAL_PROJ]);
     if (preview.searchType === 'code' && isCanonicalPredialCode(preview.codigoPredial)) {
+      const cleanResult = await queryImpl(CLEAN_FULL_RESULT_QUERY, [preview.codigoPredial, CATASTROX_ORIGEN_NACIONAL_PROJ]);
       const exactResolution = resolveExactFullResultByCodeRows(cleanResult.rows, preview.codigoPredial);
       if (exactResolution.outcome === 'resolved' && exactResolution.row && isValidPredioGeometry(exactResolution.row.geometry)) {
         source = 'clean';
@@ -1556,14 +1657,37 @@ const CLEAN_FULL_RESULT_QUERY = `select
           },
         };
       }
-    } else if (cleanResult.rows[0] && isValidPredioGeometry(cleanResult.rows[0].geometry)) {
-      source = 'clean';
-      row = cleanResult.rows[0];
+    } else if (preview.fid) {
+      const fidResolution = await resolveCleanRowByFid(preview.fid);
+      if (fidResolution.conflict) {
+        return {
+          errorStatus: 409,
+          payload: {
+            found: false,
+            status: 'REQUIRES_TECHNICAL_VALIDATION',
+          },
+        };
+      }
+      if (fidResolution.row) {
+        source = 'clean';
+        row = fidResolution.row;
+      } else {
+        row = await reselectCleanRowByQueryPoint();
+        if (row) source = 'clean';
+      }
+    } else {
+      // Preview de busqueda por punto sin fid (por ejemplo, uno creado antes
+      // de este cambio y aun vigente dentro del TTL). Nunca se toma rows[0]
+      // de una consulta por codigo_predial: se reselecciona por punto de
+      // forma deterministica, o se deja sin resolver aqui (no se responde
+      // FOUND con una fila arbitraria).
+      row = await reselectCleanRowByQueryPoint();
+      if (row) source = 'clean';
     }
   }
 
   if (!row && preview.predioId) {
-    const legacyResult = await query(LEGACY_FULL_RESULT_QUERY, [preview.predioId]);
+    const legacyResult = await queryImpl(LEGACY_FULL_RESULT_QUERY, [preview.predioId]);
     if (legacyResult.rows[0] && isValidPredioGeometry(legacyResult.rows[0].geometry)) {
       source = 'legacy';
       row = legacyResult.rows[0];
@@ -1575,7 +1699,7 @@ const CLEAN_FULL_RESULT_QUERY = `select
     && Number.isFinite(Number(preview?.queryPoint?.lng))
     && Number.isFinite(Number(preview?.queryPoint?.lat))
   ) {
-    const cleanPointResult = await query(CLEAN_FULL_RESULT_BY_POINT_QUERY, [
+    const cleanPointResult = await queryImpl(CLEAN_FULL_RESULT_BY_POINT_QUERY, [
       Number(preview.queryPoint.lng),
       Number(preview.queryPoint.lat),
       CATASTROX_ORIGEN_NACIONAL_PROJ,
@@ -1591,7 +1715,7 @@ const CLEAN_FULL_RESULT_QUERY = `select
     && Number.isFinite(Number(row?.query_lng))
     && Number.isFinite(Number(row?.query_lat))
   ) {
-    const cleanPointResult = await query(CLEAN_FULL_RESULT_BY_POINT_QUERY, [
+    const cleanPointResult = await queryImpl(CLEAN_FULL_RESULT_BY_POINT_QUERY, [
       Number(row.query_lng),
       Number(row.query_lat),
       CATASTROX_ORIGEN_NACIONAL_PROJ,
