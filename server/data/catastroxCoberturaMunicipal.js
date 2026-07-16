@@ -57,10 +57,15 @@ export function estimateMunicipalCoverageByPoint(lat, lng) {
     }
   }
 
+  // Fuera de los heuristicBounds conocidos, no hay base para afirmar ningun
+  // territorio: departamento (y el resto de campos) deben quedar en null,
+  // nunca asumir 'Caqueta' por ser el ambito historico de la herramienta.
+  // Un valor no-nulo aqui puede "ganarle" por error a un territorio real
+  // resuelto en otra capa (ver CX-TERR-001).
   return {
     codigoMunicipio: null,
     municipio: null,
-    departamento: 'Caqueta',
+    departamento: null,
     gestorCatastral: null,
     estadoCobertura: CATASTROX_COVERAGE_STATUS.PENDIENTE_VALIDACION,
   };

@@ -605,8 +605,8 @@ function buildNotFoundResponse({ queryPoint, municipio, coverage }) {
   };
 }
 
-async function findMunicipioByPoint(lng, lat) {
-  const directMatch = await query(
+async function findMunicipioByPoint(lng, lat, queryImpl = query) {
+  const directMatch = await queryImpl(
     `with point as (
        select ST_SetSRID(ST_MakePoint($1, $2), 4326) as geom
      )
@@ -626,7 +626,7 @@ async function findMunicipioByPoint(lng, lat) {
     return normalizeMunicipioRow(directMatch.rows[0]);
   }
 
-  const nearestMatch = await query(
+  const nearestMatch = await queryImpl(
     `with point as (
        select ST_SetSRID(ST_MakePoint($1, $2), 4326) as geom
      )
@@ -642,6 +642,99 @@ async function findMunicipioByPoint(lng, lat) {
   );
 
   return normalizeMunicipioRow(nearestMatch.rows[0]);
+}
+
+// Prioridad 1 de resolucion territorial para un predio clean identificado:
+// deriva el codigo DANE municipal (primeros 5 digitos) del codigo_predial
+// CANONICO (30 digitos) del predio ya seleccionado, y lo resuelve por
+// codigo EXACTO contra gis.municipios_colombia -- mismo esquema
+// (mpcodigo, mpnombre, depto, gestor) que ya usan findMunicipioByPoint/
+// normalizeMunicipioRow, ya probado en produccion. A proposito NO usa
+// ST_Covers/ST_Intersects por punto: esa union espacial es una capa
+// administrativa independiente del predio catastral y puede diferir cerca
+// de un limite municipal (ver CX-TERR-001), que es exactamente la causa
+// del defecto que esta funcion corrige. Si el codigo no es canonico o el
+// codigo DANE no resuelve ninguna fila, devuelve null para que el llamador
+// caiga a findMunicipioByPoint como fallback.
+export async function findMunicipioByDaneCode(codigoPredial, queryImpl = query) {
+  // Solo recorta espacios exteriores (toNullableString ya usada en todo el
+  // archivo para esto mismo) -- nunca separadores internos: un codigo con
+  // guiones/espacios internos o letras debe seguir siendo rechazado por el
+  // regex de abajo, no normalizado a algo aceptable.
+  const normalized = toNullableString(codigoPredial) || '';
+  if (!/^\d{30}$/.test(normalized)) {
+    return null;
+  }
+
+  const mpcodigo = normalized.slice(0, 5);
+  const result = await queryImpl(
+    `select
+       mpcodigo,
+       mpnombre,
+       depto,
+       gestor
+     from gis.municipios_colombia
+     where mpcodigo = $1
+     limit 1`,
+    [mpcodigo],
+  );
+
+  return normalizeMunicipioRow(result.rows[0]);
+}
+
+// Resuelve el territorio (municipio/departamento/gestor) de un predio clean
+// identificado por coordenadas, siguiendo la prioridad documentada: (1)
+// codigo DANE derivado del propio codigo_predial contra
+// gis.municipios_colombia por codigo exacto; (2) solo si eso no resuelve
+// nada (codigo no canonico, o codigo DANE sin fila), cae a
+// findMunicipioByPoint -- el mismo comportamiento que existia antes de
+// esta correccion, ahora como fallback en vez de fuente primaria.
+export async function resolveCleanPredioTerritory(cleanPredio, lng, lat, queryImpl = query) {
+  const byDaneCode = await findMunicipioByDaneCode(cleanPredio?.codigo_predial, queryImpl);
+  if (byDaneCode) {
+    return byDaneCode;
+  }
+
+  return findMunicipioByPoint(lng, lat, queryImpl);
+}
+
+// Construye, a partir de un unico territorio ya resuelto, los tres campos
+// de texto que la respuesta gratuita repite en top-level, predio y
+// coverage. Se centraliza aqui para que los tres lugares sean, por
+// construccion, siempre consistentes entre si -- nunca se vuelve a leer
+// `coverage` para decidir el nombre del municipio o el departamento.
+export function buildCleanLookupTerritoryFields(municipio) {
+  return {
+    municipio: toNullableString(municipio?.municipio),
+    departamento: toNullableString(municipio?.departamento),
+    gestor: toNullableString(municipio?.gestorCatastral),
+  };
+}
+
+// Unica funcion pura que la rama cleanPredio de router.post('/lookup')
+// consume para llenar los 9 campos territoriales de la respuesta
+// (top-level, predio.* y coverage.*). Los tres destinos leen SIEMPRE el
+// mismo `fields` interno -- no hay forma de que top-level, predio y
+// coverage queden con un municipio/departamento distinto entre si, porque
+// nunca se vuelve a derivar cada uno por separado.
+export function buildCleanLookupTerritoryProjection(municipio) {
+  const fields = buildCleanLookupTerritoryFields(municipio);
+
+  return {
+    municipio: fields.municipio,
+    departamento: fields.departamento,
+    gestor: fields.gestor,
+    predio: {
+      municipio: fields.municipio,
+      departamento: fields.departamento,
+      gestor: fields.gestor,
+    },
+    coverage: {
+      municipio: fields.municipio,
+      departamento: fields.departamento,
+      gestorCatastral: fields.gestor,
+    },
+  };
 }
 
 async function findCleanPredioByPoint(lng, lat) {
@@ -1012,8 +1105,9 @@ router.post('/lookup', async (req, res, next) => {
     const cleanPredio = await findCleanPredioByPoint(lng, lat);
 
     if (cleanPredio) {
-      const municipio = await findMunicipioByPoint(lng, lat);
+      const municipio = await resolveCleanPredioTerritory(cleanPredio, lng, lat);
       const coverage = municipio ? resolveCoverageStatus({ municipio, lat, lng }) : null;
+      const territory = buildCleanLookupTerritoryProjection(municipio);
       const lookupId = buildLookupId();
       rememberCleanLookupPreviewFromPoint(lookupId, cleanPredio, lat, lng);
 
@@ -1022,27 +1116,27 @@ router.post('/lookup', async (req, res, next) => {
         routeId: lookupId,
         found: true,
         status: 'FOUND',
-        municipio: toNullableString(municipio?.municipio),
-        departamento: toNullableString(municipio?.departamento),
+        municipio: territory.municipio,
+        departamento: territory.departamento,
         tipoZona: toNullableString(cleanPredio.zona),
-        gestor: toNullableString(municipio?.gestorCatastral),
+        gestor: territory.gestor,
         canPurchase: true,
         commercialMessage:
           'Predio identificado. Para conocer área, perímetro, códigos prediales, plano y archivos descargables, seleccione un paquete.',
         legalNotice: CATASTROX_LEGAL_NOTICE,
         coverage: {
-          municipio: coverage?.municipio || municipio?.municipio || null,
-          departamento: coverage?.departamento || municipio?.departamento || null,
-          gestorCatastral: coverage?.gestorCatastral || municipio?.gestorCatastral || null,
+          municipio: territory.coverage.municipio,
+          departamento: territory.coverage.departamento,
+          gestorCatastral: territory.coverage.gestorCatastral,
           estadoCobertura: coverage?.estadoCobertura || null,
         },
         predio: {
           lookup_id: lookupId,
           routeId: lookupId,
-          municipio: toNullableString(municipio?.municipio),
-          departamento: toNullableString(municipio?.departamento),
+          municipio: territory.predio.municipio,
+          departamento: territory.predio.departamento,
           tipoZona: toNullableString(cleanPredio.zona),
-          gestor: toNullableString(municipio?.gestorCatastral),
+          gestor: territory.predio.gestor,
           estadoPredial:
             'Predio identificado. Información detallada disponible únicamente al activar un paquete.',
           previewMapUrl: `/api/catastrox/lookups/${encodeURIComponent(lookupId)}/preview-map`,
