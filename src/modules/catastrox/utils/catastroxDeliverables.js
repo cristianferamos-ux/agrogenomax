@@ -4010,6 +4010,58 @@ export function buildShapefileOrientedParts(geometryParts) {
 
 const MAGNA_SIRGAS_ORIGEN_NACIONAL_PRJ = 'PROJCS["MAGNA-SIRGAS / Origen-Nacional",GEOGCS["MAGNA-SIRGAS",DATUM["Marco_Geocentrico_Nacional_de_Referencia",SPHEROID["GRS 1980",6378137,298.257222101]],PRIMEM["Greenwich",0],UNIT["Degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",4],PARAMETER["central_meridian",-73],PARAMETER["scale_factor",0.9992],PARAMETER["false_easting",5000000],PARAMETER["false_northing",2000000],UNIT["Meter",1]]';
 
+// Longitud (en bytes) de la secuencia UTF-8 que comienza en `byte`, segun su
+// byte lider. ASCII = 1, 110xxxxx = 2, 1110xxxx = 3, 11110xxx = 4. Cualquier
+// patron no reconocido (byte de continuacion huerfano, secuencia invalida)
+// se trata como longitud 1 para poder seguir avanzando sin quedar atascado
+// -- TextEncoder ya garantiza que el string de entrada produce UTF-8 valido,
+// asi que esta rama es defensiva, no se espera alcanzarla en uso normal.
+function utf8SequenceLength(byte) {
+  if ((byte & 0x80) === 0x00) return 1;
+  if ((byte & 0xe0) === 0xc0) return 2;
+  if ((byte & 0xf0) === 0xe0) return 3;
+  if ((byte & 0xf8) === 0xf0) return 4;
+  return 1;
+}
+
+// Recorta `bytes` (ya codificados en UTF-8) al mayor prefijo que quepa en
+// `maxBytes` sin partir ninguna secuencia multibyte (tildes, ñ, o pares
+// subrogados/emoji de 4 bytes) a mitad. Avanza caracter por caracter (no
+// byte por byte) y se detiene ANTES de cualquier secuencia que excederia el
+// presupuesto, en vez de truncar por posicion fija y luego reparar.
+export function truncateUtf8ToByteBudget(bytes, maxBytes) {
+  if (bytes.length <= maxBytes) return bytes;
+
+  let index = 0;
+  let lastCompleteEnd = 0;
+  while (index < bytes.length) {
+    const sequenceLength = utf8SequenceLength(bytes[index]);
+    if (index + sequenceLength > maxBytes) break;
+    index += sequenceLength;
+    lastCompleteEnd = index;
+  }
+  return bytes.subarray(0, lastCompleteEnd);
+}
+
+// Codifica `value` dentro de un campo DBF de ancho fijo `byteWidth`,
+// respetando el ancho en BYTES reales de UTF-8 (no en unidades UTF-16 de
+// JavaScript, que es lo que hacia `text.slice(0, size)` antes de este
+// cambio). Nunca escribe mas de `byteWidth` bytes, nunca corta una
+// secuencia UTF-8 a mitad, y siempre devuelve exactamente `byteWidth`
+// bytes (relleno con espacios ASCII 0x20). `align: 'left'` es la
+// convencion DBF para campos de texto (C); `align: 'right'` conserva la
+// alineacion que ya tenian los campos numericos (N) antes de este cambio.
+export function encodeDbfFieldBytes(value, byteWidth, align = 'left') {
+  const text = value === null || value === undefined ? '' : String(value);
+  const fullBytes = textEncoder.encode(text);
+  const usableBytes = truncateUtf8ToByteBudget(fullBytes, byteWidth);
+
+  const field = new Uint8Array(byteWidth).fill(0x20);
+  const offset = align === 'right' ? byteWidth - usableBytes.length : 0;
+  field.set(usableBytes, offset);
+  return field;
+}
+
 function writeShapefileParts(source) {
   const predio = normalizePredioForProjectedGis(source, { requireProjectedGeometry: true });
   const geometryParts = predio.geometryParts?.length
@@ -4111,7 +4163,10 @@ function writeShapefileParts(source) {
     if (type === 'N') {
       text = decimals ? Number(value).toFixed(decimals) : String(Math.round(Number(value)));
     }
-    const bytes = textEncoder.encode(text.slice(0, size).padStart(type === 'N' ? size : 0, ' ').padEnd(size, ' '));
+    const bytes = encodeDbfFieldBytes(text, size, type === 'N' ? 'right' : 'left');
+    if (bytes.length !== size) {
+      throw new Error(`Campo DBF con ancho invalido: se esperaban ${size} bytes y se obtuvieron ${bytes.length}.`);
+    }
     dbf.set(bytes, recordOffset);
     recordOffset += size;
   });
