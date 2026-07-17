@@ -2,9 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildCleanLookupTerritoryFields,
-  buildCleanLookupTerritoryProjection,
+  buildLookupTerritoryProjection,
   findMunicipioByDaneCode,
   resolveCleanPredioTerritory,
+  resolveLegacyPredioTerritory,
 } from '../catastrox.js';
 
 // Los tests B/B2 (fallback de cobertura fuera de heuristicBounds) viven en
@@ -127,7 +128,7 @@ test('C4. codigo_predial con espacios exteriores se normaliza antes de validar (
   assert.equal(longitudDistinta, null);
 });
 
-test('D. buildCleanLookupTerritoryProjection (funcion productiva real) produce top-level, predio y coverage consistentes', async () => {
+test('D. buildLookupTerritoryProjection (funcion productiva real) produce top-level, predio y coverage consistentes', async () => {
   const cleanPredio = { codigo_predial: CODIGO_PREDIAL_CANONICO, zona: 'rural', fid: 'FID-SINTETICO-D' };
   const queryImpl = createMockQuery({
     byDaneCode: (params) => (params[0] === SAN_VICENTE_DANE ? { rows: [sanVicenteRow()] } : { rows: [] }),
@@ -137,9 +138,9 @@ test('D. buildCleanLookupTerritoryProjection (funcion productiva real) produce t
   const territorio = await resolveCleanPredioTerritory(cleanPredio, LNG_CASO_REAL, LAT_CASO_REAL, queryImpl);
 
   // Se invoca la MISMA funcion que router.post('/lookup') usa para llenar
-  // los 9 campos territoriales de la respuesta (catastrox.js, rama
-  // cleanPredio) -- no se reconstruye nada manualmente aqui.
-  const projection = buildCleanLookupTerritoryProjection(territorio);
+  // los 9 campos territoriales de la respuesta, en AMBAS ramas (clean y
+  // legacy) -- no se reconstruye nada manualmente aqui.
+  const projection = buildLookupTerritoryProjection(territorio);
 
   assert.equal(projection.municipio, 'San Vicente del Caguán');
   assert.equal(projection.departamento, 'Caquetá');
@@ -190,4 +191,101 @@ test('F. la resolucion territorial nunca modifica fid, codigo_predial ni zona de
   await resolveCleanPredioTerritory(cleanPredio, LNG_CASO_REAL, LAT_CASO_REAL, queryImpl);
 
   assert.equal(JSON.stringify(cleanPredio), snapshot, 'cleanPredio (fid, codigo_predial, zona) no debe mutarse');
+});
+
+// =====================================================================
+// Rama LEGACY (gis.catastro_caqueta): mismo defecto, misma correccion.
+// La consulta legacy hace `left join municipio m on true` contra
+// gis.municipios_colombia por punto -- ese join puebla row.mpnombre/
+// row.depto/row.gestor, que es exactamente lo que puede diferir del
+// codigo_predial real del predio catastral cerca de un limite.
+// =====================================================================
+
+function legacyRow(overrides = {}) {
+  return {
+    id: 987654,
+    codigo_predial: CODIGO_PREDIAL_CANONICO,
+    codigo_municipio: null,
+    codigo_departamento: null,
+    shape_area: 1000,
+    zona: 'rural',
+    // Columnas que trae el LEFT JOIN por punto contra gis.municipios_colombia
+    // (el sintoma observado en produccion: La Macarena / Meta).
+    mpcodigo: LA_MACARENA_DANE,
+    mpnombre: 'La Macarena',
+    depto: 'Meta',
+    gestor: 'IGAC',
+    ...overrides,
+  };
+}
+
+test('Legacy-A. caso exacto: codigo_predial canonico con join por punto incorrecto -> prevalece el DANE del predio', async () => {
+  const row = legacyRow();
+  const queryImpl = createMockQuery({
+    byDaneCode: (params) => (params[0] === SAN_VICENTE_DANE ? { rows: [sanVicenteRow()] } : { rows: [] }),
+  });
+
+  const territorio = await resolveLegacyPredioTerritory(row, queryImpl);
+  assert.equal(territorio.municipio, 'San Vicente del Caguán');
+  assert.equal(territorio.departamento, 'Caquetá');
+  assert.notEqual(territorio.municipio, 'La Macarena');
+  assert.notEqual(territorio.departamento, 'Meta');
+
+  const projection = buildLookupTerritoryProjection(territorio);
+  assert.equal(projection.municipio, 'San Vicente del Caguán');
+  assert.equal(projection.departamento, 'Caquetá');
+  assert.deepEqual(projection.predio, { municipio: 'San Vicente del Caguán', departamento: 'Caquetá', gestor: 'IGAC' });
+  assert.deepEqual(projection.coverage, { municipio: 'San Vicente del Caguán', departamento: 'Caquetá', gestorCatastral: 'IGAC' });
+});
+
+test('Legacy-B. codigo legacy no canonico: conserva row.mpnombre/row.depto/row.gestor como fallback', async () => {
+  const row = legacyRow({ codigo_predial: '12345' }); // no canonico
+  let daneQueryCalled = false;
+  const queryImpl = createMockQuery({
+    byDaneCode: () => { daneQueryCalled = true; return { rows: [] }; },
+  });
+
+  const territorio = await resolveLegacyPredioTerritory(row, queryImpl);
+  assert.equal(territorio.municipio, 'La Macarena');
+  assert.equal(territorio.departamento, 'Meta');
+  assert.equal(territorio.gestorCatastral, 'IGAC');
+  assert.equal(daneQueryCalled, false, 'un codigo_predial no canonico no debe generar consulta por DANE');
+});
+
+test('Legacy-C. DANE canonico sin fila en gis.municipios_colombia: conserva el fallback del row legacy', async () => {
+  const row = legacyRow();
+  const queryImpl = createMockQuery({
+    byDaneCode: () => ({ rows: [] }), // el codigo DANE no resuelve ninguna fila
+  });
+
+  const territorio = await resolveLegacyPredioTerritory(row, queryImpl);
+  assert.equal(territorio.municipio, 'La Macarena', 'sin fila DANE, debe conservar el join por punto ya existente');
+  assert.equal(territorio.departamento, 'Meta');
+});
+
+test('Legacy-D. la resolucion territorial nunca modifica id, codigo_predial ni zona del row legacy', async () => {
+  const row = legacyRow();
+  const snapshot = JSON.stringify(row);
+
+  const queryImpl = createMockQuery({
+    byDaneCode: () => ({ rows: [sanVicenteRow()] }),
+  });
+
+  await resolveLegacyPredioTerritory(row, queryImpl);
+
+  assert.equal(JSON.stringify(row), snapshot, 'row legacy (id, codigo_predial, zona) no debe mutarse');
+});
+
+test('Regresion-clean. la rama clean (buildLookupTerritoryProjection, resolveCleanPredioTerritory) sigue funcionando sin cambio de comportamiento', async () => {
+  const cleanPredio = { codigo_predial: CODIGO_PREDIAL_CANONICO, zona: 'rural', fid: 'FID-CLEAN-SIN-REGRESION' };
+  const queryImpl = createMockQuery({
+    byDaneCode: (params) => (params[0] === SAN_VICENTE_DANE ? { rows: [sanVicenteRow()] } : { rows: [] }),
+    byPointDirect: () => ({ rows: [laMacarenaRow()] }),
+  });
+
+  const territorio = await resolveCleanPredioTerritory(cleanPredio, LNG_CASO_REAL, LAT_CASO_REAL, queryImpl);
+  const projection = buildLookupTerritoryProjection(territorio);
+
+  assert.equal(projection.municipio, 'San Vicente del Caguán');
+  assert.equal(projection.departamento, 'Caquetá');
 });

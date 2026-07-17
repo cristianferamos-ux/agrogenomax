@@ -698,6 +698,22 @@ export async function resolveCleanPredioTerritory(cleanPredio, lng, lat, queryIm
   return findMunicipioByPoint(lng, lat, queryImpl);
 }
 
+// Resuelve el territorio de un predio LEGACY (gis.catastro_caqueta)
+// siguiendo la misma prioridad que resolveCleanPredioTerritory: (1) codigo
+// DANE derivado de row.codigo_predial contra gis.municipios_colombia por
+// codigo exacto; (2) solo si el codigo no es canonico o el DANE no resuelve
+// ninguna fila, cae a normalizeMunicipioRow(row) -- el join espacial que
+// ya trae la propia consulta legacy (m.mpcodigo/mpnombre/depto/gestor),
+// que es exactamente el comportamiento previo a esta correccion.
+export async function resolveLegacyPredioTerritory(row, queryImpl = query) {
+  const byDaneCode = await findMunicipioByDaneCode(row?.codigo_predial, queryImpl);
+  if (byDaneCode) {
+    return byDaneCode;
+  }
+
+  return normalizeMunicipioRow(row);
+}
+
 // Construye, a partir de un unico territorio ya resuelto, los tres campos
 // de texto que la respuesta gratuita repite en top-level, predio y
 // coverage. Se centraliza aqui para que los tres lugares sean, por
@@ -711,13 +727,15 @@ export function buildCleanLookupTerritoryFields(municipio) {
   };
 }
 
-// Unica funcion pura que la rama cleanPredio de router.post('/lookup')
-// consume para llenar los 9 campos territoriales de la respuesta
-// (top-level, predio.* y coverage.*). Los tres destinos leen SIEMPRE el
-// mismo `fields` interno -- no hay forma de que top-level, predio y
-// coverage queden con un municipio/departamento distinto entre si, porque
-// nunca se vuelve a derivar cada uno por separado.
-export function buildCleanLookupTerritoryProjection(municipio) {
+// Unica funcion pura que AMBAS ramas de router.post('/lookup') (cleanPredio
+// y legacy) consumen para llenar los 9 campos territoriales de la
+// respuesta (top-level, predio.* y coverage.*). Los tres destinos leen
+// SIEMPRE el mismo `fields` interno -- no hay forma de que top-level,
+// predio y coverage queden con un municipio/departamento distinto entre
+// si, porque nunca se vuelve a derivar cada uno por separado. Renombrada
+// (antes buildCleanLookupTerritoryProjection) para reflejar que ya no es
+// exclusiva de la rama clean.
+export function buildLookupTerritoryProjection(municipio) {
   const fields = buildCleanLookupTerritoryFields(municipio);
 
   return {
@@ -1045,8 +1063,9 @@ router.post('/lookup', async (req, res, next) => {
 
     if (predioResult.rows[0]) {
       const row = predioResult.rows[0];
-      const municipio = normalizeMunicipioRow(row);
-      const coverage = resolveCoverageStatus({ municipio, lat, lng });
+      const municipio = await resolveLegacyPredioTerritory(row);
+      const coverage = municipio ? resolveCoverageStatus({ municipio, lat, lng }) : null;
+      const territory = buildLookupTerritoryProjection(municipio);
       const lookupId = buildLookupId();
       rememberLookupPreview(lookupId, row.id, {
         codigoPredial: row.codigo || row.codigo_predial || null,
@@ -1058,27 +1077,27 @@ router.post('/lookup', async (req, res, next) => {
         routeId: lookupId,
         found: true,
         status: 'FOUND',
-        municipio: toNullableString(row.mpnombre),
-        departamento: toNullableString(row.depto),
+        municipio: territory.municipio,
+        departamento: territory.departamento,
         tipoZona: toNullableString(row.zona),
-        gestor: toNullableString(row.gestor),
+        gestor: territory.gestor,
         canPurchase: true,
         commercialMessage:
           'Predio identificado. Para conocer área, perímetro, códigos prediales, plano y archivos descargables, seleccione un paquete.',
         legalNotice: CATASTROX_LEGAL_NOTICE,
         coverage: {
-          municipio: coverage?.municipio || municipio?.municipio,
-          departamento: coverage?.departamento || municipio?.departamento,
-          gestorCatastral: coverage?.gestorCatastral || municipio?.gestorCatastral,
+          municipio: territory.coverage.municipio,
+          departamento: territory.coverage.departamento,
+          gestorCatastral: territory.coverage.gestorCatastral,
           estadoCobertura: coverage?.estadoCobertura || null,
         },
         predio: {
           lookup_id: lookupId,
           routeId: lookupId,
-          municipio: toNullableString(row.mpnombre),
-          departamento: toNullableString(row.depto),
+          municipio: territory.predio.municipio,
+          departamento: territory.predio.departamento,
           tipoZona: toNullableString(row.zona),
-          gestor: toNullableString(row.gestor),
+          gestor: territory.predio.gestor,
           estadoPredial:
             'Predio identificado. Información detallada disponible únicamente al activar un paquete.',
           previewMapUrl: `/api/catastrox/lookups/${encodeURIComponent(lookupId)}/preview-map`,
@@ -1107,7 +1126,7 @@ router.post('/lookup', async (req, res, next) => {
     if (cleanPredio) {
       const municipio = await resolveCleanPredioTerritory(cleanPredio, lng, lat);
       const coverage = municipio ? resolveCoverageStatus({ municipio, lat, lng }) : null;
-      const territory = buildCleanLookupTerritoryProjection(municipio);
+      const territory = buildLookupTerritoryProjection(municipio);
       const lookupId = buildLookupId();
       rememberCleanLookupPreviewFromPoint(lookupId, cleanPredio, lat, lng);
 
