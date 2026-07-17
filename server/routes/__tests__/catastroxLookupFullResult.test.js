@@ -49,7 +49,7 @@ function createMockQuery({ fid = () => ({ rows: [] }), code = () => ({ rows: [] 
   return async (sql, params) => {
     if (sql.includes('where fid = $1')) return fid(params);
     if (sql.includes('where p.codigo_predial = $1')) return code(params);
-    if (sql.includes('order by p.area_terreno_m2 asc nulls last')) return point(params);
+    if (sql.includes('order by p.area_terreno_m2 asc nulls last')) return point(params, sql);
     if (sql.includes('from gis.catastro_caqueta c')) return legacy(params);
     throw new Error(`Query no reconocida por el mock: ${sql.slice(0, 60)}...`);
   };
@@ -149,18 +149,27 @@ test('D1. preview sin fid (compatibilidad) usa reseleccion espacial deterministi
   rememberAdvancedLookupPreview(lookupId, SYNTHETIC_CODE, { queryPoint: SYNTHETIC_POINT });
 
   let codeQueryCalled = false;
+  let pointSql = '';
   const queryImpl = createMockQuery({
     code: () => {
       codeQueryCalled = true;
       return { rows: [makeCleanRow({ municipio_nombre: 'NUNCA-DEBE-SERVIRSE' })] };
     },
-    point: () => ({ rows: [makeCleanRow({ municipio_nombre: 'MUNI-ESPACIAL' })] }),
+    point: (_params, sql) => {
+      pointSql = sql;
+      return { rows: [makeCleanRow({ municipio_nombre: 'MUNI-ESPACIAL' })] };
+    },
   });
 
   const result = await buildLookupFullResultPayload(lookupId, queryImpl);
   assert.equal(result.errorStatus, null);
   assert.equal(result.payload.predio.municipio, 'MUNI-ESPACIAL');
   assert.equal(codeQueryCalled, false, 'sin fid, no debe consultarse por codigo_predial en absoluto');
+  assert.match(
+    pointSql,
+    /ST_SetSRID\(\s*ST_Transform\(\s*ST_SetSRID\(ST_Point\(\$1, \$2\), 4326\),[\s\S]*?\)\s*,\s*9377\s*\)/,
+    'el punto transformado debe conservar SRID 9377 antes de ST_Covers',
+  );
 });
 
 test('D2. preview sin fid y sin queryPoint nunca responde FOUND con una fila arbitraria', async () => {

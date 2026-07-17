@@ -1654,9 +1654,12 @@ const CLEAN_FULL_RESULT_QUERY = `select
        from catastrox_clean.v_predios_enriquecidos p
        where ST_Covers(
          p.geom,
-            ST_Transform(
-              ST_SetSRID(ST_Point($1, $2), 4326),
-              '${CATASTROX_ORIGEN_NACIONAL_PROJ}'
+            ST_SetSRID(
+              ST_Transform(
+                ST_SetSRID(ST_Point($1, $2), 4326),
+                '${CATASTROX_ORIGEN_NACIONAL_PROJ}'
+              ),
+              9377
             )
        )
        order by p.area_terreno_m2 asc nulls last
