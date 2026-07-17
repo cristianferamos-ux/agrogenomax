@@ -219,3 +219,46 @@ test('E2. busqueda por codigo con candidatos coherentes sigue resolviendo normal
   assert.equal(result.errorStatus, null);
   assert.equal(result.payload.predio.municipio, 'MUNI-UNICA');
 });
+
+test('CX-LOGIC-002 E. disponibilidad: identidad incompleta con geometria invalida/valida no alterna entre FOUND y FULL_RESULT_UNAVAILABLE', async () => {
+  __clearLookupStateForTests();
+  const lookupId = 'cx-test-availability-incomplete-identity';
+  rememberAdvancedLookupPreview(lookupId, SYNTHETIC_CODE, {
+    queryPoint: SYNTHETIC_POINT,
+    searchType: 'code',
+    queriedCode: SYNTHETIC_CODE,
+  });
+
+  // Identidad incompleta (territorio y huella ausentes en ambas filas):
+  // una con geometria estructuralmente invalida, otra valida.
+  const filaGeometriaInvalida = makeCleanRow({
+    municipio_dane: null,
+    municipio_nombre: null,
+    departamento_nombre: null,
+    zona: null,
+    geometry_fingerprint: null,
+    geometry: null,
+  });
+  const filaGeometriaValida = makeCleanRow({
+    municipio_dane: null,
+    municipio_nombre: null,
+    departamento_nombre: null,
+    zona: null,
+    geometry_fingerprint: null,
+    geometry: SYNTHETIC_GEOMETRY,
+  });
+
+  const outcomes = [];
+  for (const rows of [[filaGeometriaInvalida, filaGeometriaValida], [filaGeometriaValida, filaGeometriaInvalida]]) {
+    const queryImpl = createMockQuery({ code: () => ({ rows }) });
+    const result = await buildLookupFullResultPayload(lookupId, queryImpl);
+    outcomes.push(result.payload.status);
+    // El resultado seguro (ambiguo) nunca debe presentarse como FOUND ni
+    // como FULL_RESULT_UNAVAILABLE -- debe ser el mismo estado de
+    // revision tecnica en ambos ordenes.
+    assert.equal(result.errorStatus, 409);
+    assert.equal(result.payload.status, 'REQUIRES_TECHNICAL_VALIDATION');
+    assert.notEqual(result.payload.found, true);
+  }
+  assert.deepEqual(outcomes, ['REQUIRES_TECHNICAL_VALIDATION', 'REQUIRES_TECHNICAL_VALIDATION']);
+});

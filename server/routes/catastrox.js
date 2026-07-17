@@ -366,6 +366,23 @@ function buildCandidateGeometrySignature(row) {
   ].join('|');
 }
 
+// Un campo se considera "demostrado identico" entre TODOS los candidatos
+// solo si NINGUNO de ellos tiene el valor ausente (null/undefined/''/solo
+// espacios, via canonicalText) Y los valores presentes son exactamente
+// iguales entre si. La ausencia NUNCA cuenta como evidencia positiva de
+// igualdad -- dos candidatos que comparten el mismo campo ausente no
+// demuestran nada sobre ese campo, sin importar que el resto de campos si
+// coincida. Esta funcion es la unica responsable de esa distincion; el
+// resto de resolveLookupByCodeCandidates solo la invoca, sin volver a
+// comparar canonicalText(...) directamente por campo (ver CX-LOGIC-002).
+function isFieldDemonstratedEqual(candidates, extractField) {
+  const values = candidates.map((row) => canonicalText(extractField(row)));
+  if (values.some((value) => value === '')) {
+    return false;
+  }
+  return new Set(values).size === 1;
+}
+
 function isCanonicalPredialCode(value) {
   return /^[0-9]{30}$/.test(canonicalText(value));
 }
@@ -406,18 +423,33 @@ export function resolveLookupByCodeCandidates(rows, normalizedCode) {
     };
   }
 
-  const municipalities = new Set(candidates.map((row) => canonicalText(row.municipio_nombre)));
-  const departments = new Set(candidates.map((row) => canonicalText(row.departamento_nombre)));
-  const zones = new Set(candidates.map((row) => canonicalText(row.zona)));
-  const geometrySignatures = new Set(candidates.map(buildCandidateGeometrySignature));
+  // Con mas de un candidato para el mismo codigo_predial, la identidad solo
+  // queda demostrada si CADA uno de estos campos esta presente (no ausente)
+  // y es identico en TODOS los candidatos. Si cualquier candidato carece de
+  // uno de estos campos, o si dos candidatos tienen valores reales distintos,
+  // la identidad exacta no esta demostrada -- nunca se responde 'resolved'
+  // en ese caso, independientemente del orden de `candidates` (CX-LOGIC-002).
+  if (candidates.length > 1) {
+    const identityFieldExtractors = [
+      (row) => row.municipio_dane,
+      (row) => row.municipio_nombre,
+      (row) => row.departamento_nombre,
+      (row) => row.zona,
+      (row) => row.geometry_fingerprint,
+    ];
 
-  if (municipalities.size > 1 || departments.size > 1 || zones.size > 1 || geometrySignatures.size > 1) {
-    return {
-      outcome: 'ambiguous',
-      reason: 'CONFLICTING_TERRITORIAL_OR_GEOMETRY_DATA',
-      normalizedCode,
-      searchLength: normalizedCode.length,
-    };
+    const identityFullyDemonstrated = identityFieldExtractors.every((extractField) =>
+      isFieldDemonstratedEqual(candidates, extractField),
+    );
+
+    if (!identityFullyDemonstrated) {
+      return {
+        outcome: 'ambiguous',
+        reason: 'CONFLICTING_TERRITORIAL_OR_GEOMETRY_DATA',
+        normalizedCode,
+        searchLength: normalizedCode.length,
+      };
+    }
   }
 
   const baseRow = candidates[0];

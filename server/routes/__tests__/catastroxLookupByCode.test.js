@@ -135,6 +135,130 @@ test('misma huella y mismo código/territorio sigue resoluble', () => {
   assert.equal(result.outcome, 'resolved');
 });
 
+// =====================================================================
+// CX-LOGIC-002: canonicalText colapsa null/undefined/''/espacios al mismo
+// valor '', por lo que dos candidatos con un campo de identidad AUSENTE en
+// ambos podian tratarse como "iguales" en ese campo sin evidencia real.
+// Estos tests cubren exactamente ese defecto, con datos 100% sinteticos.
+// =====================================================================
+
+test('CX-LOGIC-002 A. control positivo: territorio+zona+huella completos e iguales -> resolved, sin importar el orden', () => {
+  const candidateA = makeCandidate({ query_lat: 1.1, query_lng: -75.1 });
+  const candidateB = makeCandidate({ query_lat: 1.1, query_lng: -75.1 });
+
+  const resultAB = resolveLookupByCodeCandidates([candidateA, candidateB], '181500003000000130054000000000');
+  const resultBA = resolveLookupByCodeCandidates([candidateB, candidateA], '181500003000000130054000000000');
+
+  assert.equal(resultAB.outcome, 'resolved');
+  assert.equal(resultBA.outcome, 'resolved');
+});
+
+test('CX-LOGIC-002 B. caso adversarial completo: territorio/zona/huella ausentes en ambos, atributos distintos -> ambiguous en ambos ordenes', () => {
+  const candidateA = makeCandidate({
+    municipio_dane: null,
+    municipio_nombre: null,
+    departamento_nombre: null,
+    zona: null,
+    geometry_fingerprint: null,
+    bbox_wkt: 'POLYGON((0 0,1 0,1 1,0 1,0 0))', // geometria conceptualmente distinta de B
+    nombre_predio_sintetico: 'PREDIO-A',
+  });
+  const candidateB = makeCandidate({
+    municipio_dane: undefined,
+    municipio_nombre: '',
+    departamento_nombre: '   ', // solo espacios
+    zona: null,
+    geometry_fingerprint: '',
+    bbox_wkt: 'POLYGON((10 10,11 10,11 11,10 11,10 10))', // geometria conceptualmente distinta de A
+    nombre_predio_sintetico: 'PREDIO-B',
+  });
+
+  const resultAB = resolveLookupByCodeCandidates([candidateA, candidateB], '181500003000000130054000000000');
+  const resultBA = resolveLookupByCodeCandidates([candidateB, candidateA], '181500003000000130054000000000');
+
+  assert.equal(resultAB.outcome, 'ambiguous');
+  assert.equal(resultAB.reason, 'CONFLICTING_TERRITORIAL_OR_GEOMETRY_DATA');
+  assert.equal(resultBA.outcome, 'ambiguous');
+  assert.equal(resultBA.reason, 'CONFLICTING_TERRITORIAL_OR_GEOMETRY_DATA');
+  // Ninguna fila se selecciona arbitrariamente: 'resolved' no aparece en
+  // ningun orden, y el resultado no expone un 'candidate' construido sobre
+  // una fila elegida por posicion.
+  assert.equal(resultAB.candidate, undefined);
+  assert.equal(resultBA.candidate, undefined);
+});
+
+test('CX-LOGIC-002 C. geometry_fingerprint ausente en ambos candidatos (territorio identico, geometrias validas distintas) -> ambiguous en ambos ordenes', () => {
+  const candidateA = makeCandidate({ geometry_fingerprint: null, bbox_wkt: 'POLYGON((0 0,1 0,1 1,0 1,0 0))' });
+  const candidateB = makeCandidate({ geometry_fingerprint: undefined, bbox_wkt: 'POLYGON((5 5,6 5,6 6,5 6,5 5))' });
+
+  const resultAB = resolveLookupByCodeCandidates([candidateA, candidateB], '181500003000000130054000000000');
+  const resultBA = resolveLookupByCodeCandidates([candidateB, candidateA], '181500003000000130054000000000');
+
+  assert.equal(resultAB.outcome, 'ambiguous');
+  assert.equal(resultBA.outcome, 'ambiguous');
+});
+
+test('CX-LOGIC-002 D. asimetria: un candidato con campo ausente y otro con valor real -> ambiguous en ambos ordenes', () => {
+  const candidateAusente = makeCandidate({ municipio_nombre: null });
+  const candidateReal = makeCandidate({ municipio_nombre: 'CARTAGENA DEL CHAIRA' });
+
+  const resultAB = resolveLookupByCodeCandidates([candidateAusente, candidateReal], '181500003000000130054000000000');
+  const resultBA = resolveLookupByCodeCandidates([candidateReal, candidateAusente], '181500003000000130054000000000');
+
+  assert.equal(resultAB.outcome, 'ambiguous');
+  assert.equal(resultAB.reason, 'CONFLICTING_TERRITORIAL_OR_GEOMETRY_DATA');
+  assert.equal(resultBA.outcome, 'ambiguous');
+  assert.equal(resultBA.reason, 'CONFLICTING_TERRITORIAL_OR_GEOMETRY_DATA');
+});
+
+test('CX-LOGIC-002 F. conflicto real y completo en territorio o huella sigue bloqueando (sin regresion)', () => {
+  const porZona = resolveLookupByCodeCandidates(
+    [makeCandidate({ zona: 'rural' }), makeCandidate({ zona: 'urbano' })],
+    '181500003000000130054000000000',
+  );
+  assert.equal(porZona.outcome, 'ambiguous');
+  assert.equal(porZona.reason, 'CONFLICTING_TERRITORIAL_OR_GEOMETRY_DATA');
+
+  const porHuella = resolveLookupByCodeCandidates(
+    [makeCandidate({ geometry_fingerprint: 'geom-a' }), makeCandidate({ geometry_fingerprint: 'geom-b' })],
+    '181500003000000130054000000000',
+  );
+  assert.equal(porHuella.outcome, 'ambiguous');
+  assert.equal(porHuella.reason, 'CONFLICTING_TERRITORIAL_OR_GEOMETRY_DATA');
+});
+
+test('CX-LOGIC-002 G. candidato unico sigue resolviendo sin regresion', () => {
+  const result = resolveLookupByCodeCandidates([makeCandidate()], '181500003000000130054000000000');
+  assert.equal(result.outcome, 'resolved');
+});
+
+test('CX-LOGIC-002 H. resolveExactFullResultByCodeRows con identidad incompleta nunca devuelve una fila por posicion', () => {
+  const candidateA = makeCandidate({
+    municipio_dane: null,
+    municipio_nombre: null,
+    departamento_nombre: null,
+    zona: null,
+    geometry_fingerprint: null,
+    direccion_sintetica: 'DIRECCION-A',
+  });
+  const candidateB = makeCandidate({
+    municipio_dane: null,
+    municipio_nombre: null,
+    departamento_nombre: null,
+    zona: null,
+    geometry_fingerprint: null,
+    direccion_sintetica: 'DIRECCION-B',
+  });
+
+  const resultAB = resolveExactFullResultByCodeRows([candidateA, candidateB], '181500003000000130054000000000');
+  const resultBA = resolveExactFullResultByCodeRows([candidateB, candidateA], '181500003000000130054000000000');
+
+  assert.equal(resultAB.outcome, 'ambiguous');
+  assert.equal(resultBA.outcome, 'ambiguous');
+  assert.equal(resultAB.row, undefined, 'no debe seleccionar DIRECCION-A por posicion');
+  assert.equal(resultBA.row, undefined, 'no debe seleccionar DIRECCION-B por posicion');
+});
+
 test('full-result exacto por código conserva el codigoPredial almacenado aunque el queryPoint cubra otra geometría', () => {
   const exactRows = [
     makeCandidate({
