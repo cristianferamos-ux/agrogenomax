@@ -27,6 +27,7 @@ const TEST_FILES = [
   '/src/modules/catastrox/utils/__tests__/projectedGeometryExports.test.js',
   '/src/modules/catastrox/utils/__tests__/dbfFieldEncoding.test.js',
   '/src/modules/catastrox/utils/__tests__/catastroxKmlHoles.test.js',
+  '/src/modules/catastrox/utils/__tests__/catastroxShpHoles.test.js',
 ];
 
 const server = await createServer({
