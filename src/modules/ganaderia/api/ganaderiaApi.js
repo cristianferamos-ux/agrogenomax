@@ -1,65 +1,21 @@
+// LOTE-003 (ADR-014 §13/§21): la resolución de URL de API y la detección
+// de ambiente/hostname local ya no se implementan aquí -- viven en la
+// fuente central única src/config/runtimeConfig.js, que además restringe
+// el override de agx_api_url/apiUrl a development local (nunca demo,
+// staging, producción u otro hostname desplegado) y elimina cualquier
+// fallback hacia una URL configurada en build (p. ej. Railway) fuera de
+// ese contexto.
+import { normalizeApiBase, resolveApiBaseCandidates } from '../../../config/runtimeConfig.js';
+
 const CONFIGURED_API_BASE = import.meta.env.VITE_API_URL || import.meta.env.VITE_AGX_API_URL || '';
-const LOCAL_API_BASE = 'http://127.0.0.1:3001/api';
-
-function normalizeApiBase(value) {
-  return String(value || '').trim().replace(/\/$/, '');
-}
-
-function isLocalHostname() {
-  if (typeof window === 'undefined') return false;
-  return ['localhost', '127.0.0.1'].includes(window.location.hostname);
-}
 
 function isLocalApiBase(value) {
   const apiBase = normalizeApiBase(value);
   return apiBase.includes('127.0.0.1') || apiBase.includes('localhost');
 }
 
-function runtimeApiBaseFromQuery() {
-  if (typeof window === 'undefined') return '';
-
-  const params = new URLSearchParams(window.location.search);
-  const urlParam = params.get('agx_api_url') || params.get('apiUrl');
-
-  if (!urlParam) return '';
-
-  const normalized = normalizeApiBase(urlParam);
-  window.localStorage?.setItem('agx_api_url', normalized);
-  return normalized;
-}
-
-function runtimeApiBaseFromStorage() {
-  if (typeof window === 'undefined') return '';
-  return normalizeApiBase(window.localStorage?.getItem('agx_api_url'));
-}
-
 function apiBaseCandidates() {
-  const configuredApiBase = normalizeApiBase(CONFIGURED_API_BASE);
-  const queryApiBase = runtimeApiBaseFromQuery();
-  const storageApiBase = runtimeApiBaseFromStorage();
-  const candidates = [];
-
-  if (queryApiBase) {
-    candidates.push(queryApiBase);
-  }
-
-  if (!isLocalHostname()) {
-    candidates.push('/api');
-  }
-
-  if (configuredApiBase && (isLocalHostname() || !isLocalApiBase(configuredApiBase))) {
-    candidates.push(configuredApiBase);
-  }
-
-  if (isLocalHostname()) {
-    candidates.push(LOCAL_API_BASE, '/api');
-  }
-
-  if (storageApiBase && storageApiBase !== queryApiBase && (isLocalHostname() || !isLocalApiBase(storageApiBase))) {
-    candidates.push(storageApiBase);
-  }
-
-  return [...new Set(candidates.filter(Boolean))];
+  return resolveApiBaseCandidates();
 }
 
 function logApiAttempt(url) {

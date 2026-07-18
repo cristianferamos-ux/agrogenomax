@@ -1,5 +1,16 @@
 import { CATASTROX_STATUS } from '../data/catastroxMockData.js';
-const API_BASE = import.meta.env.VITE_API_URL || import.meta.env.VITE_AGX_API_URL || '/api';
+// LOTE-003 (ADR-014 §13/§21): resolución de URL de API y de hostname
+// local centralizadas en src/config/runtimeConfig.js -- fuera de
+// development local, la base de API resuelve exclusivamente al relay
+// same-origin (/api) en staging/producción, nunca a VITE_API_URL/
+// VITE_AGX_API_URL configuradas en build (evita que una URL externa,
+// p. ej. Railway, quede como backend efectivo de un despliegue). En
+// demo (ADR-014 §7) no existe ninguna base válida: resolveApiBaseUrl()
+// lanza ApiDisabledError -- por eso se resuelve de forma perezosa (solo
+// al construir una URL real, nunca al cargar este módulo) para que el
+// import no rompa el renderizado de la demo.
+import { isLocalHostname, normalizeApiBase, resolveApiBaseCandidates, resolveApiBaseUrl } from '../../../config/runtimeConfig.js';
+
 const AUDIT_DOWNLOADS_ENABLED = String(import.meta.env.VITE_CATASTROX_AUDIT_DOWNLOADS || '').toLowerCase() === 'true';
 
 export const CATASTROX_LOOKUP_STORAGE_KEY = 'catastrox_last_lookup';
@@ -25,12 +36,8 @@ function isLookupNotFoundPayload(payload) {
   ].includes(payload.status);
 }
 
-function normalizeApiBase(value) {
-  return String(value || '').trim().replace(/\/$/, '');
-}
-
 function buildApiUrl(apiBase, path) {
-  const normalizedBase = normalizeApiBase(apiBase || API_BASE);
+  const normalizedBase = normalizeApiBase(apiBase || resolveApiBaseUrl());
   return `${normalizedBase}${path}`;
 }
 
@@ -38,7 +45,7 @@ function buildApiResourceUrl(apiBase, resourcePath, fallbackPath) {
   const resource = cleanText(resourcePath) || fallbackPath;
   if (/^https?:\/\//i.test(resource)) return resource;
 
-  const normalizedBase = normalizeApiBase(apiBase || API_BASE);
+  const normalizedBase = normalizeApiBase(apiBase || resolveApiBaseUrl());
   if (resource.startsWith('/api/')) {
     if (normalizedBase === '/api') return resource;
     return `${normalizedBase.replace(/\/api$/, '')}${resource}`;
@@ -48,20 +55,8 @@ function buildApiResourceUrl(apiBase, resourcePath, fallbackPath) {
   return `${normalizedBase}/${resource}`;
 }
 
-function isLocalHostname() {
-  if (typeof window === 'undefined') return false;
-  return ['localhost', '127.0.0.1'].includes(window.location.hostname);
-}
-
 function getApiBaseCandidates() {
-  const primaryBase = normalizeApiBase(API_BASE);
-  const candidates = [primaryBase];
-
-  if (isLocalHostname() && primaryBase !== '/api') {
-    candidates.push('/api');
-  }
-
-  return [...new Set(candidates.filter(Boolean))];
+  return resolveApiBaseCandidates();
 }
 
 function logLookupFailure(error, responseBody = null) {
@@ -505,7 +500,7 @@ export async function lookupPredio({ lat, lng }) {
   const parsedLat = parseCoordinate(lat, 'lat');
   const parsedLng = parseCoordinate(lng, 'lng');
   const coords = { lat: parsedLat, lng: parsedLng };
-  const apiBase = normalizeApiBase(API_BASE);
+  const apiBase = normalizeApiBase(resolveApiBaseUrl());
   const url = `${apiBase}/catastrox/lookup`;
   let response;
 
@@ -574,7 +569,7 @@ export async function lookupPredio({ lat, lng }) {
 
 export async function lookupPredioByCode({ codigo }) {
   const rawCode = String(codigo ?? '');
-  const apiBase = normalizeApiBase(API_BASE);
+  const apiBase = normalizeApiBase(resolveApiBaseUrl());
   const url = `${apiBase}/catastrox/lookup-by-code`;
   let response;
 
