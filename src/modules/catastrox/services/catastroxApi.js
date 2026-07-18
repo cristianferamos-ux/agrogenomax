@@ -1,6 +1,4 @@
 import { CATASTROX_STATUS } from '../data/catastroxMockData.js';
-import { getCatastroxResultById, lookupPredioMock } from './catastroxMockService.js';
-
 const API_BASE = import.meta.env.VITE_API_URL || import.meta.env.VITE_AGX_API_URL || '/api';
 const AUDIT_DOWNLOADS_ENABLED = String(import.meta.env.VITE_CATASTROX_AUDIT_DOWNLOADS || '').toLowerCase() === 'true';
 
@@ -460,20 +458,6 @@ function buildNotFoundLookup(coords, payload) {
   };
 }
 
-function buildMockLookup(coords) {
-  const predio = lookupPredioMock(coords);
-  return {
-    found: true,
-    routeId: predio.routeId || predio.id,
-    source: 'mock',
-    predio: {
-      ...predio,
-      routeId: predio.routeId || predio.id,
-      source: 'mock',
-    },
-  };
-}
-
 function persistLookupResult(payload) {
   if (typeof window === 'undefined') return;
   window.sessionStorage?.setItem(CATASTROX_LOOKUP_STORAGE_KEY, JSON.stringify(payload));
@@ -505,29 +489,16 @@ export function resolveLookupForRoute(routeId) {
   const stored = getLastLookup();
   if (stored) {
     const storedRouteId = stored.routeId || stored.predio?.routeId || stored.predio?.id;
+    const storedSource = stored.source || stored.predio?.source;
     if (
-      String(storedRouteId) === String(routeId) ||
-      String(stored.predio?.id) === String(routeId)
+      storedSource !== 'mock' &&
+      (String(storedRouteId) === String(routeId) || String(stored.predio?.id) === String(routeId))
     ) {
       return stored;
     }
   }
 
-  if (String(routeId).startsWith('real-') || String(routeId) === 'no-found' || String(routeId) === 'sin-predio') {
-    return null;
-  }
-
-  const mockPredio = getCatastroxResultById(routeId);
-  return {
-    found: true,
-    routeId: mockPredio.routeId || mockPredio.id,
-    source: 'mock',
-    predio: {
-      ...mockPredio,
-      routeId: mockPredio.routeId || mockPredio.id,
-      source: 'mock',
-    },
-  };
+  return null;
 }
 
 export async function lookupPredio({ lat, lng }) {
@@ -886,12 +857,11 @@ export async function lookupPredioWithFallback({ lat, lng }) {
     return await lookupPredio({ lat, lng });
   } catch (error) {
     if (error.code === 'API_UNAVAILABLE' || error.code === 'ENDPOINT_NOT_FOUND') {
-      const fallback = buildMockLookup({
-        lat: Number.parseFloat(lat),
-        lng: Number.parseFloat(lng),
+      throw new CatastroxApiError('No pudimos completar la consulta del predio en este momento. Intenta nuevamente.', {
+        code: 'LOOKUP_UNAVAILABLE',
+        status: error.status || 503,
+        payload: error.payload,
       });
-      persistLookupResult(fallback);
-      return fallback;
     }
 
     throw error;
