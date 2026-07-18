@@ -1,10 +1,10 @@
-import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { ConfigurationError, getConfig } from './config/env.js';
 import { errorHandler, notFound } from './middleware/errors.js';
+import { buildExpressCorsPolicy, createCorsMiddleware } from './security/corsPolicy.js';
 import animalesRouter from './routes/animales.js';
 import catastroxRouter from './routes/catastrox.js';
 import catastroxPaymentsRouter from './routes/catastroxPayments.js';
@@ -45,24 +45,16 @@ try {
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const localOrigins = ['http://127.0.0.1:5173', 'http://localhost:5173'];
-const configuredOrigins = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean)
-  : [];
-const allowedOrigins = [...new Set([...localOrigins, ...configuredOrigins])];
 
-app.use(
-  cors({
-    origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-        return;
-      }
-
-      callback(new Error('Origen no permitido por CORS.'));
-    },
-  }),
-);
+// CORS (LOTE-004, ADR-014 §7 Barrera 4/§21): allowlist explícita derivada
+// de APP_ENV (server/config/env.js -- appConfig.cors.allowedOrigins), sin
+// reflejo de Origin, sin comodines, sin `CORS_ORIGIN` heredada. Montado
+// antes de cualquier ruta de negocio.
+const corsPolicy = buildExpressCorsPolicy({
+  appEnv: appConfig.appEnv,
+  allowedOrigins: appConfig.cors.allowedOrigins,
+});
+app.use(createCorsMiddleware(corsPolicy));
 app.use(express.json({ limit: '2mb' }));
 
 app.get('/', (_req, res) => {

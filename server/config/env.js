@@ -1,10 +1,13 @@
 /**
- * Módulo central de configuración runtime del backend (LOTE-002, ADR-014 §13).
+ * Módulo central de configuración runtime del backend (LOTE-002, ADR-014 §13;
+ * extendido en LOTE-004 con la resolución de la *allowlist* de CORS).
  *
  * APP_ENV es la única fuente de verdad del ambiente funcional. NODE_ENV
  * nunca la sustituye ni participa en ninguna decisión -- solo se expone de
  * forma informativa en getConfig().
  */
+
+import { CorsConfigurationError, resolveAllowedOriginsForEnvironment } from '../../shared/security/corsPolicy.js';
 
 export const ALLOWED_APP_ENVIRONMENTS = Object.freeze([
   'development',
@@ -33,7 +36,17 @@ const DEMO_PROHIBITED_EXACT_VARIABLES = Object.freeze([
   'API_BACKEND_URL',
   'VITE_API_URL',
   'VITE_AGX_API_URL',
+  // LOTE-004: demo no tiene backend Express real que proteger con CORS --
+  // configurar esta variable en demo delataría un backend inexistente.
+  'CORS_ALLOWED_ORIGINS',
 ]);
+
+// LOTE-004 (ADR-014 §7 Barrera 4, ADR-013 §21): la resolución y validación
+// de la allowlist de CORS por ambiente vive en
+// shared/security/corsPolicy.js (resolveAllowedOriginsForEnvironment) --
+// única fuente de verdad, reutilizada también por los relays de
+// Cloudflare. Este módulo solo traduce CORS_ALLOWED_ORIGINS (CSV) y
+// envuelve los errores como ConfigurationError.
 
 const DEMO_PROHIBITED_PREFIXES = Object.freeze(['WOMPI_', 'COGNITO_']);
 
@@ -110,6 +123,7 @@ function looksLikeSafeLocalDevelopment(source) {
     source.DATABASE_URL,
     source.CATASTROX_DATABASE_URL,
     source.CORS_ORIGIN,
+    source.CORS_ALLOWED_ORIGINS,
     source.API_BACKEND_URL,
   ];
   if (suspiciousValues.some((value) => containsAny(value, CROSS_ENVIRONMENT_HINTS))) return false;
@@ -248,6 +262,48 @@ export function validateEnv(appEnv, source = process.env) {
   }
 }
 
+function parseCommaSeparatedList(rawValue) {
+  if (!isNonEmpty(rawValue)) return [];
+  return rawValue
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Resuelve la *allowlist* de orígenes CORS para `appEnv` (LOTE-004,
+ * ADR-014 §7 Barrera 4). Envoltorio delgado sobre
+ * `resolveAllowedOriginsForEnvironment()` (shared/security/corsPolicy.js,
+ * única fuente de verdad de esta regla, también consumida por los relays
+ * de Cloudflare): aquí solo se traduce `CORS_ALLOWED_ORIGINS` (CSV) y se
+ * envuelven los errores como `ConfigurationError` para mantener un único
+ * tipo de error en todo este módulo.
+ *
+ * En `demo` la variable está prohibida en `validateEnv()` -- para cuando
+ * esta función se invoca, `source.CORS_ALLOWED_ORIGINS` ya está
+ * garantizada ausente si `appEnv === 'demo'`.
+ *
+ * @param {string} appEnv
+ * @param {NodeJS.ProcessEnv | Record<string, string | undefined>} source
+ * @returns {readonly string[]}
+ */
+export function resolveCorsAllowedOrigins(appEnv, source = process.env) {
+  const explicitRaw = parseCommaSeparatedList(source.CORS_ALLOWED_ORIGINS);
+
+  try {
+    return resolveAllowedOriginsForEnvironment(appEnv, explicitRaw);
+  } catch (error) {
+    if (error instanceof CorsConfigurationError) {
+      throw new ConfigurationError(error.message, {
+        code: error.code,
+        environment: error.environment,
+        variable: 'CORS_ALLOWED_ORIGINS',
+      });
+    }
+    throw error;
+  }
+}
+
 // Estado compartido: permite que server/db.js y server/catastroxDb.js
 // (corrección LOTE-002) verifiquen, sin acoplarse a los detalles internos
 // de este módulo, que getConfig() ya se ejecutó con éxito antes de
@@ -282,11 +338,17 @@ export function getConfig(source = process.env, options = {}) {
   }
 
   const usesRealServices = appEnv === 'test' ? source.TEST_USE_REAL_SERVICES === 'true' : true;
+  const corsAllowedOrigins = resolveCorsAllowedOrigins(appEnv, source);
 
   const config = Object.freeze({
     appEnv,
     isLocalDevelopmentFallback,
     usesRealServices,
+    // LOTE-004: allowlist de CORS ya resuelta y validada para este
+    // ambiente -- server/security/corsPolicy.js la consume para construir
+    // la política final (métodos/headers/credentials son constantes, no
+    // dependen de APP_ENV, y se declaran en ese módulo).
+    cors: Object.freeze({ allowedOrigins: corsAllowedOrigins }),
     // Informativo únicamente -- nunca usado para tomar decisiones.
     nodeEnv: source.NODE_ENV ?? null,
   });

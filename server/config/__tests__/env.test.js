@@ -7,6 +7,7 @@ import {
   loadEnv,
   validateEnv,
   getConfig,
+  resolveCorsAllowedOrigins,
   __resetValidationStateForTests,
 } from '../env.js';
 
@@ -277,5 +278,149 @@ describe('LOTE-002 (corrección): server/config/env.js', () => {
       () => validateEnv(appEnv, {}),
       (error) => error instanceof ConfigurationError && error.code === 'REQUIRED_VARIABLE_MISSING',
     );
+  });
+});
+
+describe('LOTE-004: resolveCorsAllowedOrigins() y appConfig.cors', () => {
+  beforeEach(() => {
+    __resetValidationStateForTests();
+  });
+
+  test('development: allowlist obligatoria fija, sin CORS_ALLOWED_ORIGINS', () => {
+    assert.deepEqual(resolveCorsAllowedOrigins('development', {}), [
+      'http://localhost:5173',
+      'http://127.0.0.1:5173',
+    ]);
+  });
+
+  test('development: CORS_ALLOWED_ORIGINS con dominio externo falla', () => {
+    assert.throws(
+      () => resolveCorsAllowedOrigins('development', { CORS_ALLOWED_ORIGINS: 'https://agrogenomax.com' }),
+      (error) => error instanceof ConfigurationError && error.code === 'CORS_ORIGIN_FORBIDDEN',
+    );
+  });
+
+  test('development: CORS_ALLOWED_ORIGINS con localhost en otro puerto se admite (ampliación válida)', () => {
+    const result = resolveCorsAllowedOrigins('development', { CORS_ALLOWED_ORIGINS: 'http://localhost:4173' });
+    assert.ok(result.includes('http://localhost:4173'));
+    assert.ok(result.includes('http://localhost:5173'));
+  });
+
+  test('test: sin configuración, allowlist vacía (sin abrir CORS globalmente)', () => {
+    assert.deepEqual(resolveCorsAllowedOrigins('test', {}), []);
+  });
+
+  test('test: allowlist inyectable vía CORS_ALLOWED_ORIGINS', () => {
+    assert.deepEqual(resolveCorsAllowedOrigins('test', { CORS_ALLOWED_ORIGINS: 'https://mock.test' }), [
+      'https://mock.test',
+    ]);
+  });
+
+  test('demo: allowlist siempre vacía y CORS_ALLOWED_ORIGINS está prohibida', () => {
+    assert.deepEqual(resolveCorsAllowedOrigins('demo', {}), []);
+    assert.throws(
+      () => getConfig({ APP_ENV: 'demo', CORS_ALLOWED_ORIGINS: 'https://demo.agrogenomax.com' }, {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'PROHIBITED_VARIABLE_PRESENT' &&
+        error.variable === 'CORS_ALLOWED_ORIGINS',
+    );
+  });
+
+  test('staging: allowlist obligatoria fija a staging.agrogenomax.com', () => {
+    assert.deepEqual(resolveCorsAllowedOrigins('staging', {}), ['https://staging.agrogenomax.com']);
+  });
+
+  test('staging: CORS_ALLOWED_ORIGINS con demo.agrogenomax.com falla', () => {
+    assert.throws(
+      () => resolveCorsAllowedOrigins('staging', { CORS_ALLOWED_ORIGINS: 'https://demo.agrogenomax.com' }),
+      (error) => error instanceof ConfigurationError && error.code === 'CORS_ORIGIN_FORBIDDEN',
+    );
+  });
+
+  test('production: allowlist obligatoria fija a los dos dominios apex oficiales', () => {
+    assert.deepEqual(resolveCorsAllowedOrigins('production', {}), [
+      'https://agrogenomax.com',
+      'https://agrogenomax.co',
+    ]);
+  });
+
+  test('production: CORS_ALLOWED_ORIGINS con staging.agrogenomax.com falla', () => {
+    assert.throws(
+      () => resolveCorsAllowedOrigins('production', { CORS_ALLOWED_ORIGINS: 'https://staging.agrogenomax.com' }),
+      (error) => error instanceof ConfigurationError && error.code === 'CORS_ORIGIN_FORBIDDEN',
+    );
+  });
+
+  test('production: www.agrogenomax.com y www.agrogenomax.co solo se admiten si se declaran explícitamente', () => {
+    assert.deepEqual(resolveCorsAllowedOrigins('production', {}), [
+      'https://agrogenomax.com',
+      'https://agrogenomax.co',
+    ]);
+    assert.deepEqual(
+      resolveCorsAllowedOrigins('production', { CORS_ALLOWED_ORIGINS: 'https://www.agrogenomax.com' }),
+      ['https://agrogenomax.com', 'https://agrogenomax.co', 'https://www.agrogenomax.com'],
+    );
+    assert.deepEqual(
+      resolveCorsAllowedOrigins('production', {
+        CORS_ALLOWED_ORIGINS: 'https://www.agrogenomax.com,https://www.agrogenomax.co',
+      }),
+      [
+        'https://agrogenomax.com',
+        'https://agrogenomax.co',
+        'https://www.agrogenomax.com',
+        'https://www.agrogenomax.co',
+      ],
+    );
+  });
+
+  test('production: CORS_ALLOWED_ORIGINS con cualquier otro subdominio de agrogenomax.com falla', () => {
+    assert.throws(
+      () => resolveCorsAllowedOrigins('production', { CORS_ALLOWED_ORIGINS: 'https://app.agrogenomax.com' }),
+      (error) => error instanceof ConfigurationError && error.code === 'CORS_ORIGIN_FORBIDDEN',
+    );
+  });
+
+  test('production: CORS_ALLOWED_ORIGINS con cualquier otro subdominio de agrogenomax.co falla', () => {
+    assert.throws(
+      () => resolveCorsAllowedOrigins('production', { CORS_ALLOWED_ORIGINS: 'https://app.agrogenomax.co' }),
+      (error) => error instanceof ConfigurationError && error.code === 'CORS_ORIGIN_FORBIDDEN',
+    );
+  });
+
+  test('production: CORS_ALLOWED_ORIGINS con dominio externo/preview/Railway falla', () => {
+    for (const badOrigin of [
+      'https://preview.pages.dev',
+      'https://agrogenomax-production.up.railway.app',
+      'https://staging.agrogenomax.com',
+      'https://demo.agrogenomax.com',
+      'http://localhost:5173',
+      'http://127.0.0.1:5173',
+    ]) {
+      assert.throws(
+        () => resolveCorsAllowedOrigins('production', { CORS_ALLOWED_ORIGINS: badOrigin }),
+        (error) => error instanceof ConfigurationError && error.code === 'CORS_ORIGIN_FORBIDDEN',
+        `esperado CORS_ORIGIN_FORBIDDEN para ${badOrigin}`,
+      );
+    }
+  });
+
+  test('staging: no autoriza automáticamente staging.agrogenomax.co ni demo.agrogenomax.co (no son canónicos)', () => {
+    assert.deepEqual(resolveCorsAllowedOrigins('staging', {}), ['https://staging.agrogenomax.com']);
+    assert.deepEqual(resolveCorsAllowedOrigins('demo', {}), []);
+  });
+
+  test('CORS_ALLOWED_ORIGINS con valor inválido lanza CORS_ORIGIN_INVALID', () => {
+    assert.throws(
+      () => resolveCorsAllowedOrigins('staging', { CORS_ALLOWED_ORIGINS: 'no-es-una-url' }),
+      (error) => error instanceof ConfigurationError && error.code === 'CORS_ORIGIN_INVALID',
+    );
+  });
+
+  test('getConfig() expone appConfig.cors.allowedOrigins ya resuelto e inmutable', () => {
+    const config = getConfig({ APP_ENV: 'staging', DATABASE_URL: 'x', CATASTROX_DATABASE_URL: 'y' }, {});
+    assert.deepEqual(config.cors.allowedOrigins, ['https://staging.agrogenomax.com']);
+    assert.ok(Object.isFrozen(config.cors));
+    assert.ok(Object.isFrozen(config.cors.allowedOrigins));
   });
 });
