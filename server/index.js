@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { ConfigurationError, getConfig } from './config/env.js';
 import { errorHandler, notFound } from './middleware/errors.js';
 import { buildExpressCorsPolicy, createCorsMiddleware } from './security/corsPolicy.js';
+import { createLivenessHandler } from './health/liveness.js';
 import animalesRouter from './routes/animales.js';
 import catastroxRouter from './routes/catastrox.js';
 import catastroxPaymentsRouter from './routes/catastroxPayments.js';
@@ -56,6 +57,12 @@ const corsPolicy = buildExpressCorsPolicy({
 });
 app.use(createCorsMiddleware(corsPolicy));
 app.use(express.json({ limit: '2mb' }));
+
+// Liveness / health de plataforma (LOTE-005, ADR-012 §5.1/§90): registrado
+// antes de cualquier ruta de negocio, sin abrir pools ni depender de
+// dependencias funcionales pesadas -- es el único contrato que el target
+// group del ALB consumirá en ECS.
+app.get('/api/health/live', createLivenessHandler(appConfig.appEnv));
 
 app.get('/', (_req, res) => {
   res.json({ ok: true, service: 'AgroGenomaX API' });
