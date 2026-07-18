@@ -189,6 +189,17 @@ function isLocalOriginValue(origin) {
  */
 export function resolveAllowedOriginsForEnvironment(appEnv, explicitOrigins = []) {
   const mandatory = CORS_MANDATORY_ORIGINS_BY_ENV[appEnv] || [];
+
+  // demo no tiene backend ni relay (ADR-014 §7): ningún origen explícito
+  // puede ampliar su CORS, sin importar qué consumidor invoque esta
+  // función -- la allowlist de demo es siempre exactamente `[]`.
+  if (appEnv === 'demo' && explicitOrigins.length > 0) {
+    throw new CorsConfigurationError(
+      'demo no admite ningún origen CORS explícito (demo no tiene backend ni relay -- ADR-014 §7).',
+      { code: 'CORS_ORIGIN_FORBIDDEN', environment: appEnv },
+    );
+  }
+
   const normalizedExplicit = [];
 
   for (const raw of explicitOrigins) {
