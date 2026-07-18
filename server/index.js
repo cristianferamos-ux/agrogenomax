@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { ConfigurationError, getConfig } from './config/env.js';
 import { errorHandler, notFound } from './middleware/errors.js';
 import animalesRouter from './routes/animales.js';
 import catastroxRouter from './routes/catastrox.js';
@@ -22,6 +23,25 @@ const __dirname = path.dirname(__filename);
 
 dotenv.config({ path: path.resolve(__dirname, '../.env'), quiet: true });
 dotenv.config({ path: path.resolve(__dirname, '.env'), quiet: true });
+
+// Fail-fast (ADR-014 §13/§21): ningún puerto se abre ni se procesa
+// tráfico si APP_ENV no puede resolverse o la configuración es inválida.
+// CORRECCIÓN LOTE-002: server/db.js y server/catastroxDb.js ya no
+// construyen su pg.Pool como efecto colateral de importarse -- lo hacen
+// de forma perezosa (getDbPool()/getCatastroxDbPool()), y exigen que
+// getConfig() ya se haya ejecutado con éxito (assertConfigValidated()).
+// Ningún Pool existe todavía en este punto del arranque.
+let appConfig;
+try {
+  appConfig = getConfig();
+} catch (error) {
+  if (error instanceof ConfigurationError) {
+    console.error(`[config] ${error.code}: ${error.message}`);
+  } else {
+    console.error('[config] Error inesperado validando la configuración del ambiente.', error);
+  }
+  process.exit(1);
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -67,6 +87,6 @@ app.use(notFound);
 app.use(errorHandler);
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`AgroGenomaX API running on port ${PORT}`);
+  console.log(`AgroGenomaX API running on port ${PORT} [APP_ENV=${appConfig.appEnv}]`);
 });
 
