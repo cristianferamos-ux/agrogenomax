@@ -21,6 +21,7 @@ import {
 import GanaderiaDemoNotice from '../components/GanaderiaDemoNotice.jsx';
 import { loadDemoData, resetDemoData } from '../data/ganaderiaDemoData.js';
 import { aplicaProduccionLeche, aplicaComercializacion } from '../engine/categoria.js';
+import { chartColorForState } from '../engine/pesajes.js';
 import { buildDemoReportPdfBlob, downloadBlob } from '../utils/demoPdf.js';
 import '../styles/ganaderia-dashboard.css';
 import '../styles/ganaderia-demo.css';
@@ -56,6 +57,135 @@ function formatFecha(iso) {
   const mm = String(date.getMonth() + 1).padStart(2, '0');
   const yyyy = date.getFullYear();
   return `${dd}-${mm}-${yyyy}`;
+}
+
+function normalizeChartPoints(items, valueKey) {
+  const values = items.map((item) => Number(item[valueKey])).filter(Number.isFinite);
+  if (!values.length) return items.map((item, index) => ({ ...item, x: index * 10, y: 92, chartValue: null }));
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+
+  return items.map((item, index) => {
+    const value = Number(item[valueKey]);
+    const x = items.length <= 1 ? 50 : (index / (items.length - 1)) * 100;
+    const y = Number.isFinite(value) ? 92 - ((value - min) / range) * 78 : 92;
+    return { ...item, x, y, chartValue: value };
+  });
+}
+
+function MiniLineChart({ title, items, valueKey, labelKey, unit = '', highlightLast = 0, note }) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return (
+      <article className="gan-demo-chart-card">
+        <header>
+          <strong>{title}</strong>
+          {note ? <span>{note}</span> : null}
+        </header>
+        <div className="gan-demo-chart-empty" role="img" aria-label={`${title}: Sin datos`}>
+          Sin datos
+        </div>
+      </article>
+    );
+  }
+
+  const points = normalizeChartPoints(items, valueKey);
+  const path = points.map((point) => `${point.x},${point.y}`).join(' ');
+  const highlightFrom = Math.max(0, points.length - highlightLast);
+
+  return (
+    <article className="gan-demo-chart-card">
+      <header>
+        <strong>{title}</strong>
+        {note ? <span>{note}</span> : null}
+      </header>
+      <svg className="gan-demo-line-chart" viewBox="0 0 100 100" role="img" aria-label={title} preserveAspectRatio="none">
+        <polyline points={path} fill="none" />
+        {points.map((point, index) => (
+          <circle key={`${point[labelKey]}-${index}`} cx={point.x} cy={point.y} r={index >= highlightFrom ? 2.8 : 2.1} className={index >= highlightFrom ? 'is-highlight' : ''} />
+        ))}
+      </svg>
+      <div className="gan-demo-chart-labels">
+        {points.map((point, index) => {
+          const pointLabel = point.fecha ? formatFecha(point.fecha) : point[labelKey];
+          return (
+            <span key={`${point[labelKey]}-label-${index}`}>
+              <strong>{pointLabel}</strong>
+              {Number.isFinite(point.chartValue) ? `${point.chartValue}${unit}` : '—'}
+            </span>
+          );
+        })}
+      </div>
+    </article>
+  );
+}
+
+function GdpBarChart({ pesajes }) {
+  const rows = pesajes.filter((row) => Number.isFinite(row.ganancia_diaria_kg));
+  const max = Math.max(...rows.map((row) => Math.abs(row.ganancia_diaria_kg)), 1);
+
+  return (
+    <article className="gan-demo-chart-card">
+      <header>
+        <strong>Ganancia diaria por periodo</strong>
+        <span>Estado calculado por el motor común de pesajes.</span>
+      </header>
+      <div className="gan-demo-bars">
+        {rows.map((row) => (
+          <div key={`gdp-${row.etapa}`} className="gan-demo-bar-row">
+            <span>{row.etapa}</span>
+            <div className="gan-demo-bar-track">
+              <i
+                style={{
+                  width: `${Math.max(8, (Math.abs(row.ganancia_diaria_kg) / max) * 100)}%`,
+                  background: chartColorForState(row.estado_productivo_class),
+                }}
+              />
+            </div>
+            <strong>{formatKg(row.ganancia_diaria_kg)} kg/día · {row.estado_productivo}</strong>
+          </div>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function CommercialSignal({ comercializacion }) {
+  return (
+    <article className="gan-demo-chart-card gan-demo-signal-card">
+      <header>
+        <strong>Semáforo comercial</strong>
+        <span>Orientativo, sin precios ni certificación comercial.</span>
+      </header>
+      <div className="gan-demo-signal">
+        <span className="is-on" />
+        <div>
+          <strong>{comercializacion.estado}</strong>
+          <p>{comercializacion.pesoActualKg} kg · Categoría {comercializacion.categoria}</p>
+        </div>
+      </div>
+      <div className="gan-demo-decision-grid is-compact">
+        {comercializacion.rutas.map((ruta) => (
+          <article key={`signal-${ruta.titulo}`} className="gan-demo-decision-card">
+            <strong>{ruta.titulo}</strong>
+          </article>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function DemoInsightGrid({ items }) {
+  return (
+    <div className="gan-demo-insight-grid">
+      {items.map((item) => (
+        <article key={item.label} className={`gan-demo-insight-card ${item.tone ? `is-${item.tone}` : ''}`}>
+          <span>{item.label}</span>
+          <p>{item.text}</p>
+        </article>
+      ))}
+    </div>
+  );
 }
 
 export default function GanaderiaDemo() {
@@ -412,6 +542,43 @@ function PesajesTab({ caso, casoActivo }) {
           ))}
         </div>
 
+        <div className="gan-demo-visual-grid">
+          <MiniLineChart
+            title="Curva de peso"
+            items={caso.pesajes}
+            valueKey="peso_kg"
+            labelKey="etapa"
+            unit=" kg"
+            highlightLast={2}
+            note="Desaceleración 15–18 meses y recuperación posterior."
+          />
+          <GdpBarChart pesajes={caso.pesajes} />
+          <CommercialSignal comercializacion={caso.comercializacion} />
+        </div>
+
+        <DemoInsightGrid
+          items={[
+            {
+              label: 'Alerta',
+              text: 'Desaceleración de crecimiento entre 15 y 18 meses.',
+              tone: 'warning',
+            },
+            {
+              label: 'Interpretación',
+              text: 'La ganancia diaria bajó frente al desempeño anterior, pero el motor común la clasifica según umbrales reales.',
+            },
+            {
+              label: 'Recomendación',
+              text: caso.analisisPesajes.recomendacion,
+            },
+            {
+              label: 'Resultado',
+              text: 'Recuperación posterior confirmada.',
+              tone: 'positive',
+            },
+          ]}
+        />
+
         <div className="gan-demo-alert-box is-warning">
           <AlertTriangle size={18} />
           <div>
@@ -432,6 +599,15 @@ function PesajesTab({ caso, casoActivo }) {
   return (
     <section className="gan-dash-section">
       <h2>Pesajes mensuales de {caso.identidad.nombre}</h2>
+      <MiniLineChart
+        title="Peso mensual postparto"
+        items={caso.pesajesMensuales}
+        valueKey="pesoKg"
+        labelKey="etapa"
+        unit=" kg"
+        highlightLast={5}
+        note="Recupera condición corporal mientras sostiene producción."
+      />
       <div className="gan-demo-table">
         {caso.pesajesMensuales.map((registro) => (
           <div key={registro.etapa} className="gan-demo-table-row">
@@ -604,6 +780,34 @@ function LecheTab({ caso }) {
       <p className="gan-demo-note">
         Días en leche: {leche.dias_en_leche} — Etapa de lactancia: {leche.etapa_lactancia}.
       </p>
+
+      <MiniLineChart
+        title="Producción diaria de leche"
+        items={registros}
+        valueKey="litros_dia"
+        labelKey="fecha"
+        unit=" L"
+        highlightLast={3}
+        note={hayCaida ? leche.alerta_principal : 'Periodo reciente estable según el motor común.'}
+      />
+
+      <DemoInsightGrid
+        items={[
+          {
+            label: 'Alerta',
+            text: leche.alerta_principal,
+            tone: hayCaida ? 'alert' : 'positive',
+          },
+          {
+            label: 'Interpretación',
+            text: leche.interpretacion,
+          },
+          {
+            label: 'Recomendación',
+            text: leche.recomendacion,
+          },
+        ]}
+      />
 
       <h3 className="gan-demo-list-title">Registro diario (últimos {registros.length} días)</h3>
       <div className="gan-demo-table gan-demo-table-milk">

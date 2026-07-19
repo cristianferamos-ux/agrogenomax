@@ -68,6 +68,10 @@
   padding: 1.8rem clamp(1.2rem, 3vw, 2.6rem) 3.5rem;
 }
 
+.gan-dash-main-operativo {
+  gap: 1.5rem;
+}
+
 .gan-dash-back {
   width: fit-content;
   color: #9fb3a8;
@@ -117,6 +121,114 @@
   color: #b7c7bd;
   font-size: 0.95rem;
   line-height: 1.5;
+}
+
+.gan-dash-operativo-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 0 0 1.5rem;
+  border-bottom: 1px solid rgba(57, 255, 20, 0.16);
+}
+
+.gan-dash-operativo-hero h1 {
+  margin: 0;
+  color: #ffffff;
+  font-family: Space Grotesk, Inter, sans-serif;
+  font-size: clamp(1.9rem, 3.4vw, 3rem);
+  line-height: 1.05;
+}
+
+.gan-dash-operativo-hero p {
+  margin: 0.7rem 0 0;
+  max-width: 45rem;
+  color: #b7c7bd;
+  font-size: 1rem;
+  line-height: 1.55;
+}
+
+.gan-dash-registered-header {
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid rgba(57, 255, 20, 0.16);
+}
+
+.gan-dash-registered-header h1 {
+  margin: 0;
+  color: #ffffff;
+  font-family: Space Grotesk, Inter, sans-serif;
+  font-size: clamp(1.45rem, 2.3vw, 2.2rem);
+}
+
+.gan-dash-registered-header p {
+  margin: 0.55rem 0 0;
+  max-width: 45rem;
+  color: #b7c7bd;
+  font-size: 0.96rem;
+  line-height: 1.55;
+}
+
+.gan-dash-operativo-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(18rem, 0.85fr);
+  gap: 1.3rem;
+  align-items: stretch;
+  border: 1px solid rgba(57, 255, 20, 0.18);
+  border-radius: 0.95rem;
+  background:
+    radial-gradient(circle at top right, rgba(57, 255, 20, 0.14), transparent 34%),
+    rgba(255, 255, 255, 0.025);
+  box-shadow: 0 18px 54px rgba(0, 0, 0, 0.34);
+  padding: clamp(1.2rem, 2.5vw, 2rem);
+}
+
+.gan-dash-operativo-copy h2 {
+  margin: 0;
+  max-width: 38rem;
+  color: #ffffff;
+  font-family: Space Grotesk, Inter, sans-serif;
+  font-size: clamp(1.45rem, 2.4vw, 2.2rem);
+}
+
+.gan-dash-operativo-copy p {
+  margin: 0.8rem 0 0;
+  max-width: 42rem;
+  color: #b7c7bd;
+  font-size: 0.98rem;
+  line-height: 1.6;
+}
+
+.gan-dash-flow {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.gan-dash-flow-step {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid rgba(57, 255, 20, 0.15);
+  border-radius: 0.65rem;
+  background: rgba(0, 0, 0, 0.22);
+  padding: 0.75rem 0.85rem;
+}
+
+.gan-dash-flow-step span {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 999px;
+  background: #39ff14;
+  color: #04170a;
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.gan-dash-flow-step strong {
+  color: #e7f5ec;
+  font-size: 0.88rem;
 }
 
 .gan-dash-header-actions {
@@ -264,6 +376,37 @@
   color: #9fb3a8;
   font-size: 0.8rem;
   line-height: 1.4;
+}
+
+.gan-dash-module-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+}
+
+.gan-dash-module-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid rgba(57, 255, 20, 0.2);
+  border-radius: 999px;
+  background: rgba(57, 255, 20, 0.06);
+  color: #a8ff2a;
+  padding: 0.62rem 0.9rem;
+  font-size: 0.84rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.gan-dash-module-link:hover {
+  background: rgba(57, 255, 20, 0.14);
+  box-shadow: 0 0 18px rgba(57, 255, 20, 0.25);
+}
+
+.gan-dash-helper {
+  margin: 0.8rem 0 0;
+  color: #9fb3a8;
+  font-size: 0.86rem;
 }
 
 .gan-dash-columns {
@@ -497,6 +640,17 @@
   .gan-dash-columns {
     grid-template-columns: 1fr;
   }
+
+  .gan-dash-operativo-panel {
+    grid-template-columns: 1fr;
+  }
+}
+
+.gan-dash-productivity-card p {
+  margin: 0;
+  color: #9fb3a8;
+  font-size: 0.78rem;
+  line-height: 1.4;
 }
 
 @media (max-width: 900px) {
@@ -546,6 +700,11 @@
   }
 
   .gan-dash-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .gan-dash-operativo-hero {
     flex-direction: column;
     align-items: flex-start;
   }

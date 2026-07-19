@@ -427,6 +427,207 @@ button.gan-dash-sidebar-link {
   margin-top: 0.1rem;
 }
 
+.gan-demo-visual-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 1rem;
+  margin: 1.1rem 0;
+}
+
+.gan-demo-chart-card {
+  display: grid;
+  gap: 0.9rem;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 0.8rem;
+  background: rgba(255, 255, 255, 0.018);
+  padding: 1rem;
+}
+
+.gan-demo-chart-card header {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.gan-demo-chart-card header strong {
+  color: #ffffff;
+  font-size: 0.95rem;
+}
+
+.gan-demo-chart-card header span {
+  color: #9fb3a8;
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.gan-demo-line-chart {
+  width: 100%;
+  height: 11rem;
+  border-radius: 0.7rem;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px) 0 0 / 100% 33.333%,
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px) 0 0 / 20% 100%,
+    rgba(3, 12, 8, 0.58);
+}
+
+.gan-demo-chart-empty {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 11rem;
+  border: 1px dashed rgba(57, 255, 20, 0.24);
+  border-radius: 0.7rem;
+  background: rgba(3, 12, 8, 0.58);
+  color: #9fb3a8;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.gan-demo-line-chart polyline {
+  stroke: #7cff00;
+  stroke-width: 2.6;
+  vector-effect: non-scaling-stroke;
+}
+
+.gan-demo-line-chart circle {
+  fill: #0b1510;
+  stroke: #7cff00;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.gan-demo-line-chart circle.is-highlight {
+  fill: #ffd600;
+  stroke: #ffd600;
+}
+
+.gan-demo-chart-labels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(6.8rem, 1fr));
+  gap: 0.45rem;
+}
+
+.gan-demo-chart-labels span {
+  display: grid;
+  gap: 0.1rem;
+  color: #9fb3a8;
+  font-size: 0.72rem;
+}
+
+.gan-demo-chart-labels strong {
+  color: #d8e2ee;
+  font-size: 0.72rem;
+}
+
+.gan-demo-bars {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.gan-demo-bar-row {
+  display: grid;
+  grid-template-columns: 7rem minmax(6rem, 1fr) minmax(8rem, auto);
+  gap: 0.7rem;
+  align-items: center;
+  color: #9fb3a8;
+  font-size: 0.76rem;
+}
+
+.gan-demo-bar-row strong {
+  color: #d8e2ee;
+  font-size: 0.76rem;
+}
+
+.gan-demo-bar-track {
+  overflow: hidden;
+  height: 0.62rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.gan-demo-bar-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.gan-demo-signal-card {
+  grid-column: 1 / -1;
+}
+
+.gan-demo-signal {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.gan-demo-signal > span {
+  width: 1.2rem;
+  height: 1.2rem;
+  border-radius: 999px;
+  background: #7cff00;
+  box-shadow: 0 0 18px rgba(124, 255, 0, 0.38);
+}
+
+.gan-demo-signal strong {
+  color: #ffffff;
+}
+
+.gan-demo-signal p {
+  margin: 0.15rem 0 0;
+  color: #9fb3a8;
+  font-size: 0.82rem;
+}
+
+.gan-demo-decision-grid.is-compact {
+  margin-bottom: 0;
+}
+
+.gan-demo-insight-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.gan-demo-insight-card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.016);
+  padding: 0.85rem;
+}
+
+.gan-demo-insight-card span {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: #7a8a80;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.gan-demo-insight-card p {
+  margin: 0;
+  color: #d8e2ee;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.gan-demo-insight-card.is-warning {
+  border-color: rgba(255, 179, 92, 0.28);
+  background: rgba(255, 179, 92, 0.06);
+}
+
+.gan-demo-insight-card.is-alert {
+  border-color: rgba(255, 107, 107, 0.3);
+  background: rgba(255, 107, 107, 0.06);
+}
+
+.gan-demo-insight-card.is-positive {
+  border-color: rgba(57, 255, 20, 0.26);
+  background: rgba(57, 255, 20, 0.05);
+}
+
 .gan-demo-table-checkpoints .gan-demo-table-row {
   display: grid;
   grid-template-columns: 10rem 12rem 6rem 8rem;
@@ -492,6 +693,11 @@ button.gan-dash-sidebar-link {
   .gan-demo-summary-grid-compact {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .gan-demo-visual-grid,
+  .gan-demo-insight-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 700px) {
@@ -500,6 +706,15 @@ button.gan-dash-sidebar-link {
   .gan-demo-summary-grid-compact,
   .gan-demo-animales-grid,
   .gan-demo-decision-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .gan-demo-visual-grid,
+  .gan-demo-insight-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .gan-demo-bar-row {
     grid-template-columns: 1fr;
   }
 

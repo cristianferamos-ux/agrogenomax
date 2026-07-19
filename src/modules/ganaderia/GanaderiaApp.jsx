@@ -1,5 +1,4 @@
-import { Route, Routes, useLocation, useParams } from 'react-router-dom';
-import GanaderiaHome from './GanaderiaHome.jsx';
+import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import AnimalFichaBasica from './animales/AnimalFichaBasica.jsx';
 import AnimalGeneticaTab from './animales/AnimalGeneticaTab.jsx';
 import AnimalPesajesTab from './animales/AnimalPesajesTab.jsx';
@@ -8,6 +7,7 @@ import AnimalTratamientosTab from './animales/AnimalTratamientosTab.jsx';
 import AnimalVacunacionesTab from './animales/AnimalVacunacionesTab.jsx';
 import GanaderiaBackLink from './components/GanaderiaBackLink.jsx';
 import GanaderiaShell from './components/GanaderiaShell.jsx';
+import AnimalesListPage from './pages/AnimalesListPage.jsx';
 import PotrerosPage from './potreros/PotrerosPage.jsx';
 import PrediosPage from './predios/PrediosPage.jsx';
 import QrEntryPage from './qr/QrEntryPage.jsx';
@@ -49,10 +49,11 @@ export default function GanaderiaApp() {
         <QrEntryPage mode="manual" />
       ) : (
         <Routes>
-          <Route index element={<GanaderiaHome />} />
+          <Route index element={<Navigate to="/ganaderia/dashboard" replace />} />
           <Route path="predios" element={<PrediosPage />} />
           <Route path="potreros" element={<PotrerosPage />} />
           <Route path="animales" element={<QrEntryPage mode="manual" />} />
+          <Route path="animales/listado" element={<AnimalesListPage />} />
           <Route path="escanear-qr" element={<QrEntryPage mode="scan" />} />
           <Route path="animal/:id" element={<AnimalFichaBasica />} />
           <Route

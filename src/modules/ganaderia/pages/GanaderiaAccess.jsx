@@ -41,7 +41,7 @@ export default function GanaderiaAccess() {
             Administra tu hato con trazabilidad QR, control sanitario, reproducción, pesajes, reportes e
             inteligencia productiva.
           </p>
-          <p className="gan-access-highlight">Prueba la demo, revisa los planes o ingresa si ya eres cliente.</p>
+          <p className="gan-access-highlight">Ingresa a tu cuenta privada o explora la Cuenta Demo con datos aislados.</p>
 
           <div className="gan-access-benefits">
             {benefitStrip.map(({ icon: Icon, label }) => (
@@ -57,16 +57,22 @@ export default function GanaderiaAccess() {
       <div className="gan-access-grid">
         <GanaderiaAccessCard
           icon={User}
-          title="Ingreso de usuarios registrados"
+          title="Ingreso para clientes con plan activo"
           text={
             <>
-              <strong>Para clientes con plan activo.</strong> Accede con tu usuario y contraseña para gestionar
-              predios, animales, QR, pesajes, vacunas, tratamientos, reproducción e informes reales.
+              <strong>Acceso privado a tu operación real.</strong> Gestiona los datos propios de tu cuenta, predios,
+              potreros, animales, QR y registros productivos del cliente.
             </>
           }
-          note="Tus datos son privados. Si aún no tienes plan, revisa Planes y precios o prueba la demo."
-          primary={{ label: 'Ingresar a mi cuenta', to: '/ganaderia/dashboard' }}
-          secondary={{ label: 'Recuperar acceso', to: '/ganaderia/proximamente/recuperar-acceso' }}
+          note="Tus datos reales permanecen separados de la Cuenta Demo y protegidos dentro de tu cuenta."
+          primary={{
+            label: 'Ingresar a mi cuenta',
+            to: '/ganaderia/dashboard'
+          }}
+          secondary={{
+            label: 'Recuperar acceso',
+            to: '/ganaderia/proximamente/recuperar-acceso'
+          }}
         />
 
         <GanaderiaAccessCard

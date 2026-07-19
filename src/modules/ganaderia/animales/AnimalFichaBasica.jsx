@@ -101,7 +101,7 @@ export default function AnimalFichaBasica() {
         peso_nacimiento: toApiDecimal(form.peso_nacimiento || ''),
       });
       setAnimal((current) => ({ ...current, ...updated }));
-      setStatus('Ficha basica actualizada en PostgreSQL.');
+      setStatus('Ficha básica actualizada en tu cuenta.');
     } catch (err) {
       setError(err.message);
     }
@@ -164,7 +164,7 @@ export default function AnimalFichaBasica() {
           <div className="gan-section-heading">
             <span className="gan-eyebrow">Identidad real</span>
             <h3>Trazabilidad del animal</h3>
-            <p>Datos operativos asociados al registro activo en PostgreSQL.</p>
+            <p>Datos operativos asociados al registro activo del animal.</p>
           </div>
           <div className="gan-list">
             {identityRows.map(([label, value]) => (
@@ -179,7 +179,7 @@ export default function AnimalFichaBasica() {
         <div className="gan-breed-box">
           <div className="gan-section-heading">
             <span className="gan-eyebrow">Composicion racial</span>
-            <h3>Razas registradas en PostgreSQL</h3>
+            <h3>Razas registradas</h3>
           </div>
           {razas.length ? (
             <div className="gan-list">

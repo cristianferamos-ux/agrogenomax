@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { ganaderiaApi, getRowId, getRowLabel } from '../api/ganaderiaApi.js';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
 
@@ -59,6 +60,8 @@ export default function AnimalInitialForm({ codigoQr, onCreated }) {
     () => selectedRazas.reduce((sum, item) => sum + Number(item.porcentaje || 0), 0),
     [selectedRazas],
   );
+  const hasPredios = predios.length > 0;
+  const hasPotreros = potreros.length > 0;
 
   const update = (field, value) => setForm((current) => ({ ...current, [field]: value }));
   const updateWeight = (field, value) => {
@@ -120,7 +123,7 @@ export default function AnimalInitialForm({ codigoQr, onCreated }) {
         tipo_raza: form.tipo_raza,
         razas: razasPayload,
       });
-      setStatus('Animal guardado y QR asociado en PostgreSQL.');
+      setStatus('Animal guardado y QR asociado a tu cuenta.');
       onCreated?.({ ...animal, id: animal.id || animal.animal_id });
     } catch (err) {
       setError(err.message);
@@ -138,21 +141,39 @@ export default function AnimalInitialForm({ codigoQr, onCreated }) {
           <input value={codigoQr} readOnly />
         </FormField>
         <FormField label="Predio" required>
-          <select value={form.predio_id} onChange={(event) => update('predio_id', event.target.value)} required>
-            <option value="">Seleccionar predio</option>
+          <select value={form.predio_id} onChange={(event) => update('predio_id', event.target.value)} required disabled={!hasPredios}>
+            <option value="">{hasPredios ? 'Selecciona un predio registrado' : 'No hay predios registrados'}</option>
             {predios.map((predio) => (
               <option key={getRowId(predio)} value={getRowId(predio)}>{getRowLabel(predio)}</option>
             ))}
           </select>
         </FormField>
         <FormField label="Potrero" required>
-          <select value={form.potrero_id} onChange={(event) => update('potrero_id', event.target.value)} required>
-            <option value="">Seleccionar potrero</option>
+          <select value={form.potrero_id} onChange={(event) => update('potrero_id', event.target.value)} required disabled={!form.predio_id || !hasPotreros}>
+            <option value="">
+              {!form.predio_id
+                ? 'Primero selecciona un predio'
+                : hasPotreros
+                  ? 'Selecciona un potrero registrado'
+                  : 'Este predio aún no tiene potreros registrados'}
+            </option>
             {potreros.map((potrero) => (
               <option key={potrero.potrero_id ?? getRowId(potrero)} value={potrero.potrero_id ?? getRowId(potrero)}>{getRowLabel(potrero)}</option>
             ))}
           </select>
         </FormField>
+        {!hasPredios ? (
+          <div className="gan-action-row">
+            <StatusMessage>Selecciona un predio registrado antes de crear animales.</StatusMessage>
+            <Link className="gan-secondary-button" to="/ganaderia/predios">Crear predio</Link>
+          </div>
+        ) : null}
+        {form.predio_id && !hasPotreros ? (
+          <div className="gan-action-row">
+            <StatusMessage>Este predio aún no tiene potreros registrados.</StatusMessage>
+            <Link className="gan-secondary-button" to="/ganaderia/potreros">Crear potrero</Link>
+          </div>
+        ) : null}
         <FormField label="Código interno">
           <input value={form.codigo_interno} onChange={(event) => update('codigo_interno', event.target.value)} />
         </FormField>
@@ -198,7 +219,7 @@ export default function AnimalInitialForm({ codigoQr, onCreated }) {
         <div className="gan-breed-box">
           <div className="gan-section-heading">
             <span className="gan-eyebrow">Composición racial</span>
-            <h3>Selecciona el tipo y las razas desde PostgreSQL</h3>
+            <h3>Selecciona el tipo y las razas registradas</h3>
           </div>
           <div className="gan-segment">
             <button type="button" className={form.tipo_raza === 'puro' ? 'is-active' : ''} onClick={() => {

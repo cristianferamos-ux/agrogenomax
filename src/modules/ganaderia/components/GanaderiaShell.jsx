@@ -1,35 +1,23 @@
-import { ArrowLeft, Database, Wifi } from 'lucide-react';
-import { Link } from 'react-router-dom';
 import { isCloudflareWithoutLocalApi } from '../api/ganaderiaApi.js';
-import GanaderiaTabs from './GanaderiaTabs.jsx';
+import GanaderiaSidebar from './GanaderiaSidebar.jsx';
 
 export default function GanaderiaShell({ children }) {
   return (
-    <main className="gan-page">
-      <header className="gan-header">
-        <div>
-          <Link to="/" className="gan-back">
-            <ArrowLeft className="h-4 w-4" />
-            Volver al Home
-          </Link>
+    <div className="gan-dash-shell">
+      <GanaderiaSidebar />
+      <main className="gan-dash-main gan-dash-main-operativo">
+        <header className="gan-dash-registered-header">
+          <span className="gan-dash-badge">Cuenta real</span>
           <h1>AgroGenomaX Ganadería Inteligente</h1>
-          <p>Registro bovino por QR, predios, potreros y ficha animal conectada a PostgreSQL.</p>
-        </div>
-        <div className="gan-health-pill">
-          <Database className="h-4 w-4" />
-          PostgreSQL local
-          <Wifi className="h-4 w-4" />
-        </div>
-      </header>
-      {isCloudflareWithoutLocalApi() ? (
-        <div className="gan-demo-banner">
-          Modo demostración: la interfaz está disponible, pero la base de datos local no está conectada desde Internet.
-        </div>
-      ) : null}
-      <div className="gan-layout">
-        <GanaderiaTabs />
-        <section className="gan-content">{children}</section>
-      </div>
-    </main>
+          <p>Gestiona tu hato con trazabilidad QR, control productivo, sanidad y decisiones inteligentes por animal.</p>
+        </header>
+        {isCloudflareWithoutLocalApi() ? (
+          <div className="gan-demo-banner">
+            El servicio de datos de tu cuenta no está disponible temporalmente. Intenta nuevamente más tarde.
+          </div>
+        ) : null}
+        {children}
+      </main>
+    </div>
   );
 }

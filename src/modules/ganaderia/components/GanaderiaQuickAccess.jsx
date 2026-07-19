@@ -1,15 +1,12 @@
-import { Beef, Dna, FileBarChart, MapPin, QrCode, Scale, Sprout, Syringe } from 'lucide-react';
+import { Beef, MapPin, QrCode, Sprout } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 const quickAccessItems = [
-  { label: 'Animales', text: 'Inventario y fichas del hato.', icon: Beef, to: '/ganaderia/animales' },
-  { label: 'Predios', text: 'Unidades productivas registradas.', icon: MapPin, to: '/ganaderia/predios' },
-  { label: 'Potreros', text: 'Distribución y carga animal.', icon: Sprout, to: '/ganaderia/potreros' },
-  { label: 'QR', text: 'Escanear o generar códigos QR.', icon: QrCode, to: '/ganaderia/escanear-qr' },
-  { label: 'Pesajes', text: 'Seleccione un animal para abrir este módulo.', icon: Scale, to: '/ganaderia/animales' },
-  { label: 'Reproducción', text: 'Seleccione un animal para abrir este módulo.', icon: Dna, to: '/ganaderia/animales' },
-  { label: 'Sanidad', text: 'Seleccione un animal para abrir este módulo.', icon: Syringe, to: '/ganaderia/animales' },
-  { label: 'Reportes', text: 'Seleccione un animal para abrir este módulo.', icon: FileBarChart, to: '/ganaderia/animales' },
+  { label: 'Predios', text: 'Registra el predio y los datos de su propietario.', icon: MapPin, to: '/ganaderia/predios' },
+  { label: 'Potreros', text: 'Crea potreros asociados a un predio.', icon: Sprout, to: '/ganaderia/potreros' },
+  { label: 'Mis animales', text: 'Busca animales registrados y abre su ficha.', icon: Beef, to: '/ganaderia/animales/listado' },
+  { label: 'Escanear QR', text: 'Valida un QR físico o digital.', icon: QrCode, to: '/ganaderia/escanear-qr' },
+  { label: 'Registrar animal con QR', text: 'Requiere predio y potrero registrados.', icon: QrCode, to: '/ganaderia/animales' },
 ];
 
 export default function GanaderiaQuickAccess() {

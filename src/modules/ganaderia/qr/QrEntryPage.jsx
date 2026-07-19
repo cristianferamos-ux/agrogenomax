@@ -1,6 +1,6 @@
 import { Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import AnimalInitialForm from '../animales/AnimalInitialForm.jsx';
 import { ganaderiaApi } from '../api/ganaderiaApi.js';
 import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
@@ -15,6 +15,7 @@ export default function QrEntryPage({ mode = 'manual' }) {
   const [qrState, setQrState] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [prerequisites, setPrerequisites] = useState({ loading: false, predios: [], potreros: [], error: '' });
 
   const lookup = async (value) => {
     const code = normalizeQrCode(value);
@@ -49,10 +50,11 @@ export default function QrEntryPage({ mode = 'manual' }) {
 
       setQrState({ ...result, codigo: code });
     } catch (err) {
-      const message = err.status === 404 || err.message.includes('404') || err.message.toLowerCase().includes('not found')
+      console.error('No fue posible validar el QR.', err);
+      const safeMessage = err.status === 404 || err.message.includes('404') || err.message.toLowerCase().includes('not found')
         ? 'QR no registrado en AgroGenomaX.'
-        : err.message;
-      setError(message);
+        : 'No fue posible validar el QR. Intenta nuevamente.';
+      setError(safeMessage);
     } finally {
       setLoading(false);
     }
@@ -62,6 +64,43 @@ export default function QrEntryPage({ mode = 'manual' }) {
     if (codigo) lookup(codigo);
   }, [codigo]);
 
+  useEffect(() => {
+    let active = true;
+
+    if (!qrState?.exists || qrState.assigned) {
+      setPrerequisites({ loading: false, predios: [], potreros: [], error: '' });
+      return () => {
+        active = false;
+      };
+    }
+
+    setPrerequisites({ loading: true, predios: [], potreros: [], error: '' });
+    Promise.all([ganaderiaApi.listPredios(), ganaderiaApi.listPotreros()])
+      .then(([predios, potreros]) => {
+        if (!active) return;
+        setPrerequisites({
+          loading: false,
+          predios: Array.isArray(predios) ? predios : [],
+          potreros: Array.isArray(potreros) ? potreros : [],
+          error: '',
+        });
+      })
+      .catch((err) => {
+        console.error('No fue posible validar predios y potreros.', err);
+        if (!active) return;
+        setPrerequisites({
+          loading: false,
+          predios: [],
+          potreros: [],
+          error: 'No fue posible validar los predios y potreros. Intenta nuevamente.',
+        });
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [qrState]);
+
   const submit = (event) => {
     event.preventDefault();
     lookup(manualCode);
@@ -70,7 +109,7 @@ export default function QrEntryPage({ mode = 'manual' }) {
   return (
     <div className="gan-stack">
       <div className="gan-panel">
-        <GanaderiaBackLink />
+        <GanaderiaBackLink to="/ganaderia/dashboard" />
         <div className="gan-section-heading">
           <span className="gan-eyebrow">{mode === 'scan' ? 'Escanear QR' : 'Registro de Animales'}</span>
           <h2>{mode === 'scan' ? 'Escanea o ingresa el QR' : 'Primero valida el QR'}</h2>
@@ -98,8 +137,77 @@ export default function QrEntryPage({ mode = 'manual' }) {
       </div>
 
       {qrState?.exists && !qrState.assigned ? (
-        <AnimalInitialForm codigoQr={qrState.codigo} onCreated={(animal) => navigate(`/ganaderia/animal/${animal.id || animal.animal_id}`)} />
+        <QrPrerequisiteGate prerequisites={prerequisites}>
+          <AnimalInitialForm codigoQr={qrState.codigo} onCreated={(animal) => navigate(`/ganaderia/animal/${animal.id || animal.animal_id}`)} />
+        </QrPrerequisiteGate>
       ) : null}
+    </div>
+  );
+}
+
+function QrPrerequisiteGate({ prerequisites, children }) {
+  if (prerequisites.loading) {
+    return <div className="gan-panel">Validando predios y potreros registrados...</div>;
+  }
+
+  if (prerequisites.error) {
+    return (
+      <div className="gan-panel">
+        <StatusMessage type="error">{prerequisites.error}</StatusMessage>
+      </div>
+    );
+  }
+
+  const hasPredios = prerequisites.predios.length > 0;
+  const hasPotreros = prerequisites.potreros.length > 0;
+
+  if (!hasPredios) {
+    return (
+      <PrerequisiteBlock
+        title="Primero registra un predio"
+        text="Para crear un animal nuevo con este QR, primero debes registrar el predio donde estará ubicado."
+        primary={{ label: 'Registrar predio', to: '/ganaderia/predios' }}
+      />
+    );
+  }
+
+  if (!hasPotreros) {
+    return (
+      <PrerequisiteBlock
+        title="Registra al menos un potrero"
+        text="Cada animal debe quedar asociado a un potrero dentro del predio."
+        primary={{ label: 'Registrar potrero', to: '/ganaderia/potreros' }}
+      />
+    );
+  }
+
+  return (
+    <>
+      <div className="gan-panel">
+        <StatusMessage>
+          Requisitos básicos verificados. Completa la información del animal.
+        </StatusMessage>
+      </div>
+      {children}
+    </>
+  );
+}
+
+function PrerequisiteBlock({ title, text, primary }) {
+  return (
+    <div className="gan-panel">
+      <div className="gan-section-heading">
+        <span className="gan-eyebrow">Prerrequisito del registro animal</span>
+        <h2>{title}</h2>
+        <p>{text}</p>
+      </div>
+      <StatusMessage>
+        Antes de registrar animales, debes registrar el predio con los datos de su propietario y al menos un potrero.
+      </StatusMessage>
+      <div className="gan-action-row">
+        <Link className="gan-secondary-button" to={primary.to}>{primary.label}</Link>
+        <Link className="gan-secondary-button" to="/ganaderia/dashboard">Volver al dashboard</Link>
+      </div>
     </div>
   );
 }
