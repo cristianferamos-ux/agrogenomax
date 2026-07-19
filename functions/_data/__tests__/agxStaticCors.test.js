@@ -1,7 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { onRequestGet as healthGet, onRequestOptions as healthOptions } from '../../api/health.js';
+import { corsPreflightResponse, corsRejectedResponse, evaluateStaticCors, json } from '../agxStatic.js';
 import { onRequestGet as animalGet, onRequestOptions as animalOptions } from '../../api/animales/[id].js';
 import { onRequestGet as razasGet } from '../../api/animales/[id]/razas.js';
 import { onRequestGet as qrGet, onRequestOptions as qrOptions } from '../../api/qr/[codigo].js';
@@ -12,6 +12,24 @@ import { resolveAllowedOriginsForEnvironment } from '../../../shared/security/co
 // con Access-Control-Allow-Origin: '*' incondicional. `Request`/`Headers`/
 // `Response` son APIs Web globales en este runtime de Node -- sin
 // Miniflare/Wrangler, sin red real (estos endpoints nunca hacen fetch).
+//
+// Ajuste LOTE-006: functions/api/health.js dejó de ser un endpoint
+// estático (ahora es el relay real de health, con su propia suite en
+// functions/api/__tests__/healthRelay.test.js) -- este archivo sigue
+// probando el adaptador CORS compartido de agxStatic.js (evaluateStaticCors/
+// corsPreflightResponse/corsRejectedResponse/json) mediante un sujeto de
+// prueba equivalente al que health.js exponía antes de LOTE-006, en lugar
+// de importar de health.js directamente. animales/[id].js y qr/[codigo].js
+// (todavía endpoints estáticos reales) siguen probándose vía su propio
+// código sin ningún cambio.
+function healthGet({ request, env } = {}) {
+  const decision = evaluateStaticCors({ request, env });
+  if (decision.action === 'reject') {
+    return corsRejectedResponse(decision);
+  }
+  return json({ ok: true, database: 'test-fixture', schema: 'agx' }, {}, decision);
+}
+const healthOptions = corsPreflightResponse;
 
 function makeRequest({ method = 'GET', url = 'https://relay.example/api/health', origin, headers = {} } = {}) {
   const requestHeaders = new Headers(headers);
