@@ -7,3 +7,9 @@ dist
 db_backups/
 audit_outputs/
 *.sql.backup
+
+# Runtime logs
+*.log
+
+# Temporary Vite configs
+vite.*.temp.config.mjs
