@@ -185,6 +185,57 @@ export async function updateDynamic(table, id, values, client = null) {
   return result.rows[0];
 }
 
+// LOTE-007 (graceful shutdown, ADR-012 §21) -- corrección final de ciclo
+// de vida: el estado de cierre asocia explícitamente `pool` + `promise`
+// en un único objeto (`poolClosingState`), nunca dos variables sueltas.
+// Respeta la inicialización perezosa -- si nunca se creó, no se crea
+// solo para cerrarlo.
+//
+// Identidad estricta en dos niveles:
+// 1) Una llamada repetida MIENTRAS la misma instancia sigue cerrándose
+//    devuelve exactamente el mismo objeto Promise (comparación
+//    `poolClosingState.pool === poolToClose`).
+// 2) El `finally` de una instancia (A) solo limpia `poolInstance` si
+//    todavía apunta a A, y solo limpia `poolClosingState` si ese estado
+//    sigue correspondiendo a LA PROMESA que ese `finally` originó
+//    (`poolClosingState.promise === closePromise`) -- no basta con
+//    comparar el pool, porque una instancia nueva (B) podría haber
+//    comenzado su propio cierre (con su propio `poolClosingState`) antes
+//    de que el `finally` de A se ejecute; comparar por promesa evita que
+//    A borre el estado de cierre de B en esa carrera.
+//
+// No usa `async`: closeMainDbPool() debe devolver el MISMO objeto
+// Promise en llamadas repetidas para la misma instancia, lo que una
+// función `async` no garantiza (cada `await`/retorno de una función
+// async envuelve el valor en una Promise nueva).
+let poolClosingState = null; // { pool, promise } | null
+
+export function closeMainDbPool() {
+  const poolToClose = poolInstance;
+
+  if (!poolToClose) {
+    return Promise.resolve();
+  }
+
+  if (poolClosingState?.pool === poolToClose) {
+    return poolClosingState.promise;
+  }
+
+  const closePromise = Promise.resolve()
+    .then(() => poolToClose.end())
+    .finally(() => {
+      if (poolInstance === poolToClose) {
+        poolInstance = null;
+      }
+      if (poolClosingState?.promise === closePromise) {
+        poolClosingState = null;
+      }
+    });
+
+  poolClosingState = { pool: poolToClose, promise: closePromise };
+  return closePromise;
+}
+
 // Exclusivamente para pruebas unitarias aisladas (LOTE-002): reporta si ya
 // existe una instancia real del Pool, sin exponerla, y permite resetear
 // el estado entre casos.
@@ -194,4 +245,5 @@ export function __hasDbPoolForTests() {
 
 export function __resetDbPoolForTests() {
   poolInstance = null;
+  poolClosingState = null;
 }

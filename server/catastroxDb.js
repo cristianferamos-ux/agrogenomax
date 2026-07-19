@@ -59,6 +59,53 @@ export function catastroxTableName(name) {
   return `"${catastroxSchema}"."${name}"`;
 }
 
+// LOTE-007 (graceful shutdown, ADR-012 §21) -- corrección final de ciclo
+// de vida: el estado de cierre asocia explícitamente `pool` + `promise`
+// en un único objeto (`catastroxPoolClosingState`), nunca dos variables
+// sueltas. Respeta la inicialización perezosa -- si nunca se creó
+// (incluida la ausencia tolerante de CATASTROX_DATABASE_URL), no se crea
+// solo para cerrarlo.
+//
+// Identidad estricta en dos niveles:
+// 1) Una llamada repetida MIENTRAS la misma instancia sigue cerrándose
+//    devuelve exactamente el mismo objeto Promise.
+// 2) El `finally` de una instancia (A) solo limpia
+//    `catastroxPoolInstance` si todavía apunta a A, y solo limpia
+//    `catastroxPoolClosingState` si ese estado sigue correspondiendo a
+//    LA PROMESA que ese `finally` originó (comparación por promesa, no
+//    solo por pool) -- evita que A borre el estado de cierre de una
+//    instancia nueva (B) que ya inició su propio cierre.
+//
+// No usa `async`: closeCatastroxDbPool() debe devolver el MISMO objeto
+// Promise en llamadas repetidas para la misma instancia.
+let catastroxPoolClosingState = null; // { pool, promise } | null
+
+export function closeCatastroxDbPool() {
+  const poolToClose = catastroxPoolInstance;
+
+  if (!poolToClose) {
+    return Promise.resolve();
+  }
+
+  if (catastroxPoolClosingState?.pool === poolToClose) {
+    return catastroxPoolClosingState.promise;
+  }
+
+  const closePromise = Promise.resolve()
+    .then(() => poolToClose.end())
+    .finally(() => {
+      if (catastroxPoolInstance === poolToClose) {
+        catastroxPoolInstance = null;
+      }
+      if (catastroxPoolClosingState?.promise === closePromise) {
+        catastroxPoolClosingState = null;
+      }
+    });
+
+  catastroxPoolClosingState = { pool: poolToClose, promise: closePromise };
+  return closePromise;
+}
+
 // Exclusivamente para pruebas unitarias aisladas (LOTE-002): reporta si ya
 // existe una instancia real del Pool, sin exponerla, y permite resetear
 // el estado entre casos.
@@ -68,4 +115,5 @@ export function __hasCatastroxDbPoolForTests() {
 
 export function __resetCatastroxDbPoolForTests() {
   catastroxPoolInstance = null;
+  catastroxPoolClosingState = null;
 }

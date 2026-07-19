@@ -6,6 +6,9 @@ import { ConfigurationError, getConfig } from './config/env.js';
 import { errorHandler, notFound } from './middleware/errors.js';
 import { buildExpressCorsPolicy, createCorsMiddleware } from './security/corsPolicy.js';
 import { createLivenessHandler } from './health/liveness.js';
+import { createGracefulShutdown, resolveShutdownTimeoutMs } from './lifecycle/gracefulShutdown.js';
+import { closeMainDbPool } from './db.js';
+import { closeCatastroxDbPool } from './catastroxDb.js';
 import animalesRouter from './routes/animales.js';
 import catastroxRouter from './routes/catastrox.js';
 import catastroxPaymentsRouter from './routes/catastroxPayments.js';
@@ -85,7 +88,25 @@ app.use('/api', reproduccionRouter);
 app.use(notFound);
 app.use(errorHandler);
 
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`AgroGenomaX API running on port ${PORT} [APP_ENV=${appConfig.appEnv}]`);
 });
+
+// Graceful shutdown (LOTE-007, ADR-012 §21): señales registradas
+// exclusivamente aquí, en el entrypoint real -- server/lifecycle/
+// gracefulShutdown.js nunca las registra por sí mismo. Cierra el
+// servidor HTTP antes que los pools (nunca al revés), respeta la
+// inicialización perezosa (un pool nunca creado no se crea solo para
+// cerrarlo) y nunca ejecuta process.exit() fuera de este único punto.
+const gracefulShutdown = createGracefulShutdown({
+  server,
+  resources: [
+    { name: 'agx_pg_pool', close: closeMainDbPool },
+    { name: 'catastrox_pg_pool', close: closeCatastroxDbPool },
+  ],
+  timeoutMs: resolveShutdownTimeoutMs(),
+});
+
+process.once('SIGTERM', () => gracefulShutdown.handleSignal('SIGTERM'));
+process.once('SIGINT', () => gracefulShutdown.handleSignal('SIGINT'));
 
