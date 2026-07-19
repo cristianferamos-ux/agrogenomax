@@ -33,7 +33,13 @@ import { motion } from 'framer-motion';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
 import GanaderiaApp from './modules/ganaderia/GanaderiaApp.jsx';
+import GanaderiaLandingComercial from './modules/ganaderia/GanaderiaLandingComercial.jsx';
+import GanaderiaDashboard from './modules/ganaderia/pages/GanaderiaDashboard.jsx';
+import GanaderiaAccess from './modules/ganaderia/pages/GanaderiaAccess.jsx';
+import GanaderiaDemo from './modules/ganaderia/pages/GanaderiaDemo.jsx';
+import GanaderiaPlans from './modules/ganaderia/pages/GanaderiaPlans.jsx';
 import CatastroXApp from './modules/catastrox/CatastroXApp.jsx';
+import AgroGenomaXHome from './components/home/AgroGenomaXHome.jsx';
 
 const GisMap = lazy(() => import('./components/GisMap.jsx'));
 
@@ -255,7 +261,12 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<HomePage />} />
+        <Route path="/" element={<AgroGenomaXHome />} />
+        <Route path="/ganaderia-comercial" element={<GanaderiaLandingComercial />} />
+        <Route path="/ganaderia/acceso" element={<GanaderiaAccess />} />
+        <Route path="/ganaderia/demo" element={<GanaderiaDemo />} />
+        <Route path="/ganaderia/planes" element={<GanaderiaPlans />} />
+        <Route path="/ganaderia/dashboard" element={<GanaderiaDashboard />} />
         <Route path="/ganaderia/*" element={<GanaderiaApp />} />
         <Route path="/catastrox/*" element={<CatastroXApp />} />
         <Route path="/qr/:codigo" element={<GanaderiaApp />} />
