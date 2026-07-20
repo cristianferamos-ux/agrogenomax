@@ -103,6 +103,7 @@ describe('LOTE-002 (corrección): server/config/env.js', () => {
             APP_ENV: 'production',
             DATABASE_URL: 'postgres://postgres@localhost:5432/agx',
             CATASTROX_DATABASE_URL: 'postgres://postgres@127.0.0.1:5432/gis',
+            HEALTH_MONITOR_TOKEN: 'a'.repeat(32),
           },
           {},
         ),
@@ -118,6 +119,7 @@ describe('LOTE-002 (corrección): server/config/env.js', () => {
             APP_ENV: 'production',
             DATABASE_URL: 'postgres://real-prod-host/agx',
             CATASTROX_DATABASE_URL: 'postgres://real-prod-host/gis',
+            HEALTH_MONITOR_TOKEN: 'a'.repeat(32),
             WOMPI_ENV: 'test',
           },
           {},
@@ -239,6 +241,7 @@ describe('LOTE-002 (corrección): server/config/env.js', () => {
             APP_ENV: 'production',
             DATABASE_URL: 'postgres://real-prod-host/agx',
             CATASTROX_DATABASE_URL: 'postgres://real-prod-host/gis',
+            HEALTH_MONITOR_TOKEN: 'a'.repeat(32),
           },
           {},
         ),
@@ -278,6 +281,118 @@ describe('LOTE-002 (corrección): server/config/env.js', () => {
       () => validateEnv(appEnv, {}),
       (error) => error instanceof ConfigurationError && error.code === 'REQUIRED_VARIABLE_MISSING',
     );
+  });
+});
+
+describe('LOTE-007 (ADR-012 §35.A): HEALTH_MONITOR_TOKEN', () => {
+  beforeEach(() => {
+    __resetValidationStateForTests();
+  });
+
+  test('staging sin HEALTH_MONITOR_TOKEN falla (token requerido)', () => {
+    assert.throws(
+      () =>
+        getConfig(
+          { APP_ENV: 'staging', DATABASE_URL: 'postgres://staging-host/agx', CATASTROX_DATABASE_URL: 'postgres://staging-host/gis' },
+          {},
+        ),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'REQUIRED_VARIABLE_MISSING' &&
+        error.variable === 'HEALTH_MONITOR_TOKEN',
+    );
+  });
+
+  test('production sin HEALTH_MONITOR_TOKEN falla (token requerido)', () => {
+    assert.throws(
+      () =>
+        getConfig(
+          {
+            APP_ENV: 'production',
+            DATABASE_URL: 'postgres://real-prod-host/agx',
+            CATASTROX_DATABASE_URL: 'postgres://real-prod-host/gis',
+          },
+          {},
+        ),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'REQUIRED_VARIABLE_MISSING' &&
+        error.variable === 'HEALTH_MONITOR_TOKEN',
+    );
+  });
+
+  test('demo con HEALTH_MONITOR_TOKEN falla (token prohibido)', () => {
+    assert.throws(
+      () => getConfig({ APP_ENV: 'demo', HEALTH_MONITOR_TOKEN: 'a'.repeat(32) }, {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'PROHIBITED_VARIABLE_PRESENT' &&
+        error.variable === 'HEALTH_MONITOR_TOKEN',
+    );
+  });
+
+  test('staging con HEALTH_MONITOR_TOKEN de menos de 32 caracteres falla', () => {
+    assert.throws(
+      () =>
+        getConfig(
+          {
+            APP_ENV: 'staging',
+            DATABASE_URL: 'postgres://staging-host/agx',
+            CATASTROX_DATABASE_URL: 'postgres://staging-host/gis',
+            HEALTH_MONITOR_TOKEN: 'a'.repeat(31),
+          },
+          {},
+        ),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'INSECURE_VALUE' &&
+        error.variable === 'HEALTH_MONITOR_TOKEN',
+    );
+  });
+
+  test('HEALTH_MONITOR_TOKEN con espacio inicial o final falla, incluso en development (opcional)', () => {
+    assert.throws(
+      () => getConfig({ APP_ENV: 'development', HEALTH_MONITOR_TOKEN: ` ${'a'.repeat(32)}` }, {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'INSECURE_VALUE' &&
+        error.variable === 'HEALTH_MONITOR_TOKEN',
+    );
+    assert.throws(
+      () => getConfig({ APP_ENV: 'development', HEALTH_MONITOR_TOKEN: `${'a'.repeat(32)} ` }, {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'INSECURE_VALUE' &&
+        error.variable === 'HEALTH_MONITOR_TOKEN',
+    );
+  });
+
+  test('development con HEALTH_MONITOR_TOKEN válido de 32 caracteres exactos no falla', () => {
+    const config = getConfig({ APP_ENV: 'development', HEALTH_MONITOR_TOKEN: 'a'.repeat(32) }, {});
+    assert.equal(config.appEnv, 'development');
+  });
+
+  test('staging con HEALTH_MONITOR_TOKEN válido no expone el secreto en el error', () => {
+    const secretToken = `monitor-secret-${'x'.repeat(20)}`;
+    try {
+      getConfig({ APP_ENV: 'staging', DATABASE_URL: 'postgres://staging-host/agx' }, {});
+      assert.fail('Se esperaba que getConfig lanzara ConfigurationError');
+    } catch (error) {
+      assert.ok(error instanceof ConfigurationError);
+      assert.ok(!error.message.includes(secretToken));
+      assert.ok(!JSON.stringify(error).includes(secretToken));
+    }
+
+    const config = getConfig(
+      {
+        APP_ENV: 'staging',
+        DATABASE_URL: 'postgres://staging-host/agx',
+        CATASTROX_DATABASE_URL: 'postgres://staging-host/gis',
+        HEALTH_MONITOR_TOKEN: secretToken,
+      },
+      {},
+    );
+    assert.ok(!JSON.stringify(config).includes(secretToken));
   });
 });
 
@@ -418,7 +533,10 @@ describe('LOTE-004: resolveCorsAllowedOrigins() y appConfig.cors', () => {
   });
 
   test('getConfig() expone appConfig.cors.allowedOrigins ya resuelto e inmutable', () => {
-    const config = getConfig({ APP_ENV: 'staging', DATABASE_URL: 'x', CATASTROX_DATABASE_URL: 'y' }, {});
+    const config = getConfig(
+      { APP_ENV: 'staging', DATABASE_URL: 'x', CATASTROX_DATABASE_URL: 'y', HEALTH_MONITOR_TOKEN: 'a'.repeat(32) },
+      {},
+    );
     assert.deepEqual(config.cors.allowedOrigins, ['https://staging.agrogenomax.com']);
     assert.ok(Object.isFrozen(config.cors));
     assert.ok(Object.isFrozen(config.cors.allowedOrigins));

@@ -20,12 +20,17 @@ export const ALLOWED_APP_ENVIRONMENTS = Object.freeze([
 // Variables server-side exigidas explícitamente en staging/production
 // (ADR-014 §13). CORS_ORIGIN queda fuera de este lote a propósito: su
 // endurecimiento definitivo es alcance de un lote posterior (CORS/relay).
+// LOTE-007 (ADR-012 §35.A): HEALTH_MONITOR_TOKEN autentica el acceso técnico
+// a readiness por dominio y a GET /api/health/db -- obligatorio en
+// staging/production (nunca readiness protegida sin credencial real),
+// inyectable de forma opcional en development/test (sin exigirla), y
+// prohibida en demo (demo no tiene backend real que proteger).
 const REQUIRED_VARIABLES_BY_ENV = Object.freeze({
   development: Object.freeze([]),
   test: Object.freeze([]),
   demo: Object.freeze([]),
-  staging: Object.freeze(['DATABASE_URL', 'CATASTROX_DATABASE_URL']),
-  production: Object.freeze(['DATABASE_URL', 'CATASTROX_DATABASE_URL']),
+  staging: Object.freeze(['DATABASE_URL', 'CATASTROX_DATABASE_URL', 'HEALTH_MONITOR_TOKEN']),
+  production: Object.freeze(['DATABASE_URL', 'CATASTROX_DATABASE_URL', 'HEALTH_MONITOR_TOKEN']),
 });
 
 // Variables que nunca deben aparecer cuando APP_ENV=demo (ADR-014 §13/§7):
@@ -39,6 +44,10 @@ const DEMO_PROHIBITED_EXACT_VARIABLES = Object.freeze([
   // LOTE-004: demo no tiene backend Express real que proteger con CORS --
   // configurar esta variable en demo delataría un backend inexistente.
   'CORS_ALLOWED_ORIGINS',
+  // LOTE-007 (ADR-012 §35.A): demo no tiene readiness protegida que
+  // autenticar -- una credencial técnica configurada en demo delataría un
+  // backend real inexistente.
+  'HEALTH_MONITOR_TOKEN',
 ]);
 
 // LOTE-004 (ADR-014 §7 Barrera 4, ADR-013 §21): la resolución y validación
@@ -218,6 +227,30 @@ export function validateEnv(appEnv, source = process.env) {
           { code: 'PROHIBITED_VARIABLE_PRESENT', environment: appEnv, variable: key },
         );
       }
+    }
+  }
+
+  // LOTE-007 (ADR-012 §35.A, endurecimiento): dondequiera que
+  // HEALTH_MONITOR_TOKEN esté presente (staging/production obligatorio,
+  // development/test opcional -- nunca demo, ya descartado arriba), debe
+  // cumplir un formato mínimo seguro. Nunca se expone el valor del token
+  // en el mensaje de error.
+  if (isNonEmpty(source.HEALTH_MONITOR_TOKEN)) {
+    const token = source.HEALTH_MONITOR_TOKEN;
+
+    if (token !== token.trim()) {
+      throw new ConfigurationError(
+        'HEALTH_MONITOR_TOKEN no puede tener espacios iniciales o finales.',
+        { code: 'INSECURE_VALUE', environment: appEnv, variable: 'HEALTH_MONITOR_TOKEN' },
+      );
+    }
+
+    if (token.length < 32) {
+      throw new ConfigurationError('HEALTH_MONITOR_TOKEN debe tener al menos 32 caracteres.', {
+        code: 'INSECURE_VALUE',
+        environment: appEnv,
+        variable: 'HEALTH_MONITOR_TOKEN',
+      });
     }
   }
 

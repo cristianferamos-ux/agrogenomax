@@ -12,7 +12,7 @@ import { closeCatastroxDbPool } from './catastroxDb.js';
 import animalesRouter from './routes/animales.js';
 import catastroxRouter from './routes/catastrox.js';
 import catastroxPaymentsRouter from './routes/catastroxPayments.js';
-import healthRouter from './routes/health.js';
+import createHealthRouter from './routes/health.js';
 import pesajesRouter from './routes/pesajes.js';
 import potrerosRouter from './routes/potreros.js';
 import prediosRouter from './routes/predios.js';
@@ -71,7 +71,10 @@ app.get('/', (_req, res) => {
   res.json({ ok: true, service: 'AgroGenomaX API' });
 });
 
-app.use('/api/health', healthRouter);
+// Readiness por dominio (LOTE-007, ADR-012 §7/§35.A): el token nunca se
+// guarda en appConfig (server/config/env.js jamás expone secretos) -- se
+// lee directamente de process.env, igual que DATABASE_URL en server/db.js.
+app.use('/api/health', createHealthRouter({ healthMonitorToken: process.env.HEALTH_MONITOR_TOKEN }));
 app.use('/api/catastrox', catastroxRouter);
 app.use('/api/catastrox/payments', catastroxPaymentsRouter);
 app.use('/api/predios', prediosRouter);
