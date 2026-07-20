@@ -175,7 +175,7 @@ Este documento es **exclusivamente un plan** — no implementa nada por sí mism
 
 **Objetivo**: construir el módulo central de configuración (`APP_ENV` y validación *fail-fast*), la clasificación de errores, el *correlation ID*, el *logging* estructurado, la disciplina `no-store`, y los primitivos de *health*/*readiness*/*liveness* que ADR-012 exige antes de que exista cualquier infraestructura real que los consuma (el *target group* del ALB de Fase 4 necesita `GET /api/health/live` ya implementado y probado).
 
-**Estado vigente de lotes de esta fase**: LOTE-002, LOTE-005, LOTE-006, LOTE-007, LOTE-008 y LOTE-009 están completados; LOTE-010 sigue pendiente; LOTE-013 permanece pendiente como auditoría de seguridad.
+**Estado vigente de lotes de esta fase**: LOTE-002, LOTE-005, LOTE-006, LOTE-007, LOTE-008, LOTE-009 y LOTE-010 están completados; LOTE-013 permanece pendiente como auditoría de seguridad.
 
 ## 13. Fase 3 — Contenedorización
 
@@ -244,7 +244,7 @@ Este documento es **exclusivamente un plan** — no implementa nada por sí mism
 | ADR-009 | Fase 5 | — |
 | ADR-010 | Fase 4 | — |
 | ADR-011 | Fase 3, Fase 4 | Lote 14 (Dockerfile) |
-| ADR-012 | Fase 2 | Lotes 5, 6, 7, 8 y 9 completados; Lote 10 pendiente |
+| ADR-012 | Fase 2 | Lotes 5, 6, 7, 8, 9 y 10 completados |
 | ADR-013 | Fase 7 | — (primeros 15 lotes son prerrequisitos de plataforma; Fase 7 en sí no está entre los primeros 15) |
 | ADR-014 | Fase 1, Fase 8 | Lotes 2, 3, 4, 11, 12, 15 |
 
@@ -263,7 +263,7 @@ Este documento es **exclusivamente un plan** — no implementa nada por sí mism
 | LOTE-007 | COMPLETADO | `902b4e0` | Readiness protegida general y por dominio (Ganadería y CatastroX independientes) implementada con `HEALTH_MONITOR_TOKEN`; ruta heredada `/api/health/db` queda protegida por el mismo token pero aún no retirada; 377 de 377 pruebas backend aprobadas. |
 | LOTE-008 | COMPLETADO | `783cddd` | Graceful shutdown implementado. |
 | LOTE-009 | COMPLETADO | `6ba3056` | `Cache-Control: no-store` en `notFound` y en las respuestas de `errorHandler`; `status`/`statusCode` normalizado a enteros 400-599; mensajes controlados 4xx conservados; mensajes 5xx sanitizados a "Error interno del servidor"; log mínimo sin `error.message`, `stack`, `error.name`, SQL, tokens ni credenciales; `headersSent` delegado a `next`; 15/15 pruebas específicas y 392/392 pruebas backend. |
-| LOTE-010 | PENDIENTE | — | *Logging* estructurado/*correlation ID*. |
+| LOTE-010 | COMPLETADO | `bc4696b` | Middleware de *logging* estructurado montado antes de CORS y de las rutas; `X-Request-ID` usado como *correlation ID*, aceptado del cliente solo si es un UUID canónico, o generado con `crypto.randomUUID` en caso contrario; ID expuesto en `req.correlationId`, `res.locals.correlationId` y en la respuesta; eventos JSON `request_started`, `request_completed` y `request_aborted` sin duplicación; campos mínimos, sin URL, *query*, *headers*, *cookies*, `Authorization`, *body*, IP, *user-agent*, tokens, credenciales, geometría ni `error.message`; nivel de *log* según código de estado; duración medida con reloj monotónico; *sink* tolerante a fallos; 13/13 pruebas específicas y 405/405 pruebas backend. Completa el alcance mínimo del lote; no afirma métricas, alarmas, CloudWatch ni el reemplazo de todos los *logs* heredados de ADR-012 §25. |
 | LOTE-011 | REQUIERE AUDITORÍA FINAL | `81c647e` | Restauró cuenta real/demo; todavía debe verificarse específicamente que ninguna ruta real muestre cifras de relleno. |
 | LOTE-012 | PENDIENTE DE VERIFICACIÓN | — | No afirmar retiro de `ganaderiaMockData.js` sin comprobarlo. |
 | LOTE-013 | PENDIENTE | — | Auditoría SQL/entropía de `lookupId`. |
@@ -541,23 +541,24 @@ Este plan (como documento) se considera cerrado y vigente cuando:
 | ID | LOTE-010 |
 | Fase | Fase 2 |
 | ADR que lo autoriza | ADR-012 §25 |
-| Estado | Pendiente |
-| Estado vigente | PENDIENTE — *logging* estructurado y *correlation ID*. |
+| Estado | Completado |
+| Estado vigente | COMPLETADO — middleware de *logging* estructurado y *correlation ID* montado antes de CORS y de las rutas. Completa el alcance mínimo del lote; no afirma métricas, alarmas, CloudWatch ni el reemplazo de todos los *logs* heredados de ADR-012 §25. |
 | Objetivo | Introducir *logging* estructurado mínimo (formato JSON o equivalente) con *correlation ID* por solicitud, sin registrar secretos, cookies, tokens ni geometrías completas |
 | Precondiciones | Lote 2 completado |
-| Archivos permitidos | `server/index.js` (middleware de *logging*), un nuevo módulo de *logging* |
+| Archivos permitidos | `server/index.js`, `server/observability/requestLogging.js`, `server/observability/__tests__/requestLogging.test.js` |
 | Archivos prohibidos | Rutas de negocio (solo se instrumenta vía middleware transversal, no editando cada ruta individualmente) |
-| Cambios exactos | Middleware que genera/propaga un *correlation ID* por solicitud y registra eventos mínimos (inicio/fin de solicitud, código de estado) |
-| Pruebas | Prueba de que cada solicitud recibe un *correlation ID* único; prueba de que el *log* no contiene ningún patrón de secreto conocido (verificación negativa) |
+| Cambios exactos | Middleware montado antes de CORS y de las rutas; `X-Request-ID` usado como *correlation ID*, aceptado del cliente solo si es un UUID canónico, o generado con `crypto.randomUUID()` en caso contrario; ID expuesto en `req.correlationId`, `res.locals.correlationId` y en la respuesta; eventos JSON `request_started`, `request_completed` y `request_aborted` emitidos sin duplicación; campos mínimos, sin URL, *query*, *headers*, *cookies*, `Authorization`, *body*, IP, *user-agent*, tokens, credenciales, geometría ni `error.message`; nivel de *log* según código de estado; duración medida con reloj monotónico; *sink* tolerante a fallos |
+| Pruebas | Prueba de que cuando no existe un `X-Request-ID` válido, cada solicitud recibe un UUID generado; prueba de que un UUID canónico entrante se propaga; prueba de que el *log* no contiene ningún patrón de secreto conocido (verificación negativa); 13/13 pruebas específicas y 405/405 pruebas backend totales |
 | Criterio de aceptación | Coherente con ADR-012 §25 |
-| Rollback | `git revert` |
+| Rollback | `git revert bc4696b` |
 | Riesgo | Bajo |
 | Tamaño | S |
 | Dependencias | Lote 2 |
 | Tareas paralelizables | Paralelizable con Lotes 5-9 |
-| Commit esperado | Uno, aislado |
+| Commit esperado | `bc4696b` |
 | Mensaje recomendado del commit | `feat(observability): add structured logging with correlation ID` |
-| Evidencia requerida | Resultado de pruebas |
+| Mensaje real del commit | `feat(observability): add structured logging with correlation ID` |
+| Evidencia requerida | 13/13 pruebas específicas y 405/405 pruebas backend |
 
 ### LOTE-011 — Estados vacíos reales de Ganadería
 
@@ -698,7 +699,7 @@ Este plan (como documento) se considera cerrado y vigente cuando:
 
 ### 3. Número total de lotes
 
-15 lotes iniciales detallados: 8 lotes completados, 1 lote parcial (LOTE-003), 2 con auditoría/verificación específica (LOTE-011 y LOTE-012) y 4 pendientes, con las Fases 5-10 registradas a nivel de fase y pendientes de descomposición lote por lote en tareas futuras (§24).
+15 lotes iniciales detallados: 9 lotes completados, 1 lote parcial (LOTE-003), 2 con auditoría/verificación específica (LOTE-011 y LOTE-012) y 3 pendientes, con las Fases 5-10 registradas a nivel de fase y pendientes de descomposición lote por lote en tareas futuras (§24).
 
 ### 4. Estado del Lote 1
 
@@ -706,13 +707,13 @@ Completado, commit `26ca461`, 5 pruebas *pass* / 0 *fail*. El registro vigente c
 
 ### 5. Siguiente lote recomendado
 
-LOTE-009 completado (commit `6ba3056`). Siguiente lote recomendado: LOTE-010, *logging* estructurado y *correlation ID*.
+LOTE-010 completado (commit `bc4696b`). Siguiente lote recomendado: LOTE-014, `Dockerfile`/`.dockerignore`.
 
-Justificación: con LOTE-009 cerrado, Fase 4 exige completar los Lotes 5-10 y 14 antes de iniciar; el único lote de Fase 2 que sigue pendiente es LOTE-010. Esta recomendación no autoriza ejecución todavía.
+Justificación: con LOTE-010 cerrado, Fase 2 completa los Lotes 5-10 exigidos antes de Fase 4; el lote que resta antes de Fase 4 es LOTE-014. Esta recomendación no autoriza ejecución todavía.
 
 ### 6. Dependencias
 
-Documentadas en §5 (ADR→ADR) y en el campo "Dependencias" de cada lote (§ definición detallada) — la cadena crítica vigente pendiente es: LOTE-010 → LOTE-014 → Fase 4 (LOTE-009 ya completado, commit `6ba3056`). LOTE-003 conserva remanentes no bloqueantes para readiness, pero obligatorios antes de cerrar integralmente ADR-014.
+Documentadas en §5 (ADR→ADR) y en el campo "Dependencias" de cada lote (§ definición detallada) — la cadena crítica vigente pendiente es: LOTE-014 → Fase 4 (LOTE-009 y LOTE-010 ya completados, commits `6ba3056` y `bc4696b`). LOTE-003 conserva remanentes no bloqueantes para readiness, pero obligatorios antes de cerrar integralmente ADR-014.
 
 ### 7. Gates
 
