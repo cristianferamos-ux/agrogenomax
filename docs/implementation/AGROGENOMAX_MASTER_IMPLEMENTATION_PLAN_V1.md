@@ -49,13 +49,14 @@ Este documento es **exclusivamente un plan** — no implementa nada por sí mism
 - **CORS y relays endurecidos**: `e857db5 fix(security): enforce CORS allowlists and secure relays`; `649c6d6 fix(security): remove wildcard CORS from static functions`.
 - **Liveness backend**: `ddca06c feat(health): add backend liveness endpoint`.
 - **Relay real de liveness**: `1868f72 feat(health): proxy backend liveness through Cloudflare`.
+- **Readiness por dominio**: `902b4e0 feat(health): add domain readiness checks`. Readiness general y por dominio (Ganadería y CatastroX independientes) protegida mediante `HEALTH_MONITOR_TOKEN`; la ruta heredada `/api/health/db` quedó protegida por el mismo token pero aún no fue retirada; 377 de 377 pruebas backend aprobadas.
 - **Graceful shutdown**: `783cddd feat(lifecycle): add graceful shutdown`.
 - **Ganadería cuenta real/demo**: `81c647e feat(ganaderia): restore real account flow and enhance demo`.
 - **Workflow limpio parcial de CatastroX para Caquetá**: `2a017e0 feat(catastrox): add clean Caqueta import workflow`.
 
 ### Pendientes reales
 
-- Readiness general y por dominio.
+- Retiro de la ruta heredada `/api/health/db` (protegida por `HEALTH_MONITOR_TOKEN`, aún no retirada).
 - Sanitización global de `error.message`.
 - *Logging* estructurado.
 - *Correlation ID*.
@@ -70,7 +71,7 @@ Este documento es **exclusivamente un plan** — no implementa nada por sí mism
 
 ### Precisiones de estado
 
-- Las afirmaciones históricas sobre `APP_ENV` no leído, overrides sin restricción, CORS abierto/reflejado como estado actual, health estático de Cloudflare, ausencia de liveness y ausencia de `SIGTERM`/*graceful shutdown* quedaron superadas por los commits registrados arriba.
+- Las afirmaciones históricas sobre `APP_ENV` no leído, overrides sin restricción, CORS abierto/reflejado como estado actual, health estático de Cloudflare, ausencia de liveness, ausencia de *readiness* por dominio y ausencia de `SIGTERM`/*graceful shutdown* quedaron superadas por los commits registrados arriba.
 - Para ADR-006 ya existe un workflow limpio parcial/versionado para Caquetá; aún faltan import integral controlado, manifiestos, hashes, conteos, resolución formal de EPSG:9377 y validación reproducible en PostGIS destino. ADR-006 no está cerrado.
 - **`ganaderiaMockData.js`** y las rutas reales de Ganadería requieren verificación específica antes de declarar completado LOTE-011 o LOTE-012.
 - **Sin Terraform, sin estado remoto aplicado, sin recursos AWS desplegados** (ADR-003/ADR-010/ADR-011) — pendiente (Fase 4).
@@ -174,7 +175,7 @@ Este documento es **exclusivamente un plan** — no implementa nada por sí mism
 
 **Objetivo**: construir el módulo central de configuración (`APP_ENV` y validación *fail-fast*), la clasificación de errores, el *correlation ID*, el *logging* estructurado, la disciplina `no-store`, y los primitivos de *health*/*readiness*/*liveness* que ADR-012 exige antes de que exista cualquier infraestructura real que los consuma (el *target group* del ALB de Fase 4 necesita `GET /api/health/live` ya implementado y probado).
 
-**Estado vigente de lotes de esta fase**: LOTE-002, LOTE-005, LOTE-006 y LOTE-008 están completados; LOTE-009 está parcial; LOTE-007 y LOTE-010 siguen pendientes; LOTE-013 permanece pendiente como auditoría de seguridad.
+**Estado vigente de lotes de esta fase**: LOTE-002, LOTE-005, LOTE-006, LOTE-007 y LOTE-008 están completados; LOTE-009 está parcial; LOTE-010 sigue pendiente; LOTE-013 permanece pendiente como auditoría de seguridad.
 
 ## 13. Fase 3 — Contenedorización
 
@@ -243,7 +244,7 @@ Este documento es **exclusivamente un plan** — no implementa nada por sí mism
 | ADR-009 | Fase 5 | — |
 | ADR-010 | Fase 4 | — |
 | ADR-011 | Fase 3, Fase 4 | Lote 14 (Dockerfile) |
-| ADR-012 | Fase 2 | Lotes 5, 6 y 8 completados; Lote 9 parcial; Lotes 7 y 10 pendientes |
+| ADR-012 | Fase 2 | Lotes 5, 6, 7 y 8 completados; Lote 9 parcial; Lote 10 pendiente |
 | ADR-013 | Fase 7 | — (primeros 15 lotes son prerrequisitos de plataforma; Fase 7 en sí no está entre los primeros 15) |
 | ADR-014 | Fase 1, Fase 8 | Lotes 2, 3, 4, 11, 12, 15 |
 
@@ -259,7 +260,7 @@ Este documento es **exclusivamente un plan** — no implementa nada por sí mism
 | LOTE-004 | COMPLETADO | `e857db5`, `649c6d6` | CORS y relays endurecidos; wildcard CORS retirado de Functions estáticas. |
 | LOTE-005 | COMPLETADO | `ddca06c` | Liveness backend implementado. |
 | LOTE-006 | COMPLETADO | `1868f72` | Relay real de liveness vía Cloudflare. |
-| LOTE-007 | PENDIENTE | — | Readiness por dominio no implementada. |
+| LOTE-007 | COMPLETADO | `902b4e0` | Readiness protegida general y por dominio (Ganadería y CatastroX independientes) implementada con `HEALTH_MONITOR_TOKEN`; ruta heredada `/api/health/db` queda protegida por el mismo token pero aún no retirada; 377 de 377 pruebas backend aprobadas. |
 | LOTE-008 | COMPLETADO | `783cddd` | Graceful shutdown implementado. |
 | LOTE-009 | PARCIAL | — | `Cache-Control: no-store` existe en relay health; sanitización global de `error.message` sigue pendiente. No declarado completado. |
 | LOTE-010 | PENDIENTE | — | *Logging* estructurado/*correlation ID*. |
@@ -463,24 +464,24 @@ Este plan (como documento) se considera cerrado y vigente cuando:
 |---|---|
 | ID | LOTE-007 |
 | Fase | Fase 2 |
-| ADR que lo autoriza | ADR-012 §5.3, §7, §14 |
-| Estado | Pendiente |
-| Estado vigente | PENDIENTE — readiness por dominio no implementada. |
-| Objetivo | Implementar `GET /api/health/ready`, `GET /api/health/ready/ganaderia`, `GET /api/health/ready/catastrox`, con inspección previa del *pool* de PostgreSQL, `SELECT 1` con *timeout*, cero reintentos ante `pool_exhausted`, deduplicación, caché interna breve, causas clasificadas sin exponer detalle crudo |
+| ADR que lo autoriza | ADR-012 §5.3, §7, §14, §35.A |
+| Estado | Completado |
+| Estado vigente | COMPLETADO — commit `902b4e0`. Readiness protegida general y por dominio (Ganadería y CatastroX independientes) implementada con `HEALTH_MONITOR_TOKEN`; la ruta heredada `/api/health/db` queda protegida por el mismo token pero aún no fue retirada; 377 de 377 pruebas backend aprobadas. |
+| Objetivo | Implementar `GET /api/health/ready`, `GET /api/health/ready/ganaderia`, `GET /api/health/ready/catastrox` protegidas con autenticación `Bearer HEALTH_MONITOR_TOKEN`, con readiness general y por dominio independiente entre Ganadería y CatastroX; inspección previa del *pool* de PostgreSQL, consultas `SELECT` de solo lectura con *timeout* externo y `query_timeout` del driver, cero reintentos ante `pool_exhausted`, deduplicación de verificaciones concurrentes, caché interna breve, verificación parametrizada (`$1`) del esquema `agx`, y verificación de PostGIS más los esquemas `catastrox`, `catastrox_clean` y `gis`; causas clasificadas sin exponer detalle crudo |
 | Precondiciones | Lote 5 completado |
-| Archivos permitidos | `server/routes/health.js`, `server/db.js`/`server/catastroxDb.js` (solo lectura de sus métricas de *pool*, sin modificar su configuración) |
-| Archivos prohibidos | Rutas de negocio |
-| Cambios exactos | Tres nuevas rutas de diagnóstico, con la clasificación de causas ya diseñada en ADR-012 §14 |
-| Pruebas | Prueba de `200` con PostgreSQL disponible; prueba de `503` con `database_unreachable` simulado; prueba de que `pool_exhausted` no reintenta |
-| Criterio de aceptación | Ningún endpoint de *readiness* es consumido por el *target group* del ALB (eso sigue siendo exclusivamente Lote 5) |
-| Rollback | `git revert` |
+| Archivos permitidos | `server/config/env.js`, `server/config/__tests__/env.test.js`, `server/index.js`, `server/routes/health.js`, `server/health/dbReadiness.js`, `server/health/ganaderiaReadiness.js`, `server/health/catastroxReadiness.js`, `server/health/monitorAuth.js`, `server/health/readiness.js`, `server/health/__tests__/dbReadiness.test.js`, `server/health/__tests__/domainReadiness.test.js`, `server/health/__tests__/healthRouter.test.js`, `server/health/__tests__/monitorAuth.test.js`, `server/health/__tests__/readiness.test.js` |
+| Archivos prohibidos | Rutas de negocio; `functions/api/health.js`; `server/db.js`; `server/catastroxDb.js` |
+| Cambios exactos | Autenticación `Bearer HEALTH_MONITOR_TOKEN` en tiempo constante (hash SHA-256 + `timingSafeEqual`) sobre las rutas de readiness y `/api/health/db`; readiness independiente por dominio sin dependencia entre Ganadería y CatastroX; `Cache-Control: no-store` en toda respuesta; errores sanitizados sin exponer `error.message` crudo del driver `pg` |
+| Pruebas | Prueba de `200` con PostgreSQL disponible; prueba de `503` con `database_unreachable` simulado; prueba de que `pool_exhausted` no reintenta; prueba de autenticación `Bearer` (401 sin token o token inválido); prueba de independencia entre dominios (falla uno sin afectar al otro); prueba de `no-store` y de errores sanitizados sin detalle crudo |
+| Criterio de aceptación | 377 de 377 pruebas backend aprobadas; ningún endpoint de *readiness* es consumido por el *target group* del ALB ni por el relay público (eso sigue siendo exclusivamente Lote 5) |
+| Rollback | `git revert 902b4e0` |
 | Riesgo | Medio — requiere simular condiciones de fallo de base de datos de forma controlada en las pruebas |
-| Tamaño | S |
+| Tamaño | M |
 | Dependencias | Lote 5 |
 | Tareas paralelizables | Paralelizable con Lote 6 |
-| Commit esperado | Uno, aislado |
-| Mensaje recomendado del commit | `feat(health): add domain-scoped readiness endpoints` |
-| Evidencia requerida | Resultado de pruebas |
+| Commit esperado | `902b4e0` |
+| Mensaje recomendado del commit | `feat(health): add domain readiness checks` |
+| Evidencia requerida | 377/377 pruebas backend aprobadas |
 
 ### LOTE-008 — *Graceful shutdown*
 
@@ -696,7 +697,7 @@ Este plan (como documento) se considera cerrado y vigente cuando:
 
 ### 3. Número total de lotes
 
-15 lotes iniciales detallados: 6 lotes completados, 2 lotes parciales (LOTE-003 y LOTE-009), 2 con auditoría/verificación específica (LOTE-011 y LOTE-012) y 5 pendientes, con las Fases 5-10 registradas a nivel de fase y pendientes de descomposición lote por lote en tareas futuras (§24).
+15 lotes iniciales detallados: 7 lotes completados, 2 lotes parciales (LOTE-003 y LOTE-009), 2 con auditoría/verificación específica (LOTE-011 y LOTE-012) y 4 pendientes, con las Fases 5-10 registradas a nivel de fase y pendientes de descomposición lote por lote en tareas futuras (§24).
 
 ### 4. Estado del Lote 1
 
@@ -704,13 +705,13 @@ Completado, commit `26ca461`, 5 pruebas *pass* / 0 *fail*. El registro vigente c
 
 ### 5. Siguiente lote recomendado
 
-LOTE-007 — Readiness por dominio.
+LOTE-007 completado (commit `902b4e0`). Siguiente lote recomendado: cierre completo de LOTE-009 (sanitización global de `error.message`).
 
-Justificación: es la principal brecha restante de ADR-012, debe cerrarse antes de Dockerfile y ECS, no requiere infraestructura AWS y prepara el health operativo para staging. Esta recomendación no autoriza ejecución todavía.
+Justificación: con LOTE-007 cerrado, la principal brecha restante de ADR-012 es la sanitización global de errores; debe cerrarse antes de Dockerfile y ECS, no requiere infraestructura AWS y prepara el health operativo para staging. Esta recomendación no autoriza ejecución todavía.
 
 ### 6. Dependencias
 
-Documentadas en §5 (ADR→ADR) y en el campo "Dependencias" de cada lote (§ definición detallada) — la cadena crítica vigente pendiente es: LOTE-007 → cierre completo de LOTE-009 → LOTE-014 → Fase 4. LOTE-003 conserva remanentes no bloqueantes para readiness, pero obligatorios antes de cerrar integralmente ADR-014.
+Documentadas en §5 (ADR→ADR) y en el campo "Dependencias" de cada lote (§ definición detallada) — la cadena crítica vigente pendiente es: cierre completo de LOTE-009 → LOTE-014 → Fase 4 (LOTE-007 ya completado, commit `902b4e0`). LOTE-003 conserva remanentes no bloqueantes para readiness, pero obligatorios antes de cerrar integralmente ADR-014.
 
 ### 7. Gates
 
