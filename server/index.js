@@ -7,6 +7,7 @@ import { errorHandler, notFound } from './middleware/errors.js';
 import { buildExpressCorsPolicy, createCorsMiddleware } from './security/corsPolicy.js';
 import { createLivenessHandler } from './health/liveness.js';
 import { createGracefulShutdown, resolveShutdownTimeoutMs } from './lifecycle/gracefulShutdown.js';
+import { createRequestLogging } from './observability/requestLogging.js';
 import { closeMainDbPool } from './db.js';
 import { closeCatastroxDbPool } from './catastroxDb.js';
 import animalesRouter from './routes/animales.js';
@@ -49,6 +50,13 @@ try {
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Correlation ID / logging estructurado (LOTE-010, ADR-012 §25): montado
+// inmediatamente después de crear `app`, antes de CORS, express.json,
+// health y cualquier ruta de negocio -- correlationId debe existir durante
+// todo el ciclo de vida de la solicitud. X-Request-ID ya está permitido
+// por CORS (server/security/corsPolicy.js -- DEFAULT_CORS_HEADERS).
+app.use(createRequestLogging());
 
 // CORS (LOTE-004, ADR-014 §7 Barrera 4/§21): allowlist explícita derivada
 // de APP_ENV (server/config/env.js -- appConfig.cors.allowedOrigins), sin
