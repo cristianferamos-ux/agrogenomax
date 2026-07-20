@@ -175,13 +175,13 @@ Este documento es **exclusivamente un plan** — no implementa nada por sí mism
 
 **Objetivo**: construir el módulo central de configuración (`APP_ENV` y validación *fail-fast*), la clasificación de errores, el *correlation ID*, el *logging* estructurado, la disciplina `no-store`, y los primitivos de *health*/*readiness*/*liveness* que ADR-012 exige antes de que exista cualquier infraestructura real que los consuma (el *target group* del ALB de Fase 4 necesita `GET /api/health/live` ya implementado y probado).
 
-**Estado vigente de lotes de esta fase**: LOTE-002, LOTE-005, LOTE-006, LOTE-007 y LOTE-008 están completados; LOTE-009 está parcial; LOTE-010 sigue pendiente; LOTE-013 permanece pendiente como auditoría de seguridad.
+**Estado vigente de lotes de esta fase**: LOTE-002, LOTE-005, LOTE-006, LOTE-007, LOTE-008 y LOTE-009 están completados; LOTE-010 sigue pendiente; LOTE-013 permanece pendiente como auditoría de seguridad.
 
 ## 13. Fase 3 — Contenedorización
 
 **Objetivo**: producir un `Dockerfile` reproducible del backend, ejecutable localmente, con *health check* de contenedor evaluado (no adoptado como obligatorio salvo necesidad demostrada, ADR-012 §9), señales `SIGTERM` manejadas (dependiente del *graceful shutdown* de Lote 8), usuario no root, y una imagen identificable por *digest* — sin desplegar a ningún registro ni servicio en la nube todavía.
 
-**Estado vigente**: Fase 3 está bloqueada hasta cerrar LOTE-009 y ejecutar LOTE-014. El lote incluido en los primeros 15 es `Dockerfile` + `.dockerignore` (LOTE-014, pendiente).
+**Estado vigente**: Fase 3 está bloqueada hasta ejecutar LOTE-014 (LOTE-009 ya cerrado, commit `6ba3056`). El lote incluido en los primeros 15 es `Dockerfile` + `.dockerignore` (LOTE-014, pendiente).
 
 **Lotes adicionales de esta fase, no detallados en los primeros 15** (registrados como pendientes, §24): ejecución local del contenedor con `docker run`/*compose* de desarrollo; validación de que el contenedor respeta las señales de parada; publicación reproducible del *digest* (sin subir a ECR todavía, dado que ECR es Fase 4).
 
@@ -244,7 +244,7 @@ Este documento es **exclusivamente un plan** — no implementa nada por sí mism
 | ADR-009 | Fase 5 | — |
 | ADR-010 | Fase 4 | — |
 | ADR-011 | Fase 3, Fase 4 | Lote 14 (Dockerfile) |
-| ADR-012 | Fase 2 | Lotes 5, 6, 7 y 8 completados; Lote 9 parcial; Lote 10 pendiente |
+| ADR-012 | Fase 2 | Lotes 5, 6, 7, 8 y 9 completados; Lote 10 pendiente |
 | ADR-013 | Fase 7 | — (primeros 15 lotes son prerrequisitos de plataforma; Fase 7 en sí no está entre los primeros 15) |
 | ADR-014 | Fase 1, Fase 8 | Lotes 2, 3, 4, 11, 12, 15 |
 
@@ -262,7 +262,7 @@ Este documento es **exclusivamente un plan** — no implementa nada por sí mism
 | LOTE-006 | COMPLETADO | `1868f72` | Relay real de liveness vía Cloudflare. |
 | LOTE-007 | COMPLETADO | `902b4e0` | Readiness protegida general y por dominio (Ganadería y CatastroX independientes) implementada con `HEALTH_MONITOR_TOKEN`; ruta heredada `/api/health/db` queda protegida por el mismo token pero aún no retirada; 377 de 377 pruebas backend aprobadas. |
 | LOTE-008 | COMPLETADO | `783cddd` | Graceful shutdown implementado. |
-| LOTE-009 | PARCIAL | — | `Cache-Control: no-store` existe en relay health; sanitización global de `error.message` sigue pendiente. No declarado completado. |
+| LOTE-009 | COMPLETADO | `6ba3056` | `Cache-Control: no-store` en `notFound` y en las respuestas de `errorHandler`; `status`/`statusCode` normalizado a enteros 400-599; mensajes controlados 4xx conservados; mensajes 5xx sanitizados a "Error interno del servidor"; log mínimo sin `error.message`, `stack`, `error.name`, SQL, tokens ni credenciales; `headersSent` delegado a `next`; 15/15 pruebas específicas y 392/392 pruebas backend. |
 | LOTE-010 | PENDIENTE | — | *Logging* estructurado/*correlation ID*. |
 | LOTE-011 | REQUIERE AUDITORÍA FINAL | `81c647e` | Restauró cuenta real/demo; todavía debe verificarse específicamente que ninguna ruta real muestre cifras de relleno. |
 | LOTE-012 | PENDIENTE DE VERIFICACIÓN | — | No afirmar retiro de `ganaderiaMockData.js` sin comprobarlo. |
@@ -515,23 +515,24 @@ Este plan (como documento) se considera cerrado y vigente cuando:
 | ID | LOTE-009 |
 | Fase | Fase 2 |
 | ADR que lo autoriza | ADR-012 §11, §23; ADR-013 §22 |
-| Estado | Parcial |
-| Estado vigente | PARCIAL — `Cache-Control: no-store` ya existe en el relay health; sanitización global de `error.message` sigue pendiente. |
+| Estado | Completado |
+| Estado vigente | COMPLETADO — `Cache-Control: no-store` aplicado en `notFound` y en las respuestas de `errorHandler`; `status`/`statusCode` normalizado a enteros 400-599; mensajes controlados 4xx conservados; mensajes 5xx sanitizados a "Error interno del servidor"; log mínimo sin `error.message`, `stack`, `error.name`, SQL, tokens ni credenciales; `headersSent` delegado a `next`. |
 | Objetivo | Añadir `Cache-Control: no-store` a todas las respuestas de *health*/API relevantes; corregir `server/middleware/errors.js` para que `errorHandler` nunca exponga `error.message` crudo del driver `pg` u otro detalle interno |
 | Precondiciones | Lotes 5, 6, 7 completados (para aplicar la cabecera de forma consistente a todas las rutas nuevas) |
-| Archivos permitidos | `server/middleware/errors.js`, `server/routes/health.js` |
+| Archivos permitidos | `server/middleware/errors.js`, `server/middleware/__tests__/errors.test.js` |
 | Archivos prohibidos | Rutas de negocio no relacionadas con *health*/errores |
-| Cambios exactos | Cabecera `no-store` en respuestas de *health*; clasificación de errores en `errorHandler` sin exponer el mensaje crudo |
-| Pruebas | Prueba de que un error de base de datos simulado no expone la cadena cruda del driver en la respuesta HTTP; prueba de cabecera `Cache-Control` presente |
+| Cambios exactos | `Cache-Control: no-store` en `notFound` y en las respuestas de `errorHandler`; `status`/`statusCode` normalizado a enteros 400-599; mensajes controlados 4xx conservados; mensajes 5xx sanitizados a "Error interno del servidor"; log mínimo sin `error.message`, `stack`, `error.name`, SQL, tokens ni credenciales; `headersSent` delegado a `next` |
+| Pruebas | Prueba de que un error de base de datos simulado no expone la cadena cruda del driver en la respuesta HTTP; prueba de cabecera `Cache-Control` presente; 15/15 pruebas específicas de `errors.test.js` y 392/392 pruebas backend totales |
 | Criterio de aceptación | Ninguna respuesta de *health* es cacheable; ningún error interno se filtra al cliente |
-| Rollback | `git revert` |
+| Rollback | `git revert 6ba3056` |
 | Riesgo | Bajo |
-| Tamaño | XS |
+| Tamaño | S |
 | Dependencias | Lotes 5, 6, 7 |
 | Tareas paralelizables | Ninguna |
-| Commit esperado | Uno, aislado |
+| Commit esperado | `6ba3056` |
 | Mensaje recomendado del commit | `fix(security): enforce no-store and sanitize error responses` |
-| Evidencia requerida | Resultado de pruebas |
+| Mensaje real del commit | `fix(security): enforce no-store and sanitize error responses` |
+| Evidencia requerida | 15/15 pruebas específicas y 392/392 pruebas backend |
 
 ### LOTE-010 — *Logging* estructurado y *correlation ID*
 
@@ -641,7 +642,7 @@ Este plan (como documento) se considera cerrado y vigente cuando:
 | Fase | Fase 3 |
 | ADR que lo autoriza | ADR-011 §10 |
 | Estado | Pendiente |
-| Estado vigente | PENDIENTE — `Dockerfile`/`.dockerignore`; Fase 3 bloqueada hasta cerrar LOTE-009. |
+| Estado vigente | PENDIENTE — `Dockerfile`/`.dockerignore`; LOTE-009 ya cerrado (commit `6ba3056`), precondición cumplida. |
 | Objetivo | Crear un `Dockerfile` reproducible del backend Express, con usuario no *root*, manejo correcto de señales (heredado de Lote 8), y un `.dockerignore` que excluya `node_modules`, archivos de desarrollo y secretos locales |
 | Precondiciones | Lotes 2, 5, 8, 9 completados |
 | Archivos permitidos | `Dockerfile` (nuevo, en la raíz o en `server/`, a decidir en el propio lote), `.dockerignore` (nuevo) |
@@ -697,7 +698,7 @@ Este plan (como documento) se considera cerrado y vigente cuando:
 
 ### 3. Número total de lotes
 
-15 lotes iniciales detallados: 7 lotes completados, 2 lotes parciales (LOTE-003 y LOTE-009), 2 con auditoría/verificación específica (LOTE-011 y LOTE-012) y 4 pendientes, con las Fases 5-10 registradas a nivel de fase y pendientes de descomposición lote por lote en tareas futuras (§24).
+15 lotes iniciales detallados: 8 lotes completados, 1 lote parcial (LOTE-003), 2 con auditoría/verificación específica (LOTE-011 y LOTE-012) y 4 pendientes, con las Fases 5-10 registradas a nivel de fase y pendientes de descomposición lote por lote en tareas futuras (§24).
 
 ### 4. Estado del Lote 1
 
@@ -705,13 +706,13 @@ Completado, commit `26ca461`, 5 pruebas *pass* / 0 *fail*. El registro vigente c
 
 ### 5. Siguiente lote recomendado
 
-LOTE-007 completado (commit `902b4e0`). Siguiente lote recomendado: cierre completo de LOTE-009 (sanitización global de `error.message`).
+LOTE-009 completado (commit `6ba3056`). Siguiente lote recomendado: LOTE-010, *logging* estructurado y *correlation ID*.
 
-Justificación: con LOTE-007 cerrado, la principal brecha restante de ADR-012 es la sanitización global de errores; debe cerrarse antes de Dockerfile y ECS, no requiere infraestructura AWS y prepara el health operativo para staging. Esta recomendación no autoriza ejecución todavía.
+Justificación: con LOTE-009 cerrado, Fase 4 exige completar los Lotes 5-10 y 14 antes de iniciar; el único lote de Fase 2 que sigue pendiente es LOTE-010. Esta recomendación no autoriza ejecución todavía.
 
 ### 6. Dependencias
 
-Documentadas en §5 (ADR→ADR) y en el campo "Dependencias" de cada lote (§ definición detallada) — la cadena crítica vigente pendiente es: cierre completo de LOTE-009 → LOTE-014 → Fase 4 (LOTE-007 ya completado, commit `902b4e0`). LOTE-003 conserva remanentes no bloqueantes para readiness, pero obligatorios antes de cerrar integralmente ADR-014.
+Documentadas en §5 (ADR→ADR) y en el campo "Dependencias" de cada lote (§ definición detallada) — la cadena crítica vigente pendiente es: LOTE-010 → LOTE-014 → Fase 4 (LOTE-009 ya completado, commit `6ba3056`). LOTE-003 conserva remanentes no bloqueantes para readiness, pero obligatorios antes de cerrar integralmente ADR-014.
 
 ### 7. Gates
 
