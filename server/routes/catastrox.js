@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { randomUUID } from 'node:crypto';
 import {
   CATASTROX_COVERAGE_STATUS,
   estimateMunicipalCoverageByPoint,
@@ -25,8 +26,8 @@ const TECHNICAL_VEREDA_PATTERN = /^\d+[A-Z]{2}$/i;
 const CATASTROX_ORIGEN_NACIONAL_PROJ =
   '+proj=tmerc +lat_0=4 +lon_0=-73 +k=0.9992 +x_0=5000000 +y_0=2000000 +ellps=GRS80 +units=m +no_defs +type=crs';
 
-function buildLookupId() {
-  return `cx-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+export function buildLookupId() {
+  return `cx-${randomUUID()}`;
 }
 
 function rememberLookupPreview(lookupId, predioId, extras = null) {
@@ -1501,7 +1502,7 @@ const CLEAN_FULL_RESULT_QUERY = `select
          p.geom,
             ST_Transform(
               ST_SetSRID(ST_Point($1, $2), 4326),
-              '${CATASTROX_ORIGEN_NACIONAL_PROJ}'
+              $3
             )
        )
        order by p.area_terreno_m2 asc nulls last
@@ -1779,8 +1780,7 @@ router.post('/advanced/lookup', async (req, res, next) => {
       return;
     }
 
-    const requestedLookupId = String(req.body?.lookup_id || req.body?.routeId || '').trim();
-    const lookupId = requestedLookupId || buildLookupId();
+    const lookupId = buildLookupId();
     rememberAdvancedLookupPreview(lookupId, row.codigo_predial, {
       queryPoint: buildQueryPoint(lat, lng),
     });
