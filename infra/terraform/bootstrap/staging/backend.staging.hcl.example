@@ -1,0 +1,12 @@
+# Plantilla de configuración parcial del backend S3 (ADR-010).
+# Copiar como `backend.staging.hcl` (local, ignorado por git) y reemplazar
+# los placeholders con valores reales SOLO tras la aprobación del lote
+# operativo posterior. LOTE-016 NO AUTORIZA esta copia ni ejecutar
+# `terraform init -backend-config=backend.staging.hcl`.
+
+bucket       = "REPLACE_WITH_STATE_BUCKET_NAME"
+key          = "bootstrap/terraform.tfstate"
+region       = "us-east-1"
+kms_key_id   = "REPLACE_WITH_CMK_ARN_OR_ALIAS"
+encrypt      = true
+use_lockfile = true
