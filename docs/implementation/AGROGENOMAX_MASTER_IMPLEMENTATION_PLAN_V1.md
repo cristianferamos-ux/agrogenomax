@@ -181,9 +181,9 @@ Este documento es **exclusivamente un plan** — no implementa nada por sí mism
 
 **Objetivo**: producir un `Dockerfile` reproducible del backend, ejecutable localmente, con *health check* de contenedor evaluado (no adoptado como obligatorio salvo necesidad demostrada, ADR-012 §9), señales `SIGTERM` manejadas (dependiente del *graceful shutdown* de Lote 8), usuario no root, y una imagen identificable por *digest* — sin desplegar a ningún registro ni servicio en la nube todavía.
 
-**Estado vigente**: Fase 3 está bloqueada hasta ejecutar LOTE-014 (LOTE-009 ya cerrado, commit `6ba3056`). El lote incluido en los primeros 15 es `Dockerfile` + `.dockerignore` (LOTE-014, pendiente).
+**Estado vigente**: Fase 3 completada a nivel de los primeros 15 lotes. LOTE-014 (`Dockerfile` + `.dockerignore`) quedó COMPLETADO, commit `f691466` — imagen y contenedor validados únicamente en entorno local (`docker build`/`docker run`), sin publicación a ningún registro ni servicio en la nube.
 
-**Lotes adicionales de esta fase, no detallados en los primeros 15** (registrados como pendientes, §24): ejecución local del contenedor con `docker run`/*compose* de desarrollo; validación de que el contenedor respeta las señales de parada; publicación reproducible del *digest* (sin subir a ECR todavía, dado que ECR es Fase 4).
+**Lotes adicionales de esta fase, no detallados en los primeros 15**: la ejecución local del contenedor con `docker run` y la validación de SIGTERM y cierre ordenado quedaron cubiertas por LOTE-014 (validación exclusivamente local; no se publicó ninguna imagen en ECR ni se desplegó en ECS). Permanece pendiente únicamente la eventual publicación reproducible de la imagen por *digest* en un registro, actividad correspondiente a Fase 4.
 
 ## 14. Fase 4 — Terraform y staging AWS
 
@@ -243,7 +243,7 @@ Este documento es **exclusivamente un plan** — no implementa nada por sí mism
 | ADR-008 | Fase 6 | — |
 | ADR-009 | Fase 5 | — |
 | ADR-010 | Fase 4 | — |
-| ADR-011 | Fase 3, Fase 4 | Lote 14 (Dockerfile) |
+| ADR-011 | Fase 3, Fase 4 | Lote 14 (Dockerfile, completado, commit `f691466`) |
 | ADR-012 | Fase 2 | Lotes 5, 6, 7, 8, 9 y 10 completados |
 | ADR-013 | Fase 7 | — (primeros 15 lotes son prerrequisitos de plataforma; Fase 7 en sí no está entre los primeros 15) |
 | ADR-014 | Fase 1, Fase 8 | Lotes 2, 3, 4, 11, 12, 15 |
@@ -267,7 +267,7 @@ Este documento es **exclusivamente un plan** — no implementa nada por sí mism
 | LOTE-011 | REQUIERE AUDITORÍA FINAL | `81c647e` | Restauró cuenta real/demo; todavía debe verificarse específicamente que ninguna ruta real muestre cifras de relleno. |
 | LOTE-012 | PENDIENTE DE VERIFICACIÓN | — | No afirmar retiro de `ganaderiaMockData.js` sin comprobarlo. |
 | LOTE-013 | PENDIENTE | — | Auditoría SQL/entropía de `lookupId`. |
-| LOTE-014 | PENDIENTE | — | `Dockerfile`/`.dockerignore`. |
+| LOTE-014 | COMPLETADO | `f691466` | `Dockerfile` multi-stage (`dependencies`/`runtime`) + `.dockerignore` en allow-list; imagen base `node:24.16.0-bookworm-slim` fijada por *digest* en ambas etapas; `npm ci --omit=dev --no-audit --no-fund`; runtime con `NODE_ENV=production`, usuario `node` no *root*, `EXPOSE 3000`, `STOPSIGNAL SIGTERM`, `CMD ["node", "server/index.js"]`; sin `HEALTHCHECK` interno (ADR-012 mantiene `/api/health/live` para el *target group* del ALB); validado solo localmente. |
 | LOTE-015 | PENDIENTE | — | Matriz documental de staging. |
 
 ## 23. Riesgos críticos
@@ -642,23 +642,22 @@ Este plan (como documento) se considera cerrado y vigente cuando:
 | ID | LOTE-014 |
 | Fase | Fase 3 |
 | ADR que lo autoriza | ADR-011 §10 |
-| Estado | Pendiente |
-| Estado vigente | PENDIENTE — `Dockerfile`/`.dockerignore`; LOTE-009 ya cerrado (commit `6ba3056`), precondición cumplida. |
+| Estado | Completado |
+| Estado vigente | COMPLETADO — commit `f691466`. `Dockerfile` multi-stage y `.dockerignore` construidos, probados localmente y validados; sin publicación a ningún registro ni servicio en la nube. |
 | Objetivo | Crear un `Dockerfile` reproducible del backend Express, con usuario no *root*, manejo correcto de señales (heredado de Lote 8), y un `.dockerignore` que excluya `node_modules`, archivos de desarrollo y secretos locales |
 | Precondiciones | Lotes 2, 5, 8, 9 completados |
-| Archivos permitidos | `Dockerfile` (nuevo, en la raíz o en `server/`, a decidir en el propio lote), `.dockerignore` (nuevo) |
-| Archivos prohibidos | Cualquier archivo de código de aplicación — este lote no modifica lógica, solo empaqueta lo ya existente |
-| Cambios exactos | Definición de imagen base, copia de `server/`, instalación de dependencias de producción, usuario no *root*, `CMD`/`ENTRYPOINT` apuntando a `node index.js` |
-| Pruebas | Construcción local de la imagen (`docker build`, fuera del alcance de esta tarea documental, pero obligatoria en la ejecución real del lote); ejecución local del contenedor confirmando que responde en `GET /api/health/live`; envío de `SIGTERM` al contenedor confirmando cierre ordenado (heredado de Lote 8) |
-| Criterio de aceptación | Imagen construible de forma reproducible, contenedor que responde a *health* y a señales de parada |
-| Rollback | `git revert` — elimina el `Dockerfile`, sin impacto en el resto del sistema (nada lo consume todavía fuera de pruebas locales) |
-| Riesgo | Medio — primera vez que el proyecto se empaqueta como contenedor, puede revelar dependencias implícitas del entorno de desarrollo no capturadas |
+| Archivos reales | `Dockerfile` (raíz del repositorio), `.dockerignore` |
+| Archivos prohibidos | Cualquier archivo de código de aplicación — este lote no modificó lógica, solo empaquetó lo ya existente |
+| Contrato / cambios exactos | `Dockerfile` multi-stage con etapas `dependencies` y `runtime`, ambas sobre la imagen base `node:24.16.0-bookworm-slim` fijada al *digest* `sha256:2c87ef9bd3c6a3bd4b472b4bec2ce9d16354b0c574f736c476489d09f560a203`; etapa `dependencies` instala con `npm ci --omit=dev --no-audit --no-fund`; etapa `runtime` con `NODE_ENV=production`, usuario `node` no *root*, `EXPOSE 3000`, `STOPSIGNAL SIGTERM` y `CMD ["node", "server/index.js"]`; sin `HEALTHCHECK` interno — ADR-012 mantiene `/api/health/live` como verificación real, consumida por el *target group* del ALB en Fase 4. `.dockerignore` en modelo *allow-list*: solo manifiestos `npm`, `server` y `shared`; excluye `server/sql`, pruebas, `.env` y cualquier otro archivo no listado |
+| Pruebas | `docker build` aprobado, 15/15 pasos, contexto de compilación 519.62 kB; `docker build --check` aprobado sin advertencias; contenedor ejecutado localmente (`APP_ENV=development`, puerto `3100:3000`); `GET /api/health/live` respondió HTTP 200 con `Cache-Control: no-store` y `X-Request-ID`; proceso confirmado ejecutándose como usuario `node`/UID 1000; señal `SIGTERM` probada con cierre ordenado de HTTP y de ambos *pools* en 3 ms, `ExitCode=0`, `OOMKilled=false`; verificación dentro de la imagen de que `server/sql`, pruebas y archivos `.env` están ausentes |
+| Criterio de aceptación | Imagen construible de forma reproducible, contenedor que responde a *health* y a señales de parada — cumplido, validado solo en entorno local |
+| Rollback | `git revert f691466` — elimina `Dockerfile`/`.dockerignore`, sin impacto en el resto del sistema (nada lo consume todavía fuera de pruebas locales) |
+| Riesgo | Medio — primera vez que el proyecto se empaqueta como contenedor; riesgo materializado y mitigado durante la ejecución del lote |
 | Tamaño | M |
 | Dependencias | Lotes 2, 5, 8, 9 |
-| Tareas paralelizables | Ninguna (depende de casi toda la Fase 2) |
-| Commit esperado | Uno, aislado |
-| Mensaje recomendado del commit | `build(docker): add reproducible backend Dockerfile` |
-| Evidencia requerida | Resultado de `docker build`/`docker run` local; captura del *health check* respondiendo; captura del cierre ordenado ante `SIGTERM` |
+| Tareas paralelizables | Ninguna (dependía de casi toda la Fase 2) |
+| Commit | `f691466` — `build(docker): add reproducible backend Dockerfile` |
+| Evidencia | `docker build`/`docker build --check` aprobados; `docker run` local con *health check* HTTP 200 y `SIGTERM` con cierre ordenado; verificación de ausencia de `server/sql`/pruebas/`.env` dentro de la imagen. No se ejecutó SQL, Terraform, AWS ni `push`; no hay ECR, ECS ni publicación de imagen — solo validación local. |
 
 ### LOTE-015 — Matriz de configuración de staging (documental, sin desplegar)
 
@@ -699,7 +698,7 @@ Este plan (como documento) se considera cerrado y vigente cuando:
 
 ### 3. Número total de lotes
 
-15 lotes iniciales detallados: 9 lotes completados, 1 lote parcial (LOTE-003), 2 con auditoría/verificación específica (LOTE-011 y LOTE-012) y 3 pendientes, con las Fases 5-10 registradas a nivel de fase y pendientes de descomposición lote por lote en tareas futuras (§24).
+15 lotes iniciales detallados: 10 lotes completados, 1 lote parcial (LOTE-003), 2 con auditoría/verificación específica (LOTE-011 y LOTE-012) y 2 pendientes (LOTE-013 y LOTE-015), con las Fases 5-10 registradas a nivel de fase y pendientes de descomposición lote por lote en tareas futuras (§24).
 
 ### 4. Estado del Lote 1
 
@@ -707,13 +706,13 @@ Completado, commit `26ca461`, 5 pruebas *pass* / 0 *fail*. El registro vigente c
 
 ### 5. Siguiente lote recomendado
 
-LOTE-010 completado (commit `bc4696b`). Siguiente lote recomendado: LOTE-014, `Dockerfile`/`.dockerignore`.
+LOTE-014 completado (commit `f691466`). Siguiente lote recomendado: LOTE-015, matriz de configuración de staging — documental, sin aprovisionar infraestructura.
 
-Justificación: con LOTE-010 cerrado, Fase 2 completa los Lotes 5-10 exigidos antes de Fase 4; el lote que resta antes de Fase 4 es LOTE-014. Esta recomendación no autoriza ejecución todavía.
+Justificación: con LOTE-014 cerrado, Fase 3 completa los lotes exigidos antes de Fase 4; el lote que resta antes de aprovisionar cualquier recurso real es LOTE-015. Esta recomendación no autoriza ejecución todavía.
 
 ### 6. Dependencias
 
-Documentadas en §5 (ADR→ADR) y en el campo "Dependencias" de cada lote (§ definición detallada) — la cadena crítica vigente pendiente es: LOTE-014 → Fase 4 (LOTE-009 y LOTE-010 ya completados, commits `6ba3056` y `bc4696b`). LOTE-003 conserva remanentes no bloqueantes para readiness, pero obligatorios antes de cerrar integralmente ADR-014.
+Documentadas en §5 (ADR→ADR) y en el campo "Dependencias" de cada lote (§ definición detallada) — la cadena crítica vigente pendiente es: LOTE-015 → Fase 4 (LOTE-009, LOTE-010 y LOTE-014 ya completados, commits `6ba3056`, `bc4696b` y `f691466`). LOTE-003 conserva remanentes no bloqueantes para readiness, pero obligatorios antes de cerrar integralmente ADR-014.
 
 ### 7. Gates
 
