@@ -175,7 +175,7 @@ Este documento es **exclusivamente un plan** — no implementa nada por sí mism
 
 **Objetivo**: construir el módulo central de configuración (`APP_ENV` y validación *fail-fast*), la clasificación de errores, el *correlation ID*, el *logging* estructurado, la disciplina `no-store`, y los primitivos de *health*/*readiness*/*liveness* que ADR-012 exige antes de que exista cualquier infraestructura real que los consuma (el *target group* del ALB de Fase 4 necesita `GET /api/health/live` ya implementado y probado).
 
-**Estado vigente de lotes de esta fase**: LOTE-002, LOTE-005, LOTE-006, LOTE-007, LOTE-008, LOTE-009 y LOTE-010 están completados; LOTE-013 permanece pendiente como auditoría de seguridad.
+**Estado vigente de lotes de esta fase**: LOTE-002, LOTE-005, LOTE-006, LOTE-007, LOTE-008, LOTE-009, LOTE-010 y LOTE-013 están completados. LOTE-013 (commit `cf99371`) cerró la auditoría SQL/entropía de `lookupId`; conserva riesgos residuales documentados en §22 (rate limiting específico pendiente, `lookupPreviewStore` en memoria sin límite/barrido activo, estado no compartido entre tareas, y retiro pendiente de `full-result` condicionado a `orders`/`entitlements`).
 
 ## 13. Fase 3 — Contenedorización
 
@@ -245,7 +245,7 @@ Este documento es **exclusivamente un plan** — no implementa nada por sí mism
 | ADR-010 | Fase 4 | — |
 | ADR-011 | Fase 3, Fase 4 | Lote 14 (Dockerfile, completado, commit `f691466`) |
 | ADR-012 | Fase 2 | Lotes 5, 6, 7, 8, 9 y 10 completados |
-| ADR-013 | Fase 7 | — (primeros 15 lotes son prerrequisitos de plataforma; Fase 7 en sí no está entre los primeros 15) |
+| ADR-013 | Fase 7 | Lote 13 (auditoría SQL/entropía de `lookupId`, completado, commit `cf99371`; primeros 15 lotes son prerrequisitos de plataforma, Fase 7 en sí no está entre los primeros 15) |
 | ADR-014 | Fase 1, Fase 8 | Lotes 2, 3, 4, 11, 12, 15 (Lote 15 completado, commit `9b2d11e`) |
 
 **Nota de lectura**: los primeros 15 lotes de este plan son deliberadamente **prerrequisitos de plataforma** (configuración, salud, seguridad de red, higiene de código, contenedorización) — ningún ADR que dependa de infraestructura desplegada (ADR-007/008/009/010/011-parcial/013 en su forma completa) puede tener un lote completamente ejecutado todavía; sus lotes de Fase 4 en adelante quedan diseñados a nivel de fase (§14-§20) y se detallarán lote por lote cuando corresponda avanzar a ellas, conforme al principio de "ningún avance automático" (§9).
@@ -266,7 +266,7 @@ Este documento es **exclusivamente un plan** — no implementa nada por sí mism
 | LOTE-010 | COMPLETADO | `bc4696b` | Middleware de *logging* estructurado montado antes de CORS y de las rutas; `X-Request-ID` usado como *correlation ID*, aceptado del cliente solo si es un UUID canónico, o generado con `crypto.randomUUID` en caso contrario; ID expuesto en `req.correlationId`, `res.locals.correlationId` y en la respuesta; eventos JSON `request_started`, `request_completed` y `request_aborted` sin duplicación; campos mínimos, sin URL, *query*, *headers*, *cookies*, `Authorization`, *body*, IP, *user-agent*, tokens, credenciales, geometría ni `error.message`; nivel de *log* según código de estado; duración medida con reloj monotónico; *sink* tolerante a fallos; 13/13 pruebas específicas y 405/405 pruebas backend. Completa el alcance mínimo del lote; no afirma métricas, alarmas, CloudWatch ni el reemplazo de todos los *logs* heredados de ADR-012 §25. |
 | LOTE-011 | REQUIERE AUDITORÍA FINAL | `81c647e` | Restauró cuenta real/demo; todavía debe verificarse específicamente que ninguna ruta real muestre cifras de relleno. |
 | LOTE-012 | PENDIENTE DE VERIFICACIÓN | — | No afirmar retiro de `ganaderiaMockData.js` sin comprobarlo. |
-| LOTE-013 | PENDIENTE | — | Auditoría SQL/entropía de `lookupId`. |
+| LOTE-013 | COMPLETADO | `cf99371` | Auditoría de `server/routes/catastrox.js` y `server/routes/catastroxPayments.js`: sin SQL no parametrizada explotable por cliente; `CLEAN_FULL_RESULT_BY_POINT_QUERY` usa `$3` para `CATASTROX_ORIGEN_NACIONAL_PROJ`. `buildLookupId` migrado de `Date.now`+`Math.random` (~31 bits teóricos) a `crypto.randomUUID()` (UUID v4, 122 bits vía CSPRNG); `POST /advanced/lookup` ya no acepta `lookup_id`/`routeId` del cliente, el ID siempre se genera *server-side*. 6/6 pruebas específicas y 411/411 suite backend completa aprobadas, 0 fallos. Riesgos residuales abiertos, no declarados resueltos: rate limiting específico pendiente; `lookupPreviewStore` en memoria sin límite/barrido activo; estado no compartido entre múltiples tareas; retiro de `full-result` deprecado pendiente de `orders`/`entitlements`. |
 | LOTE-014 | COMPLETADO | `f691466` | `Dockerfile` multi-stage (`dependencies`/`runtime`) + `.dockerignore` en allow-list; imagen base `node:24.16.0-bookworm-slim` fijada por *digest* en ambas etapas; `npm ci --omit=dev --no-audit --no-fund`; runtime con `NODE_ENV=production`, usuario `node` no *root*, `EXPOSE 3000`, `STOPSIGNAL SIGTERM`, `CMD ["node", "server/index.js"]`; sin `HEALTHCHECK` interno (ADR-012 mantiene `/api/health/live` para el *target group* del ALB); validado solo localmente. |
 | LOTE-015 | COMPLETADO | `9b2d11e` | Matriz documental de staging (`server/.env.staging.example`, 194 líneas); planos backend Express/ECS, frontend Vite/Cloudflare Pages build, relay Cloudflare Pages Functions, configuración futura Cognito/cookies y variables excluidas/prohibidas. Solo *placeholders*, cero secretos reales; revisión negativa de patrones de secretos y `git diff --cached --check` aprobados. No es un `.env` desplegable ni una fuente única cargable con `dotenv`; no se ejecutó SQL, Terraform, AWS, Secrets Manager, Cognito, ALB, ECS, RDS, ECR ni Cloudflare staging; no hubo `push` ni despliegue. |
 
@@ -617,23 +617,24 @@ Este plan (como documento) se considera cerrado y vigente cuando:
 | ID | LOTE-013 |
 | Fase | Fase 2 |
 | ADR que lo autoriza | ADR-013 §22, §31 |
-| Estado | Pendiente |
-| Estado vigente | PENDIENTE — auditoría SQL/entropía de `lookupId`. |
+| Estado | Completado |
+| Estado vigente | COMPLETADO — commit `cf99371`. Auditoría de SQL parametrizado y entropía de `lookupId` cerrada, con corrección aplicada y riesgos residuales documentados sin declararlos resueltos. |
 | Objetivo | Revisión dedicada de `server/routes/catastrox.js` y `server/routes/catastroxPayments.js` en busca de patrones de construcción de SQL no parametrizada, y verificación de que el `lookupId` actual tiene aleatoriedad suficiente para no ser adivinable (ADR-013 §22, acciones ya señaladas como pendientes) |
 | Precondiciones | Ninguna técnica |
-| Archivos permitidos | Ninguno de código en la primera mitad (es una auditoría); posible corrección puntual acotada en la segunda mitad, si se encuentra un hallazgo concreto |
+| Archivos reales | `server/routes/catastrox.js`, `server/routes/__tests__/catastroxLookupId.test.js`, `docs/security/LOTE-013-security-baseline.md` |
 | Archivos prohibidos | Cualquier cambio de comportamiento no directamente motivado por un hallazgo de la auditoría |
-| Cambios exactos | Depende del resultado — este lote es predominantemente de análisis, con un informe como entregable principal |
-| Pruebas | Si se encuentra y corrige un hallazgo, prueba específica de ese hallazgo (por ejemplo, un caso de entrada que antes hubiera sido vulnerable) |
-| Criterio de aceptación | Informe de auditoría completo, sin patrones de SQL no parametrizada encontrados sin corregir, y confirmación explícita del nivel de aleatoriedad del `lookupId` |
-| Rollback | `git revert` de cualquier corrección puntual aplicada |
-| Riesgo | Bajo para el análisis en sí; depende del hallazgo para cualquier corrección |
+| Auditoría SQL | Revisión de `server/routes/catastrox.js` y `server/routes/catastroxPayments.js`: no se encontró SQL no parametrizada explotable por cliente en ninguno de los dos archivos auditados; `CLEAN_FULL_RESULT_BY_POINT_QUERY` usa el parámetro `$3` para `CATASTROX_ORIGEN_NACIONAL_PROJ` |
+| Hallazgo y corrección | `buildLookupId` construía el identificador con `Date.now()` + `Math.random()` (~31 bits de aleatoriedad teórica máxima, con riesgo de adivinación/enumeración). Se corrigió a `crypto.randomUUID()` (UUID v4, 122 bits aleatorios mediante CSPRNG). Adicionalmente, `POST /advanced/lookup` dejó de aceptar `lookup_id`/`routeId` provistos por el cliente para fijar la clave: el ID siempre se genera *server-side* |
+| Pruebas | 6/6 pruebas específicas del hallazgo aprobadas, 0 fallos (`server/routes/__tests__/catastroxLookupId.test.js`); suite backend completa: 411 pruebas, 29 *suites*, 411 *pass*, 0 *fail*, 0 *skipped*/*cancelled*/*todo*. Nota: una invocación previa con `node --test server` fue inválida — cargó el *entrypoint* y activó correctamente `APP_ENV_MISSING`; no fue una regresión. La ejecución válida enumeró explícitamente todos los `*.test.js` y aprobó 411/411 |
+| Informe | `docs/security/LOTE-013-security-baseline.md` |
+| Criterio de aceptación | Informe de auditoría completo, sin patrones de SQL no parametrizada encontrados sin corregir, y confirmación explícita del nivel de aleatoriedad del `lookupId` — cumplido |
+| Rollback | `git revert cf99371` |
+| Riesgos residuales | Abiertos y no declarados resueltos: rate limiting específico pendiente; `lookupPreviewStore` en memoria sin límite/barrido activo; estado no compartido entre múltiples tareas; retiro de `full-result` deprecado pendiente de `orders`/`entitlements` |
 | Tamaño | M |
 | Dependencias | Ninguna |
 | Tareas paralelizables | Sí |
-| Commit esperado | Cero o uno (según si hay corrección) |
-| Mensaje recomendado del commit | `security(catastrox): audit SQL parameterization and lookupId entropy` (si aplica corrección) |
-| Evidencia requerida | Informe de auditoría |
+| Commit | `cf99371` — `security(catastrox): audit SQL parameterization and lookupId entropy` |
+| Evidencia | Informe `docs/security/LOTE-013-security-baseline.md`; 6/6 pruebas específicas y 411/411 suite backend aprobadas; no se ejecutó SQL contra bases reales, servidor productivo, Docker, Terraform, AWS ni hubo `push` |
 
 ### LOTE-014 — `Dockerfile` + `.dockerignore`
 
@@ -699,7 +700,7 @@ Este plan (como documento) se considera cerrado y vigente cuando:
 
 ### 3. Número total de lotes
 
-15 lotes iniciales detallados: 11 lotes completados, 1 lote parcial (LOTE-003), 2 con auditoría/verificación específica (LOTE-011 y LOTE-012) y 1 pendiente (LOTE-013), con las Fases 5-10 registradas a nivel de fase y pendientes de descomposición lote por lote en tareas futuras (§24).
+15 lotes iniciales detallados: 12 lotes completados, 1 lote parcial (LOTE-003), 2 con auditoría/verificación específica (LOTE-011 y LOTE-012) y 0 pendientes, con las Fases 5-10 registradas a nivel de fase y pendientes de descomposición lote por lote en tareas futuras (§24).
 
 ### 4. Estado del Lote 1
 
@@ -707,13 +708,13 @@ Completado, commit `26ca461`, 5 pruebas *pass* / 0 *fail*. El registro vigente c
 
 ### 5. Siguiente lote recomendado
 
-LOTE-015 completado (commit `9b2d11e`). Siguiente lote recomendado: LOTE-013, línea base de pruebas de seguridad (auditoría SQL/entropía de `lookupId`).
+LOTE-013 completado (commit `cf99371`). Los 15 lotes iniciales quedan sin pendientes: 12 completados, 1 parcial (LOTE-003) y 2 con auditoría/verificación específica (LOTE-011 y LOTE-012). Siguiente paso recomendado: definir y someter a aprobación formal el primer lote adicional de Fase 4 — estado remoto de Terraform + *locking* —, incluyendo su definición completa, revisión de costos/presupuesto y plan de *rollback*.
 
-Justificación: LOTE-013 es el único pendiente de los 15 lotes iniciales; no requiere infraestructura de ningún tipo y conviene cerrarlo, por gobernanza, antes de aprovisionar staging. Esto no es una dependencia técnica formal de Fase 4 — es la secuencia de gobernanza recomendada. Esta recomendación no autoriza ejecución todavía.
+Justificación: con LOTE-013 cerrado no queda ningún lote de los primeros 15 en estado pendiente; sin embargo, esto no autoriza todavía ejecutar `terraform apply` ni crear ningún recurso AWS — se requiere la definición completa del lote de Terraform (§14), revisión de costos/presupuesto, *rollback* y aprobación explícita antes de ejecutarlo.
 
 ### 6. Dependencias
 
-Documentadas en §5 (ADR→ADR) y en el campo "Dependencias" de cada lote (§ definición detallada). LOTE-015 queda retirado como pendiente (completado, commit `9b2d11e`). LOTE-013 no es una dependencia técnica formal de Fase 4 — se presenta únicamente como secuencia de gobernanza recomendada antes de aprovisionar staging. Antes de ejecutar cualquier lote de Fase 4, el primer lote adicional de infraestructura (§14, párrafo de "Lotes adicionales") debe definirse y aprobarse individualmente; ninguno de esos lotes está autorizado por adelantado. LOTE-003 conserva remanentes no bloqueantes para readiness, pero obligatorios antes de cerrar integralmente ADR-014.
+Documentadas en §5 (ADR→ADR) y en el campo "Dependencias" de cada lote (§ definición detallada). LOTE-015 y LOTE-013 quedan retirados como pendientes (LOTE-015 completado, commit `9b2d11e`; LOTE-013 completado, commit `cf99371`). Ningún lote adicional de Fase 4 (más allá de LOTE-015) está definido o autorizado todavía — el primer lote adicional de infraestructura (§14, párrafo de "Lotes adicionales"), estado remoto de Terraform + *locking*, debe definirse y aprobarse individualmente antes de ejecutarse; ninguno de esos lotes está autorizado por adelantado. LOTE-003 conserva remanentes no bloqueantes para readiness, pero obligatorios antes de cerrar integralmente ADR-014. LOTE-011 sigue requiriendo auditoría final y LOTE-012 sigue pendiente de verificación.
 
 ### 7. Gates
 
@@ -737,7 +738,7 @@ Seis riesgos críticos documentados en §23, encabezados por la ejecución fuera
 
 ### 12. Elementos bloqueados
 
-Fase 9 (migración geoespacial) bloqueada hasta cumplimiento verificado de ADR-006; Fase 10 (producción) bloqueada hasta superar los *gates* de ADR-011/012/013/014 y aprobación explícita de costo; LOTE-011 y LOTE-013 tienen alcance de corrección condicionado al resultado de su propia auditoría.
+Fase 9 (migración geoespacial) bloqueada hasta cumplimiento verificado de ADR-006; Fase 10 (producción) bloqueada hasta superar los *gates* de ADR-011/012/013/014 y aprobación explícita de costo; LOTE-011 tiene alcance de corrección condicionado al resultado de su propia auditoría final. LOTE-013 quedó completado (commit `cf99371`) con riesgos residuales documentados (no resueltos); dichos riesgos permanecen abiertos y deberán asignarse/evaluarse en lotes posteriores antes de los *gates* operativos que correspondan, especialmente antes de habilitar múltiples tareas ECS y antes del retiro definitivo de *full-result*.
 
 ### 13. Información NO VERIFICADA
 
