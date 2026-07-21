@@ -189,7 +189,7 @@ Este documento es **exclusivamente un plan** — no implementa nada por sí mism
 
 **Objetivo**: aprovisionar **exclusivamente staging** — nunca producción en esta fase (ADR-014 §24.B) — con estado remoto de Terraform (ADR-010), OIDC (ADR-003), ECR, ECS Express Mode + ALB (ADR-011), **dos planos de datos separados** (`agx-staging` y `postgis-catastrox-staging`, ADR-014 §7/§8, nunca fusionados), Secrets Manager, CloudWatch, el dominio `staging.agrogenomax.com` (`noindex`, acceso restringido, ADR-014 §12), con revisión de costo y presupuesto en cada paso, y manteniendo Railway como rollback disponible durante toda la fase.
 
-**Estado vigente**: Fase 4 no ha iniciado; no se ha ejecutado ningún `terraform apply` ni se ha creado ningún recurso AWS. El primer lote de esta fase incluido en los primeros 15 es la matriz de configuración de staging (LOTE-015), todavía pendiente.
+**Estado vigente**: LOTE-015 (matriz documental de variables de entorno de staging, `server/.env.staging.example`) está COMPLETADO, commit `9b2d11e`. Esto no significa que Fase 4 haya iniciado: Fase 4 de infraestructura todavía NO ha iniciado; no se ha ejecutado ningún `terraform apply` ni se ha creado ningún recurso AWS. Los lotes adicionales de infraestructura de esta fase (§14, párrafo siguiente) siguen pendientes y cada uno requiere definición completa y aprobación individual antes de ejecutarse.
 
 **Lotes adicionales de esta fase, no detallados en los primeros 15** (registrados como pendientes, §24, cada uno requerirá su propia definición completa de lote antes de ejecutarse): módulo Terraform de estado remoto + *locking*; módulo de rol OIDC de CI/CD; módulo ECR; módulo ECS Express Mode + ALB de staging; módulo RDS `agx-staging`; módulo/instancia `postgis-catastrox-staging` (plano separado); módulo Secrets Manager de staging; configuración de CloudWatch de staging; configuración de dominio `staging.agrogenomax.com` en Cloudflare; validación del gate de staging ya exigido por ADR-011 §14.1/§19.1.
 
@@ -246,7 +246,7 @@ Este documento es **exclusivamente un plan** — no implementa nada por sí mism
 | ADR-011 | Fase 3, Fase 4 | Lote 14 (Dockerfile, completado, commit `f691466`) |
 | ADR-012 | Fase 2 | Lotes 5, 6, 7, 8, 9 y 10 completados |
 | ADR-013 | Fase 7 | — (primeros 15 lotes son prerrequisitos de plataforma; Fase 7 en sí no está entre los primeros 15) |
-| ADR-014 | Fase 1, Fase 8 | Lotes 2, 3, 4, 11, 12, 15 |
+| ADR-014 | Fase 1, Fase 8 | Lotes 2, 3, 4, 11, 12, 15 (Lote 15 completado, commit `9b2d11e`) |
 
 **Nota de lectura**: los primeros 15 lotes de este plan son deliberadamente **prerrequisitos de plataforma** (configuración, salud, seguridad de red, higiene de código, contenedorización) — ningún ADR que dependa de infraestructura desplegada (ADR-007/008/009/010/011-parcial/013 en su forma completa) puede tener un lote completamente ejecutado todavía; sus lotes de Fase 4 en adelante quedan diseñados a nivel de fase (§14-§20) y se detallarán lote por lote cuando corresponda avanzar a ellas, conforme al principio de "ningún avance automático" (§9).
 
@@ -268,7 +268,7 @@ Este documento es **exclusivamente un plan** — no implementa nada por sí mism
 | LOTE-012 | PENDIENTE DE VERIFICACIÓN | — | No afirmar retiro de `ganaderiaMockData.js` sin comprobarlo. |
 | LOTE-013 | PENDIENTE | — | Auditoría SQL/entropía de `lookupId`. |
 | LOTE-014 | COMPLETADO | `f691466` | `Dockerfile` multi-stage (`dependencies`/`runtime`) + `.dockerignore` en allow-list; imagen base `node:24.16.0-bookworm-slim` fijada por *digest* en ambas etapas; `npm ci --omit=dev --no-audit --no-fund`; runtime con `NODE_ENV=production`, usuario `node` no *root*, `EXPOSE 3000`, `STOPSIGNAL SIGTERM`, `CMD ["node", "server/index.js"]`; sin `HEALTHCHECK` interno (ADR-012 mantiene `/api/health/live` para el *target group* del ALB); validado solo localmente. |
-| LOTE-015 | PENDIENTE | — | Matriz documental de staging. |
+| LOTE-015 | COMPLETADO | `9b2d11e` | Matriz documental de staging (`server/.env.staging.example`, 194 líneas); planos backend Express/ECS, frontend Vite/Cloudflare Pages build, relay Cloudflare Pages Functions, configuración futura Cognito/cookies y variables excluidas/prohibidas. Solo *placeholders*, cero secretos reales; revisión negativa de patrones de secretos y `git diff --cached --check` aprobados. No es un `.env` desplegable ni una fuente única cargable con `dotenv`; no se ejecutó SQL, Terraform, AWS, Secrets Manager, Cognito, ALB, ECS, RDS, ECR ni Cloudflare staging; no hubo `push` ni despliegue. |
 
 ## 23. Riesgos críticos
 
@@ -666,23 +666,24 @@ Este plan (como documento) se considera cerrado y vigente cuando:
 | ID | LOTE-015 |
 | Fase | Fase 4 (primer lote, sin aprovisionar infraestructura todavía) |
 | ADR que lo autoriza | ADR-014 §13 |
-| Estado | Pendiente |
-| Estado vigente | PENDIENTE — matriz documental de staging; no autoriza `terraform apply` ni recursos AWS. |
-| Objetivo | Documentar, sin desplegar, la matriz completa de variables de entorno de staging (`APP_ENV=staging`, `DATABASE_URL`/`CATASTROX_DATABASE_URL` de staging como *placeholders*, `WOMPI_ENV=test`, `COOKIE_DOMAIN=staging.agrogenomax.com`, etc.), como preparación para que Fase 4 tenga un contrato claro antes de aprovisionar cualquier recurso real |
+| Estado | COMPLETADO |
+| Estado vigente | COMPLETADO — matriz documental de staging entregada en `server/.env.staging.example` (194 líneas); no autoriza ni implica `terraform apply` ni recursos AWS. Fase 4 de infraestructura sigue sin iniciar. |
+| Objetivo | Documentar, sin desplegar, la matriz completa de variables de entorno de staging, como preparación para que Fase 4 tenga un contrato claro antes de aprovisionar cualquier recurso real |
 | Precondiciones | Lote 2 completado |
-| Archivos permitidos | Un nuevo archivo de ejemplo (`server/.env.staging.example` o equivalente), sin valores reales |
-| Archivos prohibidos | Cualquier archivo `.env` real, cualquier credencial |
-| Cambios exactos | Archivo de ejemplo documentando cada variable esperada para staging, con *placeholders*, sin valores reales |
-| Pruebas | No aplica (documento de configuración, no código ejecutable) — revisión de que el archivo no contiene ningún valor real por accidente |
-| Criterio de aceptación | Matriz completa y coherente con ADR-014 §13, lista para que Fase 4 la use al aprovisionar |
-| Rollback | `git revert` — elimina el archivo de ejemplo, sin impacto operativo |
+| Archivo real creado | `server/.env.staging.example` (único archivo creado; 194 líneas) |
+| Contrato documentado | Planos: backend Express/ECS, frontend Vite/Cloudflare Pages build, relay Cloudflare Pages Functions, configuración futura de Cognito/cookies, y listado explícito de variables excluidas/prohibidas |
+| Archivos prohibidos | Cualquier archivo `.env` real, cualquier credencial — ninguno fue creado ni tocado |
+| Naturaleza del archivo | *Placeholders* no desplegables; el archivo no es un `.env` real ni funcional, no está pensado para cargarse con `dotenv` como fuente única de configuración, y no contiene ningún secreto real |
+| Pruebas | No aplica (documento de configuración, no código ejecutable) — no se ejecutaron pruebas |
+| Revisión realizada | Revisión documental/negativa de patrones de secretos, aprobada; `git diff --cached --check` aprobado; confirmación de que el archivo no contiene ningún valor real |
+| Criterio de aceptación | Matriz completa y coherente con ADR-014 §13, lista para que Fase 4 la use al aprovisionar — cumplido |
+| Rollback | `git revert 9b2d11e` — elimina el archivo de ejemplo, sin impacto operativo |
 | Riesgo | Muy bajo |
 | Tamaño | XS |
 | Dependencias | Lote 2 |
 | Tareas paralelizables | Sí, con casi cualquier otro lote |
-| Commit esperado | Uno, aislado |
-| Mensaje recomendado del commit | `docs(config): add staging environment variable matrix` |
-| Evidencia requerida | Revisión visual de que no hay secretos reales en el archivo |
+| Commit | `9b2d11e` — `docs(config): add staging environment variable matrix` |
+| Evidencia real | Único archivo creado (`server/.env.staging.example`); revisión negativa de patrones de secretos aprobada; `git diff --cached --check` aprobado; cero secretos reales; no se ejecutó ni creó SQL, Terraform, AWS, Secrets Manager, Cognito, ALB, ECS, RDS, ECR ni Cloudflare staging; no hubo `push` ni despliegue de staging |
 
 ---
 
@@ -698,7 +699,7 @@ Este plan (como documento) se considera cerrado y vigente cuando:
 
 ### 3. Número total de lotes
 
-15 lotes iniciales detallados: 10 lotes completados, 1 lote parcial (LOTE-003), 2 con auditoría/verificación específica (LOTE-011 y LOTE-012) y 2 pendientes (LOTE-013 y LOTE-015), con las Fases 5-10 registradas a nivel de fase y pendientes de descomposición lote por lote en tareas futuras (§24).
+15 lotes iniciales detallados: 11 lotes completados, 1 lote parcial (LOTE-003), 2 con auditoría/verificación específica (LOTE-011 y LOTE-012) y 1 pendiente (LOTE-013), con las Fases 5-10 registradas a nivel de fase y pendientes de descomposición lote por lote en tareas futuras (§24).
 
 ### 4. Estado del Lote 1
 
@@ -706,13 +707,13 @@ Completado, commit `26ca461`, 5 pruebas *pass* / 0 *fail*. El registro vigente c
 
 ### 5. Siguiente lote recomendado
 
-LOTE-014 completado (commit `f691466`). Siguiente lote recomendado: LOTE-015, matriz de configuración de staging — documental, sin aprovisionar infraestructura.
+LOTE-015 completado (commit `9b2d11e`). Siguiente lote recomendado: LOTE-013, línea base de pruebas de seguridad (auditoría SQL/entropía de `lookupId`).
 
-Justificación: con LOTE-014 cerrado, Fase 3 completa los lotes exigidos antes de Fase 4; el lote que resta antes de aprovisionar cualquier recurso real es LOTE-015. Esta recomendación no autoriza ejecución todavía.
+Justificación: LOTE-013 es el único pendiente de los 15 lotes iniciales; no requiere infraestructura de ningún tipo y conviene cerrarlo, por gobernanza, antes de aprovisionar staging. Esto no es una dependencia técnica formal de Fase 4 — es la secuencia de gobernanza recomendada. Esta recomendación no autoriza ejecución todavía.
 
 ### 6. Dependencias
 
-Documentadas en §5 (ADR→ADR) y en el campo "Dependencias" de cada lote (§ definición detallada) — la cadena crítica vigente pendiente es: LOTE-015 → Fase 4 (LOTE-009, LOTE-010 y LOTE-014 ya completados, commits `6ba3056`, `bc4696b` y `f691466`). LOTE-003 conserva remanentes no bloqueantes para readiness, pero obligatorios antes de cerrar integralmente ADR-014.
+Documentadas en §5 (ADR→ADR) y en el campo "Dependencias" de cada lote (§ definición detallada). LOTE-015 queda retirado como pendiente (completado, commit `9b2d11e`). LOTE-013 no es una dependencia técnica formal de Fase 4 — se presenta únicamente como secuencia de gobernanza recomendada antes de aprovisionar staging. Antes de ejecutar cualquier lote de Fase 4, el primer lote adicional de infraestructura (§14, párrafo de "Lotes adicionales") debe definirse y aprobarse individualmente; ninguno de esos lotes está autorizado por adelantado. LOTE-003 conserva remanentes no bloqueantes para readiness, pero obligatorios antes de cerrar integralmente ADR-014.
 
 ### 7. Gates
 
