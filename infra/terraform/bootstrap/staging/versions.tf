@@ -1,6 +1,8 @@
 # Versión fijada y verificada localmente (windows_amd64). Compatible con
 # `use_lockfile` del backend S3 nativo (ADR-010 §12).
 terraform {
+  backend "s3" {}
+
   required_version = "= 1.15.8"
 
   required_providers {
