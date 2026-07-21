@@ -4,3 +4,23 @@ dist
 .DS_Store
 .vite
 .env.local
+
+# Terraform (LOTE-016 / ADR-010)
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfplan
+*.tfvars
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Backend real generado localmente — nunca versionar (ver *.example)
+infra/terraform/bootstrap/staging/backend.tf
+infra/terraform/bootstrap/staging/backend.staging.hcl

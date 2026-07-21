@@ -1,0 +1,6 @@
+# Plantilla — copiar como `backend.tf` (local, ignorado por git) únicamente
+# tras completar el bootstrap y contar con la aprobación del lote operativo
+# correspondiente. LOTE-016 NO AUTORIZA esta copia ni su ejecución.
+terraform {
+  backend "s3" {}
+}
