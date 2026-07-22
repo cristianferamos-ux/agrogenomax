@@ -44,7 +44,7 @@ export default function PotrerosPage() {
       await ganaderiaApi.createPotrero(form);
       setForm(initialForm);
       await load();
-      setStatus('Potrero guardado en PostgreSQL.');
+      setStatus('Potrero guardado en tu cuenta.');
     } catch (err) {
       setError(err.message);
     }

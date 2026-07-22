@@ -12,6 +12,12 @@ import {
   projectRingToViewport,
 } from './ProjectionEngine.js';
 import { reducePointsForVisualClarity, selectVisibleReferencePoints } from './VisibleReferencePointEngine.js';
+import { getVeredaDisplay } from './veredaDisplay.js';
+import {
+  getDestinoEconomicoDisplay,
+  getTipoConstruccionDisplay,
+  getUsoDisplay,
+} from '../semantic/catastroxSemanticCatalog.js';
 import {
   cumulativeDistances,
   getPointBounds,
@@ -33,6 +39,10 @@ const LABELS_TILE_URL =
   'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}';
 
 const PAGE = { width: 792, height: 612, scale: 2 };
+const CARTOGRAPHIC_TOTAL_PERIMETER_LABEL = 'Perímetro cartográfico total';
+const LEGAL_FOOTER_TEXT =
+  'CatastroX realiza análisis técnico sobre información geográfica y catastral pública disponible. Este documento no reemplaza certificados oficiales del IGAC, gestor catastral, oficina de registro ni autoridad competente.';
+const UNIFIED_FOOTER_RECT = { x: 24, y: 576, width: 744, height: 20 };
 
 const SATELLITE_LAYOUT = {
   page: { x: 0, y: 0, width: PAGE.width, height: PAGE.height },
@@ -40,7 +50,7 @@ const SATELLITE_LAYOUT = {
   mapArea: { x: 24, y: 112, width: 446, height: 394 },
   rightPanel: { x: 484, y: 112, width: 284, height: 394 },
   bottomPanel: { x: 24, y: 516, width: 744, height: 52 },
-  footer: { x: 24, y: 580, width: 744, height: 16 },
+  footer: UNIFIED_FOOTER_RECT,
 };
 
 const TECHNICAL_LAYOUT = {
@@ -48,16 +58,16 @@ const TECHNICAL_LAYOUT = {
   header: { x: 22, y: 20, width: 748, height: 84 },
   mapArea: { x: 24, y: 108, width: 546, height: 450 },
   rightPanel: { x: 584, y: 108, width: 184, height: 450 },
-  bottomPanel: { x: 24, y: 566, width: 744, height: 24 },
-  footer: { x: 24, y: 592, width: 744, height: 10 },
+  bottomPanel: { x: 24, y: 546, width: 744, height: 22 },
+  footer: UNIFIED_FOOTER_RECT,
 };
 
 const TABLE_LAYOUT = {
   page: { x: 0, y: 0, width: PAGE.width, height: PAGE.height },
   header: { x: 22, y: 20, width: 748, height: 84 },
-  mapArea: { x: 24, y: 116, width: 744, height: 420 },
-  bottomPanel: { x: 24, y: 548, width: 744, height: 30 },
-  footer: { x: 24, y: 582, width: 744, height: 14 },
+  mapArea: { x: 24, y: 116, width: 744, height: 416 },
+  bottomPanel: { x: 24, y: 536, width: 744, height: 32 },
+  footer: UNIFIED_FOOTER_RECT,
 };
 
 const CUSTOM_PDF_FONT_FAMILY = 'CatastroXArial';
@@ -77,6 +87,15 @@ function cleanText(value, fallback = '') {
   return next || fallback;
 }
 
+function escapeXml(value) {
+  return cleanText(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
 function formatNumber(value, decimals = 2) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return 'Sin dato';
@@ -86,12 +105,314 @@ function formatNumber(value, decimals = 2) {
   });
 }
 
+function formatAreaM2Exact(value) {
+  return `${formatNumber(value, 2)} m²`;
+}
+
+function formatPlainDecimal(value, decimals) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return '';
+  return parsed.toFixed(decimals);
+}
+
+function formatNumberOrUnavailable(value, { decimals = 2, suffix = '', emptyLabel = 'No disponible' } = {}) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return emptyLabel;
+  return `${formatNumber(parsed, decimals)}${suffix ? ` ${suffix}` : ''}`;
+}
+
 function fileSafeCode(predio) {
   return cleanText(predio.codigoPredial || predio.codigo || predio.id || 'predio').replace(/[^\w.-]+/g, '_');
 }
 
 function predioName(predio) {
-  return cleanText(predio.nombrePredio) || `Predio ${fileSafeCode(predio)}`;
+  return cleanText(predio.nombrePredio || predio.nombre_predio || predio.nombrePredioClean) || `Predio ${fileSafeCode(predio)}`;
+}
+
+function resolveVeredaNombre(predio, source) {
+  return cleanText(
+    predio.veredaNombre ||
+      predio.vereda_nombre ||
+      predio.vereda ||
+      predio.nombreVereda ||
+      predio.nombre_vereda ||
+      source?.veredaNombre ||
+      source?.vereda_nombre ||
+      source?.vereda,
+  );
+}
+
+function resolveFirstValue(...values) {
+  return values.find((value) => cleanText(value));
+}
+
+function semanticText(result, fallback = 'No disponible') {
+  return cleanText(result?.value, fallback);
+}
+
+function resolveDestinoEconomico(predio) {
+  return getDestinoEconomicoDisplay(resolveFirstValue(
+    predio.destinoEconomicoNombre,
+    predio.destino_economico_nombre,
+    predio.codDestino,
+    predio.cod_destino,
+    predio.destinoEconomico,
+    predio.destino_economico,
+    predio.DESTINO_ECONOMICO,
+  ));
+}
+
+function resolveUso(predio, camelName, snakeName, rawName) {
+  return getUsoDisplay(resolveFirstValue(
+    predio[camelName],
+    predio[snakeName],
+    predio[rawName],
+  ));
+}
+
+function resolveTipoConstruccionResumen(predio) {
+  const summary = resolveFirstValue(predio.tiposConstruccionResumen, predio.tipos_construccion_resumen);
+  if (summary) return cleanText(summary, 'No registra');
+
+  const direct = getTipoConstruccionDisplay(resolveFirstValue(
+    predio.tipoConstruccion,
+    predio.tipo_construccion,
+    predio.TIPO_CONSTRUCCION,
+  ));
+  return semanticText(direct, 'No registra');
+}
+
+function toSentenceCase(text) {
+  const clean = cleanText(text);
+  if (!clean) return '';
+  const lower = clean.toLocaleLowerCase('es-CO');
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
+}
+
+// Correcciones tipograficas de topónimos conocidos de la cobertura Caqueta (catastrox_clean),
+// cuya fuente exporta nombres en mayusculas sin tilde. Ambito: presentacion en PDF unicamente,
+// nunca se escriben de vuelta en el objeto predio ni se usan en KML/KMZ.
+const KNOWN_TOPONYM_UPPERCASE_ACCENTS = {
+  CAQUETA: 'CAQUETÁ',
+  'CARTAGENA DEL CHAIRA': 'CARTAGENA DEL CHAIRÁ',
+  'LA MONTANITA': 'LA MONTAÑITA',
+};
+
+const KNOWN_TOPONYM_TITLE_CASE = {
+  CAQUETA: 'Caquetá',
+  'CARTAGENA DEL CHAIRA': 'Cartagena del Chairá',
+  'LA MONTANITA': 'La Montañita',
+  'PUERTO RICO': 'Puerto Rico',
+  FLORENCIA: 'Florencia',
+};
+
+function withKnownToponymAccents(text) {
+  const clean = cleanText(text);
+  if (!clean) return clean;
+  return KNOWN_TOPONYM_UPPERCASE_ACCENTS[clean.toUpperCase()] || clean;
+}
+
+function toDisplayToponymTitleCase(text) {
+  const clean = cleanText(text);
+  if (!clean) return '';
+  return KNOWN_TOPONYM_TITLE_CASE[clean.toUpperCase()] || toSentenceCase(clean);
+}
+
+const EMPTY_USO_DISPLAY_VALUES = new Set(['', 'INFORMACIÓN NO DISPONIBLE', 'NO DISPONIBLE', 'NO REGISTRA']);
+
+function isUsableUsoValue(value) {
+  const text = cleanText(value);
+  return Boolean(text) && !EMPTY_USO_DISPLAY_VALUES.has(text.toUpperCase());
+}
+
+function collectUsosConstructivos(predio) {
+  const seen = new Set();
+  const usos = [];
+  [predio.uso1Nombre, predio.uso2Nombre, predio.uso3Nombre].forEach((value) => {
+    if (!isUsableUsoValue(value)) return;
+    const key = cleanText(value).toUpperCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    usos.push(cleanText(value));
+  });
+  return usos;
+}
+
+// Algunos usos constructivos llegan de la fuente separados por guiones
+// ("ESTABLOS - PESEBRERAS - CABALLERIZAS"); se muestran como una enumeración natural.
+function humanizeDashSeparatedList(text) {
+  const clean = cleanText(text);
+  if (!clean) return clean;
+  const parts = clean.split(/\s*-\s*/).map((part) => part.trim()).filter(Boolean);
+  if (parts.length <= 1) return clean;
+  const lowered = parts.map((part) => part.toLowerCase());
+  const head = lowered.slice(0, -1);
+  return `${head.join(', ')} y ${lowered[lowered.length - 1]}`;
+}
+
+function buildUsosConstructivosList(predio) {
+  const usos = collectUsosConstructivos(predio);
+  if (!usos.length) return ['Información no disponible'];
+  return usos.map((value) => toSentenceCase(humanizeDashSeparatedList(value)));
+}
+
+function simplifyUsoLabelForSummary(value) {
+  const clean = cleanText(value);
+  if (!clean) return '';
+  const humanized = humanizeDashSeparatedList(clean);
+  const stripped = humanized.replace(/\s+(HASTA|DESDE|DE|CON|A)\s+\d+.*$/i, '').trim();
+  return toSentenceCase(stripped || humanized);
+}
+
+function buildUsosConstructivosResumen(predio) {
+  const usos = collectUsosConstructivos(predio);
+  if (!usos.length) return 'Información no disponible';
+
+  const seen = new Set();
+  const simplified = [];
+  usos.forEach((value) => {
+    const label = simplifyUsoLabelForSummary(value);
+    const key = label.toUpperCase();
+    if (!label || seen.has(key)) return;
+    seen.add(key);
+    simplified.push(label);
+  });
+
+  if (!simplified.length) return 'Información no disponible';
+  if (simplified.length === 1) return simplified[0];
+  const last = simplified[simplified.length - 1];
+  const head = simplified.slice(0, -1);
+  return `${head.join(', ')} y ${last.charAt(0).toLowerCase()}${last.slice(1)}`;
+}
+
+function areEquivalentTexts(a, b) {
+  const normalize = (value) => cleanText(value).toUpperCase().replace(/\s+/g, ' ');
+  const left = normalize(a);
+  return left !== '' && left === normalize(b);
+}
+
+const TITLE_CASE_LOWERCASE_CONNECTORS = new Set(['de', 'del', 'la', 'las', 'los', 'y', 'el', 'en']);
+
+// Titulo propio generico para nombres de predio: capitaliza cada palabra (conectores en
+// minuscula salvo al inicio) y aplica la convencion "N 2" -> "N.° 2". No restaura tildes
+// faltantes en nombres propios arbitrarios (requeriria un diccionario de nombres, fuera de
+// alcance); las tildes de topónimos conocidos (municipio/departamento) se resuelven aparte.
+function toProperNameTitleCase(text) {
+  const clean = cleanText(text);
+  if (!clean) return '';
+  let sawWord = false;
+  const titled = clean
+    .toLocaleLowerCase('es-CO')
+    .split(/(\s+)/)
+    .map((chunk) => {
+      if (!chunk.trim()) return chunk;
+      const isFirst = !sawWord;
+      sawWord = true;
+      if (!isFirst && TITLE_CASE_LOWERCASE_CONNECTORS.has(chunk)) return chunk;
+      return chunk.charAt(0).toUpperCase() + chunk.slice(1);
+    })
+    .join('');
+  return titled.replace(/\bN\.?\s+(\d+)/gi, 'N.° $1');
+}
+
+const KNOWN_FUENTE_DISPLAY = {
+  IGAC_PUBLICO_ABRIL_2026: 'IGAC - Base Catastral Pública, abril de 2026',
+};
+
+function formatFuenteDisplay(value) {
+  const clean = cleanText(value);
+  if (!clean) return 'No registrado';
+  const known = KNOWN_FUENTE_DISPLAY[clean.toUpperCase()];
+  if (known) return known;
+  return clean.split('_').map((part) => toSentenceCase(part)).join(' ');
+}
+
+const SPANISH_MONTH_NAMES = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+];
+
+function formatFechaProcesoDisplay(value) {
+  const clean = cleanText(value);
+  if (!clean) return 'No registrado';
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(clean);
+  if (!match) return clean;
+  const [, year, month, day] = match;
+  const monthName = SPANISH_MONTH_NAMES[Number(month) - 1];
+  if (!monthName) return clean;
+  return `${Number(day)} de ${monthName} de ${year}`;
+}
+
+const LEGACY_EMPTY_FIELD_LABELS = new Set([
+  '', 'NO DISPONIBLE', 'NO APLICA / NO REGISTRA', 'NO REGISTRA', 'NO REGISTRADO', 'NO APLICA',
+]);
+
+function resolveFieldOrNotRegistered(value) {
+  const clean = cleanText(value);
+  return LEGACY_EMPTY_FIELD_LABELS.has(clean.toUpperCase()) ? 'No registrado' : clean;
+}
+
+// Barrio/Manzana no aplican en predios rurales; en predios urbanos, si faltan, es un dato
+// que deberia existir pero no esta en la fuente.
+function resolveUrbanFieldOrNotApplicable(value, zona) {
+  const clean = cleanText(value);
+  if (clean && !LEGACY_EMPTY_FIELD_LABELS.has(clean.toUpperCase())) return clean;
+  return /rural/i.test(cleanText(zona)) ? 'No aplica' : 'No registrado';
+}
+
+function isUrbanZona(predio) {
+  return /urbano/i.test(cleanText(predio?.tipoZona || predio?.zona));
+}
+
+// Regla única de presentación de área:
+// - areaM2 < 10.000: solo m²
+// - areaM2 >= 10.000: ha como unidad principal y m² como complemento
+const AREA_HA_THRESHOLD_M2 = 10000;
+
+function buildAreaDisplayFields(predio, { haLabel = 'Área en hectáreas', m2Label = 'Área en metros cuadrados', combinedLabel = 'Área total' } = {}) {
+  if (Number(predio.areaM2) < AREA_HA_THRESHOLD_M2) {
+    return [{ label: combinedLabel, value: formatAreaM2Exact(predio.areaM2) }];
+  }
+
+  return [
+    { label: haLabel, value: `${formatNumber(predio.areaHa)} ha` },
+    { label: m2Label, value: formatAreaM2Exact(predio.areaM2) },
+  ];
+}
+
+// Version de una sola linea para tarjetas compactas (pagina 1, KML) donde solo cabe un valor.
+function buildAreaPrimaryDisplay(predio) {
+  if (Number(predio.areaM2) < AREA_HA_THRESHOLD_M2) {
+    return formatAreaM2Exact(predio.areaM2);
+  }
+  return `${formatNumber(predio.areaHa)} ha`;
+}
+
+// Regla 6.6: la auditoria de la GDB publica (ver audit_outputs/catastrox/urban_integral_audit)
+// demostro que "numero_construcciones" es un conteo de filas de U_CONSTRUCCION, no de
+// edificaciones fisicas verificadas (Puerto Rico: 50 filas = solo 2 construcciones reales,
+// 48 filas duplicadas geometricamente). No se puede afirmar "construcciones" sin verificar
+// caso por caso, por lo que se usa la etiqueta mas conservadora y honesta.
+const CONSTRUCTION_COUNT_LABEL = 'Registros constructivos asociados';
+const CONSTRUCTION_COUNT_LABEL_COMPACT = 'Registros constructivos';
+
+function formatConstructionCount(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 'No registrados';
+  return formatNumber(parsed, 0);
+}
+
+// Devuelve una linea por tipo de construccion ("Convencional: 1"), nunca unidas en una sola linea.
+function formatTiposConstruccionDisplayLines(value) {
+  const clean = cleanText(value);
+  if (!clean || clean.toUpperCase() === 'NO REGISTRA') return ['No registrado'];
+  const parts = clean.split(';').map((part) => part.trim()).filter(Boolean);
+  if (!parts.length) return ['No registrado'];
+  return parts.map((part) => {
+    const [label, count] = part.split(':').map((piece) => piece?.trim());
+    const displayLabel = toSentenceCase(label);
+    return count ? `${displayLabel}: ${count}` : displayLabel;
+  });
 }
 
 function geometryToGeoJson(geometry) {
@@ -108,31 +429,336 @@ function firstRing(geometry) {
   return [];
 }
 
+function normalizePolygonParts(geometry) {
+  const geo = geometryToGeoJson(geometry);
+  if (!geo) return [];
+  const rawPolygons =
+    geo.type === 'Polygon'
+      ? [geo.coordinates || []]
+      : geo.type === 'MultiPolygon'
+        ? geo.coordinates || []
+        : [];
+
+  return rawPolygons
+    .map((polygon, partIndex) => {
+      const outerRing = normalizeRing(polygon?.[0] || []);
+      if (outerRing.length < 4) return null;
+      const innerRings = (polygon || [])
+        .slice(1)
+        .map((ring) => normalizeRing(ring || []))
+        .filter((ring) => ring.length >= 4);
+      const displayGeometry = buildDisplayRingFromOriginalRing(outerRing);
+      const bounds = getRingBounds(outerRing);
+      return {
+        partIndex,
+        outerRing,
+        innerRings,
+        bounds,
+        vertexCount: outerRing.length - 1,
+        displayRing: displayGeometry.displayRing,
+        displayVertices: displayGeometry.displayVertices,
+        displayRingReport: displayGeometry.report,
+      };
+    })
+    .filter(Boolean);
+}
+
+function mergePartBounds(parts) {
+  const rings = parts.flatMap((part) => part.outerRing.slice(0, -1));
+  if (!rings.length) return null;
+  return getRingBounds(rings);
+}
+
+function buildMapRingFromParts(parts) {
+  const points = parts.flatMap((part) => part.outerRing.slice(0, -1));
+  return normalizeRing(points);
+}
+
+function partPredio(predio, part, totalParts = 1) {
+  return {
+    ...predio,
+    ring: part.outerRing,
+    displayRing: part.displayRing,
+    displayVertices: part.displayVertices,
+    displayRingReport: part.displayRingReport,
+    geometryParts: [part],
+    partIndex: part.partIndex,
+    // Solo se numera cuando el MultiPolygon tiene mas de una parte valida.
+    partLabel: totalParts > 1 ? `Polígono ${part.partIndex + 1} de ${totalParts}` : '',
+  };
+}
+
 function normalizePredioForDeliverables(source) {
   const predio = source?.predio || source || {};
-  const geometry = predio.geometry || predio.polygonGeoJson?.geometry || predio.polygonGeoJson || null;
-  const ring = normalizeRing(firstRing(geometry));
-  const displayGeometry = buildDisplayRingFromOriginalRing(ring);
+  const geometry =
+    predio.geometry ||
+    predio.polygonGeoJson?.geometry ||
+    predio.polygonGeoJson ||
+    predio.geojson?.geometry ||
+    predio.geojson ||
+    null;
+  const geometryParts = normalizePolygonParts(geometry);
+  const ring = geometryParts[0]?.outerRing || normalizeRing(firstRing(geometry));
+  const displayGeometry = geometryParts[0]
+    ? {
+        displayRing: geometryParts[0].displayRing,
+        displayVertices: geometryParts[0].displayVertices,
+        report: geometryParts[0].displayRingReport,
+      }
+    : buildDisplayRingFromOriginalRing(ring);
+  const mapRing = geometryParts.length ? buildMapRingFromParts(geometryParts) : ring;
+  const geometryBounds = geometryParts.length ? mergePartBounds(geometryParts) : getRingBounds(ring);
+  const destinoEconomico = resolveDestinoEconomico(predio);
+  const uso1 = resolveUso(predio, 'uso1Nombre', 'uso_1_nombre', 'USO_1');
+  const uso2 = resolveUso(predio, 'uso2Nombre', 'uso_2_nombre', 'USO_2');
+  const uso3 = resolveUso(predio, 'uso3Nombre', 'uso_3_nombre', 'USO_3');
 
   return {
     id: predio.id,
-    codigoPredial: cleanText(predio.codigoPredial || predio.codigo || predio.codigo_catastral || predio.id, 'predio'),
-    codigoAnterior: cleanText(predio.codigoAnterior || predio.codigo_anterior || 'No disponible'),
+    codigoPredial: cleanText(
+      predio.codigoPredial ||
+        predio.codigo ||
+        predio.codigo_predial ||
+        predio.codigo_catastral ||
+        predio.id,
+      'predio',
+    ),
+    codigoAnterior: cleanText(predio.codigoAnterior || predio.codigo_anterior || predio.codigoAnteriorReal || 'No disponible'),
     municipio: cleanText(predio.municipio || source?.municipio, 'Sin dato'),
     departamento: cleanText(predio.departamento || source?.departamento, 'Sin dato'),
-    areaHa: Number(predio.areaHa || 0),
-    areaM2: Number(predio.areaM2 || 0),
-    perimetroM: Number(predio.perimetroM || 0),
+    areaHa: Number(predio.areaHa ?? predio.area_terreno_ha ?? 0),
+    areaM2: Number(predio.areaM2 ?? predio.area_terreno_m2 ?? 0),
+    perimetroM: Number(predio.perimetroM ?? predio.perimetro_m ?? 0),
     estadoPredial: cleanText(predio.estadoPredial, 'Predio identificado en la base catastral consultada.'),
-    tipoZona: cleanText(predio.tipoZona, 'Rural'),
+    tipoZona: cleanText(predio.tipoZona || predio.zona, 'Rural'),
+    zona: cleanText(predio.zona || predio.tipoZona, 'Rural'),
+    veredaDisplay: predio.veredaDisplay || getVeredaDisplay(resolveVeredaNombre(predio, source)),
     nombrePredio: predioName(predio),
+    direccionReal: cleanText(predio.direccionReal || predio.direccion_real, 'No disponible'),
+    barrioNombre: cleanText(predio.barrioNombre || predio.barrio_nombre, ''),
+    manzanaCodigo: cleanText(predio.manzanaCodigo || predio.manzana_codigo, ''),
+    sectorCodigo: cleanText(predio.sectorCodigo || predio.sector_codigo, ''),
+    destinoEconomicoNombre: semanticText(destinoEconomico),
+    destinoEconomicoSemantic: destinoEconomico,
+    uso1Nombre: semanticText(uso1),
+    uso1Semantic: uso1,
+    uso2Nombre: semanticText(uso2, ''),
+    uso2Semantic: uso2,
+    uso3Nombre: semanticText(uso3, ''),
+    uso3Semantic: uso3,
+    numeroConstrucciones: Number(predio.numeroConstrucciones ?? predio.numero_construcciones ?? 0),
+    areaConstruidaM2: Number(predio.areaConstruidaM2 ?? predio.area_construida_m2 ?? 0),
+    tiposConstruccionResumen: resolveTipoConstruccionResumen(predio),
+    fuente: cleanText(predio.fuente, 'No disponible'),
+    fechaProceso: cleanText(predio.fechaProceso || predio.fecha_proceso, 'No disponible'),
+    deliverablePackageId: cleanText(predio.deliverablePackageId || source?.deliverablePackageId),
     queryPoint: predio.queryPoint || source?.queryPoint || null,
     geometry,
+    geometryParts,
+    geometryBounds,
+    mapRing,
     ring,
     displayRing: displayGeometry.displayRing,
     displayVertices: displayGeometry.displayVertices,
     displayRingReport: displayGeometry.report,
   };
+}
+
+function getGeometryMetricBbox(geometryParts = []) {
+  const points = geometryParts.flatMap((part) => [part.outerRing, ...(part.innerRings || [])]).flat();
+  const xs = points.map((pt) => pt[0]);
+  const ys = points.map((pt) => pt[1]);
+  return {
+    minX: Math.min(...xs),
+    maxX: Math.max(...xs),
+    minY: Math.min(...ys),
+    maxY: Math.max(...ys),
+  };
+}
+
+export function assertProjectedGeometryFor9377(geometryParts = []) {
+  if (!geometryParts.length) {
+    throw new Error('ProjectedGeometry no disponible para exportar archivos tecnicos en EPSG:9377.');
+  }
+
+  const bbox = getGeometryMetricBbox(geometryParts);
+  const looksLikeLonLat =
+    Math.abs(bbox.minX) <= 180 &&
+    Math.abs(bbox.maxX) <= 180 &&
+    Math.abs(bbox.minY) <= 90 &&
+    Math.abs(bbox.maxY) <= 90;
+
+  if (looksLikeLonLat) {
+    throw new Error('ProjectedGeometry invalida: el bbox sigue en coordenadas geograficas y no en EPSG:9377.');
+  }
+
+  return bbox;
+}
+
+function normalizePredioForProjectedGis(source, { requireProjectedGeometry = false } = {}) {
+  const base = normalizePredioForDeliverables(source);
+  const predio = source?.predio || source || {};
+  const projectedGeometry =
+    predio.projectedGeometry ||
+    predio.projectedGeoJson?.geometry ||
+    predio.projectedGeoJson ||
+    null;
+
+  if (!projectedGeometry) {
+    if (requireProjectedGeometry) {
+      throw new Error('ProjectedGeometry no disponible para exportar archivos tecnicos en EPSG:9377.');
+    }
+    return base;
+  }
+
+  const geometryParts = normalizePolygonParts(projectedGeometry);
+  const projectedBbox = assertProjectedGeometryFor9377(geometryParts);
+  const ring = geometryParts[0]?.outerRing || normalizeRing(firstRing(projectedGeometry));
+  const mapRing = geometryParts.length ? buildMapRingFromParts(geometryParts) : ring;
+  const geometryBounds = geometryParts.length ? mergePartBounds(geometryParts) : getRingBounds(ring);
+
+  return {
+    ...base,
+    geometry: projectedGeometry,
+    projectedGeometry,
+    geometryParts,
+    geometryBounds,
+    projectedBbox,
+    mapRing,
+    ring,
+  };
+}
+
+function getCoordinateRingSets(projectedGeometry, geographicGeometry) {
+  const projectedParts = normalizePolygonParts(projectedGeometry);
+  const geographicParts = normalizePolygonParts(geographicGeometry);
+
+  if (!projectedParts.length) {
+    throw new Error('ProjectedGeometry no disponible para construir la tabla de coordenadas.');
+  }
+
+  if (!geographicParts.length) {
+    throw new Error('La geometría geográfica WGS84 no está disponible para completar latitud y longitud.');
+  }
+
+  if (projectedParts.length !== geographicParts.length) {
+    throw new Error('La geometría proyectada y la geográfica no coinciden en cantidad de polígonos.');
+  }
+
+  return projectedParts.map((projectedPart, partIndex) => {
+    const geographicPart = geographicParts[partIndex];
+    const projectedRings = [projectedPart.outerRing, ...(projectedPart.innerRings || [])].map(stripClosingPoint);
+    const geographicRings = [geographicPart.outerRing, ...(geographicPart.innerRings || [])].map(stripClosingPoint);
+
+    if (projectedRings.length !== geographicRings.length) {
+      throw new Error(`El polígono ${partIndex + 1} no coincide en cantidad de anillos entre EPSG:9377 y WGS84.`);
+    }
+
+    return projectedRings.map((projectedRing, ringIndex) => {
+      const geographicRing = geographicRings[ringIndex];
+      if (projectedRing.length !== geographicRing.length) {
+        throw new Error(`El anillo ${ringIndex + 1} del polígono ${partIndex + 1} no coincide en cantidad de vértices.`);
+      }
+
+      return {
+        projectedRing,
+        geographicRing,
+        type: ringIndex === 0 ? 'EXTERIOR' : 'INTERIOR',
+        ringLabel: ringIndex === 0 ? 'EXT1' : `INT${ringIndex}`,
+      };
+    });
+  });
+}
+
+function buildCoordinateCsvRows(source) {
+  const predio = normalizePredioForProjectedGis(source, { requireProjectedGeometry: true });
+  const geographicGeometry = source?.predio?.geometry || source?.geometry || null;
+  const coordinateRingSets = getCoordinateRingSets(predio.projectedGeometry, geographicGeometry);
+  const rows = [];
+
+  coordinateRingSets.forEach((rings, partIndex) => {
+    const polygonLabel = `POL${partIndex + 1}`;
+    let polygonVertexCounter = 1;
+
+    rings.forEach(({ projectedRing, geographicRing, type, ringLabel }) => {
+      const pointLabels = projectedRing.map(() => `${polygonLabel}-P${polygonVertexCounter++}`);
+      projectedRing.forEach((point, vertexIndex) => {
+        const nextIndex = (vertexIndex + 1) % projectedRing.length;
+        const geographicPoint = geographicRing[vertexIndex];
+        rows.push([
+          pointLabels[vertexIndex],
+          polygonLabel,
+          ringLabel,
+          type,
+          String(vertexIndex + 1),
+          formatPlainDecimal(point[1], 3),
+          formatPlainDecimal(point[0], 3),
+          formatPlainDecimal(geographicPoint[1], 7),
+          formatPlainDecimal(geographicPoint[0], 7),
+          pointLabels[nextIndex],
+          formatPlainDecimal(Math.hypot(projectedRing[nextIndex][0] - point[0], projectedRing[nextIndex][1] - point[1]), 2),
+          '9377',
+        ]);
+      });
+    });
+  });
+
+  return rows;
+}
+
+function buildCoordinatesCsvText(source) {
+  const header = [
+    'punto',
+    'poligono',
+    'anillo',
+    'tipo_anillo',
+    'secuencia',
+    'norte_m',
+    'este_m',
+    'latitud',
+    'longitud',
+    'siguiente_punto',
+    'distancia_m',
+    'epsg',
+  ];
+  const rows = buildCoordinateCsvRows(source);
+  return `\uFEFF${[header, ...rows].map((row) => row.join(';')).join('\r\n')}\r\n`;
+}
+
+function buildCoordinatesReadmeText() {
+  return [
+    'CATASTROX — TABLA DE COORDENADAS',
+    '',
+    'Sistema de referencia:',
+    'MAGNA-SIRGAS 2018 / Origen-Nacional',
+    '',
+    'Código EPSG:',
+    '9377',
+    '',
+    'Tipo de coordenadas:',
+    'Coordenadas planas proyectadas',
+    '',
+    'Unidades:',
+    'Metros',
+    '',
+    'Eje Este:',
+    'X',
+    '',
+    'Eje Norte:',
+    'Y',
+    '',
+    'Descripción:',
+    'El archivo CSV contiene todos los vértices disponibles de la geometría catastral procesada por CatastroX. Los polígonos, componentes y anillos se identifican de manera independiente.',
+    '',
+    'Advertencia:',
+    'La cantidad de decimales representa la precisión de almacenamiento y presentación del archivo; no constituye una garantía de exactitud topográfica, materialización física de linderos ni levantamiento en campo.',
+    '',
+    'Alcance:',
+    'La información sirve como apoyo técnico, informativo y comercial. No reemplaza certificados oficiales, levantamientos topográficos, deslindes, amojonamientos ni decisiones de la autoridad competente.',
+    '',
+    'MAGNA-SIRGAS 2018 / Origen-Nacional — EPSG:9377.',
+    '',
+  ].join('\r\n');
 }
 
 function wrapText(text, maxChars) {
@@ -444,9 +1070,8 @@ function setFont(context, size, weight = 400) {
   context.font = `${weight} ${size}px ${activePdfFontStack}`;
 }
 
-function drawWrappedText(context, text, x, y, maxWidth, lineHeight, color = '#0f172a', weight = 400, size = 10) {
+function measureWrappedText(context, text, maxWidth, lineHeight, weight = 400, size = 10) {
   setFont(context, size, weight);
-  context.fillStyle = color;
   const words = cleanText(text).split(/\s+/).filter(Boolean);
   const lines = [];
   let current = '';
@@ -462,11 +1087,25 @@ function drawWrappedText(context, text, x, y, maxWidth, lineHeight, color = '#0f
   }
   if (current) lines.push(current);
 
+  return {
+    lines,
+    lineCount: lines.length,
+    height: lines.length * lineHeight,
+  };
+}
+
+function drawWrappedText(context, text, x, y, maxWidth, lineHeight, color = '#0f172a', weight = 400, size = 10) {
+  const measurement = measureWrappedText(context, text, maxWidth, lineHeight, weight, size);
+  context.fillStyle = color;
+  const { lines } = measurement;
   lines.forEach((line, index) => {
     context.fillText(line, x, y + index * lineHeight);
   });
 
-  return { lines, height: lines.length * lineHeight };
+  return {
+    ...measurement,
+    renderedBottom: y + measurement.height,
+  };
 }
 
 function chunkArray(values, chunkSize) {
@@ -625,23 +1264,38 @@ function drawHeader(context, predio, pageLabel, title, layout) {
   context.fillText('by CRH', zone.x + 16, zone.y + 46);
   context.fillText('Vertical predial de AgroGenomaX', zone.x + 16, zone.y + 60);
 
-  setFont(context, 18, 700);
+  const pageBox = {
+    x: zone.x + zone.width - 76,
+    y: zone.y + 8,
+    width: 62,
+    height: 34,
+  };
+  const titleX = zone.x + 360;
+  const titleMaxWidth = pageBox.x - titleX - 12;
+  let titleFontSize = 18;
+  setFont(context, titleFontSize, 700);
+  while (context.measureText(title).width > titleMaxWidth && titleFontSize > 12) {
+    titleFontSize -= 0.5;
+    setFont(context, titleFontSize, 700);
+  }
   context.fillStyle = '#0a2e73';
-  context.fillText(title, zone.x + 360, zone.y + 24);
+  context.fillText(title, titleX, zone.y + 24);
   setFont(context, 8, 700);
   context.fillStyle = '#334155';
   context.fillText('CÓDIGO PREDIAL', zone.x + 500, zone.y + 42);
-  setFont(context, 11, 700);
+  const codigoMaxWidth = pageBox.x - (zone.x + 500) - 12;
+  const codigoSize = fitSingleLineFontSize(context, predio.codigoPredial, codigoMaxWidth, { maxSize: 11, minSize: 7 });
+  setFont(context, codigoSize, 700);
   context.fillStyle = '#0f172a';
   context.fillText(predio.codigoPredial, zone.x + 500, zone.y + 58);
 
   context.fillStyle = '#0a2e73';
-  context.fillRect(zone.x + zone.width - 56, zone.y + 8, 42, 34);
+  context.fillRect(pageBox.x, pageBox.y, pageBox.width, pageBox.height);
   context.fillStyle = '#ffffff';
   setFont(context, 7, 700);
-  context.fillText('PÁGINA', zone.x + zone.width - 50, zone.y + 21);
-  setFont(context, 10, 700);
-  context.fillText(pageLabel, zone.x + zone.width - 46, zone.y + 34);
+  context.fillText('PÁGINA', pageBox.x + 7, zone.y + 21);
+  setFont(context, 8.6, 700);
+  context.fillText(pageLabel, pageBox.x + 7, zone.y + 34);
 }
 
 function drawPanel(context, rect, title) {
@@ -654,6 +1308,83 @@ function drawPanel(context, rect, title) {
   context.fillStyle = '#ffffff';
   setFont(context, 10, 700);
   context.fillText(title, rect.x + 12, rect.y + 16);
+}
+
+function buildPanelBodyRect(rect, options = {}) {
+  const {
+    paddingX = PDF_LAYOUT_GRID.panelPaddingX,
+    topOffset = 40,
+    bottomPadding = PDF_LAYOUT_GRID.minBottomPadding,
+  } = options;
+  return {
+    x: rect.x + paddingX,
+    y: rect.y + topOffset,
+    width: rect.width - paddingX * 2,
+    topOffset,
+    bottomPadding,
+    bottom: rect.y + rect.height - bottomPadding,
+  };
+}
+
+function measureBulletList(context, items, width, options = {}) {
+  const {
+    bulletTextOffset = 14,
+    lineHeight = 14,
+    itemGap = 8,
+    minItemHeight = 22,
+    weight = 400,
+    size = 10.5,
+  } = options;
+
+  const entries = items.map((item) => {
+    const textMetrics = measureWrappedText(context, item, width - bulletTextOffset, lineHeight, weight, size);
+    const consumedHeight = Math.max(minItemHeight, textMetrics.height + itemGap);
+    return {
+      item,
+      textMetrics,
+      consumedHeight,
+    };
+  });
+
+  return {
+    entries,
+    totalHeight: entries.reduce((sum, entry) => sum + entry.consumedHeight, 0),
+  };
+}
+
+function drawBullets(context, items, x, y, width, color, options = {}) {
+  const metrics = measureBulletList(context, items, width, options);
+  let cursorY = y;
+  metrics.entries.forEach((entry) => {
+    context.fillStyle = color;
+    context.fillRect(x, cursorY - 7, 6, 6);
+    drawWrappedText(
+      context,
+      entry.item,
+      x + (options.bulletTextOffset ?? 14),
+      cursorY,
+      width - (options.bulletTextOffset ?? 14),
+      options.lineHeight ?? 14,
+      '#243446',
+      options.weight ?? 400,
+      options.size ?? 10.5,
+    );
+    cursorY += entry.consumedHeight;
+  });
+  return {
+    ...metrics,
+    renderedBottom: cursorY,
+  };
+}
+
+function computeBulletPanelHeight(context, items, rectWidth, options = {}) {
+  const body = buildPanelBodyRect({ x: 0, y: 0, width: rectWidth, height: 0 }, options.bodyOptions);
+  const metrics = measureBulletList(context, items, body.width, options.listOptions);
+  return {
+    body,
+    metrics,
+    requiredHeight: body.topOffset + metrics.totalHeight + body.bottomPadding,
+  };
 }
 
 function tileUrl(template, z, x, y) {
@@ -765,6 +1496,87 @@ function drawPolygonOverlay(context, points, { stroke = '#ffea00', fill = 'rgba(
   context.lineWidth = lineWidth;
   context.strokeStyle = stroke;
   context.stroke();
+}
+
+function drawPolygonPartOverlay(context, outerPoints, innerPointRings = [], options = {}) {
+  if (!outerPoints.length) return;
+  const { stroke = '#ffea00', fill = 'rgba(0, 116, 136, 0.24)', lineWidth = 2 } = options;
+  context.beginPath();
+  context.moveTo(outerPoints[0][0], outerPoints[0][1]);
+  for (const [x, y] of outerPoints.slice(1)) {
+    context.lineTo(x, y);
+  }
+  context.closePath();
+  innerPointRings.forEach((ring) => {
+    if (!ring.length) return;
+    context.moveTo(ring[0][0], ring[0][1]);
+    for (const [x, y] of ring.slice(1)) {
+      context.lineTo(x, y);
+    }
+    context.closePath();
+  });
+  if (fill) {
+    context.fillStyle = fill;
+    context.fill('evenodd');
+  }
+  context.lineWidth = lineWidth;
+  context.strokeStyle = stroke;
+  context.stroke();
+}
+
+// Corrección controlada 1: plano técnico con anillos interiores. Función pura (sin
+// canvas) que prepara los trazados del exterior y de cada anillo interior como
+// contornos independientes, en el mismo orden recibido, sin concatenarlos entre si.
+// outerPoints se conserva como primer elemento sin modificar; los anillos vacios o sin
+// puntos se descartan (entradas invalidas no producen un trazado).
+export function buildTechnicalPolygonSubpaths(outerPoints = [], innerPointRings = []) {
+  if (!outerPoints.length) return [];
+  const inners = innerPointRings.filter((ring) => ring && ring.length > 0);
+  return [outerPoints, ...inners];
+}
+
+// A diferencia de drawPolygonPartOverlay (portada satelital, con relleno evenodd), esta
+// función es exclusiva del plano técnico: nunca rellena, solo traza cada subpath (exterior
+// y anillos interiores) como contorno cerrado e independiente (moveTo por anillo evita
+// cualquier linea artificial entre exterior, huecos o partes distintas).
+function drawTechnicalPolygonPartOverlay(context, outerPoints, innerPointRings = [], options = {}) {
+  const { stroke = '#1170cf', lineWidth = 2 } = options;
+  const subpaths = buildTechnicalPolygonSubpaths(outerPoints, innerPointRings);
+
+  context.lineWidth = lineWidth;
+  context.strokeStyle = stroke;
+
+  subpaths.forEach((ring) => {
+    context.beginPath();
+    context.moveTo(ring[0][0], ring[0][1]);
+    for (const [x, y] of ring.slice(1)) {
+      context.lineTo(x, y);
+    }
+    context.closePath();
+    context.stroke();
+  });
+}
+
+function projectRingForMap(ring, mapState, mapRect) {
+  return projectRingToViewport(ring, mapState, mapRect.width, mapRect.height).map(([x, y]) => [
+    mapRect.x + x,
+    mapRect.y + y,
+  ]);
+}
+
+function projectDisplayParts(predio, mapState, mapRect) {
+  const parts = predio.geometryParts?.length
+    ? predio.geometryParts
+    : [{
+        outerRing: predio.ring,
+        innerRings: [],
+        displayRing: predio.displayRing?.length ? predio.displayRing : predio.ring,
+      }];
+  return parts.map((part) => ({
+    part,
+    outer: projectRingForMap(part.displayRing?.length ? part.displayRing : part.outerRing, mapState, mapRect),
+    inners: (part.innerRings || []).map((ring) => projectRingForMap(ring, mapState, mapRect)),
+  }));
 }
 
 function buildVisiblePointPlacements(projectedPoints, mapZone, polygonPoints = [], blockedRects = []) {
@@ -879,6 +1691,36 @@ function drawVisiblePoints(context, projectedPoints, placements = null, options 
     const textWidth = context.measureText(label).width;
     context.fillText(label, x - textWidth / 2, y + 3);
   });
+}
+
+// Regla Fase 8: escala grafica dinamica. metros/pixel en el centro del mapa usando la
+// formula estandar de Web Mercator (156543.03392 m por unidad de "mundo" en zoom 0,
+// consistente con TILE_SIZE=256 y mapState.scale=2^zoom de ProjectionEngine.js).
+const WEB_MERCATOR_METERS_PER_WORLD_UNIT_AT_ZOOM0 = 156543.03392;
+
+function computeMetersPerPixel(mapState, extraScale = 1) {
+  const latRad = ((mapState?.centerLat ?? 0) * Math.PI) / 180;
+  const metersPerPixelBase = (WEB_MERCATOR_METERS_PER_WORLD_UNIT_AT_ZOOM0 * Math.cos(latRad)) / (mapState?.scale || 1);
+  return metersPerPixelBase / (extraScale || 1);
+}
+
+// Redondea a la serie 1-2-5 x 10^n mas cercana (convencion estandar de escalas graficas).
+function roundToNiceScaleMeters(value) {
+  if (!Number.isFinite(value) || value <= 0) return 10;
+  const exponent = Math.floor(Math.log10(value));
+  const base = value / 10 ** exponent;
+  const niceBase = base < 1.5 ? 1 : base < 3.5 ? 2 : base < 7.5 ? 5 : 10;
+  return niceBase * 10 ** exponent;
+}
+
+// Calcula la distancia total (m) que debe representar la barra de escala para que su ancho
+// visual ocupe ~25-35% del ancho util del mapa, dado el mapState (zoom/latitud) vigente y,
+// opcionalmente, un factor de reescalado adicional aplicado tras la proyeccion base
+// (createFitTransform en la pagina tecnica).
+function computeDynamicScaleMeters(mapState, mapWidthPx, extraScale = 1) {
+  const metersPerPixel = computeMetersPerPixel(mapState, extraScale);
+  const desiredMeters = mapWidthPx * 0.3 * metersPerPixel;
+  return roundToNiceScaleMeters(desiredMeters);
 }
 
 function drawScaleBar(context, x, y, totalMeters = 800, options = {}) {
@@ -1052,8 +1894,134 @@ function drawKeyValueRows(context, startX, startY, width, rows, options = {}) {
   });
 }
 
+function fitSingleLineFontSize(context, text, maxWidth, { maxSize = 11.5, minSize = 8, weight = 700, step = 0.5 } = {}) {
+  let size = maxSize;
+  while (size > minSize) {
+    setFont(context, size, weight);
+    if (context.measureText(text).width <= maxWidth) return size;
+    size -= step;
+  }
+  return minSize;
+}
+
+function splitTextToFitWidth(context, text, maxWidth, size, weight = 700) {
+  setFont(context, size, weight);
+  const clean = cleanText(text);
+  if (context.measureText(clean).width <= maxWidth || clean.length < 2) return [clean];
+
+  let splitAt = Math.ceil(clean.length / 2);
+  while (splitAt > 1 && context.measureText(clean.slice(0, splitAt)).width > maxWidth) {
+    splitAt -= 1;
+  }
+  const first = clean.slice(0, splitAt);
+  const second = clean.slice(splitAt);
+  return second ? [first, second] : [first];
+}
+
+// Renderiza campos de valor unico (codigos catastrales largos) con ancho maximo fijo:
+// reduce el tamano de fuente localmente antes de partir la linea, reserva una altura fija
+// por campo (deterministica) y nunca toca el tamano de fuente del resto de la pagina.
+function drawCodeFieldRows(context, startX, startY, width, rows, options = {}) {
+  const {
+    labelSize = 9.1,
+    maxValueSize = 11.5,
+    minValueSize = 8,
+    labelGap = 12,
+    fieldHeight = 38,
+    lineHeight = 12.5,
+    rightMargin = 16,
+  } = options;
+  let cursorY = startY;
+  const fitWidth = Math.max(1, width - rightMargin);
+
+  rows.forEach(({ label, value }) => {
+    context.fillStyle = '#52637d';
+    setFont(context, labelSize, 700);
+    context.fillText(label, startX, cursorY);
+
+    const text = cleanText(value, 'No disponible');
+    const size = fitSingleLineFontSize(context, text, fitWidth, { maxSize: maxValueSize, minSize: minValueSize });
+    const lines = splitTextToFitWidth(context, text, fitWidth, size);
+
+    context.fillStyle = '#0f172a';
+    setFont(context, size, 700);
+    lines.forEach((line, index) => {
+      context.fillText(line, startX, cursorY + labelGap + index * lineHeight);
+    });
+
+    cursorY += fieldHeight;
+  });
+
+  return cursorY;
+}
+
+// Retícula tipográfica compartida por la ficha técnica consolidada del PDF Plus.
+const PDF_LAYOUT_GRID = {
+  pageMargin: 40,
+  panelPaddingX: 26,
+  panelPaddingY: 24,
+  labelValueGap: 15,
+  fieldGap: 26,
+  sectionGap: 22,
+  minBottomPadding: 18,
+};
+
+function drawFieldLabel(context, x, y, label, labelSize = 9) {
+  context.fillStyle = '#52637d';
+  setFont(context, labelSize, 700);
+  context.fillText(label, x, y);
+}
+
+// Dibuja una grilla de campos etiqueta/valor (1 o 2 columnas, con soporte para filas de
+// ancho completo) y devuelve la coordenada Y siguiente disponible tras el ultimo campo.
+function drawFieldGrid(context, rect, fields, options = {}) {
+  const {
+    labelSize = 9,
+    valueSize = 11,
+    labelValueGap = PDF_LAYOUT_GRID.labelValueGap,
+    fieldGap = PDF_LAYOUT_GRID.fieldGap,
+    valueLineHeight = 13,
+    columns = 2,
+    columnGap = 24,
+  } = options;
+
+  const colWidth = columns === 2 ? (rect.width - columnGap) / 2 : rect.width;
+  let cursorY = rect.y;
+  let col = 0;
+  let pendingRowHeight = 0;
+
+  const flushRow = () => {
+    cursorY += pendingRowHeight + fieldGap;
+    col = 0;
+    pendingRowHeight = 0;
+  };
+
+  fields.forEach((field) => {
+    if (field.fullWidth && col !== 0) flushRow();
+    const x = rect.x + (col === 1 ? colWidth + columnGap : 0);
+    const fieldWidth = field.fullWidth || columns === 1 ? rect.width : colWidth;
+
+    drawFieldLabel(context, x, cursorY, field.label, labelSize);
+    const valueResult = drawWrappedText(context, field.value, x, cursorY + labelValueGap, fieldWidth, valueLineHeight, '#0f172a', 700, valueSize);
+    const rowHeight = labelValueGap + Math.max(valueLineHeight, valueResult.height);
+    pendingRowHeight = Math.max(pendingRowHeight, rowHeight);
+
+    if (field.fullWidth || columns === 1 || col === 1) {
+      flushRow();
+    } else {
+      col = 1;
+    }
+  });
+
+  if (col !== 0) flushRow();
+  return cursorY;
+}
+
 function buildAutomaticDiagnosis(predio) {
-  const areaLabel = Number.isFinite(predio.areaHa) && predio.areaHa > 0 ? `${formatNumber(predio.areaHa)} ha` : 'Sin dato';
+  const areaLabel =
+    Number.isFinite(predio.areaM2) && predio.areaM2 > 0
+      ? buildAreaPrimaryDisplay(predio)
+      : 'Sin dato';
   return [
     `La consulta identifica un predio individualizado con código predial ${predio.codigoPredial}.`,
     `El área estimada en la información catastral consultada es ${areaLabel} y el perímetro reportado es ${formatNumber(predio.perimetroM)} m.`,
@@ -1078,18 +2046,150 @@ function buildAutomaticRecommendations(predio) {
   return recommendations;
 }
 
-function drawBullets(context, items, x, y, width, color) {
-  let cursorY = y;
-  items.forEach((item) => {
-    context.fillStyle = color;
-    context.fillRect(x, cursorY - 7, 6, 6);
-    const result = drawWrappedText(context, item, x + 14, cursorY, width - 14, 14, '#243446', 400, 10.5);
-    cursorY += Math.max(22, result.height + 8);
+function todayDisplayDate() {
+  const now = new Date();
+  return new Intl.DateTimeFormat('es-CO', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(now).replace(/\//g, '-');
+}
+
+function drawLegalFooter(context, rect) {
+  drawWrappedText(
+    context,
+    LEGAL_FOOTER_TEXT,
+    rect.x + 16,
+    rect.y,
+    rect.width - 32,
+    10,
+    '#334155',
+    400,
+    8,
+  );
+}
+
+function drawCommercialMetric(context, x, y, width, label, value, accent = '#00aeea', options = {}) {
+  const {
+    height = 58,
+    labelSize = 8.7,
+    labelLineHeight = 9.5,
+    valueSize = 12,
+    valueLineHeight = 13,
+  } = options;
+  context.fillStyle = '#ffffff';
+  context.fillRect(x, y, width, height);
+  context.strokeStyle = '#d6dfef';
+  context.strokeRect(x, y, width, height);
+  context.fillStyle = accent;
+  context.fillRect(x, y, 5, height);
+  const labelResult = drawWrappedText(
+    context,
+    label.toUpperCase(),
+    x + 14,
+    y + 18,
+    width - 24,
+    labelLineHeight,
+    '#52637d',
+    700,
+    labelSize,
+  );
+  const valueY = y + (labelResult.lines.length > 1 ? 43 : 40);
+  drawWrappedText(context, value, x + 14, valueY, width - 24, valueLineHeight, '#0f172a', 700, valueSize);
+}
+
+function buildPlusSummaryPageCanvas(predio, layoutData, pageLabel = '1 de 6') {
+  const { canvas, context } = createPageCanvas();
+  const mapRect = { x: 420, y: 136, width: 332, height: 296 };
+  const mapState = computeMapState(predio.mapRing?.length ? predio.mapRing : predio.ring, mapRect.width, mapRect.height, 18);
+  const constructionLabel = `${formatConstructionCount(predio.numeroConstrucciones)} / ${formatNumberOrUnavailable(predio.areaConstruidaM2, { suffix: 'm²' })}`;
+
+  drawHeader(context, predio, pageLabel, 'DIAGNÓSTICO PREDIAL CATASTROX', SATELLITE_LAYOUT);
+
+  // Regla 6.1: en zona urbana la direccion es el dato principal; nunca se muestra
+  // "nombre_predio" (que en la fuente publica es solo una copia de un texto de direccion).
+  const isUrban = isUrbanZona(predio);
+  let summaryHeadline;
+  if (isUrban) {
+    const direccionDisplay = predio.direccionReal && predio.direccionReal !== 'No disponible'
+      ? predio.direccionReal
+      : 'Dirección no registrada';
+    summaryHeadline = `Dirección del predio: ${direccionDisplay}. Información identificada por CatastroX a partir de fuentes geográficas y catastrales públicas disponibles.`;
+  } else {
+    const displayNombrePredio = toProperNameTitleCase(predio.nombrePredio);
+    const sameNameAndAddress = areEquivalentTexts(predio.nombrePredio, predio.direccionReal);
+    summaryHeadline = sameNameAndAddress
+      ? `Predio ${displayNombrePredio}. Información identificada por CatastroX a partir de fuentes geográficas y catastrales públicas disponibles.`
+      : `Predio ${displayNombrePredio}. Dirección: ${predio.direccionReal}. Información identificada por CatastroX a partir de fuentes geográficas y catastrales públicas disponibles.`;
+  }
+
+  context.fillStyle = '#07152d';
+  context.fillRect(24, 128, 360, 86);
+  context.fillStyle = '#00aeea';
+  context.fillRect(24, 128, 6, 86);
+  drawWrappedText(
+    context,
+    summaryHeadline,
+    44,
+    150,
+    316,
+    13,
+    '#ffffff',
+    700,
+    11.5,
+  );
+
+  drawCommercialMetric(context, 24, 238, 172, 'Municipio', withKnownToponymAccents(predio.municipio));
+  drawCommercialMetric(context, 212, 238, 172, 'Departamento', withKnownToponymAccents(predio.departamento));
+  drawCommercialMetric(context, 24, 312, 172, 'Zona', toSentenceCase(predio.tipoZona), '#00aeea');
+  drawCommercialMetric(context, 212, 312, 172, 'Área total', buildAreaPrimaryDisplay(predio), '#8bcf2b');
+  drawCommercialMetric(context, 24, 386, 172, CARTOGRAPHIC_TOTAL_PERIMETER_LABEL, `${formatNumber(predio.perimetroM)} m`, '#8bcf2b', { labelSize: 7.6 });
+  drawCommercialMetric(context, 212, 386, 172, CONSTRUCTION_COUNT_LABEL_COMPACT, constructionLabel, '#8bcf2b');
+  drawCommercialMetric(context, 24, 460, 172, 'Destinación catastral', toSentenceCase(predio.destinoEconomicoNombre) || 'Información no disponible', '#00aeea');
+  drawCommercialMetric(context, 212, 460, 172, 'Usos constructivos', buildUsosConstructivosResumen(predio), '#00aeea', {
+    height: 74,
+    valueSize: 10.2,
+    valueLineHeight: 11,
+  });
+
+  context.fillStyle = '#f8fbff';
+  context.fillRect(mapRect.x - 10, mapRect.y - 10, mapRect.width + 20, mapRect.height + 20);
+  context.strokeStyle = '#c9d6ea';
+  context.strokeRect(mapRect.x - 10, mapRect.y - 10, mapRect.width + 20, mapRect.height + 20);
+
+  return drawHybridMap(context, mapRect, mapState).then(() => {
+    const projectedParts = projectDisplayParts(predio, mapState, mapRect);
+    projectedParts.forEach(({ outer, inners }) => {
+      drawPolygonPartOverlay(context, outer, inners, { stroke: '#ffea00', fill: 'rgba(0, 174, 234, 0.18)', lineWidth: 2.4 });
+    });
+    drawCompassRose(context, mapRect.x + 46, mapRect.y + 48, false);
+    const scalePolygon = projectedParts.flatMap((entry) => entry.outer);
+    const summaryScaleAnchor = chooseScaleBarAnchor(mapRect, scalePolygon, [], [], true);
+    const summaryScaleMeters = computeDynamicScaleMeters(mapState, mapRect.width);
+    drawScaleBar(context, summaryScaleAnchor.x, summaryScaleAnchor.y, summaryScaleMeters, { compact: true });
+
+    drawPanel(context, { x: 420, y: 456, width: 332, height: 68 }, 'PAQUETE PLUS');
+    drawWrappedText(
+      context,
+      'Incluye PDF, KML y KMZ para visualizar el polígono del predio y abrirlo en Google Earth.',
+      436,
+      494,
+      300,
+      13,
+      '#243446',
+      400,
+      10.5,
+    );
+
+    drawLegalFooter(context, UNIFIED_FOOTER_RECT);
+    return canvas;
   });
 }
 
 function buildDiagnosticPageCanvas(predio) {
   const { canvas, context } = createPageCanvas();
+  const veredaDisplay = predio.veredaDisplay || getVeredaDisplay();
+  const isUrban = isUrbanZona(predio);
   const layout = {
     page: { x: 0, y: 0, width: 612, height: 792 },
     header: { x: 24, y: 24, width: 564, height: 84 },
@@ -1111,10 +2211,12 @@ function buildDiagnosticPageCanvas(predio) {
     ['Código anterior', predio.codigoAnterior],
     ['Municipio', predio.municipio],
     ['Departamento', predio.departamento],
+    // Regla 6.2: vereda no aplica ni se muestra en predios urbanos.
+    ...(isUrban ? [] : [[veredaDisplay.label, veredaDisplay.value]]),
+    ...(!isUrban && veredaDisplay.isCadastralCode ? [[veredaDisplay.secondaryLabel, veredaDisplay.secondaryValue]] : []),
     ['Tipo de zona', predio.tipoZona],
-    ['Área total', `${formatNumber(predio.areaHa)} ha`],
-    ['Área total m²', `${formatNumber(predio.areaM2)} m²`],
-    ['Perímetro', `${formatNumber(predio.perimetroM)} m`],
+    ...buildAreaDisplayFields(predio, { haLabel: 'Área total', m2Label: 'Área total m²' }).map(({ label, value }) => [label, value]),
+    [CARTOGRAPHIC_TOTAL_PERIMETER_LABEL, `${formatNumber(predio.perimetroM)} m`],
     ['Estado predial', predio.estadoPredial],
   ];
 
@@ -1143,6 +2245,10 @@ function buildDiagnosticPageCanvas(predio) {
   context.fillText('RECOMENDACIONES AUTOMÁTICAS', 44, 612);
   drawBullets(context, buildAutomaticRecommendations(predio), 44, 634, 520, '#8bcf2b');
 
+  if (!isUrban && veredaDisplay.isCadastralCode) {
+    drawWrappedText(context, veredaDisplay.note, 44, 704, 520, 11, '#52637d', 400, 9);
+  }
+
   context.fillStyle = '#52637d';
   setFont(context, 10, 700);
   context.fillText('AVISO LEGAL', 44, 734);
@@ -1158,6 +2264,346 @@ function buildDiagnosticPageCanvas(predio) {
     9,
   );
 
+  return canvas;
+}
+
+function buildContextoPredioText(predio) {
+  const zona = toSentenceCase(predio.tipoZona) || 'Rural';
+  const municipio = toDisplayToponymTitleCase(predio.municipio);
+  const departamento = toDisplayToponymTitleCase(predio.departamento);
+  const destinacion = toSentenceCase(predio.destinoEconomicoNombre);
+  const usosResumen = buildUsosConstructivosResumen(predio);
+
+  const destinacionText = isUsableUsoValue(destinacion)
+    ? `una destinación catastral de tipo ${destinacion}`
+    : 'una destinación catastral no registrada';
+  const usosText = usosResumen && usosResumen !== 'Información no disponible'
+    ? ` y construcciones asociadas con usos de ${usosResumen.toLowerCase()}`
+    : '';
+
+  return `Predio ${zona.toLowerCase()} denominado ${toProperNameTitleCase(predio.nombrePredio)}, ubicado en el municipio de ${municipio}, ${departamento}. La fuente catastral registra ${destinacionText}${usosText}.`;
+}
+
+function estimateFichaTecnicaPageCount(predio) {
+  const usosCount = buildUsosConstructivosList(predio).length;
+  const tiposLineCount = formatTiposConstruccionDisplayLines(predio.tiposConstruccionResumen).length;
+  return usosCount > 3 || tiposLineCount > 3 ? 2 : 1;
+}
+
+function drawIdentificacionPanel(context, rect, predio, options = {}) {
+  const { labelValueGap = 13, fieldGap = 24, fieldHeight = 34, columns = 2 } = options;
+  drawPanel(context, rect, 'IDENTIFICACIÓN Y LOCALIZACIÓN');
+
+  const isUrban = isUrbanZona(predio);
+  const veredaDisplay = predio.veredaDisplay || getVeredaDisplay();
+  // Regla 6.2: vereda no se muestra en absoluto para predios urbanos (ni siquiera como
+  // "Información no disponible"); en rurales se conserva el comportamiento aprobado.
+  const veredaFields = isUrban
+    ? []
+    : veredaDisplay.isCadastralCode
+      ? [
+          { label: veredaDisplay.label, value: 'No registrada' },
+          { label: 'Código catastral de vereda', value: veredaDisplay.secondaryValue },
+        ]
+      : [{ label: veredaDisplay.label, value: veredaDisplay.value }];
+
+  // Regla 6.1: en zona urbana el primer campo es la direccion (nunca "Nombre del predio",
+  // que en la fuente publica es solo una copia de texto de direccion, no un nombre real).
+  const identificationHeaderField = isUrban
+    ? {
+        label: 'Dirección del predio',
+        value: predio.direccionReal && predio.direccionReal !== 'No disponible' ? predio.direccionReal : 'Dirección no registrada',
+        fullWidth: true,
+      }
+    : { label: 'Nombre del predio', value: toProperNameTitleCase(predio.nombrePredio), fullWidth: true };
+
+  const regularFields = [
+    identificationHeaderField,
+    { label: 'Municipio', value: toDisplayToponymTitleCase(predio.municipio) },
+    { label: 'Departamento', value: toDisplayToponymTitleCase(predio.departamento) },
+    { label: 'Zona', value: toSentenceCase(predio.tipoZona) },
+    ...veredaFields,
+    { label: 'Barrio', value: resolveUrbanFieldOrNotApplicable(predio.barrioNombre, predio.tipoZona) },
+    // Regla 6.4: nunca mostrar el codigo de manzana como si fuera un nombre; la auditoria de
+    // la GDB confirmo que no existe ningun campo de nombre legible para manzana.
+    { label: 'Manzana', value: isUrban ? 'No registrada' : resolveUrbanFieldOrNotApplicable(predio.manzanaCodigo, predio.tipoZona) },
+  ];
+
+  const contentX = rect.x + PDF_LAYOUT_GRID.panelPaddingX;
+  const contentWidth = rect.width - PDF_LAYOUT_GRID.panelPaddingX * 2;
+  const startY = rect.y + 46;
+
+  const afterRegularY = drawFieldGrid(context, { x: contentX, y: startY, width: contentWidth }, regularFields, {
+    labelSize: 9, valueSize: 10.8, labelValueGap, fieldGap, valueLineHeight: 12, columns, columnGap: 20,
+  });
+
+  const codeRows = [
+    { label: 'Código predial', value: predio.codigoPredial },
+    { label: 'Código anterior', value: resolveFieldOrNotRegistered(predio.codigoAnterior) },
+  ];
+  return drawCodeFieldRows(context, contentX, afterRegularY + PDF_LAYOUT_GRID.sectionGap - fieldGap, contentWidth, codeRows, {
+    labelSize: 9, maxValueSize: 10.8, minValueSize: 7.5, labelGap: labelValueGap, fieldHeight, lineHeight: 11.5, rightMargin: 16,
+  });
+}
+
+function drawCaracteristicasFisicasPanel(context, rect, predio, options = {}) {
+  const { labelValueGap = 13, fieldGap = 24 } = options;
+  drawPanel(context, rect, 'CARACTERÍSTICAS FÍSICAS');
+  const fields = [
+    ...buildAreaDisplayFields(predio),
+    { label: CARTOGRAPHIC_TOTAL_PERIMETER_LABEL, value: `${formatNumber(predio.perimetroM)} m` },
+    { label: CONSTRUCTION_COUNT_LABEL, value: formatConstructionCount(predio.numeroConstrucciones) },
+    { label: 'Área construida', value: formatNumberOrUnavailable(predio.areaConstruidaM2, { suffix: 'm²' }) },
+  ];
+  return drawFieldGrid(
+    context,
+    { x: rect.x + PDF_LAYOUT_GRID.panelPaddingX, y: rect.y + 46, width: rect.width - PDF_LAYOUT_GRID.panelPaddingX * 2 },
+    fields,
+    { labelSize: 9, valueSize: 11.5, labelValueGap, fieldGap, valueLineHeight: 13, columns: 2, columnGap: 20 },
+  );
+}
+
+function drawClasificacionPanel(context, rect, predio, options = {}) {
+  const {
+    usoLineHeight = 14,
+    usoItemGap = 11,
+    sectionGap = PDF_LAYOUT_GRID.sectionGap,
+    tiposLineHeight = 15,
+    tiposLineGap = 3,
+    labelValueGap = 15,
+  } = options;
+  drawPanel(context, rect, 'CLASIFICACIÓN Y CONSTRUCCIONES');
+
+  const paddingX = PDF_LAYOUT_GRID.panelPaddingX;
+  const colWidth = (rect.width - paddingX * 2 - 24) / 2;
+  const leftX = rect.x + paddingX;
+  const rightX = leftX + colWidth + 24;
+  const labelY = rect.y + 42;
+
+  drawFieldLabel(context, leftX, labelY, 'DESTINACIÓN CATASTRAL');
+  const destinacionResult = drawWrappedText(context, toSentenceCase(predio.destinoEconomicoNombre) || 'Información no disponible', leftX, labelY + labelValueGap, colWidth, 16, '#0f172a', 700, 13);
+
+  drawFieldLabel(context, rightX, labelY, 'USOS CONSTRUCTIVOS');
+  let usoCursorY = labelY + labelValueGap;
+  buildUsosConstructivosList(predio).forEach((uso) => {
+    const result = drawWrappedText(context, uso, rightX, usoCursorY, colWidth, usoLineHeight, '#0f172a', 700, 11.5);
+    usoCursorY += Math.max(usoLineHeight, result.height) + usoItemGap;
+  });
+
+  const destinacionBottom = labelY + labelValueGap + Math.max(16, destinacionResult.height);
+  const tiposY = Math.max(destinacionBottom, usoCursorY) + sectionGap;
+  drawFieldLabel(context, leftX, tiposY, 'TIPOS DE CONSTRUCCIÓN');
+  const tiposLines = formatTiposConstruccionDisplayLines(predio.tiposConstruccionResumen);
+  let tiposCursorY = tiposY + labelValueGap;
+  tiposLines.forEach((line) => {
+    const result = drawWrappedText(context, line, leftX, tiposCursorY, rect.width - paddingX * 2, tiposLineHeight, '#0f172a', 700, 11.5);
+    tiposCursorY += Math.max(tiposLineHeight, result.height) + tiposLineGap;
+  });
+
+  return tiposCursorY;
+}
+
+function buildFuentePanelText(predio) {
+  return `${formatFuenteDisplay(predio.fuente)}. Este documento fue elaborado por CatastroX mediante el procesamiento, organización y presentación de información catastral pública disponible en el Geoportal del IGAC. Fecha de procesamiento: ${formatFechaProcesoDisplay(predio.fechaProceso)}.`;
+}
+
+function measureFuentePanel(context, rect, predio, options = {}) {
+  const body = buildPanelBodyRect(rect, {
+    paddingX: options.paddingX ?? PDF_LAYOUT_GRID.panelPaddingX,
+    topOffset: options.topOffset ?? 36,
+    bottomPadding: options.bottomPadding ?? 12,
+  });
+  const text = buildFuentePanelText(predio);
+  const textMetrics = measureWrappedText(
+    context,
+    text,
+    body.width,
+    options.lineHeight ?? 13,
+    options.weight ?? 400,
+    options.size ?? 11,
+  );
+  return {
+    text,
+    body,
+    textMetrics,
+    requiredHeight: body.topOffset + textMetrics.height + body.bottomPadding,
+    renderedBottom: body.y + textMetrics.height,
+  };
+}
+
+function drawFuentePanel(context, rect, predio, options = {}) {
+  const metrics = measureFuentePanel(context, rect, predio, options);
+  drawPanel(context, rect, 'FUENTE');
+  drawWrappedText(
+    context,
+    metrics.text,
+    metrics.body.x,
+    metrics.body.y,
+    metrics.body.width,
+    options.lineHeight ?? 13,
+    '#243446',
+    options.weight ?? 400,
+    options.size ?? 11,
+  );
+  return metrics;
+}
+
+function buildUsoAlcancePageLayout(context, predio) {
+  const isProfessionalPackage = predio.deliverablePackageId === 'profesional';
+  const deliveredFiles = [
+    'PDF: resumen comercial, ficha técnica y plano predial con puntos y distancias.',
+    'KML: polígono del predio para Google Earth y aplicaciones compatibles.',
+    'KMZ: versión comprimida del KML, lista para compartir.',
+  ];
+  if (isProfessionalPackage) {
+    deliveredFiles.push('CSV: tabla completa de vértices con coordenadas Este y Norte en MAGNA-SIRGAS 2018 / Origen-Nacional (EPSG:9377).');
+  }
+
+  const instructions = [
+    'Abra el archivo KML o KMZ en Google Earth o una aplicación compatible.',
+    'Verifique visualmente la ubicación del polígono sobre el mapa.',
+    'Utilícelo como apoyo de consulta y planeación técnica o comercial.',
+  ];
+  const scopeItems = [
+    'No reemplaza certificados oficiales del IGAC, gestor catastral ni oficina de registro.',
+    'No reemplaza levantamientos topográficos ni actos de deslinde o amojonamiento.',
+    'Los usos normativos del suelo están sujetos al POT, PBOT o EOT municipal vigente.',
+    'Decisiones jurídicas, registrales o de linderos requieren validación de autoridad competente.',
+  ];
+  const footerGap = 18;
+  const middleGap = 14;
+  const availableBottom = UNIFIED_FOOTER_RECT.y - footerGap;
+  const topRect = { x: 24, y: 126, width: 744, height: 0 };
+  const topMetrics = computeBulletPanelHeight(context, deliveredFiles, topRect.width, {});
+  const topPanel = { ...topRect, height: Math.max(110, Math.ceil(topMetrics.requiredHeight)) };
+  const topListStartY = topPanel.y + topMetrics.body.topOffset;
+  const lowerPanelY = topPanel.y + topPanel.height + middleGap;
+  const lowerPanelWidth = 360;
+  const lowerGap = 24;
+  const lowerAvailableHeight = availableBottom - lowerPanelY;
+  const leftMetrics = computeBulletPanelHeight(context, instructions, lowerPanelWidth, {});
+  const rightMetrics = computeBulletPanelHeight(context, scopeItems, lowerPanelWidth, {});
+  const lowerPanelHeight = Math.max(
+    236,
+    Math.ceil(Math.max(leftMetrics.requiredHeight, rightMetrics.requiredHeight)),
+  );
+  const fittedLowerPanelHeight = Math.min(lowerPanelHeight, lowerAvailableHeight);
+  return {
+    deliveredFiles,
+    instructions,
+    scopeItems,
+    topPanel,
+    topListStartY,
+    lowerLeftPanel: { x: 24, y: lowerPanelY, width: lowerPanelWidth, height: fittedLowerPanelHeight },
+    lowerRightPanel: { x: 24 + lowerPanelWidth + lowerGap, y: lowerPanelY, width: lowerPanelWidth, height: fittedLowerPanelHeight },
+    deliveredBottomLimit: topPanel.y + topPanel.height - topMetrics.body.bottomPadding,
+    lowerBottomLimit: lowerPanelY + fittedLowerPanelHeight - PDF_LAYOUT_GRID.minBottomPadding,
+    topMetrics,
+    leftMetrics,
+    rightMetrics,
+  };
+}
+
+function buildExecutiveBottomNoteLayout(context, text, rect, options = {}) {
+  const body = buildPanelBodyRect(rect, {
+    paddingX: options.paddingX ?? 0,
+    topOffset: options.topOffset ?? 6,
+    bottomPadding: options.bottomPadding ?? 4,
+  });
+  const textMetrics = measureWrappedText(
+    context,
+    text,
+    body.width,
+    options.lineHeight ?? 10,
+    options.weight ?? 400,
+    options.size ?? 9,
+  );
+  return {
+    body,
+    textMetrics,
+    renderedBottom: body.y + textMetrics.height,
+    requiredHeight: body.topOffset + textMetrics.height + body.bottomPadding,
+  };
+}
+
+function buildFichaTecnicaSinglePageCanvas(predio, pageLabel) {
+  const { canvas, context } = createPageCanvas();
+  drawHeader(context, predio, pageLabel, 'FICHA TÉCNICA Y CATASTRAL', TABLE_LAYOUT);
+
+  drawIdentificacionPanel(context, { x: 24, y: 126, width: 360, height: 356 }, predio, { labelValueGap: 13, fieldGap: 24, fieldHeight: 34 });
+  drawCaracteristicasFisicasPanel(context, { x: 408, y: 126, width: 360, height: 168 }, predio, { labelValueGap: 13, fieldGap: 24 });
+  const clasificacionBottomY = drawClasificacionPanel(context, { x: 408, y: 302, width: 360, height: 198 }, predio, {
+    usoLineHeight: 13,
+    usoItemGap: 4,
+    sectionGap: 4,
+    tiposLineHeight: 14,
+    tiposLineGap: 0,
+    labelValueGap: 12,
+  });
+  const fuenteProbeRect = { x: 24, y: 0, width: 744, height: 0 };
+  const fuenteProbe = measureFuentePanel(context, fuenteProbeRect, predio);
+  const fuenteY = Math.max(478, Math.ceil(clasificacionBottomY + 6));
+  const fuenteMaxHeight = UNIFIED_FOOTER_RECT.y - 10 - fuenteY;
+  const fuenteHeight = Math.max(Math.min(fuenteProbe.requiredHeight, fuenteMaxHeight), 66);
+  drawFuentePanel(context, { x: 24, y: fuenteY, width: 744, height: fuenteHeight }, predio);
+
+  drawLegalFooter(context, UNIFIED_FOOTER_RECT);
+  return canvas;
+}
+
+function buildFichaTecnicaSplitPageCanvases(predio, pageLabelA, pageLabelB) {
+  const { canvas: canvasA, context: contextA } = createPageCanvas();
+  drawHeader(contextA, predio, pageLabelA, 'FICHA TÉCNICA Y CATASTRAL', TABLE_LAYOUT);
+  drawIdentificacionPanel(contextA, { x: 24, y: 126, width: 360, height: 430 }, predio, { labelValueGap: 15, fieldGap: 28, fieldHeight: 40, columns: 1 });
+  drawCaracteristicasFisicasPanel(contextA, { x: 408, y: 126, width: 360, height: 430 }, predio, { labelValueGap: 15, fieldGap: 40 });
+  drawLegalFooter(contextA, UNIFIED_FOOTER_RECT);
+
+  const { canvas: canvasB, context: contextB } = createPageCanvas();
+  drawHeader(contextB, predio, pageLabelB, 'FICHA TÉCNICA Y CATASTRAL (CONTINUACIÓN)', TABLE_LAYOUT);
+  const clasificacionBottomY = drawClasificacionPanel(
+    contextB,
+    { x: 24, y: 118, width: 744, height: 300 },
+    predio,
+    { usoLineHeight: 15, usoItemGap: 4, sectionGap: 4, tiposLineHeight: 14, tiposLineGap: 0, labelValueGap: 12 },
+  );
+  const fuenteGap = 16;
+  const fuenteBottomGap = 16;
+  const fuenteY = Math.max(430, Math.ceil(clasificacionBottomY + fuenteGap));
+  const fuenteProbe = measureFuentePanel(contextB, { x: 24, y: 0, width: 744, height: 0 }, predio);
+  const fuenteAvailableHeight = UNIFIED_FOOTER_RECT.y - fuenteBottomGap - fuenteY;
+  const fuenteHeight = Math.max(72, Math.min(fuenteProbe.requiredHeight, fuenteAvailableHeight));
+  drawFuentePanel(contextB, { x: 24, y: fuenteY, width: 744, height: fuenteHeight }, predio);
+  drawLegalFooter(contextB, UNIFIED_FOOTER_RECT);
+
+  return [canvasA, canvasB];
+}
+
+function buildFichaTecnicaCanvases(predio, pageLabels) {
+  if (pageLabels.length === 1) {
+    return [buildFichaTecnicaSinglePageCanvas(predio, pageLabels[0])];
+  }
+  return buildFichaTecnicaSplitPageCanvases(predio, pageLabels[0], pageLabels[1]);
+}
+
+function buildUsoAlcancePageCanvas(predio, pageLabel) {
+  const { canvas, context } = createPageCanvas();
+  drawHeader(context, predio, pageLabel, 'USO, ALCANCE Y ADVERTENCIAS', TABLE_LAYOUT);
+
+  const layout = buildUsoAlcancePageLayout(context, predio);
+
+  drawPanel(context, layout.topPanel, 'ARCHIVOS ENTREGADOS');
+  const deliveredBody = buildPanelBodyRect(layout.topPanel);
+  drawBullets(context, layout.deliveredFiles, layout.topPanel.x + 24, deliveredBody.y, deliveredBody.width, '#00aeea');
+
+  drawPanel(context, layout.lowerLeftPanel, 'CÓMO UTILIZARLOS');
+  const leftBody = buildPanelBodyRect(layout.lowerLeftPanel);
+  drawBullets(context, layout.instructions, layout.lowerLeftPanel.x + 24, leftBody.y, leftBody.width, '#8bcf2b');
+
+  drawPanel(context, layout.lowerRightPanel, 'ALCANCE Y VALIDACIÓN OFICIAL');
+  const rightBody = buildPanelBodyRect(layout.lowerRightPanel);
+  drawBullets(context, layout.scopeItems, layout.lowerRightPanel.x + 16, rightBody.y, rightBody.width, '#00aeea');
+
+  drawLegalFooter(context, UNIFIED_FOOTER_RECT);
   return canvas;
 }
 
@@ -1487,7 +2933,7 @@ function buildUnifiedTableRows(referenceRows, referenceSegments) {
     row.lat,
     row.lng,
     `${referenceSegments[index].from}-${referenceSegments[index].to}`,
-    `${Math.round(referenceSegments[index].distance)} m`,
+    `${formatNumber(referenceSegments[index].distance, 2)} m`,
   ]);
 }
 
@@ -1521,35 +2967,28 @@ function buildExecutiveTablePageCanvas(predio, pageLabel, rows, startIndex = 0, 
   drawSimpleTable(
     context,
     tableRect,
-    isContinuation ? 'TABLA EJECUTIVA DE PUNTOS VISIBLES Y LONGITUDES (CONTINUACIÓN)' : 'TABLA EJECUTIVA DE PUNTOS VISIBLES Y LONGITUDES',
+    `${isContinuation ? 'TABLA DE VÉRTICES REPRESENTATIVOS Y LONGITUDES (CONTINUACIÓN)' : 'TABLA DE VÉRTICES REPRESENTATIVOS Y LONGITUDES'}${predio.partLabel ? ` - ${predio.partLabel.toUpperCase()}` : ''}`,
     headers,
     columnXs,
     visibleRows,
   );
 
+  const bottomNote =
+    'La tabla ejecutiva compila en una sola vista los puntos visibles del plano, sus coordenadas y la distancia entre tramos consecutivos. La geometría completa del predio permanece disponible en los archivos KML y KMZ descargables.';
+  const bottomNoteLayout = buildExecutiveBottomNoteLayout(context, bottomNote, TABLE_LAYOUT.bottomPanel);
   drawWrappedText(
     context,
-    'La tabla ejecutiva compila en una sola vista los puntos visibles del plano, sus coordenadas y la distancia entre tramos consecutivos. La totalidad de vértices permanece en los archivos GIS descargables.',
-    TABLE_LAYOUT.bottomPanel.x,
-    TABLE_LAYOUT.bottomPanel.y + 14,
-    TABLE_LAYOUT.bottomPanel.width,
-    12,
+    bottomNote,
+    bottomNoteLayout.body.x,
+    bottomNoteLayout.body.y,
+    bottomNoteLayout.body.width,
+    10,
     '#334155',
     400,
     9,
   );
 
-  drawWrappedText(
-    context,
-    'CatastroX realiza análisis técnico sobre información geográfica y catastral pública disponible. Este documento no reemplaza certificados oficiales del IGAC, gestor catastral, oficina de registro ni autoridad competente.',
-    TABLE_LAYOUT.footer.x,
-    TABLE_LAYOUT.footer.y + 10,
-    TABLE_LAYOUT.footer.width,
-    10,
-    '#334155',
-    400,
-    8,
-  );
+  drawLegalFooter(context, TABLE_LAYOUT.footer);
 
   return {
     canvas,
@@ -1558,16 +2997,16 @@ function buildExecutiveTablePageCanvas(predio, pageLabel, rows, startIndex = 0, 
   };
 }
 
-function buildExecutiveTablePagesCanvases(predio, referenceRows, referenceSegments) {
+function buildExecutiveTablePagesCanvases(predio, referenceRows, referenceSegments, startPage = 3, totalDocumentPages = null) {
   const unifiedRows = buildUnifiedTableRows(referenceRows, referenceSegments);
   const availableRows = Math.max(1, Math.floor((TABLE_LAYOUT.mapArea.height - 54) / 20));
   const totalTablePages = Math.ceil(unifiedRows.length / availableRows);
-  const totalPages = 2 + totalTablePages;
+  const totalPages = totalDocumentPages || 2 + totalTablePages;
   const canvases = [];
   let nextIndex = 0;
 
   for (let tablePage = 0; tablePage < totalTablePages; tablePage += 1) {
-    const pageLabel = `${3 + tablePage} de ${totalPages}`;
+    const pageLabel = `${startPage + tablePage} de ${totalPages}`;
     const result = buildExecutiveTablePageCanvas(predio, pageLabel, unifiedRows, nextIndex, tablePage > 0, totalPages);
     canvases.push(result.canvas);
     nextIndex = result.nextIndex;
@@ -1582,7 +3021,7 @@ function buildReferenceTableRows(referenceRows, referenceSegments) {
     lat: row.lat,
     lng: row.lng,
     segment: `${referenceSegments[index].from}-${referenceSegments[index].to}`,
-    distance: `${Math.round(referenceSegments[index].distance)} m`,
+    distance: `${formatNumber(referenceSegments[index].distance, 2)} m`,
   }));
 }
 
@@ -2080,7 +3519,8 @@ async function buildSatellitePageCanvas(predio, layoutData, pageLabel = '1 de 3'
   });
   drawCompassRose(context, mapRect.x + 54, mapRect.y + 54, false);
   const satelliteScaleAnchor = chooseScaleBarAnchor(mapRect, projected, projectedRefs, pointPlacements, false);
-  drawScaleBar(context, satelliteScaleAnchor.x, satelliteScaleAnchor.y, 800);
+  const satelliteScaleMeters = computeDynamicScaleMeters(mapState, mapRect.width);
+  drawScaleBar(context, satelliteScaleAnchor.x, satelliteScaleAnchor.y, satelliteScaleMeters);
 
   const infoRect = { x: SATELLITE_LAYOUT.rightPanel.x, y: SATELLITE_LAYOUT.rightPanel.y, width: SATELLITE_LAYOUT.rightPanel.width, height: SATELLITE_LAYOUT.rightPanel.height };
 
@@ -2092,16 +3532,15 @@ async function buildSatellitePageCanvas(predio, layoutData, pageLabel = '1 de 3'
     { label: 'Código predial anterior', value: predio.codigoAnterior },
     { label: 'Municipio', value: predio.municipio },
     { label: 'Departamento', value: predio.departamento },
-    { label: 'Área total', value: `${formatNumber(predio.areaHa)} ha` },
-    { label: 'Área total m²', value: `${formatNumber(predio.areaM2)} m²` },
-    { label: 'Perímetro', value: `${formatNumber(predio.perimetroM)} m` },
+    ...buildAreaDisplayFields(predio, { haLabel: 'Área total', m2Label: 'Área total m²' }),
+    { label: CARTOGRAPHIC_TOTAL_PERIMETER_LABEL, value: `${formatNumber(predio.perimetroM)} m` },
     { label: 'Estado predial', value: predio.estadoPredial },
   ], { labelSize: 9.1, valueSize: 11.5, labelGap: 12, rowGap: 31, lineHeight: 12.5 });
 
   drawPanel(context, SATELLITE_LAYOUT.bottomPanel, 'LECTURA VISUAL DEL PREDIO');
   drawWrappedText(
     context,
-    'Esta página prioriza la interpretación visual del predio sobre la imagen satelital real. Las coordenadas y longitudes de referencia se presentan de forma consolidada en la tabla ejecutiva de las páginas siguientes.',
+    `Plano visual generado el ${todayDisplayDate()}. La imagen satelital permite ubicar el predio identificado; los puntos y longitudes se conservan como anexo técnico al final del reporte.`,
     SATELLITE_LAYOUT.bottomPanel.x + 14,
     SATELLITE_LAYOUT.bottomPanel.y + 34,
     SATELLITE_LAYOUT.bottomPanel.width - 28,
@@ -2111,22 +3550,12 @@ async function buildSatellitePageCanvas(predio, layoutData, pageLabel = '1 de 3'
     8.8,
   );
 
-  drawWrappedText(
-    context,
-    'CatastroX realiza análisis técnico sobre información geográfica y catastral pública disponible. Este documento no reemplaza certificados oficiales del IGAC, gestor catastral, oficina de registro ni autoridad competente.',
-    SATELLITE_LAYOUT.footer.x,
-    SATELLITE_LAYOUT.footer.y + 10,
-    SATELLITE_LAYOUT.footer.width,
-    10,
-    '#334155',
-    400,
-    8,
-  );
+  drawLegalFooter(context, SATELLITE_LAYOUT.footer);
 
   return canvas;
 }
 
-async function buildTechnicalPagesCanvases(predio, layoutData, technicalPageLabel = '2 de 3') {
+async function buildTechnicalPagesCanvases(predio, layoutData, technicalPageLabel = '2 de 3', tableStartPage = 3, totalDocumentPages = null) {
   const { mapState, referencePoints, referenceRows, referenceSegments } = layoutData;
   const expandedMapArea = { x: 24, y: 108, width: 744, height: 450 };
   const { canvas, context } = createPageCanvas();
@@ -2145,6 +3574,17 @@ async function buildTechnicalPagesCanvases(predio, layoutData, technicalPageLabe
   const projected = applyFitTransform(baseProjected, transform);
   const baseProjectedRefs = referencePoints.map((entry) => projectPointToViewport(entry.point || entry, mapState, mapRect.width, mapRect.height));
   const projectedRefs = applyFitTransform(baseProjectedRefs, transform);
+  // El anillo exterior siempre acota a sus propios anillos interiores (son geometrias
+  // contenidas en el mismo polígono), por lo que createFitTransform no necesita
+  // concatenar coordenadas de anillos distintos: el encuadre calculado sobre el
+  // exterior ya es válido para dibujar también los huecos de esta misma parte.
+  // Los anillos interiores se proyectan igual que baseProjected (projectRingToViewport
+  // sin sumar mapRect.x/y) y pasan por el mismo applyFitTransform: projectRingForMap
+  // no sirve aqui porque ya suma mapRect.x/y antes del fit, duplicando el desplazamiento.
+  const innerRings = predio.geometryParts?.[0]?.innerRings || [];
+  const projectedInnerRings = innerRings.map((ring) =>
+    applyFitTransform(projectRingToViewport(ring, mapState, mapRect.width, mapRect.height), transform),
+  );
 
   context.fillStyle = '#ffffff';
   context.fillRect(expandedMapArea.x, expandedMapArea.y, expandedMapArea.width, expandedMapArea.height);
@@ -2154,9 +3594,13 @@ async function buildTechnicalPagesCanvases(predio, layoutData, technicalPageLabe
   context.strokeRect(mapRect.x, mapRect.y, mapRect.width, mapRect.height);
   setFont(context, 10.5, 700);
   context.fillStyle = '#0a2e73';
-  context.fillText('PLANO TÉCNICO • GEOMETRÍA DEL PREDIO', TECHNICAL_LAYOUT.header.x + 16, TECHNICAL_LAYOUT.header.y + 76);
+  context.fillText(
+    `PLANO TÉCNICO • GEOMETRÍA DEL PREDIO${predio.partLabel ? ` • ${predio.partLabel.toUpperCase()}` : ''}`,
+    TECHNICAL_LAYOUT.header.x + 16,
+    TECHNICAL_LAYOUT.header.y + 76,
+  );
 
-  drawPolygonOverlay(context, projected, { stroke: '#1170cf', fill: null, lineWidth: 2 });
+  drawTechnicalPolygonPartOverlay(context, projected, projectedInnerRings, { stroke: '#1170cf', lineWidth: 2 });
   const pointPlacements = buildVisiblePointPlacements(projectedRefs, mapRect, projected);
   const compassCenter = { x: mapRect.x + 52, y: mapRect.y + 54 };
   const preliminaryScaleAnchor = chooseScaleBarAnchor(mapRect, projected, projectedRefs, pointPlacements, true);
@@ -2183,7 +3627,10 @@ async function buildTechnicalPagesCanvases(predio, layoutData, technicalPageLabe
   drawVisiblePoints(context, projectedRefs, pointPlacements);
   drawCompassRose(context, compassCenter.x, compassCenter.y, true);
   const technicalScaleAnchor = chooseScaleBarAnchor(mapRect, projected, projectedRefs, [...technicalDimensionResult.placements, ...pointPlacements], true);
-  drawScaleBar(context, technicalScaleAnchor.x, technicalScaleAnchor.y, 800, { compact: true });
+  // El plano tecnico reescala la proyeccion base con createFitTransform (transform.scale);
+  // la escala grafica debe reflejar esa reescala adicional, no solo el zoom del mapState.
+  const technicalScaleMeters = computeDynamicScaleMeters(mapState, mapRect.width, transform.scale);
+  drawScaleBar(context, technicalScaleAnchor.x, technicalScaleAnchor.y, technicalScaleMeters, { compact: true });
 
   console.log('CatastroX visible point quality report', {
     codigoPredial: predio.codigoPredial,
@@ -2193,19 +3640,9 @@ async function buildTechnicalPagesCanvases(predio, layoutData, technicalPageLabe
     cotasDibujadas: technicalDimensionResult.placements.length,
     cotasOmitidasPorColision: technicalDimensionResult.omittedCount,
   });
-  drawWrappedText(
-    context,
-    'CatastroX realiza análisis técnico sobre información geográfica y catastral pública disponible. Este documento no reemplaza certificados oficiales del IGAC, gestor catastral, oficina de registro ni autoridad competente.',
-    TECHNICAL_LAYOUT.footer.x + 16,
-    TECHNICAL_LAYOUT.footer.y - 16,
-    TECHNICAL_LAYOUT.footer.width - 32,
-    10,
-    '#334155',
-    400,
-    8,
-  );
+  drawLegalFooter(context, TECHNICAL_LAYOUT.footer);
 
-  const tableCanvases = buildExecutiveTablePagesCanvases(predio, referenceRows, referenceSegments);
+  const tableCanvases = buildExecutiveTablePagesCanvases(predio, referenceRows, referenceSegments, tableStartPage, totalDocumentPages);
   return [canvas, ...tableCanvases];
 }
 
@@ -2239,19 +3676,62 @@ export async function buildPlanPdfBytes(source) {
   await ensurePdfFontsLoaded();
   const predio = normalizePredioForDeliverables(source);
   const attemptBuild = async (layoutOptions = {}) => {
-    const layoutData = buildLayoutData(predio, resolvePlanLayoutOptions(predio, layoutOptions));
-    const availableRows = Math.max(1, Math.floor((TABLE_LAYOUT.mapArea.height - 54) / 20));
-    const totalTablePages = Math.ceil(layoutData.referenceRows.length / availableRows);
-    const totalPages = 2 + totalTablePages;
-    const satelliteCanvas = await buildSatellitePageCanvas(predio, layoutData, `1 de ${totalPages}`);
-    const technicalCanvases = await buildTechnicalPagesCanvases(predio, layoutData, `2 de ${totalPages}`);
+    const parts = predio.geometryParts?.length ? predio.geometryParts : [{ outerRing: predio.ring, innerRings: [] }];
+    const partEntries = parts.map((part) => {
+      const nextPredio = partPredio(predio, part, parts.length);
+      const layoutData = buildLayoutData(nextPredio, resolvePlanLayoutOptions(nextPredio, layoutOptions));
+      const availableRows = Math.max(1, Math.floor((TABLE_LAYOUT.mapArea.height - 54) / 20));
+      const tablePages = Math.max(1, Math.ceil(layoutData.referenceRows.length / availableRows));
+      return { predio: nextPredio, layoutData, tablePages };
+    });
+    const summaryLayoutData = {
+      ...partEntries[0].layoutData,
+      mapState: computeMapState(predio.mapRing?.length ? predio.mapRing : predio.ring, SATELLITE_LAYOUT.mapArea.width, SATELLITE_LAYOUT.mapArea.height, 18),
+    };
+    const totalTechnicalPages = partEntries.reduce((sum, entry) => sum + 1 + entry.tablePages, 0);
+    const fichaTecnicaPageCount = estimateFichaTecnicaPageCount(predio);
+    // 1 (resumen) + ficha tecnica (1 o 2, dinamico) + 1 (uso/alcance) + paginas tecnicas.
+    const totalPages = 1 + fichaTecnicaPageCount + 1 + totalTechnicalPages;
+
+    const summaryCanvas = await buildPlusSummaryPageCanvas(predio, summaryLayoutData, `1 de ${totalPages}`);
+
+    const fichaTecnicaPageLabels = Array.from(
+      { length: fichaTecnicaPageCount },
+      (_, index) => `${2 + index} de ${totalPages}`,
+    );
+    const fichaTecnicaCanvases = buildFichaTecnicaCanvases(predio, fichaTecnicaPageLabels);
+
+    const usoAlcancePageNumber = 2 + fichaTecnicaPageCount;
+    const usoAlcanceCanvas = buildUsoAlcancePageCanvas(predio, `${usoAlcancePageNumber} de ${totalPages}`);
+
+    const technicalCanvases = [];
+    let pageCursor = usoAlcancePageNumber + 1;
+    for (const entry of partEntries) {
+      const canvases = await buildTechnicalPagesCanvases(
+        entry.predio,
+        entry.layoutData,
+        `${pageCursor} de ${totalPages}`,
+        pageCursor + 1,
+        totalPages,
+      );
+      technicalCanvases.push(...canvases);
+      pageCursor += canvases.length;
+    }
     const pageImages = [];
 
     pageImages.push({
-      width: satelliteCanvas.width,
-      height: satelliteCanvas.height,
-      bytes: await canvasToJpegBytes(satelliteCanvas),
+      width: summaryCanvas.width,
+      height: summaryCanvas.height,
+      bytes: await canvasToJpegBytes(summaryCanvas),
     });
+
+    for (const pageCanvas of [...fichaTecnicaCanvases, usoAlcanceCanvas]) {
+      pageImages.push({
+        width: pageCanvas.width,
+        height: pageCanvas.height,
+        bytes: await canvasToJpegBytes(pageCanvas),
+      });
+    }
 
     for (const pageCanvas of technicalCanvases) {
       pageImages.push({
@@ -2272,27 +3752,83 @@ export async function buildPlanPdfBytes(source) {
   }
 }
 
+function kmlLinearRing(ring) {
+  const coords = ring.map(([lng, lat]) => `${lng},${lat},0`).join(' ');
+  return `<LinearRing>
+            <coordinates>${coords}</coordinates>
+          </LinearRing>`;
+}
+
+function kmlPolygon(part) {
+  const inners = (part.innerRings || [])
+    .map((ring) => `
+        <innerBoundaryIs>
+          ${kmlLinearRing(ring)}
+        </innerBoundaryIs>`)
+    .join('');
+  return `<Polygon>
+        <outerBoundaryIs>
+          ${kmlLinearRing(part.outerRing)}
+        </outerBoundaryIs>${inners}
+      </Polygon>`;
+}
+
+function isWgs84Ring(ring) {
+  return ring.length >= 4 && ring.every(
+    ([lng, lat]) => Number.isFinite(lng) && Number.isFinite(lat) && Math.abs(lng) <= 180 && Math.abs(lat) <= 90,
+  );
+}
+
 export function buildKmlText(source) {
   const predio = normalizePredioForDeliverables(source);
-  const coords = predio.ring.map(([lng, lat]) => `${lng},${lat},0`).join(' ');
+  const parts = predio.geometryParts?.length
+    ? predio.geometryParts
+    : [{ outerRing: predio.ring, innerRings: [] }];
+
+  if (!parts.length || !parts.every((part) => isWgs84Ring(part.outerRing))) {
+    throw new Error('El predio no tiene geometría WGS84 válida para generar el archivo KML.');
+  }
+
+  const geometryKml = parts.length === 1
+    ? kmlPolygon(parts[0])
+    : `<MultiGeometry>
+${parts.map((part) => `      ${kmlPolygon(part)}`).join('\n')}
+      </MultiGeometry>`;
+  const documentName = `CatastroX - ${predio.municipio}, ${predio.departamento}`;
+  const isUrban = isUrbanZona(predio);
+  // Regla 6.2: la vereda no se incluye en la descripcion KML de predios urbanos.
+  const veredaLine = isUrban
+    ? null
+    : predio.veredaDisplay?.isCadastralCode
+      ? `${predio.veredaDisplay.label}: ${predio.veredaDisplay.value}. ${predio.veredaDisplay.secondaryLabel}: ${predio.veredaDisplay.secondaryValue}. ${predio.veredaDisplay.note}`
+      : `${predio.veredaDisplay?.label || 'Vereda'}: ${predio.veredaDisplay?.value || 'Información no disponible'}.`;
+  const description = [
+    'Reporte predial CatastroX - Paquete Plus.',
+    `Municipio: ${predio.municipio}.`,
+    `Departamento: ${predio.departamento}.`,
+    veredaLine,
+    `Código predial: ${predio.codigoPredial}.`,
+    `Área total: ${buildAreaPrimaryDisplay(predio)}.`,
+    `${CARTOGRAPHIC_TOTAL_PERIMETER_LABEL}: ${formatNumber(predio.perimetroM)} m.`,
+    `Destino económico: ${predio.destinoEconomicoNombre}.`,
+    `Uso principal: ${predio.uso1Nombre}.`,
+    `Registros constructivos asociados: ${formatConstructionCount(predio.numeroConstrucciones)}.`,
+    predio.destinoEconomicoSemantic?.isAmbiguous ? predio.destinoEconomicoSemantic.note : null,
+    'Archivo para visualización del polígono predial en Google Earth o herramientas compatibles.',
+    'No reemplaza certificados oficiales, levantamientos topográficos ni decisiones de autoridad competente.',
+  ].filter(Boolean).join(' ');
   return `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
-    <name>${predio.codigoPredial}</name>
+    <name>${escapeXml(documentName)}</name>
     <Placemark>
-      <name>${predio.codigoPredial}</name>
-      <description>Geometría predial CatastroX.</description>
+      <name>${escapeXml(`Predio ${predio.codigoPredial}`)}</name>
+      <description>${escapeXml(description)}</description>
       <Style>
         <LineStyle><color>ffef8b00</color><width>3</width></LineStyle>
         <PolyStyle><color>66ffd9b3</color></PolyStyle>
       </Style>
-      <Polygon>
-        <outerBoundaryIs>
-          <LinearRing>
-            <coordinates>${coords}</coordinates>
-          </LinearRing>
-        </outerBoundaryIs>
-      </Polygon>
+      ${geometryKml}
     </Placemark>
   </Document>
 </kml>`;
@@ -2324,7 +3860,11 @@ function buildZip(entries) {
 
   entries.forEach((entry) => {
     const nameBytes = textEncoder.encode(entry.name);
-    const dataBytes = entry.data instanceof Uint8Array ? entry.data : textEncoder.encode(entry.data);
+    const dataBytes = entry.data instanceof Uint8Array
+      ? entry.data
+      : ArrayBuffer.isView(entry.data)
+        ? new Uint8Array(entry.data.buffer, entry.data.byteOffset, entry.data.byteLength)
+        : textEncoder.encode(entry.data);
     const crc = crc32(dataBytes);
 
     const localHeader = concatUint8Arrays([
@@ -2384,18 +3924,112 @@ function buildZip(entries) {
   return concatUint8Arrays([localData, centralDirectory, end]);
 }
 
+// Corrección controlada 2: orientación de anillos para el estándar ESRI Shapefile
+// (exterior en sentido horario/CW, hueco en sentido antihorario/CCW). El motor nunca
+// había impuesto esta convención de forma explícita: heredaba el sentido de recorrido
+// tal como llegaba en geometryParts (a su vez heredado sin alterar desde el GeoJSON de
+// origen). Estos helpers son puros (no dependen de canvas ni de ningún estado global) y
+// solo se usan en el flujo previo a writeShapefileParts; KML, DXF y PDF siguen leyendo
+// geometryParts sin pasar por ellos.
+
+// area > 0 => sentido antihorario (CCW); area < 0 => sentido horario (CW). Formula
+// shoelace estandar para coordenadas (lng=X, lat=Y, Y creciente hacia el norte),
+// verificada con un cuadrado unitario trivial antes de esta implementación. Funciona
+// tanto si el anillo llega cerrado (ultimo punto = primero) como abierto, ya que el
+// termino de "cierre" entre el ultimo y el primer punto se suma explicitamente.
+export function calculateSignedRingArea(ring) {
+  if (!ring || ring.length < 3) return 0;
+  let sum = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const [x1, y1] = ring[i];
+    const [x2, y2] = ring[(i + 1) % ring.length];
+    sum += x1 * y2 - x2 * y1;
+  }
+  return sum / 2;
+}
+
+// Cierra el anillo si hace falta, sin duplicar el punto de cierre si ya esta cerrado.
+// Nunca muta el arreglo recibido.
+export function ensureClosedRing(ring) {
+  if (!ring || !ring.length) return [];
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  const isClosed = first[0] === last[0] && first[1] === last[1];
+  return isClosed ? ring.slice() : [...ring, [first[0], first[1]]];
+}
+
+// Area firmada por debajo de este umbral (en unidades de grado^2, muy por debajo del
+// area real mas pequena observada en datos reales, ~1e-8) se considera degenerada:
+// anillo colineal o sin superficie real, no una geometria valida con orientacion.
+const DEGENERATE_RING_AREA_EPSILON = 1e-15;
+
+// Reorienta un anillo para cumplir la convencion ESRI Shapefile segun su rol:
+// role = 'outer' -> horario (CW); role = 'inner' -> antihorario (CCW). Nunca muta el
+// arreglo original. Si ya tiene la orientacion correcta, devuelve la secuencia intacta
+// (cerrada); si debe invertirse, revierte el orden de vertices preservando el cierre
+// (un anillo cerrado [P0..Pn,P0] invertido sigue siendo [P0,Pn..P1,P0], mismo primer y
+// ultimo punto). Devuelve null para anillos invalidos (menos de 4 posiciones tras
+// cerrar) o degenerados (area firmada ~0), para que el llamador los excluya de forma
+// controlada.
+export function orientRingForShapefile(ring, role) {
+  const closed = ensureClosedRing(ring);
+  if (closed.length < 4) return null;
+
+  const area = calculateSignedRingArea(closed);
+  if (Math.abs(area) <= DEGENERATE_RING_AREA_EPSILON) return null;
+
+  const isCounterClockwise = area > 0;
+  const mustInvert =
+    (role === 'outer' && isCounterClockwise) || (role === 'inner' && !isCounterClockwise);
+
+  return mustInvert ? closed.slice().reverse() : closed;
+}
+
+// Aplica orientRingForShapefile a cada parte de geometryParts, conservando la secuencia
+// exterior-de-parte-1, interiores-de-parte-1, exterior-de-parte-2, ... (nunca concatena
+// exterior e interiores entre si ni reordena las partes globalmente). Una parte cuyo
+// exterior resulte invalido/degenerado se excluye completa; un interior invalido se
+// descarta individualmente sin afectar al resto de la parte.
+export function buildShapefileOrientedParts(geometryParts) {
+  const parts = geometryParts || [];
+  const oriented = [];
+
+  for (const part of parts) {
+    const outerRing = orientRingForShapefile(part?.outerRing, 'outer');
+    if (!outerRing) continue;
+
+    const innerRings = (part?.innerRings || [])
+      .map((ring) => orientRingForShapefile(ring, 'inner'))
+      .filter(Boolean);
+
+    oriented.push({ outerRing, innerRings });
+  }
+
+  return oriented;
+}
+
+const MAGNA_SIRGAS_ORIGEN_NACIONAL_PRJ = 'PROJCS["MAGNA-SIRGAS / Origen-Nacional",GEOGCS["MAGNA-SIRGAS",DATUM["Marco_Geocentrico_Nacional_de_Referencia",SPHEROID["GRS 1980",6378137,298.257222101]],PRIMEM["Greenwich",0],UNIT["Degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",4],PARAMETER["central_meridian",-73],PARAMETER["scale_factor",0.9992],PARAMETER["false_easting",5000000],PARAMETER["false_northing",2000000],UNIT["Meter",1]]';
+
 function writeShapefileParts(source) {
-  const predio = normalizePredioForDeliverables(source);
-  const ring = [...predio.ring];
-  if (!ring.length) {
+  const predio = normalizePredioForProjectedGis(source, { requireProjectedGeometry: true });
+  const geometryParts = predio.geometryParts?.length
+    ? predio.geometryParts
+    : [{ outerRing: predio.ring, innerRings: [] }];
+  // Orientacion ESRI (exterior CW, hueco CCW) impuesta explicitamente solo para el SHP;
+  // geometryParts en si no se modifica, por lo que KML/DXF/PDF no se ven afectados.
+  const orientedParts = buildShapefileOrientedParts(geometryParts);
+  const shapeRings = orientedParts.flatMap((part) => [part.outerRing, ...part.innerRings]);
+  if (!shapeRings.length) {
     throw new Error('El predio no tiene geometría disponible para generar archivos GIS.');
   }
 
-  const xs = ring.map((pt) => pt[0]);
-  const ys = ring.map((pt) => pt[1]);
+  const allPoints = shapeRings.flat();
+  const xs = allPoints.map((pt) => pt[0]);
+  const ys = allPoints.map((pt) => pt[1]);
   const bbox = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
-  const numPoints = ring.length;
-  const recordContentBytes = 4 + 32 + 4 + 4 + 4 + 16 * numPoints;
+  const numParts = shapeRings.length;
+  const numPoints = allPoints.length;
+  const recordContentBytes = 4 + 32 + 4 + 4 + 4 * numParts + 16 * numPoints;
   const fileLengthWords = (100 + 8 + recordContentBytes) / 2;
 
   const shp = new ArrayBuffer(100 + 8 + recordContentBytes);
@@ -2409,14 +4043,22 @@ function writeShapefileParts(source) {
   shpView.setInt32(104, recordContentBytes / 2, false);
   shpView.setInt32(108, 5, true);
   bbox.forEach((value, index) => shpView.setFloat64(112 + index * 8, value, true));
-  shpView.setInt32(144, 1, true);
+  shpView.setInt32(144, numParts, true);
   shpView.setInt32(148, numPoints, true);
-  shpView.setInt32(152, 0, true);
-  let pointOffset = 156;
-  ring.forEach(([lng, lat]) => {
-    shpView.setFloat64(pointOffset, lng, true);
-    shpView.setFloat64(pointOffset + 8, lat, true);
-    pointOffset += 16;
+  let partStart = 0;
+  let partOffset = 152;
+  shapeRings.forEach((ring) => {
+    shpView.setInt32(partOffset, partStart, true);
+    partStart += ring.length;
+    partOffset += 4;
+  });
+  let pointOffset = 152 + numParts * 4;
+  shapeRings.forEach((ring) => {
+    ring.forEach(([lng, lat]) => {
+      shpView.setFloat64(pointOffset, lng, true);
+      shpView.setFloat64(pointOffset + 8, lat, true);
+      pointOffset += 16;
+    });
   });
 
   const shx = new ArrayBuffer(108);
@@ -2430,11 +4072,14 @@ function writeShapefileParts(source) {
   shxView.setInt32(104, recordContentBytes / 2, false);
 
   const dbfFields = [
-    ['id', 'N', 8, 0, String(predio.id || 0)],
+    ['id', 'N', 8, 0, '1'],
     ['codigo', 'C', 40, 0, predio.codigoPredial],
     ['municipio', 'C', 32, 0, predio.municipio],
     ['depto', 'C', 32, 0, predio.departamento],
+    ['zona', 'C', 16, 0, predio.tipoZona || predio.zona || ''],
+    ['area_m2', 'N', 14, 2, Number(predio.areaM2 || 0).toFixed(2)],
     ['area_ha', 'N', 12, 2, Number(predio.areaHa || 0).toFixed(2)],
+    ['perim_m', 'N', 14, 2, Number(predio.perimetroM || 0).toFixed(2)],
   ];
   const headerLength = 32 + dbfFields.length * 32 + 1;
   const recordLength = 1 + dbfFields.reduce((sum, [, , size]) => sum + size, 0);
@@ -2472,33 +4117,43 @@ function writeShapefileParts(source) {
   });
   dbf[dbf.length - 1] = 0x1a;
 
-  const prj = textEncoder.encode(
-    'GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]',
-  );
+  const prj = textEncoder.encode(MAGNA_SIRGAS_ORIGEN_NACIONAL_PRJ);
+  const cpg = textEncoder.encode('UTF-8');
 
   return {
     shp: new Uint8Array(shp),
     shx: new Uint8Array(shx),
     dbf,
     prj,
+    cpg,
   };
 }
 
 export function buildKmzBytes(source) {
   const predio = normalizePredioForDeliverables(source);
-  const kmlText = buildKmlText(predio);
+  const kmlText = buildKmlText(source);
   return buildZip([{ name: `${fileSafeCode(predio)}.kml`, data: textEncoder.encode(kmlText) }]);
+}
+
+export function buildCoordinatesZipBytes(source) {
+  const predio = normalizePredioForProjectedGis(source, { requireProjectedGeometry: true });
+  const stem = `${fileSafeCode(predio)}_coordenadas_epsg9377`;
+  return buildZip([
+    { name: `${stem}.csv`, data: textEncoder.encode(buildCoordinatesCsvText(source)) },
+    { name: 'LEEME_COORDENADAS.txt', data: textEncoder.encode(buildCoordinatesReadmeText()) },
+  ]);
 }
 
 export function buildShpZipBytes(source) {
   const predio = normalizePredioForDeliverables(source);
   const stem = fileSafeCode(predio);
-  const parts = writeShapefileParts(predio);
+  const parts = writeShapefileParts(source);
   return buildZip([
     { name: `${stem}.shp`, data: parts.shp },
     { name: `${stem}.shx`, data: parts.shx },
     { name: `${stem}.dbf`, data: parts.dbf },
     { name: `${stem}.prj`, data: parts.prj },
+    { name: `${stem}.cpg`, data: parts.cpg },
   ]);
 }
 
@@ -2508,6 +4163,44 @@ function dxfSafeText(value) {
 
 function dxfPair(code, value) {
   return `${code}\n${value}\n`;
+}
+
+function buildDxfSection(name, body = '') {
+  return [dxfPair(0, 'SECTION'), dxfPair(2, name), body, dxfPair(0, 'ENDSEC')].join('');
+}
+
+function buildDxfHeaderSection(bbox) {
+  return buildDxfSection(
+    'HEADER',
+    [
+      dxfPair(9, '$ACADVER'),
+      dxfPair(1, 'AC1009'),
+      dxfPair(9, '$EXTMIN'),
+      dxfPair(10, bbox.minLng),
+      dxfPair(20, bbox.minLat),
+      dxfPair(30, 0),
+      dxfPair(9, '$EXTMAX'),
+      dxfPair(10, bbox.maxLng),
+      dxfPair(20, bbox.maxLat),
+      dxfPair(30, 0),
+    ].join(''),
+  );
+}
+
+function buildDxfLtypeTable() {
+  return [
+    dxfPair(0, 'TABLE'),
+    dxfPair(2, 'LTYPE'),
+    dxfPair(70, 1),
+    dxfPair(0, 'LTYPE'),
+    dxfPair(2, 'CONTINUOUS'),
+    dxfPair(70, 64),
+    dxfPair(3, 'Solid line'),
+    dxfPair(72, 65),
+    dxfPair(73, 0),
+    dxfPair(40, 0),
+    dxfPair(0, 'ENDTAB'),
+  ].join('');
 }
 
 function dxfPointEntity(layer, x, y) {
@@ -2544,14 +4237,14 @@ function dxfTextEntity(layer, x, y, height, text, rotation = 0) {
   ].join('');
 }
 
-function buildDxfLayerTable(layerNames) {
-  const layerEntries = layerNames
-    .map((layerName) =>
+function buildDxfLayerTable(layerConfigs) {
+  const layerEntries = layerConfigs
+    .map(({ name, color = 7, flags = 0 }) =>
       [
         dxfPair(0, 'LAYER'),
-        dxfPair(2, layerName),
-        dxfPair(70, 0),
-        dxfPair(62, 7),
+        dxfPair(2, name),
+        dxfPair(70, flags),
+        dxfPair(62, color),
         dxfPair(6, 'CONTINUOUS'),
       ].join(''),
     )
@@ -2560,40 +4253,87 @@ function buildDxfLayerTable(layerNames) {
   return [
     dxfPair(0, 'TABLE'),
     dxfPair(2, 'LAYER'),
-    dxfPair(70, layerNames.length),
+    dxfPair(70, layerConfigs.length),
     layerEntries,
     dxfPair(0, 'ENDTAB'),
   ].join('');
 }
 
-function buildDxfPolylineEntity(layer, ring) {
-  const pairs = [
-    dxfPair(0, 'LWPOLYLINE'),
-    dxfPair(8, layer),
-    dxfPair(90, ring.length),
+function buildDxfStyleTable() {
+  return [
+    dxfPair(0, 'TABLE'),
+    dxfPair(2, 'STYLE'),
     dxfPair(70, 1),
-  ];
-
-  ring.forEach(([lng, lat]) => {
-    pairs.push(dxfPair(10, lng));
-    pairs.push(dxfPair(20, lat));
-  });
-
-  return pairs.join('');
+    dxfPair(0, 'STYLE'),
+    dxfPair(2, 'STANDARD'),
+    dxfPair(70, 0),
+    dxfPair(40, 0),
+    dxfPair(41, 1),
+    dxfPair(50, 0),
+    dxfPair(71, 0),
+    dxfPair(42, 0.2),
+    dxfPair(3, 'txt'),
+    dxfPair(4, ''),
+    dxfPair(0, 'ENDTAB'),
+  ].join('');
 }
 
-function buildDxfInfoEntities(predio, bbox, spanLng, spanLat) {
-  const textHeight = Math.max(spanLat * 0.03, 0.00008);
-  const lineGap = textHeight * 1.8;
-  const startX = bbox[2] + spanLng * 0.06;
-  const startY = bbox[3];
+function buildDxfTablesSection(layerConfigs) {
+  return buildDxfSection(
+    'TABLES',
+    [buildDxfLtypeTable(), buildDxfLayerTable(layerConfigs), buildDxfStyleTable()].join(''),
+  );
+}
+
+function stripClosingPoint(ring) {
+  if (!ring || ring.length < 2) return ring || [];
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  if (first[0] === last[0] && first[1] === last[1]) {
+    return ring.slice(0, -1);
+  }
+  return ring.slice();
+}
+
+function buildDxfPolylineEntity(layer, ring) {
+  const vertices = stripClosingPoint(ring);
+  const header = [
+    dxfPair(0, 'POLYLINE'),
+    dxfPair(8, layer),
+    dxfPair(66, 1),
+    dxfPair(70, 1),
+    dxfPair(10, 0),
+    dxfPair(20, 0),
+    dxfPair(30, 0),
+  ].join('');
+  const vertexPairs = vertices.map(([lng, lat]) => [
+    dxfPair(0, 'VERTEX'),
+    dxfPair(8, layer),
+    dxfPair(10, lng),
+    dxfPair(20, lat),
+    dxfPair(30, 0),
+    dxfPair(70, 0),
+  ].join('')).join('');
+  return [header, vertexPairs, dxfPair(0, 'SEQEND')].join('');
+}
+
+function buildDxfInfoEntities(predio, bbox, spanX, spanY) {
+  const textHeight = Math.min(Math.max(Math.min(spanY * 0.012, spanX * 0.008), 1.2), 6);
+  const lineGap = textHeight * 1.65;
+  const blockOffsetX = Math.max(spanX * 0.08, 12);
+  const blockOffsetY = Math.max(spanY * 0.03, 4);
+  const startX = bbox[2] + blockOffsetX;
+  const startY = bbox[3] - blockOffsetY;
   const infoLines = [
     `CODIGO PREDIAL: ${predio.codigoPredial}`,
     `MUNICIPIO: ${predio.municipio}`,
     `DEPARTAMENTO: ${predio.departamento}`,
-    `AREA: ${formatNumber(predio.areaHa)} ha`,
-    `PERIMETRO: ${formatNumber(predio.perimetroM)} m`,
-    'SISTEMA DE REFERENCIA: WGS84 GEOGRAFICO',
+    `AREA: ${buildAreaPrimaryDisplay(predio)}`,
+    `PERIMETRO CARTOGRAFICO TOTAL: ${formatNumber(predio.perimetroM)} m`,
+    'SISTEMA DE REFERENCIA: MAGNA-SIRGAS / ORIGEN-NACIONAL',
+    'EPSG: 9377',
+    'UNIDADES: METROS',
+    'CatastroX: informacion catastral publica procesada para consulta tecnica.',
   ];
 
   return infoLines
@@ -2601,70 +4341,57 @@ function buildDxfInfoEntities(predio, bbox, spanLng, spanLat) {
     .join('');
 }
 
-function buildDxfWarningEntities(bbox, spanLng, spanLat) {
-  const textHeight = Math.max(spanLat * 0.024, 0.000065);
-  const lineGap = textHeight * 1.7;
-  const startX = bbox[0];
-  const startY = bbox[1] - spanLat * 0.09;
-  const lines = [
-    'Coordenadas en WGS84 geograficas. Para uso profesional proyectar al sistema oficial correspondiente.',
-    'CatastroX realiza analisis tecnico sobre informacion geografica y catastral publica disponible.',
-    'Este documento no reemplaza certificados oficiales del IGAC, gestor catastral, oficina de registro ni autoridad competente.',
-  ];
-
-  return lines
-    .map((line, index) => dxfTextEntity('CATASTROX_ADVERTENCIA', startX, startY - lineGap * index, textHeight, line))
-    .join('');
-}
-
 export function buildDxfText(source) {
-  const predio = normalizePredioForDeliverables(source);
+  const predio = normalizePredioForProjectedGis(source, { requireProjectedGeometry: true });
   if (!predio.ring.length) {
     throw new Error('El predio no tiene geometria disponible para generar DXF.');
   }
 
-  const layoutData = buildLayoutData(predio, resolvePlanLayoutOptions(predio));
-  const { referencePoints = [], referenceRows = [] } = layoutData;
-  const ring = predio.ring;
-  const bbox = getRingBounds(ring);
-  const spanLng = Math.max((bbox.maxLng || 0) - (bbox.minLng || 0), 0.0001);
-  const spanLat = Math.max((bbox.maxLat || 0) - (bbox.minLat || 0), 0.0001);
-  const vertexRadius = Math.max(Math.min(spanLng, spanLat) * 0.015, 0.00004);
-  const labelOffsetX = spanLng * 0.02;
-  const labelOffsetY = spanLat * 0.02;
-  const labelHeight = Math.max(spanLat * 0.028, 0.00007);
+  const shapeRings = (predio.geometryParts?.length
+    ? predio.geometryParts.flatMap((part) => [part.outerRing, ...(part.innerRings || [])])
+    : [predio.ring]).filter((ring) => ring.length >= 4);
+  const allDxfPoints = shapeRings.flat();
+  const bbox = getRingBounds(allDxfPoints);
+  const spanX = Math.max((bbox.maxLng || 0) - (bbox.minLng || 0), 1);
+  const spanY = Math.max((bbox.maxLat || 0) - (bbox.minLat || 0), 1);
+  const vertexRadius = Math.min(Math.max(Math.min(spanX, spanY) * 0.004, 0.25), 2);
+  const labelOffsetX = Math.max(spanX * 0.008, 1.2);
+  const labelOffsetY = Math.max(spanY * 0.008, 1.2);
+  const labelHeight = Math.min(Math.max(Math.min(spanY * 0.01, spanX * 0.006), 1.2), 5);
 
-  const vertexEntities = referencePoints
-    .map((entry, index) => {
-      const point = entry.point || entry;
-      const label = referenceRows[index]?.point || `P${index + 1}`;
-      if (!Array.isArray(point) || point.length < 2) return '';
-      return [
-        dxfPointEntity('CATASTROX_VERTICES', point[0], point[1]),
-        dxfCircleEntity('CATASTROX_VERTICES', point[0], point[1], vertexRadius),
-        dxfTextEntity('CATASTROX_ETIQUETAS', point[0] + labelOffsetX, point[1] + labelOffsetY, labelHeight, label),
-      ].join('');
-    })
+  const vertexEntities = (predio.geometryParts?.length ? predio.geometryParts : [{ outerRing: predio.ring, innerRings: [] }])
+    .flatMap((part, partIndex) => stripClosingPoint(part.outerRing).map((point, vertexIndex) => ({
+      point,
+      label: `POL${partIndex + 1}-P${vertexIndex + 1}`,
+    })))
+    .map(({ point, label }) => [
+      dxfPointEntity('CATASTROX_VERTICES', point[0], point[1]),
+      dxfCircleEntity('CATASTROX_VERTICES', point[0], point[1], vertexRadius),
+      dxfTextEntity('CATASTROX_ETIQUETAS', point[0] + labelOffsetX, point[1] + labelOffsetY, labelHeight, label),
+    ].join(''))
     .join('');
 
-  const sections = [
-    '0\nSECTION\n2\nHEADER\n0\nENDSEC\n',
-    `0\nSECTION\n2\nTABLES\n${buildDxfLayerTable([
-      'CATASTROX_POLIGONO',
-      'CATASTROX_VERTICES',
-      'CATASTROX_ETIQUETAS',
-      'CATASTROX_INFO',
-      'CATASTROX_ADVERTENCIA',
-    ])}0\nENDSEC\n`,
-    `0\nSECTION\n2\nENTITIES\n${buildDxfPolylineEntity('CATASTROX_POLIGONO', ring)}${vertexEntities}${buildDxfInfoEntities(
-      predio,
-      [bbox.minLng, bbox.minLat, bbox.maxLng, bbox.maxLat],
-      spanLng,
-      spanLat,
-    )}${buildDxfWarningEntities([bbox.minLng, bbox.minLat, bbox.maxLng, bbox.maxLat], spanLng, spanLat)}0\nENDSEC\n0\nEOF\n`,
+  const layerConfigs = [
+    { name: 'CATASTROX_POLIGONO', color: 3 },
+    { name: 'CATASTROX_VERTICES', color: -8 },
+    { name: 'CATASTROX_ETIQUETAS', color: -6 },
+    { name: 'CATASTROX_INFO', color: -5 },
   ];
-
-  return sections.join('');
+  return [
+    buildDxfHeaderSection(bbox),
+    buildDxfTablesSection(layerConfigs),
+    buildDxfSection('BLOCKS'),
+    buildDxfSection(
+      'ENTITIES',
+      `${shapeRings.map((ring) => buildDxfPolylineEntity('CATASTROX_POLIGONO', ring)).join('')}${vertexEntities}${buildDxfInfoEntities(
+        predio,
+        [bbox.minLng, bbox.minLat, bbox.maxLng, bbox.maxLat],
+        spanX,
+        spanY,
+      )}`,
+    ),
+    dxfPair(0, 'EOF'),
+  ].join('');
 }
 
 function downloadBytes(bytes, filename, mimeType) {
@@ -2673,18 +4400,28 @@ function downloadBytes(bytes, filename, mimeType) {
   const anchor = document.createElement('a');
   anchor.href = href;
   anchor.download = filename;
+  anchor.style.display = 'none';
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
-  setTimeout(() => URL.revokeObjectURL(href), 0);
+  setTimeout(() => URL.revokeObjectURL(href), 1000);
+}
+
+function diagnosePlanPdfError(predio, error) {
+  if (!predio.ring?.length && !predio.geometryParts?.length) return 'geometria_vacia';
+  const message = String(error?.message || '');
+  if (/tile|NetworkError|fetch/i.test(message)) return 'error_tile';
+  if (/font|FontFace/i.test(message)) return 'error_fuente';
+  if (/toBlob|canvas|Tainted/i.test(message)) return 'error_canvas';
+  return 'error_layout';
 }
 
 export async function downloadDiagnosticPdf(source) {
   const predio = normalizePredioForDeliverables(source);
   try {
-    downloadBytes(await buildDiagnosticPdfBytes(predio), `${fileSafeCode(predio)}.pdf`, 'application/pdf');
+    downloadBytes(await buildDiagnosticPdfBytes(source), `${fileSafeCode(predio)}.pdf`, 'application/pdf');
   } catch (error) {
-    console.error('CatastroX PDF diagnóstico', error);
+    console.error(`CatastroX PDF diagnóstico [${diagnosePlanPdfError(predio, error)}]`, error);
     window.alert('No fue posible generar el diagnóstico PDF en este momento. Intente nuevamente.');
   }
 }
@@ -2692,31 +4429,61 @@ export async function downloadDiagnosticPdf(source) {
 export async function downloadPlanPdf(source) {
   const predio = normalizePredioForDeliverables(source);
   try {
-    downloadBytes(await buildPlanPdfBytes(predio), `${fileSafeCode(predio)}_plano.pdf`, 'application/pdf');
+    downloadBytes(await buildPlanPdfBytes(source), `${fileSafeCode(predio)}_plano.pdf`, 'application/pdf');
   } catch (error) {
-    console.error('CatastroX PDF plano', error);
+    console.error(`CatastroX PDF plano [${diagnosePlanPdfError(predio, error)}]`, error);
     window.alert('No fue posible generar el plano PDF en este momento. Intente nuevamente.');
   }
 }
 
 export function downloadKml(source) {
   const predio = normalizePredioForDeliverables(source);
-  downloadBytes(textEncoder.encode(buildKmlText(predio)), `${fileSafeCode(predio)}.kml`, 'application/vnd.google-earth.kml+xml');
+  try {
+    downloadBytes(textEncoder.encode(buildKmlText(source)), `${fileSafeCode(predio)}.kml`, 'application/vnd.google-earth.kml+xml');
+  } catch (error) {
+    console.error('CatastroX KML', error);
+    window.alert('No fue posible generar el archivo KML: geometría del predio no disponible o inválida.');
+  }
 }
 
 export function downloadKmz(source) {
   const predio = normalizePredioForDeliverables(source);
-  downloadBytes(buildKmzBytes(predio), `${fileSafeCode(predio)}.kmz`, 'application/vnd.google-earth.kmz');
+  try {
+    downloadBytes(buildKmzBytes(source), `${fileSafeCode(predio)}.kmz`, 'application/vnd.google-earth.kmz');
+  } catch (error) {
+    console.error('CatastroX KMZ', error);
+    window.alert('No fue posible generar el archivo KMZ: geometría del predio no disponible o inválida.');
+  }
 }
 
 export function downloadShpZip(source) {
   const predio = normalizePredioForDeliverables(source);
-  downloadBytes(buildShpZipBytes(predio), `${fileSafeCode(predio)}.zip`, 'application/zip');
+  try {
+    downloadBytes(buildShpZipBytes(source), `${fileSafeCode(predio)}.zip`, 'application/zip');
+  } catch (error) {
+    console.error('CatastroX SHP', error);
+    window.alert('No fue posible generar los archivos GIS: geometría del predio no disponible o inválida.');
+  }
 }
 
 export function downloadDxf(source) {
   const predio = normalizePredioForDeliverables(source);
-  downloadBytes(textEncoder.encode(buildDxfText(predio)), `${fileSafeCode(predio)}.dxf`, 'application/dxf');
+  try {
+    downloadBytes(textEncoder.encode(buildDxfText(source)), `${fileSafeCode(predio)}.dxf`, 'application/dxf');
+  } catch (error) {
+    console.error('CatastroX DXF', error);
+    window.alert('No fue posible generar el archivo DXF: geometría del predio no disponible o inválida.');
+  }
+}
+
+export function downloadCoordinatesZip(source) {
+  const predio = normalizePredioForDeliverables(source);
+  try {
+    downloadBytes(buildCoordinatesZipBytes(source), `${fileSafeCode(predio)}_coordenadas_epsg9377.zip`, 'application/zip');
+  } catch (error) {
+    console.error('CatastroX coordenadas EPSG:9377', error);
+    window.alert('No fue posible generar el ZIP de coordenadas: geometría del predio no disponible o inválida.');
+  }
 }
 
 export async function buildDeliverableDebugSummary(source) {
@@ -2740,6 +4507,12 @@ export async function buildDeliverableDebugSummary(source) {
     department: predio.departamento,
     areaHa: predio.areaHa,
     ringPoints: predio.ring.length,
+    geometryPartCount: predio.geometryParts?.length || 0,
+    geometryRingCount: predio.geometryParts?.reduce((sum, part) => sum + 1 + (part.innerRings?.length || 0), 0) || 0,
+    geometryTotalPoints: predio.geometryParts?.reduce(
+      (sum, part) => sum + part.outerRing.length + (part.innerRings || []).reduce((innerSum, ring) => innerSum + ring.length, 0),
+      0,
+    ) || predio.ring.length,
     referencePoints: layoutData.referencePoints.length,
     pdfBytes: diagnosticPdfBytes,
     planPdfBytes,
@@ -2762,3 +4535,11 @@ export function buildCatastroXRegressionSnapshot(source) {
     regressionMetrics: technicalSnapshot.regressionMetrics,
   };
 }
+
+export {
+  buildExecutiveBottomNoteLayout,
+  buildUsoAlcancePageLayout,
+  computeBulletPanelHeight,
+  measureFuentePanel,
+  measureWrappedText,
+};

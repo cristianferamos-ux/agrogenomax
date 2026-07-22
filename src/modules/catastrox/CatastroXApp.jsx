@@ -3,7 +3,6 @@ import './styles/catastrox.css';
 import CatastroXBasicPage from './pages/CatastroXBasicPage.jsx';
 import CatastroXCalculatorPage from './pages/CatastroXCalculatorPage.jsx';
 import CatastroXFiscalPage from './pages/CatastroXFiscalPage.jsx';
-import CatastroXHomePage from './pages/CatastroXHomePage.jsx';
 import CatastroXLayout from './pages/CatastroXLayout.jsx';
 import CatastroXPlansPage from './pages/CatastroXPlansPage.jsx';
 import CatastroXPlusPage from './pages/CatastroXPlusPage.jsx';
@@ -18,8 +17,8 @@ export default function CatastroXApp() {
   return (
     <Routes>
       <Route element={<CatastroXLayout />}>
-        <Route index element={<CatastroXHomePage />} />
-        <Route path="buscar" element={<CatastroXSearchPage />} />
+        <Route index element={<CatastroXSearchPage />} />
+        <Route path="buscar" element={<Navigate to="/catastrox" replace />} />
         <Route path="resultado/:id" element={<CatastroXResultPage />} />
         <Route path="planes" element={<CatastroXPlansPage />} />
         <Route path="basico/:id" element={<CatastroXBasicPage />} />

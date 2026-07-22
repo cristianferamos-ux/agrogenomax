@@ -3,27 +3,33 @@ import {
   ClipboardList,
   Dna,
   FileBarChart,
+  HeartPulse,
+  Home,
   LayoutDashboard,
   MapPin,
   QrCode,
   Scale,
-  Settings,
+  ShieldPlus,
   Sprout,
-  Syringe,
+  Stethoscope,
 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 
 const navItems = [
-  { label: 'Dashboard', icon: LayoutDashboard, to: '/ganaderia/dashboard' },
-  { label: 'Animales', icon: Beef, to: '/ganaderia/animales' },
-  { label: 'Predios', icon: MapPin, to: '/ganaderia/predios' },
-  { label: 'Potreros', icon: Sprout, to: '/ganaderia/potreros' },
-  { label: 'QR', icon: QrCode, to: '/ganaderia/escanear-qr' },
-  { label: 'Pesajes', icon: Scale, to: '/ganaderia/animales' },
-  { label: 'Reproducción', icon: Dna, to: '/ganaderia/animales' },
-  { label: 'Sanidad', icon: Syringe, to: '/ganaderia/animales' },
-  { label: 'Reportes', icon: FileBarChart, to: '/ganaderia/animales' },
-  { label: 'Configuración', icon: Settings, to: '/ganaderia/proximamente/configuracion' },
+  { label: 'Home comercial', icon: Home, to: '/' },
+  { label: 'Inicio', icon: LayoutDashboard, to: '/ganaderia/dashboard' },
+  { label: 'Registro de Predio', icon: MapPin, to: '/ganaderia/predios' },
+  { label: 'Registro de Potreros', icon: Sprout, to: '/ganaderia/potreros' },
+  { label: 'Mis animales', icon: Beef, to: '/ganaderia/animales/listado' },
+  { label: 'Registro de Animales', icon: ClipboardList, to: '/ganaderia/animales' },
+  { label: 'Escanear QR', icon: QrCode, to: '/ganaderia/escanear-qr' },
+  { label: 'Ficha Animal', icon: ShieldPlus, to: '/ganaderia/animales/listado?modulo=ficha' },
+  { label: 'Pesajes', icon: Scale, to: '/ganaderia/animales/listado?modulo=pesajes' },
+  { label: 'Vacunaciones', icon: HeartPulse, to: '/ganaderia/animales/listado?modulo=vacunaciones' },
+  { label: 'Tratamientos', icon: Stethoscope, to: '/ganaderia/animales/listado?modulo=tratamientos' },
+  { label: 'Reproducción', icon: Sprout, to: '/ganaderia/animales/listado?modulo=reproduccion' },
+  { label: 'Genética', icon: Dna, to: '/ganaderia/animales/listado?modulo=genetica' },
+  { label: 'Reportes', icon: FileBarChart, to: '/ganaderia/proximamente/reportes' },
 ];
 
 export default function GanaderiaSidebar() {
@@ -37,7 +43,8 @@ export default function GanaderiaSidebar() {
       </div>
       <div className="gan-dash-sidebar-links">
         {navItems.map((item) => {
-          const isActive = location.pathname === item.to;
+          const itemPath = item.to.split('?')[0];
+          const isActive = location.pathname === itemPath && (!item.to.includes('?') || location.search === `?${item.to.split('?')[1]}`);
           const Icon = item.icon;
           return (
             <Link

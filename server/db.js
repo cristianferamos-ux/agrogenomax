@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import pg from 'pg';
+import { assertConfigValidated } from './config/env.js';
 
 const { Pool } = pg;
 
@@ -8,14 +9,76 @@ dotenv.config({ path: 'server/.env', quiet: true });
 
 export const schema = process.env.PGSCHEMA || 'agx';
 
-export const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/AGROGENOMAX',
-});
+let poolInstance = null;
+
+/**
+ * Crea (o reutiliza) el Pool de PostgreSQL de `agx`, de forma perezosa.
+ *
+ * CORRECCIÓN LOTE-002: nunca se instancia al importar este módulo -- solo
+ * en el primer acceso real, y solo si la configuración central (APP_ENV)
+ * ya fue validada (server/config/env.js). Nunca fabrica una cadena de
+ * conexión por defecto: si DATABASE_URL falta, falla con un error claro
+ * en vez de conectar silenciosamente a un valor inseguro hardcodeado.
+ *
+ * @param {NodeJS.ProcessEnv | Record<string, string | undefined>} source
+ */
+export function getDbPool(source = process.env) {
+  if (poolInstance) return poolInstance;
+
+  assertConfigValidated();
+
+  const connectionString = source.DATABASE_URL;
+  if (!connectionString) {
+    const error = new Error(
+      'DATABASE_URL no está configurada. No es posible crear la conexión a la base de datos agx.',
+    );
+    error.status = 503;
+    error.code = 'AGX_DB_NOT_CONFIGURED';
+    throw error;
+  }
+
+  poolInstance = new Pool({ connectionString });
+  return poolInstance;
+}
+
+// Claves de "inspección/serialización" (no operativas) que nunca deben
+// disparar la construcción del Pool real. Sin este resguardo, un
+// `console.log(pool)`, un `await pool` accidental (comprobación estándar
+// de thenable vía `.then`), o un `JSON.stringify` sobre un objeto que lo
+// contenga, forzarían una creación prematura -- o un error de validación
+// -- solo por haber sido inspeccionados, no por un uso operativo real.
+const PROXY_NON_OPERATIONAL_STRING_KEYS = new Set(['then', 'toJSON', 'toString', 'valueOf', 'constructor']);
+
+// Compatibilidad con consumidores existentes que usan `pool.connect()`
+// directamente (server/routes/animales.js, server/routes/qr.js), fuera
+// del alcance de archivos permitidos de este lote. Proxy perezoso: nunca
+// instancia el Pool real hasta el primer acceso operativo a una de sus
+// propiedades/métodos -- nunca como efecto colateral de importar este
+// módulo, ni de ser inspeccionado/logueado/serializado.
+export const pool = new Proxy(
+  /** @type {import('pg').Pool} */ ({}),
+  {
+    get(target, prop) {
+      if (typeof prop === 'symbol' || PROXY_NON_OPERATIONAL_STRING_KEYS.has(prop)) {
+        // Defiere al objeto vacío subyacente (y a su cadena de prototipos
+        // estándar de Object) para inspección/serialización/coerción --
+        // así `String(pool)`/`\`${pool}\`` siguen funcionando (resuelven
+        // por Object.prototype.toString/valueOf) sin lanzar y sin
+        // disparar la construcción del Pool real.
+        return Reflect.get(target, prop, target);
+      }
+
+      const realPool = getDbPool();
+      const value = Reflect.get(realPool, prop, realPool);
+      return typeof value === 'function' ? value.bind(realPool) : value;
+    },
+  },
+);
 
 const columnCache = new Map();
 
 export async function query(text, params = []) {
-  return pool.query(text, params);
+  return getDbPool().query(text, params);
 }
 
 export function tableName(name) {
@@ -120,4 +183,67 @@ export async function updateDynamic(table, id, values, client = null) {
   );
 
   return result.rows[0];
+}
+
+// LOTE-007 (graceful shutdown, ADR-012 §21) -- corrección final de ciclo
+// de vida: el estado de cierre asocia explícitamente `pool` + `promise`
+// en un único objeto (`poolClosingState`), nunca dos variables sueltas.
+// Respeta la inicialización perezosa -- si nunca se creó, no se crea
+// solo para cerrarlo.
+//
+// Identidad estricta en dos niveles:
+// 1) Una llamada repetida MIENTRAS la misma instancia sigue cerrándose
+//    devuelve exactamente el mismo objeto Promise (comparación
+//    `poolClosingState.pool === poolToClose`).
+// 2) El `finally` de una instancia (A) solo limpia `poolInstance` si
+//    todavía apunta a A, y solo limpia `poolClosingState` si ese estado
+//    sigue correspondiendo a LA PROMESA que ese `finally` originó
+//    (`poolClosingState.promise === closePromise`) -- no basta con
+//    comparar el pool, porque una instancia nueva (B) podría haber
+//    comenzado su propio cierre (con su propio `poolClosingState`) antes
+//    de que el `finally` de A se ejecute; comparar por promesa evita que
+//    A borre el estado de cierre de B en esa carrera.
+//
+// No usa `async`: closeMainDbPool() debe devolver el MISMO objeto
+// Promise en llamadas repetidas para la misma instancia, lo que una
+// función `async` no garantiza (cada `await`/retorno de una función
+// async envuelve el valor en una Promise nueva).
+let poolClosingState = null; // { pool, promise } | null
+
+export function closeMainDbPool() {
+  const poolToClose = poolInstance;
+
+  if (!poolToClose) {
+    return Promise.resolve();
+  }
+
+  if (poolClosingState?.pool === poolToClose) {
+    return poolClosingState.promise;
+  }
+
+  const closePromise = Promise.resolve()
+    .then(() => poolToClose.end())
+    .finally(() => {
+      if (poolInstance === poolToClose) {
+        poolInstance = null;
+      }
+      if (poolClosingState?.promise === closePromise) {
+        poolClosingState = null;
+      }
+    });
+
+  poolClosingState = { pool: poolToClose, promise: closePromise };
+  return closePromise;
+}
+
+// Exclusivamente para pruebas unitarias aisladas (LOTE-002): reporta si ya
+// existe una instancia real del Pool, sin exponerla, y permite resetear
+// el estado entre casos.
+export function __hasDbPoolForTests() {
+  return poolInstance !== null;
+}
+
+export function __resetDbPoolForTests() {
+  poolInstance = null;
+  poolClosingState = null;
 }

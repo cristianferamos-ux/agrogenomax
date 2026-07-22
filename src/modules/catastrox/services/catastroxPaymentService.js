@@ -1,4 +1,14 @@
 import { getCatastroxPackage, getCatastroxPackageRank } from '../config/catastroxPackages.js';
+// LOTE-003 (ADR-014 §13/§21): hallazgo de riesgo real corregido aquí --
+// fuera de localhost, la implementación anterior usaba
+// VITE_API_URL/VITE_AGX_API_URL (si estuviera configurada en build) como
+// candidato PRINCIPAL en lugar del relay same-origin, lo que habría
+// permitido que un despliegue de staging/producción llamara directamente
+// a una URL externa (p. ej. Railway) si esas variables llegaran a
+// poblarse. La resolución ahora vive exclusivamente en
+// src/config/runtimeConfig.js, que fuera de development local siempre
+// devuelve únicamente el relay same-origin (/api).
+import { resolveApiBaseCandidates } from '../../../config/runtimeConfig.js';
 
 const PURCHASE_STORAGE_KEY = 'catastrox_purchases_v2';
 const LEGACY_STORAGE_KEYS = [
@@ -6,8 +16,6 @@ const LEGACY_STORAGE_KEYS = [
   'catastrox_paid_packages',
   'catastrox_package_purchases',
 ];
-const ENV = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : {};
-const CONFIGURED_API_BASE = ENV.VITE_API_URL || ENV.VITE_AGX_API_URL || '';
 const WOMPI_WIDGET_SRC = 'https://checkout.wompi.co/widget.js';
 const WOMPI_WIDGET_TIMEOUT_MS = 15000;
 const WOMPI_PLACEHOLDER_PATTERN = /TU_|REEMPLAZAR|PLACEHOLDER|XXX|DEMO/i;
@@ -17,39 +25,8 @@ function isBrowser() {
   return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
 }
 
-function isLocalhost() {
-  if (typeof window === 'undefined') return false;
-  return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-}
-
-function normalizeApiBase(value) {
-  return String(value || '').trim().replace(/\/$/, '');
-}
-
 function getApiBaseCandidates() {
-  const configuredApiBase = normalizeApiBase(CONFIGURED_API_BASE);
-  const candidates = [];
-
-  if (isLocalhost()) {
-    candidates.push('/api');
-    if (configuredApiBase && !/^https?:\/\/localhost:3001\/?$/i.test(configuredApiBase) && !/^https?:\/\/127\.0\.0\.1:3001\/?$/i.test(configuredApiBase)) {
-      candidates.push(configuredApiBase);
-    }
-  } else {
-    if (configuredApiBase) {
-      candidates.push(configuredApiBase);
-    }
-
-    if (!configuredApiBase) {
-      candidates.push('/api');
-    }
-  }
-
-  if (!candidates.length) {
-    candidates.push('/api');
-  }
-
-  return [...new Set(candidates.filter(Boolean))];
+  return resolveApiBaseCandidates();
 }
 
 function normalizePackageId(value) {

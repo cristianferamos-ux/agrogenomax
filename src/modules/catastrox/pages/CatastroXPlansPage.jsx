@@ -1,16 +1,11 @@
 import CatastroXPageActions from '../components/CatastroXPageActions.jsx';
-import CatastroXPlanCard from '../components/CatastroXPlanCard.jsx';
-import {
-  formatCatastroxPackagePrice,
-  getCatastroxPackageRoute,
-  getCatastroxPackages,
-} from '../config/catastroxPackages.js';
+import CatastroXPackageCards from '../components/CatastroXPackageCards.jsx';
+import CatastroXCommercialTransparency from '../components/CatastroXCommercialTransparency.jsx';
 import { getLastLookup } from '../services/catastroxApi.js';
 
 export default function CatastroXPlansPage() {
   const lastLookup = getLastLookup();
   const activeRouteId = lastLookup?.predio?.routeId || lastLookup?.predio?.id || 'albania-demo';
-  const packages = getCatastroxPackages();
 
   return (
     <section className="catastrox-page">
@@ -27,21 +22,8 @@ export default function CatastroXPlansPage() {
           { label: 'Buscar predio', to: '/catastrox/buscar', tone: 'secondary' },
         ]}
       />
-      <div className="catastrox-grid">
-        {packages.map((pkg) => (
-          <CatastroXPlanCard
-            key={pkg.id}
-            title={pkg.title}
-            subtitle={pkg.label}
-            price={formatCatastroxPackagePrice(pkg.priceCop)}
-            description={pkg.description}
-            to={getCatastroxPackageRoute(pkg.id, activeRouteId)}
-            tone={pkg.tone}
-            features={pkg.features}
-            ctaLabel={`Comprar ${pkg.label}`}
-          />
-        ))}
-      </div>
+      <CatastroXPackageCards routeId={activeRouteId} />
+      <CatastroXCommercialTransparency />
     </section>
   );
 }
