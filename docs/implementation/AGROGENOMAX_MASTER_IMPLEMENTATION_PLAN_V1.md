@@ -4,7 +4,7 @@
 - **Fecha**: 2026-07-18
 - **Responsables**: Equipo técnico AgroGenomaX / CRH Soluciones Integrales S.A.S.
 - **Repositorio**: `agx-home-precomercial`
-- **Rama base**: `feature/home-precomercial-v2-post-merge` (rama actual del working tree al momento de crear este plan — verificar antes de abrir cada lote que sigue siendo la rama base vigente, o la que el equipo designe formalmente como base de integración)
+- **Rama base**: `main` (rama actual del working tree al momento de crear este plan — verificar antes de abrir cada lote que sigue siendo la rama base vigente, o la que el equipo designe formalmente como base de integración)
 - **Commit de referencia**: `26ca461` (`fix(catastrox): remove silent mock fallback`) — HEAD del repositorio al momento de crear este plan; corresponde al Lote 1, ya ejecutado y aprobado, documentado en §22
 
 ## Estado vigente del plan
