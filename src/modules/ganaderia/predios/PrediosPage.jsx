@@ -42,7 +42,7 @@ export default function PrediosPage() {
       await ganaderiaApi.createPredio(form);
       setForm(initialForm);
       await load();
-      setStatus('Predio guardado en PostgreSQL.');
+      setStatus('Predio guardado en tu cuenta.');
     } catch (err) {
       setError(err.message);
     }

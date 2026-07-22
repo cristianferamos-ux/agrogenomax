@@ -14,6 +14,32 @@ import { ganaderiaApi } from '../api/ganaderiaApi.js';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
 import { formatDateDisplay as formatDateDisplayValue } from '../utils/dateFormat.js';
 import { createProductiveReportPdfBlob, productiveReportFileName } from './productiveReportPdf.js';
+import {
+  valueOf,
+  normalizeDateInput as formatDate,
+  getFechaNacimiento,
+  getFechaNacimientoRealAnimal,
+  getFechaNacimientoEstimadaPorEdad,
+  formatAgeLabel as animalAgeLabel,
+} from '../engine/edad.js';
+import { normalizeSex, categoriaCebaPorSexo, clasificarCategoriaPorEdadSexo, clasificarCategoriaActual } from '../engine/categoria.js';
+import {
+  getFecha,
+  getPeso,
+  sortByDateAsc,
+  getFechaNacimientoProductiva,
+  daysSince,
+  obtenerUmbralesGDP,
+  thresholdText,
+  technicalInterpretation,
+  classifyProductivity,
+  classifyTimeSinceLastWeighing,
+  classForGdp,
+  classForDifference,
+  chartColorForState,
+  enrichRows,
+  calcularTendenciaPesajes,
+} from '../engine/pesajes.js';
 
 function todayLocal() {
   const now = new Date();
@@ -33,42 +59,10 @@ function toApiDecimal(value) {
   return value.replace(',', '.');
 }
 
-function valueOf(row, aliases) {
-  return aliases.map((key) => row?.[key]).find((value) => value !== undefined && value !== null) || '';
-}
-
-function getFecha(row) {
-  return valueOf(row, ['fecha_pesaje', 'fecha', 'weighing_date']);
-}
-
-function getPeso(row, aliases = ['peso_kg', 'peso', 'weight_kg']) {
-  const value = valueOf(row, aliases);
-  return value === '' ? null : Number(value);
-}
-
 function getPesoNacimiento(animal) {
   const value = valueOf(animal, ['peso_nacimiento', 'peso_nacimiento_kg', 'birth_weight_kg']);
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-}
-
-function getFechaNacimiento(animal) {
-  return getFechaNacimientoRealAnimal(animal) || getFechaNacimientoEstimadaPorEdad(animal);
-}
-
-function getFechaNacimientoRealAnimal(animal) {
-  const explicit = formatDate(valueOf(animal, ['fecha_nacimiento', 'fechaNacimiento', 'nacimiento', 'fecha_nac', 'fechaNacimientoAnimal']));
-  if (explicit && !Number.isNaN(new Date(`${explicit}T00:00:00`).getTime())) return explicit;
-  return '';
-}
-
-function getFechaNacimientoEstimadaPorEdad(animal) {
-  const months = parseNumericAge(valueOf(animal, ['edad_meses', 'age_months']));
-  if (!Number.isFinite(months)) return '';
-  const days = Math.round((months > 60 ? months / 30.44 : months) * 30.44);
-  const estimated = new Date(`${todayLocal()}T00:00:00`);
-  estimated.setDate(estimated.getDate() - days);
-  return estimated.toISOString().slice(0, 10);
 }
 
 function animalLabel(animal, fallback = 'Animal') {
@@ -85,94 +79,6 @@ function animalQrLabel(animal) {
 
 function animalBreedLabel(animal) {
   return valueOf(animal, ['raza', 'nombre_raza', 'raza_principal', 'composicion_racial', 'breed']) || '--';
-}
-
-function animalAgeLabel(animal, fallbackBirth = '') {
-  const birth = getFechaNacimientoRealAnimal(animal) || fallbackBirth || getFechaNacimientoEstimadaPorEdad(animal);
-  const age = calcularEdadEnFecha(birth, todayLocal());
-  if (age) return age.edadTexto;
-  const months = obtenerEdadMeses(animal);
-  return Number.isFinite(months) ? `${formatNumber(months)} meses` : '--';
-}
-
-function parseNumericAge(value) {
-  if (value === undefined || value === null || value === '') return null;
-  const match = String(value).replace(',', '.').match(/-?\d+(\.\d+)?/);
-  if (!match) return null;
-  const parsed = Number(match[0]);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function obtenerEdadMeses(animal) {
-  const explicitMonths = parseNumericAge(valueOf(animal, ['edad_meses', 'age_months']));
-  if (Number.isFinite(explicitMonths)) return Math.max(0, Math.floor(explicitMonths));
-
-  const edad = parseNumericAge(valueOf(animal, ['edad', 'age']));
-  if (Number.isFinite(edad)) {
-    return Math.max(0, Math.floor(edad > 60 ? edad / 30.44 : edad));
-  }
-
-  const birth = formatDate(valueOf(animal, ['fecha_nacimiento', 'fechaNacimiento', 'nacimiento', 'birth_date']));
-  if (!birth) return null;
-  const start = new Date(birth);
-  const end = new Date(todayLocal());
-  if (Number.isNaN(start.getTime())) return null;
-  let months = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
-  if (end.getDate() < start.getDate()) months -= 1;
-  return Math.max(0, months);
-}
-
-function calendarMonthsAndDays(start, end) {
-  let months = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
-  if (end.getDate() < start.getDate()) months -= 1;
-  const anchor = new Date(start);
-  anchor.setMonth(anchor.getMonth() + months);
-  const remainingDays = Math.max(0, Math.round((end - anchor) / 86400000));
-  return { months: Math.max(0, months), remainingDays };
-}
-
-function calcularEdadEnFecha(fechaNacimiento, fechaPesaje) {
-  const birth = formatDate(fechaNacimiento);
-  const weighing = formatDate(fechaPesaje);
-  if (!birth || !weighing) return null;
-  const start = new Date(`${birth}T00:00:00`);
-  const end = new Date(`${weighing}T00:00:00`);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return null;
-  const dias = Math.round((end - start) / 86400000);
-  const { months, remainingDays } = calendarMonthsAndDays(start, end);
-  const edadMesesDecimal = Number((months + remainingDays / 30.44).toFixed(2));
-  let edadTexto;
-  if (dias === 0) {
-    edadTexto = '0 días';
-  } else if (edadMesesDecimal < 2) {
-    if (months <= 0) {
-      edadTexto = dias === 1 ? '1 día' : `${dias} días`;
-    } else if (remainingDays <= 0) {
-      edadTexto = months === 1 ? '1 mes' : `${months} meses`;
-    } else {
-      const monthText = months === 1 ? '1 mes' : `${months} meses`;
-      const dayText = remainingDays === 1 ? '1 día' : `${remainingDays} días`;
-      edadTexto = `${monthText} y ${dayText}`;
-    }
-  } else {
-    edadTexto = months === 1 ? '1 mes' : `${months} meses`;
-  }
-  return { dias, edadMesesDecimal, edadTexto };
-}
-
-function edadMesesEnFechaPesaje(fechaNacimiento, fechaPesaje) {
-  return calcularEdadEnFecha(fechaNacimiento, fechaPesaje)?.edadMesesDecimal ?? null;
-}
-
-function normalizeSex(value) {
-  const text = String(value || '').trim().toLowerCase();
-  if (['m', 'macho', 'male', 'masculino'].includes(text)) return 'macho';
-  if (['h', 'hembra', 'female', 'femenino'].includes(text)) return 'hembra';
-  return '';
-}
-
-function formatDate(value) {
-  return value ? String(value).slice(0, 10) : '';
 }
 
 function formatDateDisplay(value) {
@@ -233,161 +139,6 @@ function initialIntervalPlaceholder(row, value) {
   return row?.es_peso_nacimiento || !Number.isFinite(row?.peso_anterior) ? '----' : formatDays(value);
 }
 
-function categoriaCebaPorSexo(sexo) {
-  if (sexo === 'hembra') return 'Novilla de Ceba';
-  if (sexo === 'macho') return 'Novillo de Ceba';
-  return 'Animal en Ceba';
-}
-
-function categoriaNacimientoPorSexo(animal) {
-  const sexo = normalizeSex(valueOf(animal, ['sexo', 'sex']));
-  if (sexo === 'hembra') return 'Ternera lactante';
-  if (sexo === 'macho') return 'Ternero lactante';
-  return 'Cría lactante';
-}
-
-function isBirthWeightRow(row, previous) {
-  const notes = String(valueOf(row, ['observaciones', 'notes']) || '');
-  return Boolean(row?.es_peso_nacimiento) || (!previous && /peso\s+(inicial|al\s+nacimiento|nacimiento)|nacimiento/i.test(notes));
-}
-
-function isBirthReferenceRow(row) {
-  const notes = String(valueOf(row, ['observaciones', 'notes']) || '');
-  return Boolean(row?.es_peso_nacimiento) || /peso\s+(inicial|al\s+nacimiento|nacimiento)|nacimiento/i.test(notes);
-}
-
-function getFechaNacimientoProductiva(animal, rows = []) {
-  const ordered = sortByDateAsc(rows);
-  const realBirthDate = getFechaNacimientoRealAnimal(animal);
-  if (realBirthDate) return realBirthDate;
-  const birthRow = ordered.find((row) => isBirthReferenceRow(row));
-  if (birthRow) return formatDate(getFecha(birthRow));
-  return formatDate(getFecha(ordered[0])) || getFechaNacimientoEstimadaPorEdad(animal);
-}
-
-function daysSince(value) {
-  const date = formatDate(value);
-  if (!date) return '—';
-  const diff = Math.floor((new Date(todayLocal()) - new Date(date)) / 86400000);
-  if (!Number.isFinite(diff)) return '—';
-  if (diff === 0) return 'Hoy';
-  if (diff === 1) return 'Hace 1 día';
-  return `Hace ${diff} días`;
-}
-
-function sortByDateAsc(rows) {
-  return [...rows].sort((a, b) => {
-    const dateA = new Date(getFecha(a)).getTime() || 0;
-    const dateB = new Date(getFecha(b)).getTime() || 0;
-    const idA = a.es_peso_nacimiento ? -1 : Number(a.pesaje_id || 0);
-    const idB = b.es_peso_nacimiento ? -1 : Number(b.pesaje_id || 0);
-    return dateA - dateB || idA - idB;
-  });
-}
-
-function clasificarCategoriaProductiva(animal) {
-  const ageMonths = obtenerEdadMeses(animal);
-  const sexo = normalizeSex(valueOf(animal, ['sexo', 'sex']));
-  const context = String(valueOf(animal, ['proposito', 'propósito', 'categoria', 'categoria_productiva', 'category', 'uso_productivo']) || '').toLowerCase();
-
-  if (/(receptora|vientre|donadora|reproducci[oó]n)/i.test(context)) return 'Vientre / receptora';
-  if (sexo === 'macho' && /(reproductor|toro)/i.test(context)) return 'Toro reproductor';
-  if (/(ceba|engorde)/i.test(context)) return categoriaCebaPorSexo(sexo);
-
-  if (!Number.isFinite(ageMonths)) return 'Categoría no determinada';
-
-  if (sexo === 'hembra') {
-    if (ageMonths <= 6) return 'Ternera lactante';
-    if (ageMonths <= 12) return 'Ternera desteta / levante inicial';
-    if (ageMonths <= 24) return 'Novilla de levante / desarrollo';
-    if (ageMonths <= 36) return 'Novilla de vientre / desarrollo final';
-    return 'Vaca / vientre adulto';
-  }
-
-  if (sexo === 'macho') {
-    if (ageMonths <= 6) return 'Ternero lactante';
-    if (ageMonths <= 12) return 'Ternero desteto / levante inicial';
-    if (ageMonths <= 24) return 'Novillo de levante / desarrollo';
-    if (ageMonths <= 36) return categoriaCebaPorSexo(sexo);
-    return 'Toro / macho adulto';
-  }
-
-  if (ageMonths <= 6) return 'Cría lactante';
-  if (ageMonths <= 12) return 'Levante inicial';
-  if (ageMonths <= 24) return 'Levante / desarrollo';
-  if (ageMonths <= 36) return 'Desarrollo final';
-  return 'Adulto productivo';
-}
-
-function categoriaBasePorEdadSexo(ageMonths, sexo) {
-  if (!Number.isFinite(ageMonths)) return 'Categoría no determinada';
-
-  if (sexo === 'hembra') {
-    if (ageMonths < 8) return 'Ternera lactante';
-    if (ageMonths < 12) return 'Ternera desteta';
-    if (ageMonths < 24) return 'Novilla de levante';
-    if (ageMonths < 36) return 'Novilla de desarrollo';
-    return 'Vaca adulta';
-  }
-
-  if (sexo === 'macho') {
-    if (ageMonths < 8) return 'Ternero lactante';
-    if (ageMonths < 12) return 'Ternero desteto';
-    if (ageMonths < 24) return 'Novillo de levante';
-    if (ageMonths < 36) return categoriaCebaPorSexo(sexo);
-    return 'Toro adulto';
-  }
-
-  if (ageMonths < 8) return 'Cría lactante';
-  if (ageMonths < 12) return 'Destete';
-  if (ageMonths < 24) return 'Levante';
-  if (ageMonths < 36) return 'Desarrollo';
-  return 'Adulto productivo';
-}
-
-function clasificarCategoriaPorEdadSexo(animal, fechaPesaje = todayLocal(), esPrimerPesaje = false, fechaNacimientoFallback = '') {
-  if (esPrimerPesaje) return categoriaNacimientoPorSexo(animal);
-
-  const sexo = normalizeSex(valueOf(animal, ['sexo', 'sex']));
-  const birth = getFechaNacimientoRealAnimal(animal) || fechaNacimientoFallback || getFechaNacimientoEstimadaPorEdad(animal);
-  const age = calcularEdadEnFecha(birth, fechaPesaje);
-  const ageMonths = age?.edadMesesDecimal;
-  const context = String(valueOf(animal, ['proposito', 'propósito', 'categoria', 'categoria_productiva', 'category', 'uso_productivo', 'estado_reproductivo']) || '').toLowerCase();
-
-  if (sexo === 'hembra' && Number.isFinite(ageMonths)) {
-    if (/(gestante)/i.test(context) && ageMonths >= 18) return 'Vaca gestante';
-    if (/(lactante)/i.test(context) && ageMonths >= 18) return 'Vaca lactante';
-    if (/(receptora|vientre|donadora|reproducci[oó]n)/i.test(context) && ageMonths >= 18) return 'Vientre / receptora';
-  }
-
-  if (sexo === 'macho' && Number.isFinite(ageMonths)) {
-    if (/(reproductor|toro)/i.test(context) && ageMonths >= 24) return 'Toro reproductor';
-    if (/(ceba|engorde)/i.test(context) && ageMonths >= 12) return categoriaCebaPorSexo(sexo);
-  }
-
-  return categoriaBasePorEdadSexo(ageMonths, sexo);
-}
-
-function clasificarCategoriaActual(animal) {
-  return clasificarCategoriaPorEdadSexo(animal, todayLocal(), false);
-}
-
-function obtenerUmbralesGDP(categoria) {
-  const text = String(categoria || '').toLowerCase();
-  if (/lactante/.test(text)) return { excelente: 0.7, aceptable: 0.4 };
-  if (/destet/.test(text)) return { excelente: 0.8, aceptable: 0.5 };
-  if (/novill[ao] de levante|levante/.test(text)) return { excelente: 0.75, aceptable: 0.45 };
-  if (/novilla de desarrollo/.test(text)) return { excelente: 0.6, aceptable: 0.3 };
-  if (/novill[ao] de ceba|novillo de desarrollo/.test(text)) return { excelente: 0.9, aceptable: 0.6 };
-  if (/vaca/.test(text)) return { excelente: 0.3, aceptable: 0 };
-  if (/toro/.test(text)) return { excelente: 0.4, aceptable: 0 };
-  return { excelente: 0.8, aceptable: 0.5 };
-}
-
-function thresholdText(thresholds) {
-  return `Excelente >= ${formatNumber(thresholds.excelente)} kg/día | Aceptable ${formatNumber(thresholds.aceptable)} a ${formatNumber(thresholds.excelente - 0.01)} kg/día | Crítico < ${formatNumber(thresholds.aceptable)} kg/día`;
-}
-
 function ThresholdSemaforo({ thresholds }) {
   return (
     <strong className="gan-threshold-list">
@@ -396,150 +147,6 @@ function ThresholdSemaforo({ thresholds }) {
       <span className="gan-threshold-critical">Crítico &lt; {formatNumber(thresholds.aceptable)} kg/día</span>
     </strong>
   );
-}
-
-function technicalInterpretation(statusInfo, timeAlert) {
-  if (statusInfo.label === 'Sin datos') return 'Se requieren al menos dos pesajes para interpretar el desempeño productivo.';
-  if (statusInfo.label === 'Excelente') return 'Ganancia diaria de peso superior al estándar esperado para su categoría productiva.';
-  if (statusInfo.label === 'Aceptable') return 'Ganancia diaria de peso dentro del rango esperado. Mantener seguimiento productivo.';
-  if (timeAlert?.className === 'estado-vencida') return 'Se recomienda actualizar el seguimiento de pesaje y revisar nutrición, oferta forrajera y estado sanitario.';
-  return 'Ganancia diaria de peso inferior al estándar esperado para la categoría actual. Revisar nutrición, oferta forrajera, sanidad, genética y manejo.';
-}
-
-function classifyProductivity(gdpReciente, difference, hasEnoughData, thresholds) {
-  if (!hasEnoughData) {
-    return {
-      label: 'Sin datos',
-      className: 'estado-sin-programacion',
-      icon: '⚪',
-      description: 'Se requieren al menos dos pesajes para calcular tendencia productiva.',
-    };
-  }
-
-  if ((Number.isFinite(difference) && difference < 0) || (Number.isFinite(gdpReciente) && gdpReciente < thresholds.aceptable)) {
-    return {
-      label: 'Crítico',
-      className: 'estado-vencida',
-      icon: '🔴',
-      description: 'Ganancia diaria de peso inferior al estándar esperado para la categoría actual. Revisar nutrición, oferta forrajera, sanidad, genética y manejo.',
-    };
-  }
-
-  if (gdpReciente >= thresholds.excelente) {
-    return {
-      label: 'Excelente',
-      className: 'estado-vigente',
-      icon: '🟢',
-      description: 'Ganancia diaria de peso superior al estándar esperado para su categoría productiva.',
-    };
-  }
-
-  return {
-    label: 'Aceptable',
-    trendLabel: 'Aceptable',
-    className: 'estado-proxima',
-    icon: '🟡',
-    description: 'Ganancia diaria de peso dentro del rango esperado. Mantener seguimiento productivo.',
-  };
-}
-
-function classifyTimeSinceLastWeighing(days) {
-  if (!Number.isFinite(days)) {
-    return {
-      label: 'Sin fecha',
-      className: 'estado-sin-programacion',
-      message: 'No existe fecha de último pesaje.',
-    };
-  }
-
-  if (days <= 30) {
-    return {
-      label: 'Actualizado',
-      className: 'estado-vigente',
-      message: 'Pesaje actualizado.',
-    };
-  }
-
-  if (days <= 60) {
-    return {
-      label: 'Recomendado',
-      className: 'estado-proxima',
-      message: 'Se recomienda nuevo pesaje.',
-    };
-  }
-
-  return {
-    label: 'Atrasado',
-    className: 'estado-vencida',
-    message: 'Alerta por falta de seguimiento.',
-  };
-}
-
-function classifyRow(row, thresholds = { excelente: 0.8, aceptable: 0.5 }) {
-  if (row.es_peso_nacimiento || !Number.isFinite(row.peso_anterior)) return { label: 'Inicial', className: 'estado-sin-programacion' };
-  if (Number.isFinite(row.diferencia_kg) && row.diferencia_kg < 0) return { label: 'Pérdida de peso', className: 'estado-vencida' };
-  if (Number.isFinite(row.ganancia_diaria_kg) && row.ganancia_diaria_kg >= thresholds.excelente) return { label: 'Excelente', className: 'estado-vigente' };
-  if (Number.isFinite(row.ganancia_diaria_kg) && row.ganancia_diaria_kg >= thresholds.aceptable) return { label: 'Aceptable', className: 'estado-proxima' };
-  return { label: 'Crítico', className: 'estado-vencida' };
-}
-
-function classForGdp(value, thresholds) {
-  if (!Number.isFinite(value)) return 'estado-sin-programacion';
-  if (value >= thresholds.excelente) return 'estado-vigente';
-  if (value >= thresholds.aceptable) return 'estado-proxima';
-  return 'estado-vencida';
-}
-
-function classForDifference(value) {
-  if (!Number.isFinite(value)) return 'estado-sin-programacion';
-  if (value < 0) return 'estado-vencida';
-  if (value === 0) return 'estado-proxima';
-  return 'estado-vigente';
-}
-
-function chartColorForState(className) {
-  if (className === 'estado-vigente') return '#9aff00';
-  if (className === 'estado-proxima') return '#ffd600';
-  if (className === 'estado-vencida') return '#ff3b3b';
-  return '#6ea8ff';
-}
-
-function enrichRows(rows, categoriaProductiva, thresholds, animal) {
-  const ordered = sortByDateAsc(rows).filter((row) => Number.isFinite(getPeso(row)));
-  const fechaNacimiento = getFechaNacimientoProductiva(animal, ordered);
-  return ordered.map((row, index) => {
-    const previous = ordered[index - 1];
-    const peso = getPeso(row);
-    const pesoAnterior = previous ? getPeso(previous) : null;
-    const currentDate = new Date(getFecha(row)).getTime();
-    const previousDate = previous ? new Date(getFecha(previous)).getTime() : null;
-    const birthWeightRow = isBirthWeightRow(row, previous);
-    const dias = previous && Number.isFinite(currentDate) && Number.isFinite(previousDate)
-      ? Math.max(0, Math.round((currentDate - previousDate) / 86400000))
-      : null;
-    const diferencia = Number.isFinite(peso) && Number.isFinite(pesoAnterior) ? peso - pesoAnterior : null;
-    const gdp = Number.isFinite(diferencia) && dias > 0 ? diferencia / dias : null;
-    const edadPesaje = calcularEdadEnFecha(fechaNacimiento, getFecha(row));
-    const edadMesesPesaje = edadPesaje?.edadMesesDecimal ?? null;
-    const categoriaEvaluada = clasificarCategoriaPorEdadSexo(animal, getFecha(row), birthWeightRow || index === 0, fechaNacimiento) || categoriaProductiva;
-    const rowThresholds = obtenerUmbralesGDP(categoriaEvaluada);
-    const status = classifyRow({ ...row, peso_anterior: pesoAnterior, diferencia_kg: diferencia, ganancia_diaria_kg: gdp }, rowThresholds);
-    return {
-      ...row,
-      peso_kg: peso,
-      peso_anterior: pesoAnterior,
-      diferencia_kg: diferencia,
-      dias_entre_pesajes: dias,
-      edad_meses_en_pesaje: edadMesesPesaje,
-      edad_texto_en_pesaje: (birthWeightRow || index === 0) ? '----' : (edadPesaje?.edadTexto || '--'),
-      ganancia_diaria_kg: gdp,
-      estado_productivo: status.label,
-      estado_productivo_class: status.className,
-      es_peso_nacimiento: birthWeightRow,
-      categoria_evaluada: categoriaEvaluada,
-      umbrales_evaluados: rowThresholds,
-    };
-  });
 }
 
 export default function AnimalPesajesTab({ animalId }) {
@@ -617,7 +224,7 @@ export default function AnimalPesajesTab({ animalId }) {
   );
 
   const categoriaProductiva = useMemo(() => clasificarCategoriaActual(animalConFechaAnalisis), [animalConFechaAnalisis]);
-  const umbralesGDP = useMemo(() => obtenerUmbralesGDP(categoriaProductiva, valueOf(animal, ['sexo', 'sex'])), [categoriaProductiva, animal]);
+  const umbralesGDP = useMemo(() => obtenerUmbralesGDP(categoriaProductiva), [categoriaProductiva]);
   const enrichedRows = useMemo(
     () => enrichRows(pesajesConPesoInicial, categoriaProductiva, umbralesGDP, animalConFechaAnalisis),
     [pesajesConPesoInicial, categoriaProductiva, umbralesGDP, animalConFechaAnalisis],
@@ -754,31 +361,7 @@ export default function AnimalPesajesTab({ animalId }) {
     };
   }, [goal, summary]);
 
-  const performance = useMemo(() => {
-    const periods = enrichedRows.filter((row) => Number.isFinite(row.ganancia_diaria_kg));
-    const best = periods.reduce((acc, row) => (!acc || row.ganancia_diaria_kg > acc.ganancia_diaria_kg ? row : acc), null);
-    const worst = periods.reduce((acc, row) => (!acc || row.ganancia_diaria_kg < acc.ganancia_diaria_kg ? row : acc), null);
-    const hasComparativePeriods = periods.length >= 2;
-    let tendencia = 'Sin datos';
-    let trendClassName = 'estado-sin-programacion';
-    const latest = periods[periods.length - 1];
-    const previous = periods[periods.length - 2];
-    if (latest && previous) {
-      const diff = latest.ganancia_diaria_kg - previous.ganancia_diaria_kg;
-      const tolerance = Math.abs(previous.ganancia_diaria_kg || 1) * 0.05;
-      if (Math.abs(diff) <= tolerance) {
-        tendencia = 'Estable';
-        trendClassName = 'estado-proxima';
-      } else if (diff > 0) {
-        tendencia = 'Mejorando';
-        trendClassName = 'estado-vigente';
-      } else {
-        tendencia = 'Empeorando';
-        trendClassName = 'estado-vencida';
-      }
-    }
-    return { best, worst, hasComparativePeriods, tendencia, trendClassName };
-  }, [enrichedRows]);
+  const performance = useMemo(() => calcularTendenciaPesajes(enrichedRows), [enrichedRows]);
 
   const chartData = useMemo(
     () =>

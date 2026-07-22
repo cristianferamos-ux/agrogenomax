@@ -1,0 +1,19 @@
+# Estrategia allow-list: se ignora todo y solo se permite lo estrictamente necesario.
+**
+
+# Se reabren explícitamente los directorios padre necesarios.
+!package.json
+!package-lock.json
+!server/
+!server/**
+!shared/
+!shared/**
+
+# Exclusiones dentro de rutas permitidas: sin datos SQL locales ni tests en la imagen.
+server/sql/
+server/**/__tests__/
+server/**/*.test.js
+
+# Nunca incluir secretos, en cualquier profundidad.
+**/.env
+**/.env.*

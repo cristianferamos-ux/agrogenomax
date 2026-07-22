@@ -1,13 +1,19 @@
-import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { ConfigurationError, getConfig } from './config/env.js';
 import { errorHandler, notFound } from './middleware/errors.js';
+import { buildExpressCorsPolicy, createCorsMiddleware } from './security/corsPolicy.js';
+import { createLivenessHandler } from './health/liveness.js';
+import { createGracefulShutdown, resolveShutdownTimeoutMs } from './lifecycle/gracefulShutdown.js';
+import { createRequestLogging } from './observability/requestLogging.js';
+import { closeMainDbPool } from './db.js';
+import { closeCatastroxDbPool } from './catastroxDb.js';
 import animalesRouter from './routes/animales.js';
 import catastroxRouter from './routes/catastrox.js';
 import catastroxPaymentsRouter from './routes/catastroxPayments.js';
-import healthRouter from './routes/health.js';
+import createHealthRouter from './routes/health.js';
 import pesajesRouter from './routes/pesajes.js';
 import potrerosRouter from './routes/potreros.js';
 import prediosRouter from './routes/predios.js';
@@ -23,33 +29,60 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, '../.env'), quiet: true });
 dotenv.config({ path: path.resolve(__dirname, '.env'), quiet: true });
 
+// Fail-fast (ADR-014 §13/§21): ningún puerto se abre ni se procesa
+// tráfico si APP_ENV no puede resolverse o la configuración es inválida.
+// CORRECCIÓN LOTE-002: server/db.js y server/catastroxDb.js ya no
+// construyen su pg.Pool como efecto colateral de importarse -- lo hacen
+// de forma perezosa (getDbPool()/getCatastroxDbPool()), y exigen que
+// getConfig() ya se haya ejecutado con éxito (assertConfigValidated()).
+// Ningún Pool existe todavía en este punto del arranque.
+let appConfig;
+try {
+  appConfig = getConfig();
+} catch (error) {
+  if (error instanceof ConfigurationError) {
+    console.error(`[config] ${error.code}: ${error.message}`);
+  } else {
+    console.error('[config] Error inesperado validando la configuración del ambiente.', error);
+  }
+  process.exit(1);
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
-const localOrigins = ['http://127.0.0.1:5173', 'http://localhost:5173'];
-const configuredOrigins = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean)
-  : [];
-const allowedOrigins = [...new Set([...localOrigins, ...configuredOrigins])];
 
-app.use(
-  cors({
-    origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-        return;
-      }
+// Correlation ID / logging estructurado (LOTE-010, ADR-012 §25): montado
+// inmediatamente después de crear `app`, antes de CORS, express.json,
+// health y cualquier ruta de negocio -- correlationId debe existir durante
+// todo el ciclo de vida de la solicitud. X-Request-ID ya está permitido
+// por CORS (server/security/corsPolicy.js -- DEFAULT_CORS_HEADERS).
+app.use(createRequestLogging());
 
-      callback(new Error('Origen no permitido por CORS.'));
-    },
-  }),
-);
+// CORS (LOTE-004, ADR-014 §7 Barrera 4/§21): allowlist explícita derivada
+// de APP_ENV (server/config/env.js -- appConfig.cors.allowedOrigins), sin
+// reflejo de Origin, sin comodines, sin `CORS_ORIGIN` heredada. Montado
+// antes de cualquier ruta de negocio.
+const corsPolicy = buildExpressCorsPolicy({
+  appEnv: appConfig.appEnv,
+  allowedOrigins: appConfig.cors.allowedOrigins,
+});
+app.use(createCorsMiddleware(corsPolicy));
 app.use(express.json({ limit: '2mb' }));
+
+// Liveness / health de plataforma (LOTE-005, ADR-012 §5.1/§90): registrado
+// antes de cualquier ruta de negocio, sin abrir pools ni depender de
+// dependencias funcionales pesadas -- es el único contrato que el target
+// group del ALB consumirá en ECS.
+app.get('/api/health/live', createLivenessHandler(appConfig.appEnv));
 
 app.get('/', (_req, res) => {
   res.json({ ok: true, service: 'AgroGenomaX API' });
 });
 
-app.use('/api/health', healthRouter);
+// Readiness por dominio (LOTE-007, ADR-012 §7/§35.A): el token nunca se
+// guarda en appConfig (server/config/env.js jamás expone secretos) -- se
+// lee directamente de process.env, igual que DATABASE_URL en server/db.js.
+app.use('/api/health', createHealthRouter({ healthMonitorToken: process.env.HEALTH_MONITOR_TOKEN }));
 app.use('/api/catastrox', catastroxRouter);
 app.use('/api/catastrox/payments', catastroxPaymentsRouter);
 app.use('/api/predios', prediosRouter);
@@ -66,7 +99,25 @@ app.use('/api', reproduccionRouter);
 app.use(notFound);
 app.use(errorHandler);
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`AgroGenomaX API running on port ${PORT}`);
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`AgroGenomaX API running on port ${PORT} [APP_ENV=${appConfig.appEnv}]`);
 });
+
+// Graceful shutdown (LOTE-007, ADR-012 §21): señales registradas
+// exclusivamente aquí, en el entrypoint real -- server/lifecycle/
+// gracefulShutdown.js nunca las registra por sí mismo. Cierra el
+// servidor HTTP antes que los pools (nunca al revés), respeta la
+// inicialización perezosa (un pool nunca creado no se crea solo para
+// cerrarlo) y nunca ejecuta process.exit() fuera de este único punto.
+const gracefulShutdown = createGracefulShutdown({
+  server,
+  resources: [
+    { name: 'agx_pg_pool', close: closeMainDbPool },
+    { name: 'catastrox_pg_pool', close: closeCatastroxDbPool },
+  ],
+  timeoutMs: resolveShutdownTimeoutMs(),
+});
+
+process.once('SIGTERM', () => gracefulShutdown.handleSignal('SIGTERM'));
+process.once('SIGINT', () => gracefulShutdown.handleSignal('SIGINT'));
 

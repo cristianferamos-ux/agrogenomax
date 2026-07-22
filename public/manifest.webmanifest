@@ -75,10 +75,10 @@
   ],
   "shortcuts": [
     {
-      "name": "Abrir GIS",
-      "short_name": "GIS",
-      "description": "Abrir el módulo GIS de AgroGenomaX.",
-      "url": "/#gis",
+      "name": "Ganadería Inteligente",
+      "short_name": "Ganadería",
+      "description": "Abrir el módulo de Ganadería Inteligente.",
+      "url": "/ganaderia",
       "icons": [
         {
           "src": "/icons/agx-icon-192-v3.png",
@@ -87,9 +87,21 @@
       ]
     },
     {
-      "name": "Contacto",
-      "short_name": "Contacto",
-      "description": "Ir al formulario de contacto.",
+      "name": "CatastroX",
+      "short_name": "CatastroX",
+      "description": "Abrir el módulo CatastroX.",
+      "url": "/catastrox",
+      "icons": [
+        {
+          "src": "/icons/agx-icon-192-v3.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Solicitar demo",
+      "short_name": "Demo",
+      "description": "Ir a la sección de contacto para solicitar una demo.",
       "url": "/#contacto",
       "icons": [
         {

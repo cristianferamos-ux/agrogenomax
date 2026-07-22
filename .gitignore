@@ -5,6 +5,17 @@ dist
 .vite
 .env.local
 
+# Local data, backups and audit outputs
+db_backups/
+audit_outputs/
+*.sql.backup
+
+# Runtime logs
+*.log
+
+# Temporary Vite configs
+vite.*.temp.config.mjs
+
 # Terraform (LOTE-016 / ADR-010)
 **/.terraform/
 *.tfstate
