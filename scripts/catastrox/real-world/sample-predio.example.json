@@ -1,0 +1,47 @@
+{
+  "id": "sample-real-world-example",
+  "codigoPredial": "180290001000000027001500000000",
+  "codigoAnterior": "18029000100279015000",
+  "municipio": "Albania",
+  "departamento": "Caqueta",
+  "areaHa": 9.16,
+  "areaM2": 91588.88,
+  "perimetroM": 1468.75,
+  "estadoPredial": "Predio de ejemplo seguro para validar el flujo real-world de CatastroX.",
+  "polygonGeoJson": {
+    "type": "Feature",
+    "properties": {},
+    "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [-75.87211, 1.331245],
+          [-75.869928, 1.332018],
+          [-75.868744, 1.329917],
+          [-75.871406, 1.328806],
+          [-75.87211, 1.331245]
+        ]
+      ]
+    }
+  },
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [-75.87211, 1.331245],
+        [-75.869928, 1.332018],
+        [-75.868744, 1.329917],
+        [-75.871406, 1.328806],
+        [-75.87211, 1.331245]
+      ]
+    ]
+  },
+  "queryPoint": {
+    "lat": 1.331245,
+    "lng": -75.87211
+  },
+  "referencePoint": {
+    "lat": 1.331245,
+    "lng": -75.87211
+  }
+}
