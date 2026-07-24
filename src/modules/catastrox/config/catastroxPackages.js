@@ -47,7 +47,7 @@ const PACKAGES_BY_ID = {
   },
   [CATASTROX_PACKAGE_IDS.PROFESIONAL]: {
     id: CATASTROX_PACKAGE_IDS.PROFESIONAL,
-    routeSlug: 'premium',
+    routeSlug: 'profesional',
     label: 'PAQUETE PROFESIONAL',
     title: 'Plano predial + archivos técnicos',
     priceCop: 59900,
@@ -83,7 +83,10 @@ export function getCatastroxPackageRank(packageId) {
 }
 
 export function routeSlugToCatastroxPackageId(routeSlug) {
-  const match = Object.values(PACKAGES_BY_ID).find((pkg) => pkg.routeSlug === routeSlug || pkg.id === routeSlug);
+  const normalizedRouteSlug = routeSlug === 'premium' ? 'profesional' : routeSlug;
+  const match = Object.values(PACKAGES_BY_ID).find(
+    (pkg) => pkg.routeSlug === normalizedRouteSlug || pkg.id === normalizedRouteSlug,
+  );
   return match?.id || null;
 }
 
