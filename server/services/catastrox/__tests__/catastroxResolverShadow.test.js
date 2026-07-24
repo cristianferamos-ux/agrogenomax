@@ -757,10 +757,15 @@ describe('catastroxResolverShadow — disparo asincrono desde /lookup (FASE 3)',
   // 18. scheduleResolverShadowEvaluation retorna sincronamente
   test('18) scheduleResolverShadowEvaluation retorna de inmediato, antes de que la evaluacion sombra corra', async () => {
     const order = [];
+    let resolveShadowEvaluation;
+    const shadowEvaluationCompleted = new Promise((resolve) => {
+      resolveShadowEvaluation = resolve;
+    });
     const slowShadow = {
       evaluateLookupInShadow: async () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
         order.push('shadow-evaluated');
+        resolveShadowEvaluation();
         return { outcome: SHADOW_OUTCOME.EVALUATED };
       },
     };
@@ -771,7 +776,7 @@ describe('catastroxResolverShadow — disparo asincrono desde /lookup (FASE 3)',
     assert.equal(returnValue, undefined);
     assert.deepEqual(order, ['response-already-sent']);
 
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    await shadowEvaluationCompleted;
     assert.deepEqual(order, ['response-already-sent', 'shadow-evaluated']);
   });
 
