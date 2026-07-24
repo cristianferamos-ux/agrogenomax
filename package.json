@@ -12,7 +12,10 @@
     "catastrox:regression:local": "powershell -ExecutionPolicy Bypass -File scripts/catastrox/regression/run-v7-regression.ps1",
     "test:catastrox-semantic": "node src/modules/catastrox/semantic/tests/runSemanticTests.mjs",
     "test:catastrox-geometry": "node src/modules/catastrox/utils/tests/runGeometryTests.mjs",
-    "catastrox:real-predio": "node scripts/catastrox/real-world/validate-real-predio.mjs"
+    "catastrox:real-predio": "node scripts/catastrox/real-world/validate-real-predio.mjs",
+    "test:node": "node --test \"functions/_data/__tests__/agxStaticCors.test.js\" \"functions/api/__tests__/healthRelay.test.js\" \"functions/api/catastrox/__tests__/corsRelay.test.js\" \"server/__tests__/catastroxDb.test.js\" \"server/__tests__/db.test.js\" \"server/config/__tests__/env.test.js\" \"server/health/__tests__/dbReadiness.test.js\" \"server/health/__tests__/domainReadiness.test.js\" \"server/health/__tests__/healthRouter.test.js\" \"server/health/__tests__/liveness.test.js\" \"server/health/__tests__/monitorAuth.test.js\" \"server/health/__tests__/readiness.test.js\" \"server/lifecycle/__tests__/gracefulShutdown.test.js\" \"server/middleware/__tests__/errors.test.js\" \"server/observability/__tests__/requestLogging.test.js\" \"server/routes/__tests__/catastroxLookupByCode.test.js\" \"server/routes/__tests__/catastroxLookupId.test.js\" \"server/security/__tests__/corsPolicy.test.js\" \"server/services/catastrox/__tests__/catastroxResolutionPolicy.test.js\" \"server/services/catastrox/__tests__/catastroxResolverShadow.test.js\" \"src/config/__tests__/runtimeConfig.test.js\" \"src/modules/catastrox/semantic/urban/__tests__/urbanAggregationRules.test.js\" \"src/modules/catastrox/semantic/urban/__tests__/urbanNarrativeBuilder.test.js\" \"src/modules/catastrox/services/__tests__/catastroxApiCommercialFlow.test.js\"",
+    "test:all": "npm run test:node && npm run test:catastrox-semantic && npm run test:catastrox-geometry",
+    "test": "npm run test:all"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.0",
