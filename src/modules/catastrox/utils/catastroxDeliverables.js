@@ -2927,7 +2927,47 @@ function estimateTableHeight(rowCount) {
   return 34 + rowCount * 20 + 20;
 }
 
-function buildUnifiedTableRows(referenceRows, referenceSegments) {
+// LOTE B2 (Especificacion 018 / Auditoria 018-A / Implementacion 018-B1-B2):
+// contrato explicito de contenido del PDF por plan. packageId siempre llega
+// de forma explicita (parametro o predio.deliverablePackageId, ya fijado por
+// quien compra en CatastroXPackagePage.jsx) -- nunca se infiere a partir de
+// projectedGeometry ni de ningun otro dato geometrico. Profesional conserva
+// temporalmente el modo actual (con latitud/longitud) hasta que un lote
+// posterior implemente su tabla tecnica definitiva con Este/Norte/EPSG:9377;
+// esto es deuda documentada, no deuda oculta.
+export const PDF_CONTENT_MODE = Object.freeze({
+  INFORMATIVE: 'informative',
+  PROFESSIONAL_CURRENT: 'professional-current',
+});
+
+export function resolvePdfContentMode(packageId) {
+  const normalized = String(packageId || '').trim().toLowerCase();
+  return normalized === 'profesional'
+    ? PDF_CONTENT_MODE.PROFESSIONAL_CURRENT
+    : PDF_CONTENT_MODE.INFORMATIVE;
+}
+
+// Encabezados de la tabla de vertices, separados en una funcion pura propia
+// para que el modo de contenido (informativo vs. profesional actual) sea
+// verificable sin depender de canvas/DOM.
+export function resolveExecutiveTableHeaders(contentMode) {
+  return contentMode === PDF_CONTENT_MODE.INFORMATIVE
+    ? ['Punto', 'Siguiente', 'Distancia']
+    : ['Punto', 'Latitud', 'Longitud', 'Tramo', 'Distancia'];
+}
+
+export function buildUnifiedTableRows(referenceRows, referenceSegments, contentMode = PDF_CONTENT_MODE.PROFESSIONAL_CURRENT) {
+  if (contentMode === PDF_CONTENT_MODE.INFORMATIVE) {
+    // Basico/Plus: unicamente vertice util, siguiente vertice util y la
+    // distancia ya producida por buildReferenceSegments (nunca recalculada
+    // aqui). Sin latitud, longitud, Este ni Norte.
+    return referenceSegments.map((segment) => [
+      segment.from,
+      segment.to,
+      `${formatNumber(segment.distance, 2)} m`,
+    ]);
+  }
+
   return referenceRows.map((row, index) => [
     row.point,
     row.lat,
@@ -2937,7 +2977,7 @@ function buildUnifiedTableRows(referenceRows, referenceSegments) {
   ]);
 }
 
-function buildExecutiveTablePageCanvas(predio, pageLabel, rows, startIndex = 0, isContinuation = false, totalPages = 3) {
+function buildExecutiveTablePageCanvas(predio, pageLabel, rows, startIndex = 0, isContinuation = false, totalPages = 3, contentMode = PDF_CONTENT_MODE.PROFESSIONAL_CURRENT) {
   const { canvas, context } = createPageCanvas();
   const validator = createLayoutValidator(TABLE_LAYOUT);
 
@@ -2957,24 +2997,31 @@ function buildExecutiveTablePageCanvas(predio, pageLabel, rows, startIndex = 0, 
   };
   validator.add('table', tableRect, 'mapArea');
 
-  const headers = ['Punto', 'Latitud', 'Longitud', 'Tramo', 'Distancia'];
-  const columnXs = [tableRect.x + 16, tableRect.x + 96, tableRect.x + 254, tableRect.x + 448, tableRect.x + 586];
+  const isInformative = contentMode === PDF_CONTENT_MODE.INFORMATIVE;
+  const headers = resolveExecutiveTableHeaders(contentMode);
+  const columnXs = isInformative
+    ? [tableRect.x + 16, tableRect.x + 220, tableRect.x + 420]
+    : [tableRect.x + 16, tableRect.x + 96, tableRect.x + 254, tableRect.x + 448, tableRect.x + 586];
   const rowHeight = 20;
   const bodyTop = tableRect.y + 34;
   const availableRows = Math.max(1, Math.floor((tableRect.height - 54) / rowHeight));
   const visibleRows = rows.slice(startIndex, startIndex + availableRows);
 
+  const tableTitleBase = isInformative
+    ? 'TABLA DE VÉRTICES REPRESENTATIVOS Y DISTANCIAS'
+    : 'TABLA DE VÉRTICES REPRESENTATIVOS Y LONGITUDES';
   drawSimpleTable(
     context,
     tableRect,
-    `${isContinuation ? 'TABLA DE VÉRTICES REPRESENTATIVOS Y LONGITUDES (CONTINUACIÓN)' : 'TABLA DE VÉRTICES REPRESENTATIVOS Y LONGITUDES'}${predio.partLabel ? ` - ${predio.partLabel.toUpperCase()}` : ''}`,
+    `${isContinuation ? `${tableTitleBase} (CONTINUACIÓN)` : tableTitleBase}${predio.partLabel ? ` - ${predio.partLabel.toUpperCase()}` : ''}`,
     headers,
     columnXs,
     visibleRows,
   );
 
-  const bottomNote =
-    'La tabla ejecutiva compila en una sola vista los puntos visibles del plano, sus coordenadas y la distancia entre tramos consecutivos. La geometría completa del predio permanece disponible en los archivos KML y KMZ descargables.';
+  const bottomNote = isInformative
+    ? 'La tabla informativa compila en una sola vista los puntos visibles del plano y la distancia entre tramos consecutivos. La geometría completa del predio permanece disponible en los archivos KML y KMZ descargables.'
+    : 'La tabla ejecutiva compila en una sola vista los puntos visibles del plano, sus coordenadas y la distancia entre tramos consecutivos. La geometría completa del predio permanece disponible en los archivos KML y KMZ descargables.';
   const bottomNoteLayout = buildExecutiveBottomNoteLayout(context, bottomNote, TABLE_LAYOUT.bottomPanel);
   drawWrappedText(
     context,
@@ -2997,8 +3044,8 @@ function buildExecutiveTablePageCanvas(predio, pageLabel, rows, startIndex = 0, 
   };
 }
 
-function buildExecutiveTablePagesCanvases(predio, referenceRows, referenceSegments, startPage = 3, totalDocumentPages = null) {
-  const unifiedRows = buildUnifiedTableRows(referenceRows, referenceSegments);
+function buildExecutiveTablePagesCanvases(predio, referenceRows, referenceSegments, startPage = 3, totalDocumentPages = null, contentMode = PDF_CONTENT_MODE.PROFESSIONAL_CURRENT) {
+  const unifiedRows = buildUnifiedTableRows(referenceRows, referenceSegments, contentMode);
   const availableRows = Math.max(1, Math.floor((TABLE_LAYOUT.mapArea.height - 54) / 20));
   const totalTablePages = Math.ceil(unifiedRows.length / availableRows);
   const totalPages = totalDocumentPages || 2 + totalTablePages;
@@ -3007,7 +3054,7 @@ function buildExecutiveTablePagesCanvases(predio, referenceRows, referenceSegmen
 
   for (let tablePage = 0; tablePage < totalTablePages; tablePage += 1) {
     const pageLabel = `${startPage + tablePage} de ${totalPages}`;
-    const result = buildExecutiveTablePageCanvas(predio, pageLabel, unifiedRows, nextIndex, tablePage > 0, totalPages);
+    const result = buildExecutiveTablePageCanvas(predio, pageLabel, unifiedRows, nextIndex, tablePage > 0, totalPages, contentMode);
     canvases.push(result.canvas);
     nextIndex = result.nextIndex;
   }
@@ -3555,7 +3602,7 @@ async function buildSatellitePageCanvas(predio, layoutData, pageLabel = '1 de 3'
   return canvas;
 }
 
-async function buildTechnicalPagesCanvases(predio, layoutData, technicalPageLabel = '2 de 3', tableStartPage = 3, totalDocumentPages = null) {
+async function buildTechnicalPagesCanvases(predio, layoutData, technicalPageLabel = '2 de 3', tableStartPage = 3, totalDocumentPages = null, contentMode = PDF_CONTENT_MODE.PROFESSIONAL_CURRENT) {
   const { mapState, referencePoints, referenceRows, referenceSegments } = layoutData;
   const expandedMapArea = { x: 24, y: 108, width: 744, height: 450 };
   const { canvas, context } = createPageCanvas();
@@ -3642,7 +3689,7 @@ async function buildTechnicalPagesCanvases(predio, layoutData, technicalPageLabe
   });
   drawLegalFooter(context, TECHNICAL_LAYOUT.footer);
 
-  const tableCanvases = buildExecutiveTablePagesCanvases(predio, referenceRows, referenceSegments, tableStartPage, totalDocumentPages);
+  const tableCanvases = buildExecutiveTablePagesCanvases(predio, referenceRows, referenceSegments, tableStartPage, totalDocumentPages, contentMode);
   return [canvas, ...tableCanvases];
 }
 
@@ -3669,12 +3716,18 @@ export async function buildDiagnosticPdfBytes(source) {
   return buildImageOnlyPdf(pageImages);
 }
 
-export async function buildPlanPdfBytes(source) {
+export async function buildPlanPdfBytes(source, options = {}) {
   if (typeof document === 'undefined') {
     throw new Error('La generación de PDF requiere un entorno con canvas, fuentes y mapa disponibles.');
   }
   await ensurePdfFontsLoaded();
   const predio = normalizePredioForDeliverables(source);
+  // packageId explicito (parametro o predio.deliverablePackageId, ya fijado por
+  // quien compra) -- nunca inferido de projectedGeometry ni de otro dato
+  // geometrico. Profesional nunca se degrada silenciosamente a informativo:
+  // solo 'profesional' resuelve a PROFESSIONAL_CURRENT (ver resolvePdfContentMode).
+  const packageId = options.packageId ?? predio.deliverablePackageId;
+  const contentMode = resolvePdfContentMode(packageId);
   const attemptBuild = async (layoutOptions = {}) => {
     const parts = predio.geometryParts?.length ? predio.geometryParts : [{ outerRing: predio.ring, innerRings: [] }];
     const partEntries = parts.map((part) => {
@@ -3713,6 +3766,7 @@ export async function buildPlanPdfBytes(source) {
         `${pageCursor} de ${totalPages}`,
         pageCursor + 1,
         totalPages,
+        contentMode,
       );
       technicalCanvases.push(...canvases);
       pageCursor += canvases.length;
