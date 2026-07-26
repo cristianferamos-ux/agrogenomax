@@ -125,6 +125,44 @@ function fileSafeCode(predio) {
   return cleanText(predio.codigoPredial || predio.codigo || predio.id || 'predio').replace(/[^\w.-]+/g, '_');
 }
 
+const CATASTROX_VALID_PACKAGE_IDS = Object.freeze(['basico', 'plus', 'profesional']);
+
+// LOTE 018-D: nombres de entregables con sufijo de plan explicito antes de la
+// extension -- Basico/Plus/Profesional ya no producen el mismo nombre de
+// archivo para el mismo predio (confirmado empiricamente antes de este lote:
+// downloadPlanPdf/downloadKml/downloadKmz/downloadShpZip/downloadDxf usaban
+// unicamente el codigo predial, sin distinguir plan). Funcion pura, sin
+// canvas/DOM, para que la convencion sea verificable directamente. No decide
+// contenido ni MIME -- solo el nombre de archivo.
+export function buildCatastroxDeliverableFilename({ codigoPredial, packageId, deliverableType }) {
+  const code = cleanText(codigoPredial, 'predio').toLowerCase().replace(/[^\w.-]+/g, '_');
+  const normalizedPackageId = String(packageId || '').trim().toLowerCase();
+  const packageSuffix = CATASTROX_VALID_PACKAGE_IDS.includes(normalizedPackageId) ? `_${normalizedPackageId}` : '';
+  const base = `${code}${packageSuffix}`;
+
+  const buildersByType = {
+    pdf: () => `${base}.pdf`,
+    kml: () => `${base}.kml`,
+    kmz: () => `${base}.kmz`,
+    dxf: () => `${base}.dxf`,
+    shpZip: () => `${base}_shp.zip`,
+    shp: () => `${base}.shp`,
+    shx: () => `${base}.shx`,
+    dbf: () => `${base}.dbf`,
+    prj: () => `${base}.prj`,
+    cpg: () => `${base}.cpg`,
+    coordinatesZip: () => `${base}_coordenadas_epsg9377.zip`,
+    coordinatesCsv: () => `${base}_coordenadas_epsg9377.csv`,
+  };
+
+  const builder = buildersByType[deliverableType];
+  if (!builder) {
+    throw new Error(`deliverableType desconocido para nombrar un entregable CatastroX: "${deliverableType}".`);
+  }
+
+  return builder();
+}
+
 function predioName(predio) {
   return cleanText(predio.nombrePredio || predio.nombre_predio || predio.nombrePredioClean) || `Predio ${fileSafeCode(predio)}`;
 }
@@ -2168,10 +2206,16 @@ function buildPlusSummaryPageCanvas(predio, layoutData, pageLabel = '1 de 6') {
     const summaryScaleMeters = computeDynamicScaleMeters(mapState, mapRect.width);
     drawScaleBar(context, summaryScaleAnchor.x, summaryScaleAnchor.y, summaryScaleMeters, { compact: true });
 
-    drawPanel(context, { x: 420, y: 456, width: 332, height: 68 }, 'PAQUETE PLUS');
+    // LOTE 018-C: esta funcion (buildPlusSummaryPageCanvas) se reutiliza sin
+    // cambios para Basico/Plus/Profesional -- la tarjeta comercial de la
+    // pagina 1 debe describir unicamente lo que cada plan realmente entrega.
+    // predio.deliverablePackageId ya lo fija normalizePredioForDeliverables
+    // (misma fuente que ya usa buildUsoAlcancePageLayout mas abajo).
+    const summaryCard = resolvePdfSummaryCardContent(predio.deliverablePackageId);
+    drawPanel(context, { x: 420, y: 456, width: 332, height: 68 }, summaryCard.title);
     drawWrappedText(
       context,
-      'Incluye PDF, KML y KMZ para visualizar el polígono del predio y abrirlo en Google Earth.',
+      summaryCard.body,
       436,
       494,
       300,
@@ -2449,21 +2493,10 @@ function drawFuentePanel(context, rect, predio, options = {}) {
 }
 
 function buildUsoAlcancePageLayout(context, predio) {
-  const isProfessionalPackage = predio.deliverablePackageId === 'profesional';
-  const deliveredFiles = [
-    'PDF: resumen comercial, ficha técnica y plano predial con puntos y distancias.',
-    'KML: polígono del predio para Google Earth y aplicaciones compatibles.',
-    'KMZ: versión comprimida del KML, lista para compartir.',
-  ];
-  if (isProfessionalPackage) {
-    deliveredFiles.push('CSV: tabla completa de vértices con coordenadas Este y Norte en MAGNA-SIRGAS 2018 / Origen-Nacional (EPSG:9377).');
-  }
-
-  const instructions = [
-    'Abra el archivo KML o KMZ en Google Earth o una aplicación compatible.',
-    'Verifique visualmente la ubicación del polígono sobre el mapa.',
-    'Utilícelo como apoyo de consulta y planeación técnica o comercial.',
-  ];
+  // LOTE 018-C/018-D: "ARCHIVOS ENTREGADOS" y "CÓMO UTILIZARLO(S)" describen
+  // exactamente los archivos reales de cada plan (Basico: solo PDF: Plus:
+  // PDF/KML/KMZ; Profesional: los 6 entregables reales, sin omitir SHP/DXF).
+  const { deliveredFiles, instructions, instructionsTitle } = resolvePdfUsoAlcanceContent(predio.deliverablePackageId);
   const scopeItems = [
     'No reemplaza certificados oficiales del IGAC, gestor catastral ni oficina de registro.',
     'No reemplaza levantamientos topográficos ni actos de deslinde o amojonamiento.',
@@ -2491,6 +2524,7 @@ function buildUsoAlcancePageLayout(context, predio) {
   return {
     deliveredFiles,
     instructions,
+    instructionsTitle,
     scopeItems,
     topPanel,
     topListStartY,
@@ -2595,7 +2629,7 @@ function buildUsoAlcancePageCanvas(predio, pageLabel) {
   const deliveredBody = buildPanelBodyRect(layout.topPanel);
   drawBullets(context, layout.deliveredFiles, layout.topPanel.x + 24, deliveredBody.y, deliveredBody.width, '#00aeea');
 
-  drawPanel(context, layout.lowerLeftPanel, 'CÓMO UTILIZARLOS');
+  drawPanel(context, layout.lowerLeftPanel, layout.instructionsTitle);
   const leftBody = buildPanelBodyRect(layout.lowerLeftPanel);
   drawBullets(context, layout.instructions, layout.lowerLeftPanel.x + 24, leftBody.y, leftBody.width, '#8bcf2b');
 
@@ -2947,6 +2981,125 @@ export function resolvePdfContentMode(packageId) {
     : PDF_CONTENT_MODE.INFORMATIVE;
 }
 
+// LOTE 018-C: seleccion semantica explicita del contenido comercial/narrativo
+// por plan (tarjeta de la pagina 1, "ARCHIVOS ENTREGADOS"/"CÓMO UTILIZARLOS" de
+// la pagina 3, subtitulo del plano de la pagina 4 y nota final de la pagina 5),
+// separada en funciones puras propias para que sean verificables sin depender
+// de canvas/DOM -- mismo patron que resolveExecutiveTableHeaders/
+// buildUnifiedTableRows. Deliberadamente independiente de PDF_CONTENT_MODE: ese
+// contrato es binario (informativo vs. profesional-actual) y gobierna la TABLA
+// de vertices; Basico y Plus comparten el mismo PDF_CONTENT_MODE pero
+// necesitan textos comerciales distintos (Basico no entrega KML/KMZ, Plus si),
+// por lo que estas funciones resuelven directamente por packageId cuando
+// corresponde.
+export function resolvePdfSummaryCardContent(packageId) {
+  const normalized = String(packageId || '').trim().toLowerCase();
+
+  if (normalized === 'basico') {
+    return {
+      title: 'PAQUETE BÁSICO',
+      body: 'Incluye PDF con diagnóstico predial, ficha catastral y plano informativo.',
+    };
+  }
+
+  if (normalized === 'profesional') {
+    // LOTE 018-D: ya no comparte la tarjeta de Plus. Se usa la variante corta
+    // (autorizada explicitamente si la version larga desborda la tarjeta de
+    // 332x68px) -- la lista completa de archivos vive en la pagina 3.
+    return {
+      title: 'PAQUETE PROFESIONAL',
+      body: 'Incluye PDF profesional y archivos técnicos para análisis geográfico especializado.',
+    };
+  }
+
+  // Plus conserva exactamente el texto previo a este lote.
+  return {
+    title: 'PAQUETE PLUS',
+    body: 'Incluye PDF, KML y KMZ para visualizar el polígono del predio y abrirlo en Google Earth.',
+  };
+}
+
+export function resolvePdfUsoAlcanceContent(packageId) {
+  const normalized = String(packageId || '').trim().toLowerCase();
+  const isBasico = normalized === 'basico';
+  const isProfesional = normalized === 'profesional';
+
+  if (isBasico) {
+    return {
+      deliveredFiles: [
+        'PDF: diagnóstico predial, ficha técnica y catastral y plano informativo con vértices representativos y distancias.',
+      ],
+      instructions: [
+        'Revise la ficha técnica y catastral del predio.',
+        'Consulte el plano informativo, los vértices representativos y las distancias entre tramos.',
+        'Utilice el documento como apoyo para consulta, planeación y orientación técnica.',
+      ],
+      // LOTE 018-D: singular -- Basico entrega un unico archivo.
+      instructionsTitle: 'CÓMO UTILIZARLO',
+    };
+  }
+
+  if (isProfesional) {
+    // LOTE 018-D: enumera exactamente los 6 entregables reales de
+    // ['pdf','kml','kmz','shp','dxf','coords9377'] -- ya no omite SHP/DXF.
+    // No afirma que SHP/DXF equivalgan a un levantamiento topografico certificado.
+    return {
+      deliveredFiles: [
+        'PDF: diagnóstico predial, ficha técnica, plano y tabla de vértices representativos.',
+        'KML: polígono para Google Earth y aplicaciones compatibles.',
+        'KMZ: versión comprimida del KML.',
+        'SHP: conjunto de archivos para software SIG.',
+        'DXF: geometría de referencia para software CAD.',
+        'CSV: vértices con coordenadas Este y Norte en MAGNA-SIRGAS 2018 / Origen-Nacional (EPSG:9377).',
+      ],
+      instructions: [
+        'Consulte el PDF para revisar la información catastral, el plano y las distancias.',
+        'Abra KML o KMZ en Google Earth o aplicaciones compatibles.',
+        'Use el SHP en software SIG para análisis geográfico.',
+        'Use el DXF como geometría de referencia en software CAD.',
+        'Use el CSV para consultar coordenadas EPSG:9377 e interoperar con otras herramientas.',
+      ],
+      instructionsTitle: 'CÓMO UTILIZARLOS',
+    };
+  }
+
+  // Plus conserva exactamente el contenido previo a este lote.
+  return {
+    deliveredFiles: [
+      'PDF: resumen comercial, ficha técnica y plano predial con puntos y distancias.',
+      'KML: polígono del predio para Google Earth y aplicaciones compatibles.',
+      'KMZ: versión comprimida del KML, lista para compartir.',
+    ],
+    instructions: [
+      'Abra el archivo KML o KMZ en Google Earth o una aplicación compatible.',
+      'Verifique visualmente la ubicación del polígono sobre el mapa.',
+      'Utilícelo como apoyo de consulta y planeación técnica o comercial.',
+    ],
+    instructionsTitle: 'CÓMO UTILIZARLOS',
+  };
+}
+
+export function resolvePdfTechnicalPageTitle(contentMode) {
+  return contentMode === PDF_CONTENT_MODE.INFORMATIVE
+    ? 'PLANO INFORMATIVO • GEOMETRÍA CATASTRAL DEL PREDIO'
+    : 'PLANO TÉCNICO • GEOMETRÍA DEL PREDIO';
+}
+
+export function resolvePdfExecutiveBottomNote(contentMode, packageId) {
+  if (contentMode !== PDF_CONTENT_MODE.INFORMATIVE) {
+    // LOTE 018-D: ya no menciona unicamente KML/KMZ -- Profesional tambien
+    // entrega SHP/DXF/CSV. Unica combinacion real hoy (contentMode
+    // profesional-actual + packageId 'profesional'); se deja generico por si
+    // en el futuro otro packageId comparte este contentMode.
+    return 'La tabla ejecutiva compila los puntos representativos visibles, sus coordenadas geográficas y las distancias entre tramos consecutivos. La geometría completa y los archivos técnicos del predio se entregan según el alcance del paquete Profesional. Este documento no reemplaza un levantamiento topográfico ni una certificación oficial.';
+  }
+
+  const isBasico = String(packageId || '').trim().toLowerCase() === 'basico';
+  return isBasico
+    ? 'La tabla informativa compila en una sola vista los puntos visibles del plano y la distancia entre tramos consecutivos. La geometría catastral completa se conserva internamente para el procesamiento del documento.'
+    : 'La tabla informativa compila en una sola vista los puntos visibles del plano y la distancia entre tramos consecutivos. La geometría completa del predio permanece disponible en los archivos KML y KMZ descargables.';
+}
+
 // Encabezados de la tabla de vertices, separados en una funcion pura propia
 // para que el modo de contenido (informativo vs. profesional actual) sea
 // verificable sin depender de canvas/DOM.
@@ -3019,9 +3172,10 @@ function buildExecutiveTablePageCanvas(predio, pageLabel, rows, startIndex = 0, 
     visibleRows,
   );
 
-  const bottomNote = isInformative
-    ? 'La tabla informativa compila en una sola vista los puntos visibles del plano y la distancia entre tramos consecutivos. La geometría completa del predio permanece disponible en los archivos KML y KMZ descargables.'
-    : 'La tabla ejecutiva compila en una sola vista los puntos visibles del plano, sus coordenadas y la distancia entre tramos consecutivos. La geometría completa del predio permanece disponible en los archivos KML y KMZ descargables.';
+  // LOTE 018-C: Basico no entrega KML/KMZ -- su nota final no debe prometerlos.
+  // Plus si los entrega y conserva la mencion previa. Profesional (rama no
+  // informativa) no se toca.
+  const bottomNote = resolvePdfExecutiveBottomNote(contentMode, predio.deliverablePackageId);
   const bottomNoteLayout = buildExecutiveBottomNoteLayout(context, bottomNote, TABLE_LAYOUT.bottomPanel);
   drawWrappedText(
     context,
@@ -3641,8 +3795,11 @@ async function buildTechnicalPagesCanvases(predio, layoutData, technicalPageLabe
   context.strokeRect(mapRect.x, mapRect.y, mapRect.width, mapRect.height);
   setFont(context, 10.5, 700);
   context.fillStyle = '#0a2e73';
+  // LOTE 018-C: Basico/Plus (contentMode informativo) usan "PLANO INFORMATIVO"
+  // para no sugerir un levantamiento topografico -- Profesional conserva
+  // "PLANO TÉCNICO" sin cambios (su contentMode sigue siendo el actual).
   context.fillText(
-    `PLANO TÉCNICO • GEOMETRÍA DEL PREDIO${predio.partLabel ? ` • ${predio.partLabel.toUpperCase()}` : ''}`,
+    `${resolvePdfTechnicalPageTitle(contentMode)}${predio.partLabel ? ` • ${predio.partLabel.toUpperCase()}` : ''}`,
     TECHNICAL_LAYOUT.header.x + 16,
     TECHNICAL_LAYOUT.header.y + 76,
   );
@@ -4183,31 +4340,41 @@ function writeShapefileParts(source) {
   };
 }
 
+function resolveDeliverableCodigoPredial(predio) {
+  return predio.codigoPredial || predio.codigo || predio.id || 'predio';
+}
+
 export function buildKmzBytes(source) {
   const predio = normalizePredioForDeliverables(source);
   const kmlText = buildKmlText(source);
-  return buildZip([{ name: `${fileSafeCode(predio)}.kml`, data: textEncoder.encode(kmlText) }]);
+  const codigoPredial = resolveDeliverableCodigoPredial(predio);
+  const packageId = predio.deliverablePackageId;
+  const internalKmlName = buildCatastroxDeliverableFilename({ codigoPredial, packageId, deliverableType: 'kml' });
+  return buildZip([{ name: internalKmlName, data: textEncoder.encode(kmlText) }]);
 }
 
 export function buildCoordinatesZipBytes(source) {
   const predio = normalizePredioForProjectedGis(source, { requireProjectedGeometry: true });
-  const stem = `${fileSafeCode(predio)}_coordenadas_epsg9377`;
+  const codigoPredial = resolveDeliverableCodigoPredial(predio);
+  const packageId = predio.deliverablePackageId;
+  const csvName = buildCatastroxDeliverableFilename({ codigoPredial, packageId, deliverableType: 'coordinatesCsv' });
   return buildZip([
-    { name: `${stem}.csv`, data: textEncoder.encode(buildCoordinatesCsvText(source)) },
+    { name: csvName, data: textEncoder.encode(buildCoordinatesCsvText(source)) },
     { name: 'LEEME_COORDENADAS.txt', data: textEncoder.encode(buildCoordinatesReadmeText()) },
   ]);
 }
 
 export function buildShpZipBytes(source) {
   const predio = normalizePredioForDeliverables(source);
-  const stem = fileSafeCode(predio);
+  const codigoPredial = resolveDeliverableCodigoPredial(predio);
+  const packageId = predio.deliverablePackageId;
   const parts = writeShapefileParts(source);
   return buildZip([
-    { name: `${stem}.shp`, data: parts.shp },
-    { name: `${stem}.shx`, data: parts.shx },
-    { name: `${stem}.dbf`, data: parts.dbf },
-    { name: `${stem}.prj`, data: parts.prj },
-    { name: `${stem}.cpg`, data: parts.cpg },
+    { name: buildCatastroxDeliverableFilename({ codigoPredial, packageId, deliverableType: 'shp' }), data: parts.shp },
+    { name: buildCatastroxDeliverableFilename({ codigoPredial, packageId, deliverableType: 'shx' }), data: parts.shx },
+    { name: buildCatastroxDeliverableFilename({ codigoPredial, packageId, deliverableType: 'dbf' }), data: parts.dbf },
+    { name: buildCatastroxDeliverableFilename({ codigoPredial, packageId, deliverableType: 'prj' }), data: parts.prj },
+    { name: buildCatastroxDeliverableFilename({ codigoPredial, packageId, deliverableType: 'cpg' }), data: parts.cpg },
   ]);
 }
 
@@ -4483,7 +4650,12 @@ export async function downloadDiagnosticPdf(source) {
 export async function downloadPlanPdf(source) {
   const predio = normalizePredioForDeliverables(source);
   try {
-    downloadBytes(await buildPlanPdfBytes(source), `${fileSafeCode(predio)}_plano.pdf`, 'application/pdf');
+    const filename = buildCatastroxDeliverableFilename({
+      codigoPredial: resolveDeliverableCodigoPredial(predio),
+      packageId: predio.deliverablePackageId,
+      deliverableType: 'pdf',
+    });
+    downloadBytes(await buildPlanPdfBytes(source), filename, 'application/pdf');
   } catch (error) {
     console.error(`CatastroX PDF plano [${diagnosePlanPdfError(predio, error)}]`, error);
     window.alert('No fue posible generar el plano PDF en este momento. Intente nuevamente.');
@@ -4493,7 +4665,12 @@ export async function downloadPlanPdf(source) {
 export function downloadKml(source) {
   const predio = normalizePredioForDeliverables(source);
   try {
-    downloadBytes(textEncoder.encode(buildKmlText(source)), `${fileSafeCode(predio)}.kml`, 'application/vnd.google-earth.kml+xml');
+    const filename = buildCatastroxDeliverableFilename({
+      codigoPredial: resolveDeliverableCodigoPredial(predio),
+      packageId: predio.deliverablePackageId,
+      deliverableType: 'kml',
+    });
+    downloadBytes(textEncoder.encode(buildKmlText(source)), filename, 'application/vnd.google-earth.kml+xml');
   } catch (error) {
     console.error('CatastroX KML', error);
     window.alert('No fue posible generar el archivo KML: geometría del predio no disponible o inválida.');
@@ -4503,7 +4680,12 @@ export function downloadKml(source) {
 export function downloadKmz(source) {
   const predio = normalizePredioForDeliverables(source);
   try {
-    downloadBytes(buildKmzBytes(source), `${fileSafeCode(predio)}.kmz`, 'application/vnd.google-earth.kmz');
+    const filename = buildCatastroxDeliverableFilename({
+      codigoPredial: resolveDeliverableCodigoPredial(predio),
+      packageId: predio.deliverablePackageId,
+      deliverableType: 'kmz',
+    });
+    downloadBytes(buildKmzBytes(source), filename, 'application/vnd.google-earth.kmz');
   } catch (error) {
     console.error('CatastroX KMZ', error);
     window.alert('No fue posible generar el archivo KMZ: geometría del predio no disponible o inválida.');
@@ -4513,7 +4695,12 @@ export function downloadKmz(source) {
 export function downloadShpZip(source) {
   const predio = normalizePredioForDeliverables(source);
   try {
-    downloadBytes(buildShpZipBytes(source), `${fileSafeCode(predio)}.zip`, 'application/zip');
+    const filename = buildCatastroxDeliverableFilename({
+      codigoPredial: resolveDeliverableCodigoPredial(predio),
+      packageId: predio.deliverablePackageId,
+      deliverableType: 'shpZip',
+    });
+    downloadBytes(buildShpZipBytes(source), filename, 'application/zip');
   } catch (error) {
     console.error('CatastroX SHP', error);
     window.alert('No fue posible generar los archivos GIS: geometría del predio no disponible o inválida.');
@@ -4523,7 +4710,12 @@ export function downloadShpZip(source) {
 export function downloadDxf(source) {
   const predio = normalizePredioForDeliverables(source);
   try {
-    downloadBytes(textEncoder.encode(buildDxfText(source)), `${fileSafeCode(predio)}.dxf`, 'application/dxf');
+    const filename = buildCatastroxDeliverableFilename({
+      codigoPredial: resolveDeliverableCodigoPredial(predio),
+      packageId: predio.deliverablePackageId,
+      deliverableType: 'dxf',
+    });
+    downloadBytes(textEncoder.encode(buildDxfText(source)), filename, 'application/dxf');
   } catch (error) {
     console.error('CatastroX DXF', error);
     window.alert('No fue posible generar el archivo DXF: geometría del predio no disponible o inválida.');
@@ -4533,7 +4725,12 @@ export function downloadDxf(source) {
 export function downloadCoordinatesZip(source) {
   const predio = normalizePredioForDeliverables(source);
   try {
-    downloadBytes(buildCoordinatesZipBytes(source), `${fileSafeCode(predio)}_coordenadas_epsg9377.zip`, 'application/zip');
+    const filename = buildCatastroxDeliverableFilename({
+      codigoPredial: resolveDeliverableCodigoPredial(predio),
+      packageId: predio.deliverablePackageId,
+      deliverableType: 'coordinatesZip',
+    });
+    downloadBytes(buildCoordinatesZipBytes(source), filename, 'application/zip');
   } catch (error) {
     console.error('CatastroX coordenadas EPSG:9377', error);
     window.alert('No fue posible generar el ZIP de coordenadas: geometría del predio no disponible o inválida.');
