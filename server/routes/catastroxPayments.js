@@ -62,42 +62,70 @@ function buildIntegritySignature({ reference, amountInCents, integritySecret }) 
   return crypto.createHash('sha256').update(signaturePayload, 'utf8').digest('hex');
 }
 
-function buildRedirectUrl({
-  frontendUrl,
-  packageId,
-  purchaseKey,
-  reference,
-  predioId,
-  codigoPredial,
-  routeId,
-}) {
-  const url = new URL('/catastrox/pagos/wompi/retorno', frontendUrl);
-  url.searchParams.set('packageId', packageId);
-  url.searchParams.set('purchaseKey', purchaseKey);
-  url.searchParams.set('reference', reference);
-  url.searchParams.set('predioId', predioId || '');
-  url.searchParams.set('codigoPredial', codigoPredial || '');
-
-  if (routeId) {
-    url.searchParams.set('routeId', routeId);
-  }
-
-  return url.toString();
+// El retorno no lleva datos comerciales en la URL (packageId/purchaseKey/reference/
+// predioId/codigoPredial): CatastroXWompiReturnPage recupera ese contexto desde el
+// registro pendiente guardado en localStorage antes de abrir Wompi (ver
+// catastroxPaymentService.js). Wompi solo agrega su propio "?id=TRANSACTION_ID".
+export function buildRedirectUrl({ frontendUrl }) {
+  return new URL('/catastrox/pagos/wompi/retorno', frontendUrl).toString();
 }
 
-function isLocalFrontendUrl(value) {
+export function isLocalFrontendUrl(value) {
   const url = String(value || '').toLowerCase();
   return url.includes('localhost') || url.includes('127.0.0.1');
 }
 
-async function fetchWompiTransaction({ transactionId, apiBaseUrl, publicKey }) {
-  const response = await fetch(`${apiBaseUrl.replace(/\/$/, '')}/transactions/${encodeURIComponent(transactionId)}`, {
-    method: 'GET',
-    headers: {
-      Authorization: `Bearer ${publicKey}`,
-      Accept: 'application/json',
+// El retorno local (redirectUrl apuntando a localhost/127.0.0.1) solo se permite
+// cuando el backend corre en development y Wompi en modo test (Sandbox). Fuera de
+// esa combinación exacta (staging, production, o WOMPI_ENV=production) nunca se
+// envía una redirectUrl local, sin importar CATASTROX_FRONTEND_URL.
+export function shouldSendWompiRedirectUrl({ appEnv, wompiEnv, frontendUrl }) {
+  if (!frontendUrl) return false;
+  if (frontendUrl.startsWith('https://')) return true;
+
+  const normalizedAppEnv = String(appEnv || '').toLowerCase();
+  const normalizedWompiEnv = String(wompiEnv || '').toLowerCase();
+  const isLocalDevTest = normalizedAppEnv === 'development' && normalizedWompiEnv === 'test';
+
+  return isLocalDevTest && isLocalFrontendUrl(frontendUrl);
+}
+
+// LOTE 019-C2: fallo de transporte confirmado en produccion real (Node fetch
+// rechazando con "fetch failed" contra sandbox.wompi.co, resuelto en el intento
+// inmediatamente siguiente sin ningun otro cambio) -- nunca una respuesta HTTP de
+// Wompi. `fetch()` solo rechaza (throw) por fallos de red/DNS/socket antes de
+// obtener ninguna respuesta; cualquier respuesta HTTP real (400/401/403/404/409/
+// 422/429/500...) resuelve la promesa con normalidad y jamas entra aqui -- por
+// eso basta con envolver unicamente esta llamada, sin tocar el manejo de
+// response.ok/payload de mas abajo.
+export function isWompiTransportError(error) {
+  if (error instanceof TypeError) return true;
+  return /fetch failed/i.test(String(error?.message || ''));
+}
+
+const WOMPI_VERIFY_RETRY_DELAY_MS = 200;
+
+async function fetchWithSingleTransportRetry(url, options) {
+  try {
+    return await fetch(url, options);
+  } catch (error) {
+    if (!isWompiTransportError(error)) throw error;
+    await new Promise((resolve) => setTimeout(resolve, WOMPI_VERIFY_RETRY_DELAY_MS));
+    return fetch(url, options);
+  }
+}
+
+export async function fetchWompiTransaction({ transactionId, apiBaseUrl, publicKey }) {
+  const response = await fetchWithSingleTransportRetry(
+    `${apiBaseUrl.replace(/\/$/, '')}/transactions/${encodeURIComponent(transactionId)}`,
+    {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${publicKey}`,
+        Accept: 'application/json',
+      },
     },
-  });
+  );
 
   const payload = await response.json().catch(() => null);
 
@@ -228,21 +256,12 @@ router.post('/checkout', (req, res) => {
     amountInCents,
     integritySecret: WOMPI_INTEGRITY_SECRET_TEST,
   });
-  const shouldSendRedirectUrl =
-    Boolean(frontendUrl) &&
-    !isLocalFrontendUrl(frontendUrl) &&
-    frontendUrl.startsWith('https://');
-  const redirectUrl = shouldSendRedirectUrl
-    ? buildRedirectUrl({
-        frontendUrl,
-        packageId,
-        purchaseKey,
-        reference,
-        predioId,
-        codigoPredial,
-        routeId,
-      })
-    : null;
+  const shouldSendRedirectUrl = shouldSendWompiRedirectUrl({
+    appEnv: process.env.APP_ENV,
+    wompiEnv: process.env.WOMPI_ENV,
+    frontendUrl,
+  });
+  const redirectUrl = shouldSendRedirectUrl ? buildRedirectUrl({ frontendUrl }) : null;
 
   return res.json({
     ok: true,
