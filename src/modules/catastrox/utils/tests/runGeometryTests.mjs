@@ -25,6 +25,9 @@ const TEST_FILES = [
   '/src/modules/catastrox/utils/__tests__/pdfPanelLayout.test.js',
   '/src/modules/catastrox/utils/__tests__/shapefileRingOrientation.test.js',
   '/src/modules/catastrox/utils/__tests__/projectedGeometryExports.test.js',
+  '/src/modules/catastrox/utils/__tests__/pdfPlanContentMode.test.js',
+  '/src/modules/catastrox/utils/__tests__/pdfPlanCommercialContent.test.js',
+  '/src/modules/catastrox/utils/__tests__/catastroxDeliverableFilenames.test.js',
 ];
 
 const server = await createServer({

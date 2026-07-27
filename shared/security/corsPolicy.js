@@ -158,7 +158,10 @@ export const CORS_ALLOWLIST_REQUIRED_ENVS = Object.freeze(['staging', 'productio
 // bloqueo nunca puede enumerar exhaustivamente "cualquier otro subdominio
 // de agrogenomax.com/agrogenomax.co".
 const CORS_FORBIDDEN_ORIGIN_HINTS_BY_ENV = Object.freeze({
-  staging: Object.freeze(['demo.agrogenomax.com', 'railway.app', 'localhost', '127.0.0.1']),
+  // LOTE 019-C: trycloudflare.com se agrega explicitamente -- la excepcion de
+  // tunel de desarrollo (CORS_ALLOW_DEV_TUNNEL) es exclusiva de development;
+  // staging nunca debe aceptar un origen de Quick Tunnel, con o sin ese flag.
+  staging: Object.freeze(['demo.agrogenomax.com', 'railway.app', 'localhost', '127.0.0.1', 'trycloudflare.com']),
 });
 
 // Producción: extensión cerrada. CORS_ALLOWED_ORIGINS, si está presente,
@@ -185,9 +188,12 @@ function isLocalOriginValue(origin) {
  *
  * @param {string} appEnv
  * @param {string[]} explicitOrigins
+ * @param {{wompiEnv?: string|null, allowDevTunnel?: boolean}} [options] LOTE 019-C:
+ *   excepcion acotada de "tunel de desarrollo" -- ver comentario en el cuerpo.
  * @returns {readonly string[]}
  */
-export function resolveAllowedOriginsForEnvironment(appEnv, explicitOrigins = []) {
+export function resolveAllowedOriginsForEnvironment(appEnv, explicitOrigins = [], options = {}) {
+  const { wompiEnv = null, allowDevTunnel = false } = options;
   const mandatory = CORS_MANDATORY_ORIGINS_BY_ENV[appEnv] || [];
 
   // demo no tiene backend ni relay (ADR-014 §7): ningún origen explícito
@@ -212,11 +218,29 @@ export function resolveAllowedOriginsForEnvironment(appEnv, explicitOrigins = []
     }
 
     if (appEnv === 'development' && !isLocalOriginValue(normalized)) {
-      throw new CorsConfigurationError(
-        'En development, únicamente se admiten orígenes http://localhost o http://127.0.0.1 explícitos ' +
-          '(ningún dominio externo, ninguna IP LAN).',
-        { code: 'CORS_ORIGIN_FORBIDDEN', environment: appEnv },
-      );
+      // LOTE 019-C: excepcion explicita y acotada para un tunel de desarrollo
+      // (p. ej. Cloudflare Quick Tunnel) usado en pruebas E2E que exigen una
+      // redirectUrl HTTPS real (Wompi Sandbox no acepta redirects a localhost
+      // de forma confiable). Preserva la barrera ADR-014 SS7 Barrera 4: solo
+      // se activa si TODAS estas condiciones se cumplen a la vez --
+      //   1) appEnv === 'development';
+      //   2) wompiEnv === 'test' (nunca con Wompi en modo productivo);
+      //   3) allowDevTunnel === true (opt-in explicito, variable propia);
+      //   4) el origen es exactamente el que ya aparece en CORS_ALLOWED_ORIGINS
+      //      (esta funcion nunca acepta comodines: normalizeOrigin rechaza
+      //      cualquier valor que no sea un origen http(s) completo y unico).
+      // No aplica en test/demo/staging/production: esos ambientes ni siquiera
+      // llegan a esta rama (tienen su propio bloque de reglas mas abajo).
+      const isDevTunnelException =
+        allowDevTunnel === true && wompiEnv === 'test' && normalized.startsWith('https://');
+
+      if (!isDevTunnelException) {
+        throw new CorsConfigurationError(
+          'En development, únicamente se admiten orígenes http://localhost o http://127.0.0.1 explícitos ' +
+            '(ningún dominio externo, ninguna IP LAN).',
+          { code: 'CORS_ORIGIN_FORBIDDEN', environment: appEnv },
+        );
+      }
     }
 
     if (appEnv === 'production' && !CORS_PRODUCTION_ALLOWED_EXTENSIONS.includes(normalized)) {

@@ -20,6 +20,7 @@ import {
   saveLastLookup,
 } from '../services/catastroxApi.js';
 import {
+  clearPendingPaymentByReference,
   getApprovedPurchaseRecordByKeys,
   getPackageRank,
   getLookupPurchaseKey,
@@ -381,6 +382,7 @@ export default function CatastroXPackagePage({ packageId }) {
       const checkoutResult = await startPackageCheckout({
         packageId,
         lookup,
+        targetRoute: `/catastrox/${pkg.routeSlug}/${routeId || predio.id}`,
         onCheckoutStart: (state) => setCheckoutState(state),
         onOpened: ({ checkout }) => {
           opened = true;
@@ -396,13 +398,20 @@ export default function CatastroXPackagePage({ packageId }) {
           setIsStartingCheckout(false);
           setPendingPackageId(null);
 
+          const resolvedReference = transaction?.reference || checkout.reference || null;
           const approvedPurchase = markPackageAsPaid({
             lookup,
             packageId: checkout.packageId || packageId,
             transactionId: transaction?.id || `wompi-${Date.now()}`,
-            reference: transaction?.reference || checkout.reference || null,
+            reference: resolvedReference,
             mode: 'wompi-sandbox',
           });
+          // Se elimina el registro pendiente solo aqui, ya con markPackageAsPaid
+          // confirmado (LOTE 019-B2, Fase 4) -- no antes, en el wrapper de
+          // startPackageCheckout, para no perderlo si esta linea nunca se alcanza.
+          if (resolvedReference) {
+            clearPendingPaymentByReference(resolvedReference);
+          }
 
           setCheckoutState({
             status: 'approved',

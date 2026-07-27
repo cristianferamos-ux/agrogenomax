@@ -1,4 +1,4 @@
-import { getCatastroxPackage, getCatastroxPackageRank } from '../config/catastroxPackages.js';
+import { getCatastroxPackage, getCatastroxPackageRank, getCatastroxPackageRoute } from '../config/catastroxPackages.js';
 // LOTE-003 (ADR-014 §13/§21): hallazgo de riesgo real corregido aquí --
 // fuera de localhost, la implementación anterior usaba
 // VITE_API_URL/VITE_AGX_API_URL (si estuviera configurada en build) como
@@ -11,6 +11,21 @@ import { getCatastroxPackage, getCatastroxPackageRank } from '../config/catastro
 import { resolveApiBaseCandidates } from '../../../config/runtimeConfig.js';
 
 const PURCHASE_STORAGE_KEY = 'catastrox_purchases_v2';
+// LOTE 019-B: contexto no secreto de una compra iniciada, guardado justo antes de
+// abrir Wompi y leido por CatastroXWompiReturnPage al volver, ya que la redirectUrl
+// enviada a Wompi es intencionalmente limpia (sin packageId/purchaseKey/reference en
+// la URL). Nunca debe contener llaves, secretos ni URLs de base de datos.
+// LOTE 019-B2: esta clave (ranura unica) quedo demostrada como fragil -- un segundo
+// checkout la sobreescribe, y el callback en pagina podia limpiarla antes de que la
+// pagina de retorno la necesitara. Se mantiene solo como fuente de lectura legada
+// (migracion); el flujo nuevo escribe en PENDING_PAYMENTS_STORE_KEY, indexado por
+// reference.
+const PENDING_PAYMENT_STORAGE_KEY = 'catastrox_pending_payment_v1';
+// LOTE 019-B2: contexto pendiente indexado por reference (una entrada por checkout
+// iniciado, no una unica ranura global). Misma prohibicion de contenido sensible que
+// la clave legada.
+const PENDING_PAYMENTS_STORE_KEY = 'catastrox_pending_payments_v2';
+const PENDING_PAYMENTS_MAX_RECORDS = 10;
 const LEGACY_STORAGE_KEYS = [
   'catastrox_purchases',
   'catastrox_paid_packages',
@@ -226,6 +241,207 @@ export function getApprovedPurchaseRecordByKeys({
 
 export function readCatastroxLocalStorageJson(key) {
   return readJsonLocalStorage(key);
+}
+
+// 30 minutos: tiempo razonable para completar un checkout Sandbox de Wompi. Un
+// registro mas viejo que esto se trata como invalido para no reprocesar un intento
+// abandonado hace horas/dias contra una transaccion nueva.
+const PENDING_PAYMENT_MAX_AGE_MS = 30 * 60 * 1000;
+
+export function isPendingPaymentContextExpired(pending, { nowMs = Date.now() } = {}) {
+  if (!pending?.createdAt) return false;
+  const createdAtMs = Date.parse(pending.createdAt);
+  if (!Number.isFinite(createdAtMs)) return false;
+  return nowMs - createdAtMs > PENDING_PAYMENT_MAX_AGE_MS;
+}
+
+// --- LOTE 019-B2: contexto pendiente indexado por reference ---------------------
+//
+// Diagnostico (LOTE 019-B2, Fase 1): con `catastrox_pending_payment_v1` como ranura
+// unica, dos problemas reales quedaron demostrados en pruebas manuales:
+//  1) un segundo checkout (mismo predio u otro) sobreescribe la ranura del primero
+//     antes de que su retorno se procese;
+//  2) el callback en pagina (`startPackageCheckout`'s onApproved wrapper, antes en
+//     esta misma linea) borraba la ranura inmediatamente, antes de que
+//     CatastroXWompiReturnPage pudiera usarla si el usuario igual llegaba ahi
+//     (recarga, redirectUrl que no navego, doble intento manual).
+// La pagina de retorno ademas exigia tener el pending ANTES de llamar a
+// /verify/:transactionId, cuando lo unico que Wompi entrega de vuelta es `id` -- el
+// orden correcto es verificar primero, obtener la reference real, y buscar el
+// pending por esa reference.
+
+function readPendingPaymentsStore() {
+  return readJsonLocalStorage(PENDING_PAYMENTS_STORE_KEY) || {};
+}
+
+function writePendingPaymentsStore(store) {
+  if (!isBrowser()) return;
+  window.localStorage.setItem(PENDING_PAYMENTS_STORE_KEY, JSON.stringify(store));
+}
+
+// Pura: no toca localStorage, solo decide que registros sobreviven. Facilita probar
+// la regla de expiracion/limite sin depender del entorno del navegador.
+export function pruneExpiredPendingPayments(store, { nowMs = Date.now() } = {}) {
+  const entries = Object.entries(store || {}).filter(
+    ([, record]) => !isPendingPaymentContextExpired(record, { nowMs }),
+  );
+  entries.sort(([, a], [, b]) => Date.parse(b?.createdAt || 0) - Date.parse(a?.createdAt || 0));
+  return Object.fromEntries(entries.slice(0, PENDING_PAYMENTS_MAX_RECORDS));
+}
+
+// Guarda un registro por reference (no una ranura global). Iniciar un nuevo
+// checkout nunca elimina los anteriores: cada uno vive bajo su propia reference
+// hasta que se complete, falle o expire.
+export function savePendingPayment({
+  packageId,
+  routeId,
+  purchaseKey,
+  codigoPredial,
+  reference,
+  expectedAmountInCents,
+  currency,
+  targetRoute,
+}) {
+  if (!isBrowser() || !reference) return;
+
+  const record = {
+    packageId,
+    routeId: routeId || null,
+    lookupId: routeId || null,
+    purchaseKey: purchaseKey || null,
+    codigoPredial: codigoPredial || null,
+    reference,
+    expectedAmountInCents,
+    currency,
+    targetRoute: targetRoute || null,
+    createdAt: new Date().toISOString(),
+    status: 'pending',
+  };
+
+  const store = pruneExpiredPendingPayments(readPendingPaymentsStore());
+  store[reference] = record;
+  writePendingPaymentsStore(store);
+}
+
+export function getPendingPaymentByReference(reference) {
+  if (!reference) return null;
+  const store = readPendingPaymentsStore();
+  return store[reference] || null;
+}
+
+// El callback del widget marca el intento como "en curso de confirmacion" en vez de
+// borrarlo (LOTE 019-B2, Fase 4): si algo falla entre el callback y que
+// markPackageAsPaid se registre, el registro sigue disponible para que la pagina de
+// retorno (o un reintento) lo recupere por su reference.
+export function updatePendingPaymentStatus(reference, status) {
+  if (!isBrowser() || !reference) return;
+  const store = readPendingPaymentsStore();
+  if (!store[reference]) return;
+  store[reference] = { ...store[reference], status, updatedAt: new Date().toISOString() };
+  writePendingPaymentsStore(store);
+}
+
+// Se elimina unicamente por su propia reference (nunca toda la coleccion), y solo
+// debe invocarse despues de confirmar que el pago quedo registrado (markPackageAsPaid
+// ya se ejecuto). Tambien limpia la ranura legada si coincide, para no dejar un
+// duplicado obsoleto detras.
+export function clearPendingPaymentByReference(reference) {
+  if (!isBrowser() || !reference) return;
+
+  const store = readPendingPaymentsStore();
+  if (store[reference]) {
+    delete store[reference];
+    writePendingPaymentsStore(store);
+  }
+
+  const legacy = readJsonLocalStorage(PENDING_PAYMENT_STORAGE_KEY);
+  if (legacy?.reference === reference) {
+    window.localStorage.removeItem(PENDING_PAYMENT_STORAGE_KEY);
+  }
+}
+
+// Reconstruye, de forma segura, un contexto "tipo pending" cuando no hay registro
+// vivo en catastrox_pending_payments_v2 para esa reference (LOTE 019-B2, Fase 5).
+// Nunca desbloquea solo porque Wompi diga APPROVED: unicamente reconstruye los datos
+// (packageId/monto/moneda esperados) para que evaluateWompiReturn los valide igual
+// que si vinieran del pending original. Fuentes, en orden:
+//  1) catastrox_pending_payment_v1 (ranura legada) si su reference coincide;
+//  2) catastrox_purchases_v2, buscando un registro cuya reference coincida --
+//     cubre tanto el caso "ya lo marco el callback en pagina" (paid=true, permite
+//     una salida idempotente sin reprocesar) como "quedo en pendingCheckout" antes
+//     de que el usuario llegara al retorno.
+// Si ninguna fuente tiene esa reference, devuelve null: la pagina de retorno debe
+// mostrar un error controlado y conservar la evidencia, nunca inventar un contexto.
+export function recoverPendingLikeContextForReference(reference) {
+  if (!reference) return null;
+
+  const legacy = readJsonLocalStorage(PENDING_PAYMENT_STORAGE_KEY);
+  if (legacy?.reference === reference) {
+    return { ...legacy, source: 'legacy-v1' };
+  }
+
+  const purchases = readPurchaseStore();
+  const matchByReference = Object.values(purchases).find(
+    (record) => record?.reference === reference || record?.pendingCheckout?.reference === reference,
+  );
+
+  if (!matchByReference) return null;
+
+  const packageId = matchByReference.paid === true && matchByReference.reference === reference
+    ? matchByReference.packageId
+    : matchByReference.pendingCheckout?.packageId || matchByReference.packageId;
+
+  if (!packageId) return null;
+
+  return {
+    packageId,
+    routeId: matchByReference.routeId || null,
+    lookupId: matchByReference.routeId || null,
+    purchaseKey: matchByReference.purchaseKey || null,
+    codigoPredial: matchByReference.codigoPredial || null,
+    reference,
+    expectedAmountInCents: getExpectedAmountInCents(packageId),
+    currency: 'COP',
+    targetRoute: getCatastroxPackageRoute(packageId, matchByReference.routeId),
+    createdAt: matchByReference.updatedAt || matchByReference.paidAt || null,
+    source: 'purchases-v2',
+    alreadyPaid: matchByReference.paid === true && matchByReference.reference === reference,
+  };
+}
+
+// Evalua, de forma pura, el resultado de Wompi contra el contexto pendiente guardado
+// antes de abrir el checkout. No hace red ni toca localStorage: solo decide el
+// desenlace para que tanto la pagina de retorno como el callback del widget apliquen
+// exactamente la misma regla (monto/referencia/moneda vienen siempre del contexto de
+// checkout, nunca de la URL ni de datos que el usuario pueda alterar).
+export function evaluateWompiReturn({ verifiedTransaction, pending }) {
+  const status = String(verifiedTransaction?.status || '').trim().toUpperCase();
+
+  if (status === 'APPROVED') {
+    if (pending?.reference && verifiedTransaction.reference !== pending.reference) {
+      return { outcome: 'rejected', reason: 'reference_mismatch', shouldClearPending: false };
+    }
+
+    if (Number(verifiedTransaction.amountInCents) !== Number(pending?.expectedAmountInCents)) {
+      return { outcome: 'rejected', reason: 'amount_mismatch', shouldClearPending: false };
+    }
+
+    if (verifiedTransaction.currency !== (pending?.currency || 'COP')) {
+      return { outcome: 'rejected', reason: 'currency_mismatch', shouldClearPending: false };
+    }
+
+    return { outcome: 'approved', shouldClearPending: true };
+  }
+
+  if (status === 'PENDING' || status === 'PENDING_VALIDATION') {
+    // Se conserva el contexto: el usuario debe poder "verificar nuevamente" mas
+    // tarde sin perder el predio/paquete que estaba comprando.
+    return { outcome: 'pending', shouldClearPending: false };
+  }
+
+  // DECLINED, VOIDED, ERROR o cualquier otro estado no aprobado: el intento
+  // termino, se limpia el contexto pendiente para no arrastrarlo a un intento futuro.
+  return { outcome: 'declined', shouldClearPending: true };
 }
 
 function getStoredPurchaseForLookup(lookup) {
@@ -725,6 +941,7 @@ export async function verifyWompiTransaction(transactionId) {
 export async function startPackageCheckout({
   packageId,
   lookup,
+  targetRoute = null,
   onCheckoutStart = null,
   onOpened = null,
   onResult = null,
@@ -756,6 +973,24 @@ export async function startPackageCheckout({
       mode: 'wompi-sandbox',
     });
 
+    // El contexto pendiente se guarda aqui -- ya con la sesion de /checkout validada
+    // (referencia/monto/moneda reales) y antes de abrir Wompi -- indexado por su
+    // propia reference (LOTE 019-B2): iniciar este checkout nunca sobreescribe el
+    // registro de un checkout anterior todavia sin resolver.
+    savePendingPayment({
+      packageId: normalizedPackageId,
+      routeId: lookup?.routeId || lookup?.predio?.routeId || lookup?.predio?.id || null,
+      // Se recalcula (no se usa wompiConfig.purchaseKey): el backend lo sanitiza/trunca
+      // para la referencia de Wompi y ya no coincide con la llave real de
+      // localStorage usada por markPackageAsPaid/getStoredPurchaseRecordByKey.
+      purchaseKey: getLookupPurchaseKey(lookup),
+      codigoPredial: lookup?.predio?.codigoPredial || lookup?.predio?.codigo || null,
+      reference: wompiConfig.reference,
+      expectedAmountInCents: wompiConfig.amountInCents,
+      currency: wompiConfig.currency,
+      targetRoute,
+    });
+
     if (typeof onCheckoutStart === 'function') {
       onCheckoutStart({
         status: 'wompi_started',
@@ -770,6 +1005,15 @@ export async function startPackageCheckout({
         onResult?.({ result, transaction, checkout });
       },
       onApproved: ({ result, transaction, checkout }) => {
+        // El callback del widget (flujo en pagina, sin navegar a Wompi) ya
+        // verifico y marco la compra antes de llegar aqui (ver openWompiWidget).
+        // LOTE 019-B2 (Fase 4): ya NO se borra el registro aqui -- se marca como
+        // "confirmado por callback" y se deja vivo hasta que el consumidor
+        // (CatastroXPackagePage.onApproved, llamado abajo) confirme que
+        // markPackageAsPaid ya se ejecuto y recien entonces lo elimine por su
+        // reference. Si algo falla entre este punto y ese, el registro sigue
+        // disponible para que el usuario lo recupere desde la pagina de retorno.
+        updatePendingPaymentStatus(wompiConfig.reference, 'approved-callback');
         onApproved?.({ result, transaction, checkout });
       },
       onRejected: ({ result, transaction, checkout }) => {
@@ -782,6 +1026,9 @@ export async function startPackageCheckout({
           transactionId: mappedResult.transactionId,
           mode: 'wompi-sandbox',
         });
+        if (mappedResult.status === 'failed') {
+          clearPendingPaymentByReference(wompiConfig.reference);
+        }
         onRejected?.({ result, transaction, checkout, mappedResult });
       },
       onError: (error) => {
