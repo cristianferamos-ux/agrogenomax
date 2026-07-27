@@ -466,3 +466,92 @@ describe('LOTE-004 (corrección): dominios oficiales de producción (agrogenomax
     assert.deepEqual([...fromEnvWithWww], [...fromSharedWithWww]);
   });
 });
+
+// LOTE 019-C: excepcion acotada de "tunel de desarrollo" (Cloudflare Quick
+// Tunnel) para permitir, unicamente en development + WOMPI_ENV=test +
+// CORS_ALLOW_DEV_TUNNEL=true, el origen HTTPS exacto ya listado en
+// CORS_ALLOWED_ORIGINS -- sin comodines, sin ampliar ningun otro ambiente.
+describe('LOTE 019-C: excepcion de tunel de desarrollo en CORS', () => {
+  // Origen ficticio de prueba -- nunca fue ni sera un tunel real activo.
+  const TUNNEL_ORIGIN = 'https://catastrox-fixture.trycloudflare.com';
+  const baseSource = {
+    CORS_ALLOWED_ORIGINS: `http://127.0.0.1:5178,${TUNNEL_ORIGIN}`,
+    WOMPI_ENV: 'test',
+    CORS_ALLOW_DEV_TUNNEL: 'true',
+  };
+
+  test('1. development + test + flag true + origen exacto configurado -> permitido', () => {
+    const policy = policyFor('development', baseSource);
+    assert.equal(evaluateCorsRequest(policy, { method: 'GET', origin: TUNNEL_ORIGIN }).action, 'allow');
+  });
+
+  test('2. development + test + flag false -> rechazado', () => {
+    assert.throws(
+      () => resolveCorsAllowedOrigins('development', { ...baseSource, CORS_ALLOW_DEV_TUNNEL: 'false' }),
+      { code: 'CORS_ORIGIN_FORBIDDEN' },
+    );
+  });
+
+  test('3. development + WOMPI_ENV=production (no test) -> rechazado', () => {
+    assert.throws(
+      () => resolveCorsAllowedOrigins('development', { ...baseSource, WOMPI_ENV: 'production' }),
+      { code: 'CORS_ORIGIN_FORBIDDEN' },
+    );
+  });
+
+  test('4. staging + flag true -> rechazado (la excepcion no existe fuera de development)', () => {
+    assert.throws(
+      () => resolveCorsAllowedOrigins('staging', { ...baseSource, CORS_ALLOWED_ORIGINS: TUNNEL_ORIGIN }),
+      { code: 'CORS_ORIGIN_FORBIDDEN' },
+    );
+  });
+
+  test('5. production + flag true -> rechazado (la excepcion no existe fuera de development)', () => {
+    assert.throws(
+      () => resolveCorsAllowedOrigins('production', { ...baseSource, CORS_ALLOWED_ORIGINS: TUNNEL_ORIGIN }),
+      { code: 'CORS_ORIGIN_FORBIDDEN' },
+    );
+  });
+
+  test('6. otro subdominio trycloudflare distinto al configurado -> rechazado', () => {
+    const policy = policyFor('development', baseSource);
+    assert.equal(
+      evaluateCorsRequest(policy, { method: 'GET', origin: 'https://otro-subdominio-diferente.trycloudflare.com' }).action,
+      'reject',
+    );
+  });
+
+  test('7. comodin *.trycloudflare.com -> rechazado (normalizeOrigin nunca acepta patrones)', () => {
+    assert.throws(
+      () => resolveCorsAllowedOrigins('development', { ...baseSource, CORS_ALLOWED_ORIGINS: '*.trycloudflare.com' }),
+      { code: 'CORS_ORIGIN_INVALID' },
+    );
+  });
+
+  test('8. origen del tunel sin HTTPS (http://) -> rechazado incluso con el flag activo', () => {
+    const httpTunnelOrigin = 'http://catastrox-fixture.trycloudflare.com';
+    assert.throws(
+      () => resolveCorsAllowedOrigins('development', { ...baseSource, CORS_ALLOWED_ORIGINS: httpTunnelOrigin }),
+      { code: 'CORS_ORIGIN_FORBIDDEN' },
+    );
+  });
+
+  test('9. localhost/127.0.0.1 conservan su comportamiento actual (mandatorios + explicito ya soportado)', () => {
+    const policy = policyFor('development', baseSource);
+    assert.equal(evaluateCorsRequest(policy, { method: 'GET', origin: 'http://localhost:5173' }).action, 'allow');
+    assert.equal(evaluateCorsRequest(policy, { method: 'GET', origin: 'http://127.0.0.1:5178' }).action, 'allow');
+    assert.equal(evaluateCorsRequest(policy, { method: 'GET', origin: 'http://127.0.0.1:9999' }).action, 'reject');
+  });
+
+  test('10. sin CORS_ALLOW_DEV_TUNNEL en absoluto (variable ausente) -> se comporta como false, rechaza', () => {
+    const { CORS_ALLOW_DEV_TUNNEL, ...withoutFlag } = baseSource;
+    assert.throws(() => resolveCorsAllowedOrigins('development', withoutFlag), { code: 'CORS_ORIGIN_FORBIDDEN' });
+  });
+
+  test('11. demo prohibe CORS_ALLOW_DEV_TUNNEL explicitamente (validateEnv)', () => {
+    assert.throws(
+      () => validateEnv('demo', { APP_ENV: 'demo', CORS_ALLOW_DEV_TUNNEL: 'true' }),
+      { code: 'PROHIBITED_VARIABLE_PRESENT' },
+    );
+  });
+});

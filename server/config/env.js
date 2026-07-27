@@ -44,6 +44,9 @@ const DEMO_PROHIBITED_EXACT_VARIABLES = Object.freeze([
   // LOTE-004: demo no tiene backend Express real que proteger con CORS --
   // configurar esta variable en demo delataría un backend inexistente.
   'CORS_ALLOWED_ORIGINS',
+  // LOTE 019-C: la excepcion de tunel de desarrollo es exclusiva de
+  // development -- demo no tiene backend real que exponer via tunel.
+  'CORS_ALLOW_DEV_TUNNEL',
   // LOTE-007 (ADR-012 §35.A): demo no tiene readiness protegida que
   // autenticar -- una credencial técnica configurada en demo delataría un
   // backend real inexistente.
@@ -322,9 +325,17 @@ function parseCommaSeparatedList(rawValue) {
  */
 export function resolveCorsAllowedOrigins(appEnv, source = process.env) {
   const explicitRaw = parseCommaSeparatedList(source.CORS_ALLOWED_ORIGINS);
+  // LOTE 019-C: opt-in explicito, propio y acotado (ver
+  // shared/security/corsPolicy.js) -- por si solo, esta variable no habilita
+  // nada: solo se consulta dentro de la rama `development`, y ademas exige
+  // WOMPI_ENV=test y que el origen ya este listado en CORS_ALLOWED_ORIGINS.
+  const allowDevTunnel = String(source.CORS_ALLOW_DEV_TUNNEL || '').toLowerCase() === 'true';
 
   try {
-    return resolveAllowedOriginsForEnvironment(appEnv, explicitRaw);
+    return resolveAllowedOriginsForEnvironment(appEnv, explicitRaw, {
+      wompiEnv: source.WOMPI_ENV,
+      allowDevTunnel,
+    });
   } catch (error) {
     if (error instanceof CorsConfigurationError) {
       throw new ConfigurationError(error.message, {
