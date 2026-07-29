@@ -151,6 +151,17 @@ function buildRealPredio(predio = {}, coords, queryPoint, apiBase, payload = {})
     id: String(routeId),
     routeId,
     source: 'api',
+    // Defecto bloqueante corregido (revisión de seguridad): esta función
+    // mapeaba la respuesta del backend a una lista blanca de campos que
+    // nunca incluía canonicalPredioId -- el backend SÍ lo devuelve (las
+    // tres vías de búsqueda: código, coordenadas y "mi ubicación actual",
+    // ver server/routes/catastrox.js) pero se perdía aquí antes de llegar
+    // a CatastroXPackagePage. Sin canonicalPredioId, y con codigoPredial
+    // legítimamente ausente (es un entregable pago, no se revela antes de
+    // comprar), POST /checkout no tenía ninguna identidad de predio válida
+    // que enviar y rechazaba con INVALID_CADASTRAL_CODE -- el usuario
+    // nunca llegaba a ver Wompi.
+    canonicalPredioId: cleanText(predio.canonicalPredioId) || cleanText(payload.canonicalPredioId) || null,
     estado: CATASTROX_STATUS.IDENTIFICADO,
     estadoLabel: 'Predio identificado',
     municipio: cleanText(predio.municipio) || cleanText(payload.municipio) || null,

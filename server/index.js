@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { ConfigurationError, getConfig } from './config/env.js';
 import { errorHandler, notFound } from './middleware/errors.js';
 import { buildExpressCorsPolicy, createCorsMiddleware } from './security/corsPolicy.js';
+import { createPermissionsPolicyMiddleware, createSecurityHeadersMiddleware } from './security/securityHeaders.js';
 import { createLivenessHandler } from './health/liveness.js';
 import { createGracefulShutdown, resolveShutdownTimeoutMs } from './lifecycle/gracefulShutdown.js';
 import { createRequestLogging } from './observability/requestLogging.js';
@@ -51,12 +52,28 @@ try {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// TRUST_PROXY_HOPS (server/config/env.js, default 0 = no confiar en ningún
+// proxy): número exacto de saltos de reverse proxy confiables delante de
+// este backend. Con 0 (default), Express nunca lee X-Forwarded-For y
+// req.ip es siempre el socket TCP real -- restrictivo por diseño. Solo
+// cuando se configura explícitamente con la topología real (p. ej.
+// Cloudflare + ALB) req.ip empieza a resolverse desde X-Forwarded-For, y
+// únicamente respetando ese número exacto de saltos.
+app.set('trust proxy', appConfig.trustProxyHops);
+
 // Correlation ID / logging estructurado (LOTE-010, ADR-012 §25): montado
 // inmediatamente después de crear `app`, antes de CORS, express.json,
 // health y cualquier ruta de negocio -- correlationId debe existir durante
 // todo el ciclo de vida de la solicitud. X-Request-ID ya está permitido
 // por CORS (server/security/corsPolicy.js -- DEFAULT_CORS_HEADERS).
 app.use(createRequestLogging());
+
+// Cabeceras de seguridad HTTP (server/security/securityHeaders.js):
+// montadas antes de CORS y de cualquier ruta de negocio, igual que el
+// resto de middleware transversal. Este backend nunca sirve el SPA (ver
+// comentario en securityHeaders.js) -- CSP estricta por diseño.
+app.use(createSecurityHeadersMiddleware({ appEnv: appConfig.appEnv }));
+app.use(createPermissionsPolicyMiddleware());
 
 // CORS (LOTE-004, ADR-014 §7 Barrera 4/§21): allowlist explícita derivada
 // de APP_ENV (server/config/env.js -- appConfig.cors.allowedOrigins), sin

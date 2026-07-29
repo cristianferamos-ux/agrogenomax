@@ -25,9 +25,16 @@ export { DEFAULT_CORS_HEADERS, DEFAULT_CORS_METHODS, buildCorsPolicy, evaluateCo
  * Construye la política CORS final para `appEnv` a partir de la
  * *allowlist* ya resuelta por server/config/env.js
  * (`appConfig.cors.allowedOrigins`). Métodos, headers y `credentials` son
- * constantes -- no dependen de `APP_ENV` (no hay ningún uso de cookies en
- * el backend todavía; `allowCredentials` queda en `false` hasta que
- * ADR-009 se implemente).
+ * constantes -- no dependen de `APP_ENV`.
+ *
+ * ADR-009 implementado: `allowCredentials: true` habilita el cookie
+ * HttpOnly de recuperación de CatastroX (server/security/recoveryCookie.js)
+ * -- el aislamiento real de ese cookie lo da su atributo `Path`
+ * (`/api/catastrox/payments`), no este flag: `allowCredentials` solo
+ * permite que el navegador incluya/lea credenciales en solicitudes
+ * cross-origin ya autorizadas por la allowlist (nunca hay reflejo de `*`
+ * en este módulo, condición necesaria para poder activar credentials sin
+ * abrir la política).
  *
  * @param {{appEnv: string, allowedOrigins: string[]}} corsConfig
  */
@@ -37,7 +44,7 @@ export function buildExpressCorsPolicy(corsConfig) {
     allowedOrigins: corsConfig.allowedOrigins,
     allowedMethods: DEFAULT_CORS_METHODS,
     allowedHeaders: DEFAULT_CORS_HEADERS,
-    allowCredentials: false,
+    allowCredentials: true,
   });
 }
 

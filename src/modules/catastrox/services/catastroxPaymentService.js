@@ -823,18 +823,64 @@ async function openWompiWidget(checkoutData, {
   }
 }
 
-async function requestCheckoutSession({ packageId, lookup }) {
+async function requestCheckoutSession({ packageId, lookup, customerId, purchaseAttemptId }) {
   const checkoutIntent = buildCheckoutUrl({ packageId, lookup });
   if (!checkoutIntent) {
     throw new Error('No fue posible preparar el paquete solicitado.');
   }
 
+  const normalizedCustomerId = String(customerId || '').trim();
+  if (!normalizedCustomerId) {
+    // Defensa en profundidad: el backend ya rechaza /checkout sin
+    // customerId (CUSTOMER_ID_REQUIRED), pero este cliente nunca debe
+    // siquiera intentar la llamada sin un comprador verificado -- evita un
+    // round-trip de red innecesario y dejar rastro en logs de un intento
+    // mal formado. Se devuelve un resultado (no se lanza) para mantener el
+    // mismo contrato de retorno que el resto de esta función.
+    return {
+      ok: false,
+      status: 'error',
+      message: 'Debe registrar y verificar sus datos de comprador antes de continuar.',
+    };
+  }
+
+  const normalizedAttemptId = String(purchaseAttemptId || '').trim();
+  if (!normalizedAttemptId) {
+    // Defensa en profundidad equivalente a la de customerId -- el backend
+    // ya rechaza /checkout sin purchaseAttemptId válido
+    // (INVALID_PURCHASE_ATTEMPT_ID), pero este cliente nunca debe intentar
+    // la llamada sin uno: sin purchaseAttemptId no hay protección real
+    // contra doble clic (ver catastroxPayments.js, buildIdempotencyKey).
+    return {
+      ok: false,
+      status: 'error',
+      message: 'No fue posible preparar el intento de compra. Vuelva a intentar desde el resumen.',
+    };
+  }
+
+  // Cuerpo exhaustivo a propósito (Bloque 6 del pedido): SOLO estos campos
+  // viajan al backend. Nunca precio/amountInCents/currency/reference/
+  // transactionId/status/email/datos de documento/datos cifrados/token de
+  // sesión -- todo eso lo decide o ya lo tiene el backend por su cuenta
+  // (monto desde CATASTROX_PAYMENT_PACKAGE_PRICES_COP_CENTS, sesión desde
+  // el cookie HttpOnly que el navegador adjunta solo).
   const body = {
     packageId,
-    purchaseKey: checkoutIntent.purchaseKey,
+    customerId: normalizedCustomerId,
+    // canonicalPredioId (Bloque 3/4/5): la misma identidad sin importar si
+    // el predio se encontró por código, coordenadas o "mi ubicación
+    // actual" -- las tres vías de búsqueda ya la devuelven (ver
+    // server/routes/catastrox.js). codigoPredial se conserva como
+    // compatibilidad/metadato si el backend todavía no la recibió.
+    canonicalPredioId: lookup?.predio?.canonicalPredioId || '',
     codigoPredial: lookup?.predio?.codigoPredial || lookup?.predio?.codigo || '',
-    predioId: lookup?.predio?.id || lookup?.routeId || '',
     routeId: lookup?.routeId || lookup?.predio?.routeId || lookup?.predio?.id || '',
+    purchaseKey: checkoutIntent.purchaseKey,
+    // Protección de doble clic (revisión de seguridad): generado UNA sola
+    // vez por CatastroXPackagePage al entrar al resumen final, reutilizado
+    // en reintentos del mismo intento -- nunca regenerado por este
+    // servicio ni por render.
+    purchaseAttemptId: normalizedAttemptId,
   };
 
   console.info('[CatastroX Wompi] Checkout backend solicitado', {
@@ -851,6 +897,12 @@ async function requestCheckoutSession({ packageId, lookup }) {
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        // credentials:'include' -- el backend responde Set-Cookie con la
+        // credencial de recuperación (HttpOnly, ver
+        // server/security/recoveryCookie.js) solo cuando este checkout crea
+        // una orden nueva. El navegador la maneja por completo; este código
+        // nunca lee ni ve el valor del cookie.
+        credentials: 'include',
         body: JSON.stringify(body),
       });
 
@@ -927,7 +979,13 @@ export async function verifyWompiTransaction(transactionId) {
         throw new Error(data?.error || data?.detail || 'No fue posible verificar el pago con Wompi.');
       }
 
-      return data.transaction;
+      // El backend ya persistió/validó esta verificación contra la orden
+      // (server/routes/catastroxPayments.js) -- `order` (si existe) es la
+      // fuente autoritativa de "¿está pagado?", nunca algo que este cliente
+      // deba recalcular. Se anexa sin romper a los llamadores existentes
+      // que solo leen campos de transacción (status/reference/amountInCents/
+      // currency/id) directamente sobre el valor devuelto.
+      return { ...data.transaction, order: data.order || null };
     } catch (error) {
       lastError = error;
     }
@@ -938,9 +996,241 @@ export async function verifyWompiTransaction(transactionId) {
     : new Error('No fue posible verificar el pago con Wompi.');
 }
 
+// Fuente autoritativa de "¿está pagado?" para un predio+paquete -- el
+// backend responde según catastrox_payment_orders (Postgres), nunca según
+// nada que este cliente haya guardado. Se llama al montar/cambiar el lookup
+// en CatastroXPackagePage, reemplazando la confianza ciega en localStorage
+// que causaba el defecto de cobro duplicado (ver informe de auditoría).
+//
+// El backend ahora exige, además de canonicalPredioId/codigoPredial, la
+// credencial de recuperación (cookie HttpOnly emitida por /checkout) --
+// conocer el código predial ya NO basta para reconocer un pago como
+// propio (defecto de acceso cruzado corregido). Este cliente nunca ve ni
+// maneja el valor del cookie; `credentials:'include'` es lo único que hace
+// falta para que el navegador lo adjunte solo. La respuesta ya no incluye
+// `orderToken` -- ver server/routes/catastroxPayments.js.
+export async function checkEntitlement({ canonicalPredioId, codigoPredial, packageId }) {
+  const normalizedPackageId = normalizePackageId(packageId);
+  const normalizedCanonicalPredioId = String(canonicalPredioId || '').trim();
+  const normalizedCodigoPredial = String(codigoPredial || '').trim();
+
+  if (!normalizedCanonicalPredioId && !normalizedCodigoPredial) {
+    return { ok: false, isPaid: false, message: 'No se pudo determinar el predio consultado.' };
+  }
+
+  let lastError = null;
+
+  for (const apiBase of getApiBaseCandidates()) {
+    const url = `${apiBase}/catastrox/payments/entitlements/check`;
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          canonicalPredioId: normalizedCanonicalPredioId || undefined,
+          codigoPredial: normalizedCanonicalPredioId ? undefined : normalizedCodigoPredial,
+          packageId: normalizedPackageId,
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok || payload?.ok !== true) {
+        return {
+          ok: false,
+          isPaid: false,
+          message: payload?.message || 'No fue posible consultar el estado del pago.',
+        };
+      }
+
+      return {
+        ok: true,
+        isPaid: Boolean(payload.isPaid),
+        packageId: payload.packageId || normalizedPackageId,
+      };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  return {
+    ok: false,
+    isPaid: false,
+    message:
+      lastError instanceof Error
+        ? lastError.message
+        : 'No fue posible conectar con el backend de pagos de CatastroX.',
+  };
+}
+
+// Consulta de recuperación por orderToken (capability token opaco, no
+// sensible por sí mismo -- ver server/routes/catastroxPayments.js). Vía de
+// respaldo cuando ya se tiene un orderToken cacheado localmente (p. ej.
+// justo después de un checkout en esta misma sesión), complementaria a
+// checkEntitlement().
+export async function getOrderStatus(orderToken) {
+  const normalizedOrderToken = String(orderToken || '').trim();
+  if (!normalizedOrderToken) return null;
+
+  for (const apiBase of getApiBaseCandidates()) {
+    const url = `${apiBase}/catastrox/payments/orders/${encodeURIComponent(normalizedOrderToken)}/status`;
+
+    try {
+      const response = await fetch(url, { credentials: 'include' });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || payload?.ok !== true) continue;
+      return payload.order || null;
+    } catch {
+      // Se intenta el siguiente candidato de API base; si ninguno responde,
+      // se devuelve null -- el llamador debe tratarlo como "desconocido",
+      // nunca como "pagado".
+    }
+  }
+
+  return null;
+}
+
+// --- Comprador / verificación de correo (Bloque 2/3/4/5) -----------------
+//
+// Estas tres funciones nunca escriben nada en localStorage/sessionStorage --
+// el formulario (CatastroXBuyerForm/CatastroXOtpVerification) mantiene los
+// datos personales solo en estado de React (memoria), y customerId se
+// conserva únicamente en memoria durante el flujo (ver CatastroXPackagePage).
+
+/**
+ * Crea o actualiza el comprador y dispara el envío del código de
+ * verificación. `input` es exactamente lo que el formulario recogió --
+ * este cliente no valida más que lo indispensable para no llamar a la red
+ * con un objeto vacío; la validación real (única autoritativa) es la del
+ * backend (server/services/catastrox/customerValidation.js).
+ */
+export async function createCustomer(input) {
+  let lastError = null;
+
+  for (const apiBase of getApiBaseCandidates()) {
+    const url = `${apiBase}/catastrox/payments/customers`;
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(input),
+      });
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok || payload?.ok !== true) {
+        return {
+          ok: false,
+          code: payload?.code || 'CUSTOMER_ERROR',
+          message: payload?.message || 'No fue posible registrar sus datos.',
+        };
+      }
+
+      return {
+        ok: true,
+        customerId: payload.customerId,
+        emailVerificationRequired: Boolean(payload.emailVerificationRequired),
+        // Solo presente si el backend corre en development/test (ver
+        // server/routes/catastroxPayments.js) -- nunca en staging/producción.
+        devOtpCode: payload.devOtpCode || null,
+      };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  return {
+    ok: false,
+    code: 'NETWORK_ERROR',
+    message:
+      lastError instanceof Error
+        ? lastError.message
+        : 'No fue posible conectar con el backend de pagos de CatastroX.',
+  };
+}
+
+/**
+ * Verifica el código OTP para un customerId ya creado. El código nunca se
+ * guarda en ningún almacenamiento del navegador -- solo viaja en este
+ * único POST.
+ */
+export async function verifyCustomerEmail({ customerId, code }) {
+  const normalizedCustomerId = String(customerId || '').trim();
+  const normalizedCode = String(code || '').trim();
+
+  if (!normalizedCustomerId || !normalizedCode) {
+    return { ok: false, code: 'INVALID_VERIFICATION_REQUEST', message: 'Solicitud inválida.' };
+  }
+
+  let lastError = null;
+
+  for (const apiBase of getApiBaseCandidates()) {
+    const url = `${apiBase}/catastrox/payments/customers/${encodeURIComponent(normalizedCustomerId)}/verify-email`;
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ code: normalizedCode }),
+      });
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok || payload?.ok !== true) {
+        return {
+          ok: false,
+          code: payload?.code || 'EMAIL_VERIFICATION_ERROR',
+          message: payload?.message || 'No fue posible verificar el código.',
+        };
+      }
+
+      return { ok: true, verified: true };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  return {
+    ok: false,
+    code: 'NETWORK_ERROR',
+    message:
+      lastError instanceof Error
+        ? lastError.message
+        : 'No fue posible conectar con el backend de pagos de CatastroX.',
+  };
+}
+
+// --- Historial multiorden en este navegador (Bloque 9) --------------------
+//
+// Se apoya exclusivamente en la sesión de recuperación HttpOnly
+// (credentials:'include') -- este cliente nunca lee ni guarda la lista de
+// órdenes en localStorage/sessionStorage; cada llamada vuelve a pedirla al
+// backend.
+export async function getMyOrders() {
+  for (const apiBase of getApiBaseCandidates()) {
+    const url = `${apiBase}/catastrox/payments/orders/mine`;
+
+    try {
+      const response = await fetch(url, { credentials: 'include' });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || payload?.ok !== true) continue;
+      return { ok: true, orders: Array.isArray(payload.orders) ? payload.orders : [] };
+    } catch {
+      // Se intenta el siguiente candidato; si ninguno responde, se informa
+      // el fallo sin fingir una lista vacía como si fuera "sin compras".
+    }
+  }
+
+  return { ok: false, orders: [], message: 'No fue posible consultar su historial de compras.' };
+}
+
 export async function startPackageCheckout({
   packageId,
   lookup,
+  customerId,
+  purchaseAttemptId,
   targetRoute = null,
   onCheckoutStart = null,
   onOpened = null,
@@ -960,10 +1250,34 @@ export async function startPackageCheckout({
     };
   }
 
-  const checkoutResponse = await requestCheckoutSession({ packageId: normalizedPackageId, lookup });
+  const checkoutResponse = await requestCheckoutSession({
+    packageId: normalizedPackageId,
+    lookup,
+    customerId,
+    purchaseAttemptId,
+  });
 
   if (checkoutResponse.ok === true) {
     const wompiConfig = checkoutResponse.checkout;
+
+    // El backend ya encontró un derecho APPROVED para este predio+paquete
+    // (o uno de rango superior) -- nunca se abre Wompi de nuevo. Esta es la
+    // corrección central del defecto de cobro duplicado: la decisión viene
+    // de catastrox_payment_orders (Postgres), no de localStorage.
+    if (wompiConfig?.status === 'ALREADY_PAID') {
+      // Ya NO se marca la caché local como pagada aquí: /checkout no hace
+      // (ni puede hacer, por diseño) una verificación de posesión --
+      // ALREADY_PAID solo informa que existe una orden aprobada para este
+      // predio+paquete, no que el solicitante actual sea quien la posee.
+      // La única fuente que puede confirmar eso es checkEntitlement()
+      // (cookie de recuperación + hash), que CatastroXPackagePage ya
+      // consulta de forma independiente.
+      return {
+        status: 'already_paid',
+        message: wompiConfig.message || 'Este paquete ya fue adquirido para este predio.',
+      };
+    }
+
     validateWompiCheckoutData(wompiConfig);
 
     markPackageAsPending({

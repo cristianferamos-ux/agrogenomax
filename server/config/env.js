@@ -25,12 +25,28 @@ export const ALLOWED_APP_ENVIRONMENTS = Object.freeze([
 // staging/production (nunca readiness protegida sin credencial real),
 // inyectable de forma opcional en development/test (sin exigirla), y
 // prohibida en demo (demo no tiene backend real que proteger).
+// CATASTROX_PII_ENCRYPTION_KEY/CATASTROX_PII_HASH_SECRET (modelo de
+// comprador -- migración 004): sin ellas, POST /customers no puede cifrar/
+// indexar documento/teléfono/dirección -- obligatorias donde haya
+// compradores reales (staging/production), opcionales en development/test.
 const REQUIRED_VARIABLES_BY_ENV = Object.freeze({
   development: Object.freeze([]),
   test: Object.freeze([]),
   demo: Object.freeze([]),
-  staging: Object.freeze(['DATABASE_URL', 'CATASTROX_DATABASE_URL', 'HEALTH_MONITOR_TOKEN']),
-  production: Object.freeze(['DATABASE_URL', 'CATASTROX_DATABASE_URL', 'HEALTH_MONITOR_TOKEN']),
+  staging: Object.freeze([
+    'DATABASE_URL',
+    'CATASTROX_DATABASE_URL',
+    'HEALTH_MONITOR_TOKEN',
+    'CATASTROX_PII_ENCRYPTION_KEY',
+    'CATASTROX_PII_HASH_SECRET',
+  ]),
+  production: Object.freeze([
+    'DATABASE_URL',
+    'CATASTROX_DATABASE_URL',
+    'HEALTH_MONITOR_TOKEN',
+    'CATASTROX_PII_ENCRYPTION_KEY',
+    'CATASTROX_PII_HASH_SECRET',
+  ]),
 });
 
 // Variables que nunca deben aparecer cuando APP_ENV=demo (ADR-014 §13/§7):
@@ -51,6 +67,10 @@ const DEMO_PROHIBITED_EXACT_VARIABLES = Object.freeze([
   // autenticar -- una credencial técnica configurada en demo delataría un
   // backend real inexistente.
   'HEALTH_MONITOR_TOKEN',
+  // Modelo de comprador (migración 004): demo no tiene backend real ni
+  // base de datos de compradores que cifrar/indexar.
+  'CATASTROX_PII_ENCRYPTION_KEY',
+  'CATASTROX_PII_HASH_SECRET',
 ]);
 
 // LOTE-004 (ADR-014 §7 Barrera 4, ADR-013 §21): la resolución y validación
@@ -257,6 +277,92 @@ export function validateEnv(appEnv, source = process.env) {
     }
   }
 
+  // Sistema de órdenes de pago CatastroX: el secreto de eventos de Wompi
+  // (distinto de WOMPI_INTEGRITY_SECRET_TEST) autentica el webhook
+  // POST /api/catastrox/payments/wompi/events. Aún no es obligatorio en
+  // ningún ambiente (Sandbox/webhook opcional mientras se activa en el
+  // dashboard de Wompi), pero donde esté presente debe cumplir el mismo
+  // formato mínimo seguro que HEALTH_MONITOR_TOKEN -- nunca se expone su
+  // valor en el mensaje de error.
+  if (isNonEmpty(source.WOMPI_EVENTS_SECRET_TEST)) {
+    const secret = source.WOMPI_EVENTS_SECRET_TEST;
+
+    if (secret !== secret.trim()) {
+      throw new ConfigurationError(
+        'WOMPI_EVENTS_SECRET_TEST no puede tener espacios iniciales o finales.',
+        { code: 'INSECURE_VALUE', environment: appEnv, variable: 'WOMPI_EVENTS_SECRET_TEST' },
+      );
+    }
+
+    if (secret.length < 32) {
+      throw new ConfigurationError('WOMPI_EVENTS_SECRET_TEST debe tener al menos 32 caracteres.', {
+        code: 'INSECURE_VALUE',
+        environment: appEnv,
+        variable: 'WOMPI_EVENTS_SECRET_TEST',
+      });
+    }
+  }
+
+  // CATASTROX_PII_HASH_SECRET: mismo formato mínimo que los demás secretos
+  // de este módulo -- nunca se expone su valor en el error.
+  if (isNonEmpty(source.CATASTROX_PII_HASH_SECRET)) {
+    const secret = source.CATASTROX_PII_HASH_SECRET;
+
+    if (secret !== secret.trim()) {
+      throw new ConfigurationError(
+        'CATASTROX_PII_HASH_SECRET no puede tener espacios iniciales o finales.',
+        { code: 'INSECURE_VALUE', environment: appEnv, variable: 'CATASTROX_PII_HASH_SECRET' },
+      );
+    }
+
+    if (secret.length < 32) {
+      throw new ConfigurationError('CATASTROX_PII_HASH_SECRET debe tener al menos 32 caracteres.', {
+        code: 'INSECURE_VALUE',
+        environment: appEnv,
+        variable: 'CATASTROX_PII_HASH_SECRET',
+      });
+    }
+  }
+
+  // CATASTROX_PII_ENCRYPTION_KEY: debe decodificar exactamente a 32 bytes
+  // en base64 (AES-256) -- una clave más corta debilitaría el cifrado, una
+  // más larga indica casi con certeza un valor mal generado/copiado.
+  if (isNonEmpty(source.CATASTROX_PII_ENCRYPTION_KEY)) {
+    const key = source.CATASTROX_PII_ENCRYPTION_KEY;
+    let decodedLength = -1;
+    try {
+      decodedLength = Buffer.from(key, 'base64').length;
+    } catch {
+      decodedLength = -1;
+    }
+
+    if (decodedLength !== 32) {
+      throw new ConfigurationError(
+        'CATASTROX_PII_ENCRYPTION_KEY debe decodificar a exactamente 32 bytes (AES-256) en base64.',
+        { code: 'INSECURE_VALUE', environment: appEnv, variable: 'CATASTROX_PII_ENCRYPTION_KEY' },
+      );
+    }
+  }
+
+  // TRUST_PROXY_HOPS (opcional, default 0 = no confiar en ningún proxy):
+  // número exacto de saltos de reverse proxy confiables (p. ej. Cloudflare +
+  // ALB) para resolver la IP real del cliente en rate limiting. Restrictivo
+  // por diseño -- un valor mal formado falla-rápido en vez de degradar
+  // silenciosamente a "confiar en todo" (Express interpretaría un valor no
+  // numérico de forma impredecible).
+  if (isNonEmpty(source.TRUST_PROXY_HOPS)) {
+    const raw = source.TRUST_PROXY_HOPS.trim();
+    const parsed = Number(raw);
+
+    if (!/^\d+$/.test(raw) || !Number.isInteger(parsed) || parsed < 0 || parsed > 5) {
+      throw new ConfigurationError('TRUST_PROXY_HOPS debe ser un entero entre 0 y 5.', {
+        code: 'INSECURE_VALUE',
+        environment: appEnv,
+        variable: 'TRUST_PROXY_HOPS',
+      });
+    }
+  }
+
   if (appEnv === 'production') {
     const connectionValues = {
       DATABASE_URL: source.DATABASE_URL,
@@ -383,6 +489,9 @@ export function getConfig(source = process.env, options = {}) {
 
   const usesRealServices = appEnv === 'test' ? source.TEST_USE_REAL_SERVICES === 'true' : true;
   const corsAllowedOrigins = resolveCorsAllowedOrigins(appEnv, source);
+  // Ya validado arriba (entero 0-5 si está presente); default 0 = no
+  // confiar en ningún proxy (Express usa el socket real).
+  const trustProxyHops = isNonEmpty(source.TRUST_PROXY_HOPS) ? Number(source.TRUST_PROXY_HOPS.trim()) : 0;
 
   const config = Object.freeze({
     appEnv,
@@ -393,6 +502,7 @@ export function getConfig(source = process.env, options = {}) {
     // la política final (métodos/headers/credentials son constantes, no
     // dependen de APP_ENV, y se declaran en ese módulo).
     cors: Object.freeze({ allowedOrigins: corsAllowedOrigins }),
+    trustProxyHops,
     // Informativo únicamente -- nunca usado para tomar decisiones.
     nodeEnv: source.NODE_ENV ?? null,
   });
