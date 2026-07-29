@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Wallet } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
+import CatastroXBuyerForm from '../components/CatastroXBuyerForm.jsx';
 import CatastroXDisclaimer from '../components/CatastroXDisclaimer.jsx';
 import CatastroXDownloadMock from '../components/CatastroXDownloadMock.jsx';
 import CatastroXMockMap from '../components/CatastroXMockMap.jsx';
+import CatastroXOtpVerification from '../components/CatastroXOtpVerification.jsx';
 import CatastroXPageActions from '../components/CatastroXPageActions.jsx';
+import CatastroXPurchaseSummary from '../components/CatastroXPurchaseSummary.jsx';
 import CatastroXResultSummary from '../components/CatastroXResultSummary.jsx';
 import CatastroXWhatsAppCTA from '../components/CatastroXWhatsAppCTA.jsx';
 import {
@@ -13,6 +16,7 @@ import {
   getCatastroxPackage,
 } from '../config/catastroxPackages.js';
 import { CATASTROX_STATUS } from '../data/catastroxMockData.js';
+import { maskEmail } from '../utils/piiMasking.js';
 import {
   hydrateLookupForDeliverables,
   isCatastroxAuditDownloadsAvailable,
@@ -20,7 +24,9 @@ import {
   saveLastLookup,
 } from '../services/catastroxApi.js';
 import {
+  checkEntitlement,
   clearPendingPaymentByReference,
+  createCustomer,
   getApprovedPurchaseRecordByKeys,
   getPackageRank,
   getLookupPurchaseKey,
@@ -29,7 +35,9 @@ import {
   getUnlockedDownloadsForPackage,
   isPackageUnlockedForLookup,
   markPackageAsPaid,
+  markPackageAsPaidByPurchaseKey,
   startPackageCheckout,
+  verifyCustomerEmail,
 } from '../services/catastroxPaymentService.js';
 import {
   downloadCoordinatesZip,
@@ -170,6 +178,44 @@ export default function CatastroXPackagePage({ packageId }) {
   const [pendingPackageId, setPendingPackageId] = useState(null);
   const [, setPurchaseVersion] = useState(0);
   const [isStartingCheckout, setIsStartingCheckout] = useState(false);
+  // Fuente autoritativa de "¿está pagado?": null mientras no se resolvió una
+  // respuesta del backend todavía (se usa el valor local de localStorage
+  // solo como UX optimista mientras tanto), true/false una vez que
+  // checkEntitlement() respondió -- el backend siempre gana sobre lo que
+  // localStorage diga (corrige el defecto de cobro duplicado: localStorage
+  // ya no es la fuente de verdad, ver informe de auditoría).
+  const [entitlementState, setEntitlementState] = useState({ isPaid: null });
+
+  // Flujo de comprador/OTP/resumen (Bloque 2-10 del pedido) -- todo en
+  // memoria de React, nunca en localStorage/sessionStorage. `purchaseFlowStep`
+  // gobierna qué formulario se muestra ANTES de llamar a /checkout; Wompi
+  // solo puede abrirse después de que este flujo llega a 'summary' y el
+  // usuario confirma explícitamente (handleConfirmPurchase).
+  const [purchaseFlowStep, setPurchaseFlowStep] = useState(null); // null | 'buyer_form' | 'otp' | 'summary'
+  const [buyerInput, setBuyerInput] = useState(null);
+  const [customerId, setCustomerId] = useState(null);
+  const [devOtpCode, setDevOtpCode] = useState(null);
+  const [isCreatingCustomer, setIsCreatingCustomer] = useState(false);
+  const [buyerFormError, setBuyerFormError] = useState(null);
+  // Protección contra doble clic (Bloque 7): guard síncrono, no depende de
+  // que el re-render de setState ya haya ocurrido antes del segundo clic.
+  const checkoutInFlightRef = useRef(false);
+  // purchaseAttemptId (revisión de seguridad, Bloque 3): un solo UUID por
+  // intento de compra, generado al entrar al resumen final
+  // (handleOtpVerified) y reutilizado mientras ese intento siga vivo
+  // (doble clic, timeout, reintento) -- nunca regenerado por render.
+  // resetPurchaseFlow() lo limpia; un intento voluntario nuevo genera uno
+  // distinto la próxima vez que se llegue al resumen.
+  const purchaseAttemptIdRef = useRef(null);
+
+  function resetPurchaseFlow() {
+    setPurchaseFlowStep(null);
+    setBuyerInput(null);
+    setCustomerId(null);
+    setDevOtpCode(null);
+    setBuyerFormError(null);
+    purchaseAttemptIdRef.current = null;
+  }
 
   if (!pkg) {
     return null;
@@ -230,7 +276,11 @@ export default function CatastroXPackagePage({ packageId }) {
   const paidRank = getPackageRank(purchasedPackage?.packageId);
   const currentRank = getPackageRank(packageId);
   const isAuditUnlocked = Boolean(auditLookup);
-  const isPaid = isPackageUnlockedForLookup({ lookup: effectiveLookup, packageId });
+  const localIsPaid = isPackageUnlockedForLookup({ lookup: effectiveLookup, packageId });
+  // Mientras el backend no ha respondido (entitlementState.isPaid === null),
+  // se muestra el valor local como adelanto de UX; en cuanto responde, su
+  // valor manda siempre, sea true o false.
+  const isPaid = entitlementState.isPaid === null ? localIsPaid : entitlementState.isPaid;
   const visibleDownloads = isAuditUnlocked
     ? buildDownloadsForPackage(packageId)
     : buildDownloadsForPackage(packageId).filter((download) =>
@@ -268,6 +318,46 @@ export default function CatastroXPackagePage({ packageId }) {
     saveLastLookup(hydratedLookup);
     return hydratedLookup;
   };
+
+  useEffect(() => {
+    const codigoPredial = predio.codigoPredial || predio.codigo || '';
+    const canonicalPredioId = predio.canonicalPredioId || '';
+    if (!codigoPredial && !canonicalPredioId) {
+      // Sin identidad de predio no hay nada que consultar en backend -- se
+      // mantiene el valor local como único disponible (mismo comportamiento
+      // que antes de este cambio para este caso borde).
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    checkEntitlement({ canonicalPredioId, codigoPredial, packageId }).then((result) => {
+      if (cancelled || !result.ok) return;
+
+      if (result.isPaid) {
+        // Reconcilia la caché local (otras pantallas/tarjetas de paquete
+        // siguen leyendo localStorage para UX instantánea) -- el backend ya
+        // confirmó el derecho, así que sincronizarla aquí no es una
+        // decisión de autorización, solo mantiene la caché al día.
+        markPackageAsPaidByPurchaseKey({
+          packageId: result.packageId || packageId,
+          purchaseKey,
+          routeId,
+          codigoPredial,
+          transactionId: null,
+          reference: null,
+          mode: 'wompi-sandbox-verified',
+        });
+      }
+
+      setEntitlementState({ isPaid: result.isPaid });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [predio.codigoPredial, predio.codigo, predio.canonicalPredioId, packageId, purchaseKey, routeId]);
 
   useEffect(() => {
     if (!isPaid || auditLookup || deliverableLookup?.predio?.projectedGeometry || lookup?.predio?.projectedGeometry) {
@@ -349,6 +439,88 @@ export default function CatastroXPackagePage({ packageId }) {
     }
   };
 
+  // Paso 5-6 del flujo (Bloque 2): abre el formulario del comprador. Nunca
+  // crea customer/orden/checkout por este solo clic -- solo muestra la UI.
+  const handleOpenBuyerForm = () => {
+    setCheckoutState(null);
+    setBuyerFormError(null);
+    setPurchaseFlowStep('buyer_form');
+  };
+
+  // Paso 7-8 del flujo: crea o recupera el comprador y dispara el envío del
+  // OTP. customerId/buyerInput quedan solo en memoria (useState de este
+  // componente) -- nunca en almacenamiento del navegador.
+  const handleBuyerFormSubmit = async (input) => {
+    setIsCreatingCustomer(true);
+    setBuyerFormError(null);
+    const result = await createCustomer(input);
+    setIsCreatingCustomer(false);
+
+    if (!result.ok) {
+      setBuyerFormError(result.message || 'No fue posible registrar sus datos.');
+      return;
+    }
+
+    setBuyerInput(input);
+    setCustomerId(result.customerId);
+    setDevOtpCode(result.devOtpCode || null);
+    setPurchaseFlowStep('otp');
+  };
+
+  // Reenvío de código (Bloque 4): reutiliza el mismo POST /customers (upsert
+  // idempotente por documento) -- el backend genera y "envía" un código
+  // nuevo cada vez.
+  const handleResendOtp = async () => {
+    if (!buyerInput) return;
+    const result = await createCustomer(buyerInput);
+    if (result.ok) {
+      if (result.customerId) setCustomerId(result.customerId);
+      setDevOtpCode(result.devOtpCode || null);
+    }
+  };
+
+  // Paso 9-10: verifica el código. El código en sí nunca pasa por este
+  // componente -- CatastroXOtpVerification lo mantiene en su propio estado
+  // y lo descarta inmediatamente después del intento.
+  const handleVerifyOtp = async (code) => {
+    if (!customerId) {
+      return { ok: false, code: 'INVALID_VERIFICATION_REQUEST', message: 'Solicitud inválida.' };
+    }
+    return verifyCustomerEmail({ customerId, code });
+  };
+
+  const handleOtpVerified = () => {
+    // Se genera exactamente una vez por intento de compra, aquí -- el
+    // único punto de entrada al resumen final. crypto.randomUUID() es
+    // criptográficamente seguro (Web Crypto API nativa del navegador).
+    purchaseAttemptIdRef.current = window.crypto.randomUUID();
+    setPurchaseFlowStep('summary');
+  };
+
+  // Paso 11-12: única puerta de entrada a Wompi. Protección de doble clic
+  // vía checkoutInFlightRef (guard síncrono) + deshabilitar el botón de
+  // "Confirmar compra" (ver CatastroXPurchaseSummary, isSubmitting).
+  //
+  // Defecto corregido (revisión de seguridad): esta función ANTES sacaba
+  // al usuario del resumen (setPurchaseFlowStep(null)) de inmediato, antes
+  // de siquiera intentar /checkout. Si la llamada fallaba (por ejemplo,
+  // CORS rechazando el origen), el usuario caía en la pantalla inicial
+  // "Comprar" -- y al pulsarla de nuevo, handleOpenBuyerForm() reabría un
+  // CatastroXBuyerForm en blanco, perdiendo visualmente su progreso aunque
+  // customerId siguiera vivo en memoria (efecto percibido como "vuelve al
+  // formulario del comprador"). Ahora el resumen permanece visible durante
+  // todo el intento; solo onOpened() (más abajo, Wompi realmente abierto)
+  // saca al usuario del resumen.
+  const handleConfirmPurchase = async () => {
+    if (checkoutInFlightRef.current) return;
+    checkoutInFlightRef.current = true;
+    try {
+      await handleStartCheckout();
+    } finally {
+      checkoutInFlightRef.current = false;
+    }
+  };
+
   const handleStartCheckout = async () => {
     let opened = false;
     const watchdog = window.setTimeout(() => {
@@ -382,12 +554,19 @@ export default function CatastroXPackagePage({ packageId }) {
       const checkoutResult = await startPackageCheckout({
         packageId,
         lookup,
+        customerId,
+        purchaseAttemptId: purchaseAttemptIdRef.current,
         targetRoute: `/catastrox/${pkg.routeSlug}/${routeId || predio.id}`,
         onCheckoutStart: (state) => setCheckoutState(state),
         onOpened: ({ checkout }) => {
           opened = true;
           window.clearTimeout(watchdog);
           setIsStartingCheckout(false);
+          // Único punto donde el resumen se abandona (Bloque 7, revisión
+          // de seguridad): Wompi ya está abierto de verdad -- de aquí en
+          // adelante el estado del pago lo refleja el panel estándar
+          // (sección "Pago" / null-step), nunca antes de este punto.
+          setPurchaseFlowStep(null);
           setCheckoutState({
             status: 'wompi_started',
             message: 'Wompi fue abierto. Complete el pago para habilitar sus descargas.',
@@ -397,6 +576,10 @@ export default function CatastroXPackagePage({ packageId }) {
         onApproved: ({ transaction, checkout }) => {
           setIsStartingCheckout(false);
           setPendingPackageId(null);
+          // Bloque 11: limpia PII del estado en cuanto la compra se
+          // completa -- customerId/buyerInput ya no se necesitan (el
+          // backend es la única fuente de verdad de aquí en adelante).
+          resetPurchaseFlow();
 
           const resolvedReference = transaction?.reference || checkout.reference || null;
           const approvedPurchase = markPackageAsPaid({
@@ -535,7 +718,68 @@ export default function CatastroXPackagePage({ packageId }) {
         </ul>
       </section>
 
-      {!isPaid && !isAuditUnlocked ? (
+      {!isPaid && !isAuditUnlocked && purchaseFlowStep === 'buyer_form' ? (
+        <CatastroXBuyerForm
+          onSubmit={handleBuyerFormSubmit}
+          onCancel={resetPurchaseFlow}
+          isSubmitting={isCreatingCustomer}
+          submitError={buyerFormError}
+        />
+      ) : null}
+
+      {!isPaid && !isAuditUnlocked && purchaseFlowStep === 'otp' ? (
+        <CatastroXOtpVerification
+          maskedEmail={maskEmail(buyerInput?.email)}
+          devOtpCode={devOtpCode}
+          onVerify={handleVerifyOtp}
+          onResend={handleResendOtp}
+          onCancel={resetPurchaseFlow}
+          onVerified={handleOtpVerified}
+        />
+      ) : null}
+
+      {!isPaid && !isAuditUnlocked && purchaseFlowStep === 'summary' ? (
+        <CatastroXPurchaseSummary
+          buyerInput={buyerInput}
+          packageLabel={pkg.label}
+          packagePriceLabel={formatCatastroxPackagePrice(pkg.priceCop)}
+          predioLabel={predio.codigoPredial || predio.codigo || predio.municipio || ''}
+          onConfirm={handleConfirmPurchase}
+          onCancel={resetPurchaseFlow}
+          isSubmitting={isStartingCheckout}
+          errorMessage={checkoutState?.status === 'error' ? checkoutState.message : null}
+        />
+      ) : null}
+
+      {isPaid || isAuditUnlocked ? (
+        <section className="catastrox-card">
+          <div className="catastrox-section-heading">
+            <span>{isAuditUnlocked ? 'Modo auditoría local — no disponible en producción' : 'Descargas habilitadas'}</span>
+            <h2>{isAuditUnlocked ? `${pkg.label} habilitado para auditoría` : `${pkg.label} habilitado`}</h2>
+          </div>
+          <div className="catastrox-success">
+            <strong>{isAuditUnlocked ? 'Auditoría local activa' : 'Pago aprobado'}</strong>
+            <span>
+              {isAuditUnlocked
+                ? 'Estas descargas son temporales para revisión local y no representan una compra real.'
+                : includedMessage || `Se habilitaron las descargas de ${pkg.label.toLowerCase()} para este predio.`}
+            </span>
+          </div>
+          <div className="catastrox-action-row">
+            {visibleDownloads.map((item) => (
+              <CatastroXDownloadMock
+                key={item.id}
+                label={
+                  isHydratingDeliverables && packageId === CATASTROX_PACKAGE_IDS.PROFESIONAL
+                    ? `${item.label}...`
+                    : item.label
+                }
+                onClick={() => handleDownload(item.action, item.id)}
+              />
+            ))}
+          </div>
+        </section>
+      ) : purchaseFlowStep === null ? (
         <section className="catastrox-card">
           <div className="catastrox-section-heading">
             <span>Pago</span>
@@ -545,7 +789,7 @@ export default function CatastroXPackagePage({ packageId }) {
             Antes del pago aprobado no se habilitan descargas reales. Después del pago aprobado se activan únicamente los archivos incluidos en este paquete.
           </p>
           <div className="catastrox-action-row">
-            <button type="button" className="catastrox-button" onClick={handleStartCheckout} disabled={isStartingCheckout}>
+            <button type="button" className="catastrox-button" onClick={handleOpenBuyerForm} disabled={isStartingCheckout}>
               <Wallet size={18} />
               {isStartingCheckout ? 'Abriendo Wompi...' : `Comprar ${pkg.label}`}
             </button>
@@ -584,35 +828,7 @@ export default function CatastroXPackagePage({ packageId }) {
             </p>
           ) : null}
         </section>
-      ) : (
-        <section className="catastrox-card">
-          <div className="catastrox-section-heading">
-            <span>{isAuditUnlocked ? 'Modo auditoría local — no disponible en producción' : 'Descargas habilitadas'}</span>
-            <h2>{isAuditUnlocked ? `${pkg.label} habilitado para auditoría` : `${pkg.label} habilitado`}</h2>
-          </div>
-          <div className="catastrox-success">
-            <strong>{isAuditUnlocked ? 'Auditoría local activa' : 'Pago aprobado'}</strong>
-            <span>
-              {isAuditUnlocked
-                ? 'Estas descargas son temporales para revisión local y no representan una compra real.'
-                : includedMessage || `Se habilitaron las descargas de ${pkg.label.toLowerCase()} para este predio.`}
-            </span>
-          </div>
-          <div className="catastrox-action-row">
-            {visibleDownloads.map((item) => (
-              <CatastroXDownloadMock
-                key={item.id}
-                label={
-                  isHydratingDeliverables && packageId === CATASTROX_PACKAGE_IDS.PROFESIONAL
-                    ? `${item.label}...`
-                    : item.label
-                }
-                onClick={() => handleDownload(item.action, item.id)}
-              />
-            ))}
-          </div>
-        </section>
-      )}
+      ) : null}
       {auditAvailable && !isAuditUnlocked ? (
         <section className="catastrox-card catastrox-audit-card">
           <div className="catastrox-section-heading">

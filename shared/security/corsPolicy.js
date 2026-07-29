@@ -141,7 +141,17 @@ export function isOriginAllowed(policy, origin) {
 // y demo.agrogenomax.co NO están definidos como orígenes canónicos y no se
 // autorizan automáticamente.
 export const CORS_MANDATORY_ORIGINS_BY_ENV = Object.freeze({
-  development: Object.freeze(['http://localhost:5173', 'http://127.0.0.1:5173']),
+  // 5173 es el puerto por defecto de Vite; 5178 es el puerto real usado
+  // por el entorno de verificación local de este proyecto (defecto
+  // corregido: quedaba fuera de la allowlist, causando que /checkout y el
+  // resto de POST autenticados fallaran silenciosamente en CORS para
+  // cualquiera probando en ese puerto).
+  development: Object.freeze([
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://localhost:5178',
+    'http://127.0.0.1:5178',
+  ]),
   test: Object.freeze([]),
   demo: Object.freeze([]),
   staging: Object.freeze(['https://staging.agrogenomax.com']),

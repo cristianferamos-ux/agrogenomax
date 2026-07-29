@@ -1082,6 +1082,32 @@
   min-height: 8rem;
 }
 
+/* Defecto corregido: el <select> hereda el fondo/texto oscuros de la
+   página, pero su lista desplegable nativa (<option>) la dibuja el
+   sistema operativo/navegador, no el CSS de esta página -- en Chrome/Edge
+   Windows eso produce texto claro sobre fondo blanco (invisible). Ninguna
+   variable CSS de tema existe en este módulo (paleta fija en todo el
+   archivo, ver el resto de catastrox.css); se fijan aquí los mismos
+   valores ya usados en el resto del formulario, más `color-scheme: dark`
+   (respetado por Chromium para el desplegable nativo) y color/fondo
+   explícitos en <option>, que sí es soportado por Chrome/Edge aunque el
+   resto de la lista sea pintada por el SO. */
+.catastrox-field select {
+  color-scheme: dark;
+}
+
+.catastrox-field select option {
+  color: #ffffff;
+  background-color: #101817;
+}
+
+.catastrox-field select option:checked,
+.catastrox-field select option:hover,
+.catastrox-field select option:focus {
+  color: #9cff1a;
+  background-color: #1c2b28;
+}
+
 .catastrox-field input:focus,
 .catastrox-field select:focus,
 .catastrox-field textarea:focus {
@@ -1092,6 +1118,68 @@
 .catastrox-search,
 .catastrox-form {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.catastrox-field-error {
+  grid-column: 1 / -1;
+  margin-top: -0.25rem;
+  color: #ff8080;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.catastrox-field-error.is-full {
+  grid-column: 1 / -1;
+}
+
+.catastrox-checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  color: #c9d8ea;
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.catastrox-checkbox-row input[type='checkbox'] {
+  flex: 0 0 auto;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin-top: 0.15rem;
+  accent-color: #9cff1a;
+}
+
+.catastrox-dev-only-panel {
+  border-color: rgba(255, 214, 0, 0.5);
+  background: rgba(255, 214, 0, 0.08);
+}
+
+.catastrox-dev-only-panel strong {
+  color: #ffd600;
+}
+
+.catastrox-inline-panel.is-success {
+  border-color: rgba(156, 255, 26, 0.4);
+}
+
+.catastrox-inline-panel.is-success strong {
+  color: #9cff1a;
+}
+
+.catastrox-inline-panel.is-warning {
+  border-color: rgba(255, 214, 0, 0.4);
+}
+
+.catastrox-inline-panel.is-warning strong {
+  color: #ffd600;
+}
+
+.catastrox-inline-panel.is-danger {
+  border-color: rgba(255, 59, 59, 0.42);
+}
+
+.catastrox-inline-panel.is-danger strong {
+  color: #ff6262;
 }
 
 .catastrox-inline-panel {

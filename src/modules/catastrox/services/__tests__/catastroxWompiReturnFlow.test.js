@@ -510,3 +510,131 @@ test('Fase 7) simulacion completa con mocks: checkout -> callback (marca, no bor
   assert.equal(paymentService.isPackageUnlockedForLookup({ lookup, packageId: 'basico' }), true);
   assert.deepEqual(paymentService.getUnlockedDownloadsForPackage({ lookup, packageId: 'basico' }), ['pdf']);
 });
+
+// --- Sistema de órdenes persistentes en backend (fix del defecto de cobro
+// duplicado) -- checkEntitlement()/getOrderStatus() son la vía por la que
+// el frontend deja de decidir "¿pagado?" localmente; solo reflejan lo que
+// el backend responda. ---------------------------------------------------
+
+test('checkEntitlement) backend responde isPaid=true -> se refleja tal cual, sin exponer ningun token (el backend ya no los devuelve)', async () => {
+  let requestedBody = null;
+  let requestedCredentials = null;
+  globalThis.fetch = async (url, options) => {
+    if (String(url).includes('/entitlements/check')) {
+      requestedBody = JSON.parse(options.body);
+      requestedCredentials = options.credentials;
+      return jsonResponse({ ok: true, isPaid: true, packageId: 'basico' });
+    }
+    throw new Error(`URL no simulada: ${url}`);
+  };
+
+  const result = await paymentService.checkEntitlement({ codigoPredial: '181500003000000130054000000000', packageId: 'basico' });
+  assert.equal(result.ok, true);
+  assert.equal(result.isPaid, true);
+  assert.equal('orderToken' in result, false, 'ya no debe exponer orderToken -- solo la cookie HttpOnly autoriza');
+  assert.equal(requestedBody.codigoPredial, '181500003000000130054000000000');
+  assert.equal(requestedBody.packageId, 'basico');
+  // credentials:'include' -- imprescindible para que el navegador adjunte
+  // la cookie de recuperación HttpOnly en esta llamada cross-origin.
+  assert.equal(requestedCredentials, 'include');
+});
+
+test('checkEntitlement) backend responde isPaid=false -> nunca se infiere true localmente', async () => {
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('/entitlements/check')) {
+      return jsonResponse({ ok: true, isPaid: false, packageId: 'basico' });
+    }
+    throw new Error(`URL no simulada: ${url}`);
+  };
+
+  const result = await paymentService.checkEntitlement({ codigoPredial: '181500003000000130054000000000', packageId: 'basico' });
+  assert.equal(result.isPaid, false);
+});
+
+test('checkEntitlement) sin codigoPredial -> no llama a la red, responde isPaid=false', async () => {
+  globalThis.fetch = async () => {
+    throw new Error('No debe llamarse a la red sin codigoPredial.');
+  };
+
+  const result = await paymentService.checkEntitlement({ codigoPredial: '', packageId: 'basico' });
+  assert.equal(result.ok, false);
+  assert.equal(result.isPaid, false);
+});
+
+test('checkEntitlement) fallo de red -> ok=false, isPaid=false (nunca true por defecto)', async () => {
+  globalThis.fetch = async () => {
+    throw new Error('network down');
+  };
+
+  const result = await paymentService.checkEntitlement({ codigoPredial: '181500003000000130054000000000', packageId: 'basico' });
+  assert.equal(result.ok, false);
+  assert.equal(result.isPaid, false);
+});
+
+test('getOrderStatus) token valido -> devuelve el estado de la orden', async () => {
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('/orders/tok-xyz/status')) {
+      return jsonResponse({ ok: true, order: { status: 'APPROVED', packageId: 'basico' } });
+    }
+    throw new Error(`URL no simulada: ${url}`);
+  };
+
+  const order = await paymentService.getOrderStatus('tok-xyz');
+  assert.equal(order.status, 'APPROVED');
+});
+
+test('getOrderStatus) token invalido/inexistente -> null, nunca se asume pagado', async () => {
+  globalThis.fetch = async (url) => jsonResponse({ ok: false, error: 'Orden no encontrada.' }, { status: 404 });
+
+  const order = await paymentService.getOrderStatus('tok-que-no-existe');
+  assert.equal(order, null);
+});
+
+test('getOrderStatus) sin token -> null sin llamar a la red', async () => {
+  globalThis.fetch = async () => {
+    throw new Error('No debe llamarse a la red sin orderToken.');
+  };
+  assert.equal(await paymentService.getOrderStatus(''), null);
+});
+
+test('verifyWompiTransaction) incluye el campo order devuelto por el backend, sin perder los campos de transaccion existentes', async () => {
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('/verify/')) {
+      return jsonResponse({
+        ok: true,
+        transaction: { id: 'txn-order-1', status: 'APPROVED', reference: 'REF-ORDER-1', amountInCents: 3990000, currency: 'COP' },
+        order: { status: 'APPROVED', packageId: 'basico', orderToken: 'tok-order-1' },
+      });
+    }
+    throw new Error(`URL no simulada: ${url}`);
+  };
+
+  const verified = await paymentService.verifyWompiTransaction('txn-order-1');
+  assert.equal(verified.status, 'APPROVED');
+  assert.equal(verified.reference, 'REF-ORDER-1');
+  assert.equal(verified.order.status, 'APPROVED');
+  assert.equal(verified.order.orderToken, 'tok-order-1');
+});
+
+test('startPackageCheckout) backend responde ALREADY_PAID -> nunca abre Wompi, y NO marca localmente como pagado (checkout no prueba posesión)', async () => {
+  const lookup = buildSyntheticLookup('real-already-paid-2');
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('/checkout')) {
+      return jsonResponse({ ok: true, checkout: { status: 'ALREADY_PAID', packageId: 'basico' } });
+    }
+    throw new Error(`No debe abrirse Wompi ni llamarse otra URL: ${url}`);
+  };
+
+  const result = await paymentService.startPackageCheckout({
+    packageId: 'basico',
+    lookup,
+    customerId: 'cust-already-paid-2',
+    purchaseAttemptId: '44444444-4444-4444-8444-444444444444',
+  });
+  assert.equal(result.status, 'already_paid');
+  // Antes de este cambio, ALREADY_PAID marcaba la caché local como pagada
+  // sin ninguna prueba de posesión -- exactamente el defecto de acceso
+  // cruzado que corrige este bloque. Ahora solo checkEntitlement() (cookie
+  // de recuperación) puede confirmar un pago como propio.
+  assert.equal(paymentService.isPackageUnlockedForLookup({ lookup, packageId: 'basico' }), false);
+});

@@ -11,6 +11,13 @@ import {
   __resetValidationStateForTests,
 } from '../env.js';
 
+// Modelo de comprador (migración 004): staging/production ahora exigen
+// también CATASTROX_PII_ENCRYPTION_KEY (32 bytes en base64) y
+// CATASTROX_PII_HASH_SECRET (>=32 caracteres) -- valores fijos de prueba,
+// nunca usados fuera de este archivo.
+const TEST_PII_ENCRYPTION_KEY = '/7cHJDrllkKZ+qVKEMuaM+205+vEvpCTRKUArWkx+cc=';
+const TEST_PII_HASH_SECRET = 'b'.repeat(32);
+
 // Todas las pruebas de este archivo operan exclusivamente sobre objetos
 // planos inyectados como `source` (nunca sobre el `process.env` real).
 // Esto garantiza aislamiento total: no se lee ni se modifica el entorno
@@ -104,6 +111,8 @@ describe('LOTE-002 (corrección): server/config/env.js', () => {
             DATABASE_URL: 'postgres://postgres@localhost:5432/agx',
             CATASTROX_DATABASE_URL: 'postgres://postgres@127.0.0.1:5432/gis',
             HEALTH_MONITOR_TOKEN: 'a'.repeat(32),
+            CATASTROX_PII_ENCRYPTION_KEY: TEST_PII_ENCRYPTION_KEY,
+            CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
           },
           {},
         ),
@@ -120,6 +129,8 @@ describe('LOTE-002 (corrección): server/config/env.js', () => {
             DATABASE_URL: 'postgres://real-prod-host/agx',
             CATASTROX_DATABASE_URL: 'postgres://real-prod-host/gis',
             HEALTH_MONITOR_TOKEN: 'a'.repeat(32),
+            CATASTROX_PII_ENCRYPTION_KEY: TEST_PII_ENCRYPTION_KEY,
+            CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
             WOMPI_ENV: 'test',
           },
           {},
@@ -242,6 +253,8 @@ describe('LOTE-002 (corrección): server/config/env.js', () => {
             DATABASE_URL: 'postgres://real-prod-host/agx',
             CATASTROX_DATABASE_URL: 'postgres://real-prod-host/gis',
             HEALTH_MONITOR_TOKEN: 'a'.repeat(32),
+            CATASTROX_PII_ENCRYPTION_KEY: TEST_PII_ENCRYPTION_KEY,
+            CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
           },
           {},
         ),
@@ -340,6 +353,8 @@ describe('LOTE-007 (ADR-012 §35.A): HEALTH_MONITOR_TOKEN', () => {
             DATABASE_URL: 'postgres://staging-host/agx',
             CATASTROX_DATABASE_URL: 'postgres://staging-host/gis',
             HEALTH_MONITOR_TOKEN: 'a'.repeat(31),
+            CATASTROX_PII_ENCRYPTION_KEY: TEST_PII_ENCRYPTION_KEY,
+            CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
           },
           {},
         ),
@@ -389,6 +404,8 @@ describe('LOTE-007 (ADR-012 §35.A): HEALTH_MONITOR_TOKEN', () => {
         DATABASE_URL: 'postgres://staging-host/agx',
         CATASTROX_DATABASE_URL: 'postgres://staging-host/gis',
         HEALTH_MONITOR_TOKEN: secretToken,
+        CATASTROX_PII_ENCRYPTION_KEY: TEST_PII_ENCRYPTION_KEY,
+        CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
       },
       {},
     );
@@ -402,9 +419,14 @@ describe('LOTE-004: resolveCorsAllowedOrigins() y appConfig.cors', () => {
   });
 
   test('development: allowlist obligatoria fija, sin CORS_ALLOWED_ORIGINS', () => {
+    // 5178 se agregó como segundo puerto de desarrollo mandatorio
+    // (revisión de seguridad: era el puerto real del entorno de
+    // verificación local y quedaba fuera de la allowlist).
     assert.deepEqual(resolveCorsAllowedOrigins('development', {}), [
       'http://localhost:5173',
       'http://127.0.0.1:5173',
+      'http://localhost:5178',
+      'http://127.0.0.1:5178',
     ]);
   });
 
@@ -534,7 +556,14 @@ describe('LOTE-004: resolveCorsAllowedOrigins() y appConfig.cors', () => {
 
   test('getConfig() expone appConfig.cors.allowedOrigins ya resuelto e inmutable', () => {
     const config = getConfig(
-      { APP_ENV: 'staging', DATABASE_URL: 'x', CATASTROX_DATABASE_URL: 'y', HEALTH_MONITOR_TOKEN: 'a'.repeat(32) },
+      {
+        APP_ENV: 'staging',
+        DATABASE_URL: 'x',
+        CATASTROX_DATABASE_URL: 'y',
+        HEALTH_MONITOR_TOKEN: 'a'.repeat(32),
+        CATASTROX_PII_ENCRYPTION_KEY: TEST_PII_ENCRYPTION_KEY,
+        CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
+      },
       {},
     );
     assert.deepEqual(config.cors.allowedOrigins, ['https://staging.agrogenomax.com']);

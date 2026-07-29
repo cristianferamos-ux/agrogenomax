@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowRight, CheckCircle2, Loader2, ShieldAlert } from 'lucide-react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import CatastroXDisclaimer from '../components/CatastroXDisclaimer.jsx';
-import { getCatastroxPackage } from '../config/catastroxPackages.js';
+import { getCatastroxPackage, getCatastroxPackageRoute } from '../config/catastroxPackages.js';
 import {
   fetchCatastroxLookupFullResult,
   getLastLookup,
@@ -11,13 +11,14 @@ import {
 } from '../services/catastroxApi.js';
 import {
   clearPendingPaymentByReference,
-  evaluateWompiReturn,
+  getMyOrders,
   getPendingPaymentByReference,
   isPendingPaymentContextExpired,
   markPackageAsPaidByPurchaseKey,
   recoverPendingLikeContextForReference,
   verifyWompiTransaction,
 } from '../services/catastroxPaymentService.js';
+import { getDeliveryStatusCopy, getInvoiceStatusCopy } from '../utils/catastroxOrderStatusCopy.js';
 
 const DEFAULT_TARGET_ROUTE = '/catastrox/planes';
 
@@ -43,7 +44,6 @@ export async function recoverLookupForPending(pending) {
 
 export default function CatastroXWompiReturnPage() {
   const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
   const hasRunRef = useRef(false);
   const [state, setState] = useState({
     status: 'loading',
@@ -51,11 +51,16 @@ export default function CatastroXWompiReturnPage() {
     transaction: null,
     targetRoute: DEFAULT_TARGET_ROUTE,
   });
+  // Estado honesto de entrega/factura (Bloque 8): se completa aparte, vía
+  // GET /orders/mine (la única fuente que expone estos dos campos) -- nunca
+  // se afirma "enviado"/"facturado" mientras esto siga en null.
+  const [deliveryInvoiceState, setDeliveryInvoiceState] = useState(null);
 
   const transactionId = searchParams.get('id') || searchParams.get('transaction_id') || '';
 
   const runVerification = useCallback(async () => {
     setState((current) => ({ ...current, status: 'loading', message: 'Verificando el pago aprobado con Wompi...' }));
+    setDeliveryInvoiceState(null);
 
     if (!transactionId) {
       setState({
@@ -67,12 +72,13 @@ export default function CatastroXWompiReturnPage() {
       return;
     }
 
-    // LOTE 019-B2 (Fase 3): orden correcto -- Wompi solo entrega `id` en el retorno,
-    // asi que se verifica primero contra el backend para obtener la reference real,
-    // y solo entonces se busca el contexto pendiente por esa reference. Nunca al
-    // reves (buscar una unica clave global y fallar antes de consultar Wompi).
+    // Wompi solo entrega `id` en el retorno -- se verifica primero contra el
+    // backend para obtener la reference real y, sobre todo, el resultado ya
+    // persistido y validado server-to-side (verifiedTransaction.order,
+    // server/routes/catastroxPayments.js: reference/monto/moneda ya fueron
+    // cruzados contra la orden ahí, no aquí). Este componente ya NO decide
+    // "¿aprobado?" -- solo refleja lo que el backend diga.
     let verifiedTransaction;
-    let pending = null;
 
     try {
       verifiedTransaction = await verifyWompiTransaction(transactionId);
@@ -87,98 +93,71 @@ export default function CatastroXWompiReturnPage() {
     }
 
     const reference = verifiedTransaction.reference || '';
-    pending = reference ? getPendingPaymentByReference(reference) : null;
 
+    // `pending` es contexto de UX puramente local (a qué ruta volver, qué
+    // routeId usar para re-hidratar el mapa) -- puede faltar por completo
+    // (localStorage vacío/perdido, otro navegador, otro equipo) sin que eso
+    // impida reconocer un pago aprobado: la fuente de verdad ya es
+    // verifiedTransaction.order.
+    let pending = reference ? getPendingPaymentByReference(reference) : null;
     if (pending && isPendingPaymentContextExpired(pending)) {
       clearPendingPaymentByReference(reference);
       pending = null;
     }
-
-    // Fase 5: recuperacion alternativa (ranura legada v1, o catastrox_purchases_v2)
-    // cuando no sobrevive un registro vivo en catastrox_pending_payments_v2 -- nunca
-    // desbloquea solo porque Wompi diga APPROVED, solo reconstruye los datos que
-    // evaluateWompiReturn valida igual que si vinieran del pending original.
     if (!pending) {
       pending = recoverPendingLikeContextForReference(reference);
     }
 
-    if (!pending) {
+    const order = verifiedTransaction.order;
+
+    if (!order) {
       setState({
         status: 'error',
         message:
-          'No se pudo asociar esta transaccion a ninguna compra iniciada en este equipo. Vuelva a intentar la compra desde el paquete.',
+          'No fue posible asociar esta transacción a una orden registrada. Vuelve a intentar la compra desde el paquete.',
         transaction: verifiedTransaction,
-        targetRoute: DEFAULT_TARGET_ROUTE,
+        targetRoute: pending?.targetRoute || DEFAULT_TARGET_ROUTE,
       });
       return;
     }
 
-    const packageConfig = getCatastroxPackage(pending.packageId);
-    if (!packageConfig) {
+    const packageConfig = getCatastroxPackage(order.packageId);
+    const fallbackTargetRoute = packageConfig
+      ? getCatastroxPackageRoute(order.packageId, pending?.routeId)
+      : DEFAULT_TARGET_ROUTE;
+    const targetRoute = pending?.targetRoute || fallbackTargetRoute;
+
+    if (order.status === 'PENDING' || order.status === 'CREATED') {
+      setState({
+        status: 'pending',
+        message: `El pago quedo pendiente en Wompi (estado: ${verifiedTransaction.status || 'sin estado'}). Puede verificar nuevamente en unos minutos.`,
+        transaction: verifiedTransaction,
+        targetRoute,
+      });
+      return;
+    }
+
+    if (order.status !== 'APPROVED') {
+      if (reference) clearPendingPaymentByReference(reference);
       setState({
         status: 'error',
-        message: 'No se pudo determinar el paquete asociado a este pago.',
+        message: `El pago no fue aprobado. Estado reportado: ${verifiedTransaction.status || order.status}.`,
         transaction: verifiedTransaction,
-        targetRoute: pending.targetRoute || DEFAULT_TARGET_ROUTE,
+        targetRoute,
       });
       return;
     }
 
-    // Ya estaba pagado con esta misma reference (p. ej. el callback en pagina del
-    // widget ya lo proceso antes de que el usuario llegara aqui) -- salida
-    // idempotente: no se reverifica contra evaluateWompiReturn ni se vuelve a
-    // marcar, solo se recupera el predio y se redirige (Fase 4/6: no doble
-    // procesamiento).
-    if (pending.alreadyPaid) {
-      const recoveredLookup = await recoverLookupForPending(pending);
-      setState({
-        status: 'approved',
-        message: 'Pago ya estaba aprobado y registrado. Tus descargas siguen habilitadas para este predio.',
-        transaction: verifiedTransaction,
-        targetRoute: pending.targetRoute || DEFAULT_TARGET_ROUTE,
-        hasLookup: Boolean(recoveredLookup),
-      });
-      return;
-    }
+    // order.status === 'APPROVED': ya validado y persistido en backend
+    // (idempotente -- llegar aquí de nuevo con la misma transacción, por
+    // recarga o doble intento, solo vuelve a leer el mismo resultado, nunca
+    // reaprueba). Recuperar el lookup y sincronizar la caché local son
+    // pasos de UX, no de autorización.
+    const recoveredLookup = pending ? await recoverLookupForPending(pending) : null;
 
-    try {
-      const decision = evaluateWompiReturn({ verifiedTransaction, pending });
-
-      if (decision.outcome === 'pending') {
-        setState({
-          status: 'pending',
-          message: `El pago quedo pendiente en Wompi (estado: ${verifiedTransaction.status || 'sin estado'}). Puede verificar nuevamente en unos minutos.`,
-          transaction: verifiedTransaction,
-          targetRoute: pending.targetRoute || DEFAULT_TARGET_ROUTE,
-        });
-        return;
-      }
-
-      if (decision.outcome === 'declined') {
-        clearPendingPaymentByReference(reference);
-        setState({
-          status: 'error',
-          message: `El pago no fue aprobado. Estado reportado por Wompi: ${verifiedTransaction.status || 'sin estado'}.`,
-          transaction: verifiedTransaction,
-          targetRoute: pending.targetRoute || DEFAULT_TARGET_ROUTE,
-        });
-        return;
-      }
-
-      if (decision.outcome === 'rejected') {
-        const reasonMessage = {
-          reference_mismatch: 'La referencia verificada por Wompi no coincide con la referencia esperada en CatastroX.',
-          amount_mismatch: 'El monto verificado por Wompi no coincide con el paquete seleccionado.',
-          currency_mismatch: 'La moneda verificada por Wompi no coincide con COP.',
-        }[decision.reason] || 'No fue posible validar el pago con Wompi.';
-        throw new Error(reasonMessage);
-      }
-
-      // decision.outcome === 'approved'
-      const recoveredLookup = await recoverLookupForPending(pending);
-
+    if (pending?.purchaseKey) {
       markPackageAsPaidByPurchaseKey({
-        packageId: packageConfig.id,
+        packageId: order.packageId,
         purchaseKey: pending.purchaseKey,
         routeId: pending.routeId,
         codigoPredial: pending.codigoPredial,
@@ -186,24 +165,30 @@ export default function CatastroXWompiReturnPage() {
         reference: verifiedTransaction.reference,
         mode: 'wompi-sandbox-verified',
       });
+    }
 
-      // Se elimina solo aqui, ya con el pago registrado y el lookup recuperado
-      // (Fase 4/6: eliminar unicamente tras completar exitosamente).
-      clearPendingPaymentByReference(reference);
+    if (reference) clearPendingPaymentByReference(reference);
 
-      setState({
-        status: 'approved',
-        message: 'Pago aprobado. Tus descargas quedaron habilitadas para este predio.',
-        transaction: verifiedTransaction,
-        targetRoute: pending.targetRoute || DEFAULT_TARGET_ROUTE,
-        hasLookup: Boolean(recoveredLookup),
-      });
-    } catch (error) {
-      setState({
-        status: 'error',
-        message: error?.message || 'No fue posible verificar el pago con Wompi.',
-        transaction: verifiedTransaction,
-        targetRoute: pending?.targetRoute || DEFAULT_TARGET_ROUTE,
+    setState({
+      status: 'approved',
+      message: 'Pago aprobado. Tus descargas quedaron habilitadas para este predio.',
+      transaction: verifiedTransaction,
+      targetRoute,
+      hasLookup: Boolean(recoveredLookup),
+    });
+
+    // Estado honesto de entrega/factura (Bloque 8): se busca por
+    // orderToken en el historial de la sesión -- GET /orders/mine es la
+    // única vía que expone estos dos campos, /verify no los incluye a
+    // propósito (endpoint deliberadamente mínimo). Un fallo aquí nunca
+    // debe alterar el estado "approved" ya fijado arriba.
+    if (order.orderToken) {
+      void getMyOrders().then((result) => {
+        if (!result.ok) return;
+        const match = result.orders.find((entry) => entry.orderToken === order.orderToken);
+        if (match) {
+          setDeliveryInvoiceState({ deliveryStatus: match.deliveryStatus, invoiceStatus: match.invoiceStatus });
+        }
       });
     }
   }, [transactionId]);
@@ -213,16 +198,6 @@ export default function CatastroXWompiReturnPage() {
     hasRunRef.current = true;
     void runVerification();
   }, [runVerification]);
-
-  useEffect(() => {
-    if (state.status !== 'approved' || !state.targetRoute) return undefined;
-
-    const timer = window.setTimeout(() => {
-      navigate(state.targetRoute, { replace: true });
-    }, 1200);
-
-    return () => window.clearTimeout(timer);
-  }, [state.status, state.targetRoute, navigate]);
 
   const handleRetryVerification = () => {
     void runVerification();
@@ -294,11 +269,37 @@ export default function CatastroXWompiReturnPage() {
           <Link className="catastrox-button" to={state.targetRoute || DEFAULT_TARGET_ROUTE}>
             Volver al paquete <ArrowRight size={18} />
           </Link>
+          <Link className="catastrox-button is-ghost" to="/catastrox/mis-compras">
+            Mis compras
+          </Link>
           <Link className="catastrox-button is-ghost" to="/catastrox/planes">
             Ver planes
           </Link>
         </div>
       </section>
+
+      {state.status === 'approved' ? (
+        <section className="catastrox-card">
+          <div className="catastrox-section-heading">
+            <span>Entrega y facturación</span>
+            <h2>Estado real de sus entregables</h2>
+          </div>
+          {deliveryInvoiceState ? (
+            <>
+              <div className={`catastrox-inline-panel is-${getDeliveryStatusCopy(deliveryInvoiceState.deliveryStatus, { paymentApproved: true }).tone}`}>
+                <strong>{getDeliveryStatusCopy(deliveryInvoiceState.deliveryStatus, { paymentApproved: true }).label}</strong>
+                <span>{getDeliveryStatusCopy(deliveryInvoiceState.deliveryStatus, { paymentApproved: true }).message}</span>
+              </div>
+              <div className={`catastrox-inline-panel is-${getInvoiceStatusCopy(deliveryInvoiceState.invoiceStatus).tone}`}>
+                <strong>{getInvoiceStatusCopy(deliveryInvoiceState.invoiceStatus).label}</strong>
+                <span>{getInvoiceStatusCopy(deliveryInvoiceState.invoiceStatus).message}</span>
+              </div>
+            </>
+          ) : (
+            <p className="catastrox-copy">Consultando estado de entrega y facturación...</p>
+          )}
+        </section>
+      ) : null}
 
       <CatastroXDisclaimer />
     </section>

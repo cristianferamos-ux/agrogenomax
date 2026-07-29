@@ -26,6 +26,47 @@ const TECHNICAL_VEREDA_PATTERN = /^\d+[A-Z]{2}$/i;
 const CATASTROX_ORIGEN_NACIONAL_PROJ =
   '+proj=tmerc +lat_0=4 +lon_0=-73 +k=0.9992 +x_0=5000000 +y_0=2000000 +ellps=GRS80 +units=m +no_defs +type=crs';
 
+// Versión del dataset catastral servido -- no existe hoy un versionado real
+// por fila/importación (el dump se recarga manualmente), así que esta es
+// una aproximación deliberada: una etiqueta estática configurable,
+// documentada como tal. Solo se usa para construir el identificador
+// canónico de respaldo (predios sin código conocido) -- nunca participa en
+// decisiones de negocio ni de pago por sí sola.
+const CATASTROX_DATASET_VERSION = process.env.CATASTROX_DATASET_VERSION || '2026-01';
+
+/**
+ * Identidad canónica de un predio (Bloque 3/4/5): estable entre los tres
+ * métodos de búsqueda (código, coordenadas manuales, "mi ubicación
+ * actual" -- los dos últimos son la misma llamada a este archivo, ver
+ * comentario en POST /lookup). Prioridad: el código predial normalizado
+ * cuando existe (ya es una identidad nacional estable por construcción);
+ * si no existe, un identificador de respaldo fuente+versión+id de fila --
+ * nunca latitud/longitud/GPS, que jamás son identidad de pago.
+ *
+ * @param {{ codigoPredial?: string|null, source: 'legacy'|'clean', terrenoId: string|number }} input
+ */
+export function resolveCanonicalPredioId({ codigoPredial, source, terrenoId }) {
+  const normalized = codigoPredial ? normalizeCadastralCodeInput(codigoPredial) : '';
+  if (normalized) return normalized;
+  return `${source}:v${CATASTROX_DATASET_VERSION}:${terrenoId}`;
+}
+
+/**
+ * Bloque 4/5: decide si dos filas candidatas devueltas por una búsqueda por
+ * punto (LIMIT 2, ver POST /lookup) representan un empate real -- misma
+ * prioridad de coincidencia (ambas ST_Covers, o ambas solo ST_Intersects;
+ * nunca se compara covers contra intersects, eso ya lo desempata
+ * correctamente el ORDER BY de la consulta) y códigos prediales distintos.
+ * Pura -- sin SQL, testeable sin base de datos.
+ *
+ * @param {{ priority_tier: number, codigo_predial: string|null }} first
+ * @param {{ priority_tier: number, codigo_predial: string|null }|undefined|null} second
+ */
+export function isAmbiguousPointMatch(first, second) {
+  if (!first || !second) return false;
+  return second.priority_tier === first.priority_tier && second.codigo_predial !== first.codigo_predial;
+}
+
 export function buildLookupId() {
   return `cx-${randomUUID()}`;
 }
@@ -452,10 +493,20 @@ function buildLookupByCodeFoundResponse(lookupId, candidate) {
     lat: candidate.queryPoint.lat,
     lng: candidate.queryPoint.lng,
   });
+  // Búsqueda por código: candidate.codigoPredial siempre existe (es
+  // literalmente cómo se encontró el predio) -- resolveCanonicalPredioId
+  // siempre toma la rama del código normalizado aquí, nunca el respaldo
+  // fuente:versión:id.
+  const canonicalPredioId = resolveCanonicalPredioId({
+    codigoPredial: candidate.codigoPredial,
+    source: 'code',
+    terrenoId: null,
+  });
 
   return {
     lookup_id: lookupId,
     routeId: lookupId,
+    canonicalPredioId,
     found: true,
     status: 'FOUND',
     municipio: candidate.municipio || null,
@@ -475,6 +526,7 @@ function buildLookupByCodeFoundResponse(lookupId, candidate) {
     predio: {
       lookup_id: lookupId,
       routeId: lookupId,
+      canonicalPredioId,
       municipio: candidate.municipio || null,
       departamento: candidate.departamento || null,
       tipoZona: candidate.zona || null,
@@ -633,7 +685,12 @@ async function findMunicipioByPoint(lng, lat) {
   return normalizeMunicipioRow(nearestMatch.rows[0]);
 }
 
-async function findCleanPredioByPoint(lng, lat) {
+// Devuelve hasta 2 filas (no 1): el llamador (POST /lookup) usa la segunda
+// exclusivamente para detectar un empate real de prioridad (Bloque 4/5,
+// mismo criterio que la consulta legacy en el mismo archivo) -- el
+// desempate ST_Covers-antes-que-ST_Intersects/área/código para el caso no
+// ambiguo no cambia.
+async function findCleanPredioCandidatesByPoint(lng, lat) {
   const result = await query(
     `with punto as (
        select ST_SetSRID(
@@ -663,7 +720,8 @@ async function findCleanPredioByPoint(lng, lat) {
      select
        c.codigo_predial,
        c.zona,
-       c.fid
+       c.fid,
+       case when ST_Covers(c.lookup_geom, p.geom) then 0 else 1 end as priority_tier
      from candidatos c, punto p
      where c.lookup_geom is not null
        and not ST_IsEmpty(c.lookup_geom)
@@ -678,11 +736,11 @@ async function findCleanPredioByPoint(lng, lat) {
        end,
        ST_Area(c.lookup_geom) asc,
        c.codigo_predial asc
-     limit 1`,
+     limit 2`,
     [lng, lat, CATASTROX_ORIGEN_NACIONAL_PROJ],
   );
 
-  return result.rows[0] || null;
+  return result.rows;
 }
 
 // Candidatos tecnicos de solo lectura para el modo sombra del resolver: unica
@@ -898,7 +956,13 @@ router.post('/lookup', async (req, res, next) => {
             c.codigo_municipio,
             c.codigo_departamento,
             c.shape_area,
-            clean.zona
+            clean.zona,
+            -- Bloque 4/5: se piden hasta 2 filas (no 1) exclusivamente
+            -- para poder detectar un empate real de prioridad más abajo
+            -- en JS (ver ambigüedad de búsqueda por punto) -- el
+            -- desempate ST_Covers-antes-que-ST_Intersects sigue siendo
+            -- el mismo de siempre y no cambia para el caso no ambiguo.
+            case when ST_Covers(c.lookup_geom, p.geom) then 0 else 1 end as priority_tier
           from catastro c
           cross join punto p
           left join catastrox_clean.v_predios_enriquecidos clean
@@ -915,7 +979,7 @@ router.post('/lookup', async (req, res, next) => {
              else 1
            end,
            c.shape_area asc nulls last
-         limit 1
+         limit 2
        ),
        municipio as (
          select
@@ -940,10 +1004,35 @@ router.post('/lookup', async (req, res, next) => {
     );
 
     if (predioResult.rows[0]) {
-      const row = predioResult.rows[0];
+      const [firstCandidate, secondCandidate] = predioResult.rows;
+
+      // Bloque 4/5: dos filas con la MISMA prioridad (ambas ST_Covers, o
+      // ambas solo ST_Intersects) y códigos prediales distintos son un
+      // empate real -- polígonos superpuestos/duplicados en el punto
+      // consultado. Nunca se elige una silenciosamente: mismo contrato
+      // 409 que ya usa la búsqueda por código (resolveLookupByCodeCandidates
+      // más abajo). No se recuerda preview -- ningún routeId se emite para
+      // un resultado ambiguo, igual que en el flujo por código.
+      if (isAmbiguousPointMatch(firstCandidate, secondCandidate)) {
+        res.status(409).json({
+          ok: false,
+          code: 'REQUIRES_TECHNICAL_VALIDATION',
+          message:
+            'Este punto coincide con varios predios catastrales. Ubique el predio mediante su número predial o solicite validación técnica.',
+          canPurchase: false,
+        });
+        return;
+      }
+
+      const row = firstCandidate;
       const municipio = normalizeMunicipioRow(row);
       const coverage = resolveCoverageStatus({ municipio, lat, lng });
       const lookupId = buildLookupId();
+      const canonicalPredioId = resolveCanonicalPredioId({
+        codigoPredial: row.codigo || row.codigo_predial || null,
+        source: 'legacy',
+        terrenoId: row.id,
+      });
       rememberLookupPreview(lookupId, row.id, {
         codigoPredial: row.codigo || row.codigo_predial || null,
         queryPoint: buildQueryPoint(lat, lng),
@@ -952,6 +1041,7 @@ router.post('/lookup', async (req, res, next) => {
       res.json({
         lookup_id: lookupId,
         routeId: lookupId,
+        canonicalPredioId,
         found: true,
         status: 'FOUND',
         municipio: toNullableString(row.mpnombre),
@@ -971,6 +1061,7 @@ router.post('/lookup', async (req, res, next) => {
         predio: {
           lookup_id: lookupId,
           routeId: lookupId,
+          canonicalPredioId,
           municipio: toNullableString(row.mpnombre),
           departamento: toNullableString(row.depto),
           tipoZona: toNullableString(row.zona),
@@ -998,12 +1089,30 @@ router.post('/lookup', async (req, res, next) => {
       return;
     }
 
-    const cleanPredio = await findCleanPredioByPoint(lng, lat);
+    const cleanCandidates = await findCleanPredioCandidatesByPoint(lng, lat);
+    const [firstCleanCandidate, secondCleanCandidate] = cleanCandidates;
 
-    if (cleanPredio) {
+    if (firstCleanCandidate) {
+      if (isAmbiguousPointMatch(firstCleanCandidate, secondCleanCandidate)) {
+        res.status(409).json({
+          ok: false,
+          code: 'REQUIRES_TECHNICAL_VALIDATION',
+          message:
+            'Este punto coincide con varios predios catastrales. Ubique el predio mediante su número predial o solicite validación técnica.',
+          canPurchase: false,
+        });
+        return;
+      }
+
+      const cleanPredio = firstCleanCandidate;
       const municipio = await findMunicipioByPoint(lng, lat);
       const coverage = municipio ? resolveCoverageStatus({ municipio, lat, lng }) : null;
       const lookupId = buildLookupId();
+      const canonicalPredioId = resolveCanonicalPredioId({
+        codigoPredial: cleanPredio.codigo_predial || null,
+        source: 'clean',
+        terrenoId: cleanPredio.fid,
+      });
       rememberAdvancedLookupPreview(lookupId, cleanPredio.codigo_predial, {
         queryPoint: buildQueryPoint(lat, lng),
       });
@@ -1011,6 +1120,7 @@ router.post('/lookup', async (req, res, next) => {
       res.json({
         lookup_id: lookupId,
         routeId: lookupId,
+        canonicalPredioId,
         found: true,
         status: 'FOUND',
         municipio: toNullableString(municipio?.municipio),
@@ -1030,6 +1140,7 @@ router.post('/lookup', async (req, res, next) => {
         predio: {
           lookup_id: lookupId,
           routeId: lookupId,
+          canonicalPredioId,
           municipio: toNullableString(municipio?.municipio),
           departamento: toNullableString(municipio?.departamento),
           tipoZona: toNullableString(cleanPredio.zona),
@@ -1625,6 +1736,16 @@ const CLEAN_FULL_RESULT_QUERY = `select
         lookup_id: lookupId,
         source: source === 'clean' ? 'audit-local-clean' : 'audit-local',
         codigoPredial: toNullableString(source === 'clean' ? row.codigo_predial : (row.codigo || row.codigo_predial)),
+        // Identidad canónica (Bloque 3/4/5): esta es la que checkout/
+        // entitlements/check deben usar -- llega aquí sin importar si el
+        // predio se resolvió originalmente por código, coordenadas o
+        // ubicación actual, porque los tres convergen en esta misma
+        // función de full-result.
+        canonicalPredioId: resolveCanonicalPredioId({
+          codigoPredial: source === 'clean' ? row.codigo_predial : (row.codigo || row.codigo_predial),
+          source: source === 'clean' ? 'clean' : 'legacy',
+          terrenoId: source === 'clean' ? row.codigo_predial : row.id,
+        }),
         codigoAnterior: toNullableString(row.codigo_anterior) || 'No disponible',
         municipio: toNullableString(row.mpnombre || row.municipio_nombre),
         departamento: toNullableString(row.depto || row.departamento_nombre),

@@ -61,6 +61,19 @@ describe('LOTE-004: server/security/corsPolicy.js', () => {
     assert.equal(evaluateCorsRequest(policy, { method: 'GET', origin: 'http://127.0.0.1:5173' }).action, 'allow');
   });
 
+  // Defecto corregido (revisión de seguridad): 5178 es el puerto real del
+  // entorno de verificación local -- quedaba fuera de la allowlist,
+  // rompiendo /checkout y el resto de POST autenticados en CORS.
+  test('14) development permite http://127.0.0.1:5178', () => {
+    const policy = policyFor('development');
+    assert.equal(evaluateCorsRequest(policy, { method: 'GET', origin: 'http://127.0.0.1:5178' }).action, 'allow');
+  });
+
+  test('15) development permite http://localhost:5178', () => {
+    const policy = policyFor('development');
+    assert.equal(evaluateCorsRequest(policy, { method: 'GET', origin: 'http://localhost:5178' }).action, 'allow');
+  });
+
   test('3. development rechaza puerto local no autorizado', () => {
     const policy = policyFor('development');
     assert.equal(evaluateCorsRequest(policy, { method: 'GET', origin: 'http://localhost:9999' }).action, 'reject');
