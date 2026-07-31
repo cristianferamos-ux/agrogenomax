@@ -7,7 +7,11 @@
  * forma informativa en getConfig().
  */
 
-import { CorsConfigurationError, resolveAllowedOriginsForEnvironment } from '../../shared/security/corsPolicy.js';
+import {
+  CorsConfigurationError,
+  resolveAllowedOriginsForEnvironment,
+  resolvePublicOriginForEnvironment,
+} from '../../shared/security/corsPolicy.js';
 
 export const ALLOWED_APP_ENVIRONMENTS = Object.freeze([
   'development',
@@ -29,6 +33,14 @@ export const ALLOWED_APP_ENVIRONMENTS = Object.freeze([
 // comprador -- migración 004): sin ellas, POST /customers no puede cifrar/
 // indexar documento/teléfono/dirección -- obligatorias donde haya
 // compradores reales (staging/production), opcionales en development/test.
+// STAGING_READINESS_001 (Bloque 4): WOMPI_PUBLIC_KEY_TEST/
+// WOMPI_INTEGRITY_SECRET_TEST/WOMPI_EVENTS_SECRET_TEST/CATASTROX_FRONTEND_URL
+// pasan a ser obligatorias en staging -- sin ellas, /checkout y el flujo de
+// retorno de Wompi fallarían en silencio en el primer intento real de
+// compra. Se agregan solo a staging, no a production: WOMPI_PUBLIC_KEY/
+// WOMPI_INTEGRITY_SECRET/WOMPI_EVENTS_SECRET en modo productivo aún no
+// están implementados en este repo (riesgo residual documentado en
+// docs/catastrox/STAGING_READINESS_001.md).
 const REQUIRED_VARIABLES_BY_ENV = Object.freeze({
   development: Object.freeze([]),
   test: Object.freeze([]),
@@ -39,6 +51,10 @@ const REQUIRED_VARIABLES_BY_ENV = Object.freeze({
     'HEALTH_MONITOR_TOKEN',
     'CATASTROX_PII_ENCRYPTION_KEY',
     'CATASTROX_PII_HASH_SECRET',
+    'WOMPI_PUBLIC_KEY_TEST',
+    'WOMPI_INTEGRITY_SECRET_TEST',
+    'WOMPI_EVENTS_SECRET_TEST',
+    'CATASTROX_FRONTEND_URL',
   ]),
   production: Object.freeze([
     'DATABASE_URL',
@@ -88,6 +104,11 @@ const DEMO_PROHIBITED_PREFIXES = Object.freeze(['WOMPI_', 'COGNITO_']);
 const CROSS_ENVIRONMENT_HINTS = Object.freeze(['staging.agrogenomax.com', 'demo.agrogenomax.com']);
 
 const LOCALHOST_HINTS = Object.freeze(['localhost', '127.0.0.1']);
+
+// STAGING_READINESS_001 (Bloque 4): mismo patrón que
+// server/routes/catastroxPayments.js -- detecta valores de marcador de
+// posición evidentes en llaves/secretos de Wompi copiados sin reemplazar.
+const WOMPI_PLACEHOLDER_PATTERN = /TU_|REEMPLAZAR|PLACEHOLDER|XXX|DEMO/i;
 
 // Variables que, de estar presentes, delatan razonablemente un contexto de
 // CI/despliegue -- descartan por completo el fallback local aunque se
@@ -301,6 +322,17 @@ export function validateEnv(appEnv, source = process.env) {
         variable: 'WOMPI_EVENTS_SECRET_TEST',
       });
     }
+
+    // STAGING_READINESS_001 (revisión final): la longitud mínima por sí sola
+    // no basta -- un placeholder largo (p. ej. copiado y "rellenado" a mano
+    // hasta pasar los 32 caracteres) seguiría pareciendo válido. Mismo
+    // patrón que WOMPI_PUBLIC_KEY_TEST más abajo.
+    if (WOMPI_PLACEHOLDER_PATTERN.test(secret)) {
+      throw new ConfigurationError(
+        'WOMPI_EVENTS_SECRET_TEST tiene un valor de marcador de posición, no un secreto real.',
+        { code: 'INSECURE_VALUE', environment: appEnv, variable: 'WOMPI_EVENTS_SECRET_TEST' },
+      );
+    }
   }
 
   // CATASTROX_PII_HASH_SECRET: mismo formato mínimo que los demás secretos
@@ -322,6 +354,47 @@ export function validateEnv(appEnv, source = process.env) {
         variable: 'CATASTROX_PII_HASH_SECRET',
       });
     }
+
+    // STAGING_READINESS_001 (revisión final, hallazgo real): el placeholder
+    // documentado en .env.example/server/.env.example
+    // ("pii_hash_secret_REEMPLAZAR_treinta_dos_caracteres") tiene 49
+    // caracteres -- pasaría el check de longitud de arriba sin esta
+    // validación adicional, dejando desplegar staging con un secreto HMAC
+    // conocido/públicamente documentado en el propio repositorio.
+    if (WOMPI_PLACEHOLDER_PATTERN.test(secret)) {
+      throw new ConfigurationError(
+        'CATASTROX_PII_HASH_SECRET tiene un valor de marcador de posición, no un secreto real.',
+        { code: 'INSECURE_VALUE', environment: appEnv, variable: 'CATASTROX_PII_HASH_SECRET' },
+      );
+    }
+  }
+
+  // STAGING_READINESS_001 (revisión final): WOMPI_INTEGRITY_SECRET_TEST no
+  // tenía ninguna validación de formato -- a diferencia de
+  // WOMPI_EVENTS_SECRET_TEST/CATASTROX_PII_HASH_SECRET/HEALTH_MONITOR_TOKEN,
+  // un valor vacío-de-contenido-real (espacios, o el placeholder
+  // "test_integrity_REEMPLAZAR" de .env.example) pasaba sin control. No se
+  // exige una longitud mínima aquí porque no hay una garantía documentada
+  // del formato exacto que emite el dashboard de Wompi para este secreto --
+  // exigir un mínimo arbitrario podría rechazar un secreto real válido más
+  // corto. El rechazo de placeholder sí es seguro: ningún secreto real
+  // contendría literalmente "REEMPLAZAR"/"PLACEHOLDER"/etc.
+  if (isNonEmpty(source.WOMPI_INTEGRITY_SECRET_TEST)) {
+    const secret = source.WOMPI_INTEGRITY_SECRET_TEST;
+
+    if (secret !== secret.trim()) {
+      throw new ConfigurationError(
+        'WOMPI_INTEGRITY_SECRET_TEST no puede tener espacios iniciales o finales.',
+        { code: 'INSECURE_VALUE', environment: appEnv, variable: 'WOMPI_INTEGRITY_SECRET_TEST' },
+      );
+    }
+
+    if (WOMPI_PLACEHOLDER_PATTERN.test(secret)) {
+      throw new ConfigurationError(
+        'WOMPI_INTEGRITY_SECRET_TEST tiene un valor de marcador de posición, no un secreto real.',
+        { code: 'INSECURE_VALUE', environment: appEnv, variable: 'WOMPI_INTEGRITY_SECRET_TEST' },
+      );
+    }
   }
 
   // CATASTROX_PII_ENCRYPTION_KEY: debe decodificar exactamente a 32 bytes
@@ -340,6 +413,49 @@ export function validateEnv(appEnv, source = process.env) {
       throw new ConfigurationError(
         'CATASTROX_PII_ENCRYPTION_KEY debe decodificar a exactamente 32 bytes (AES-256) en base64.',
         { code: 'INSECURE_VALUE', environment: appEnv, variable: 'CATASTROX_PII_ENCRYPTION_KEY' },
+      );
+    }
+  }
+
+  // STAGING_READINESS_001 (Bloque 4): WOMPI_PUBLIC_KEY_TEST dondequiera que
+  // esté presente (no solo en staging) debe ser una llave Sandbox real, no
+  // un placeholder ni -- en particular -- una llave de producción (`pub_`
+  // sin el sufijo `_test_`). Antes solo se validaba en tiempo de request
+  // dentro de POST /checkout (server/routes/catastroxPayments.js); ahora
+  // también falla-rápido al arrancar, para que un despliegue de staging con
+  // la llave mal configurada nunca llegue a aceptar tráfico.
+  if (isNonEmpty(source.WOMPI_PUBLIC_KEY_TEST)) {
+    const key = source.WOMPI_PUBLIC_KEY_TEST;
+
+    if (WOMPI_PLACEHOLDER_PATTERN.test(key)) {
+      throw new ConfigurationError('WOMPI_PUBLIC_KEY_TEST tiene un valor de marcador de posición, no una llave real.', {
+        code: 'INSECURE_VALUE',
+        environment: appEnv,
+        variable: 'WOMPI_PUBLIC_KEY_TEST',
+      });
+    }
+
+    if (!key.startsWith('pub_test_')) {
+      throw new ConfigurationError('WOMPI_PUBLIC_KEY_TEST debe iniciar con pub_test_ (nunca una llave de producción).', {
+        code: 'INSECURE_VALUE',
+        environment: appEnv,
+        variable: 'WOMPI_PUBLIC_KEY_TEST',
+      });
+    }
+  }
+
+  // STAGING_READINESS_001 (Bloque 4): CATASTROX_FRONTEND_URL es la URL
+  // pública que el backend usa para construir los enlaces de retorno de
+  // Wompi y los correos de verificación -- en staging/production debe ser
+  // https y nunca apuntar a localhost/127.0.0.1 (misma regla que
+  // API_BACKEND_URL en los relays de Cloudflare, ver
+  // resolvePublicOriginForEnvironment() en shared/security/corsPolicy.js).
+  if (isNonEmpty(source.CATASTROX_FRONTEND_URL) && (appEnv === 'staging' || appEnv === 'production')) {
+    const resolved = resolvePublicOriginForEnvironment(source.CATASTROX_FRONTEND_URL, appEnv);
+    if (!resolved) {
+      throw new ConfigurationError(
+        'CATASTROX_FRONTEND_URL debe ser una URL https pública, nunca localhost/127.0.0.1, en este ambiente.',
+        { code: 'INSECURE_VALUE', environment: appEnv, variable: 'CATASTROX_FRONTEND_URL' },
       );
     }
   }

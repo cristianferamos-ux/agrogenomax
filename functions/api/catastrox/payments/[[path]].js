@@ -11,8 +11,8 @@ import {
   DEFAULT_CORS_METHODS,
   buildCorsPolicy,
   evaluateCorsRequest,
-  normalizeOrigin,
   resolveAllowedOriginsForEnvironment,
+  resolvePublicOriginForEnvironment,
 } from '../../../../shared/security/corsPolicy.js';
 
 const ALLOWED_RELAY_ENVIRONMENTS = Object.freeze(['development', 'test', 'staging', 'production']);
@@ -95,7 +95,12 @@ export async function onRequest(context) {
   // decision.action es 'continue' (sin Origin -- same-origin/server-to-server)
   // o 'allow' (origen permitido): en ambos casos se puede contactar al
   // upstream, pero solo después de validar API_BACKEND_URL a continuación.
-  const backendBaseUrl = isNonEmpty(env.API_BACKEND_URL) ? normalizeOrigin(env.API_BACKEND_URL) : null;
+  // STAGING_READINESS_001 (Bloque 4): en staging/production, API_BACKEND_URL
+  // debe ser https y nunca apuntar a localhost/127.0.0.1 -- ver
+  // resolvePublicOriginForEnvironment() en shared/security/corsPolicy.js.
+  const backendBaseUrl = isNonEmpty(env.API_BACKEND_URL)
+    ? resolvePublicOriginForEnvironment(env.API_BACKEND_URL, appEnv)
+    : null;
   if (!backendBaseUrl) {
     console.warn(`[AgroGenomaX relay pagos] API_BACKEND_URL ausente o inválida para ambiente="${appEnv}".`);
     return configErrorResponse();

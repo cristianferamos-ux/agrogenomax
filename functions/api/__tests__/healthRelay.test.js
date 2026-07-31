@@ -855,3 +855,146 @@ describe('LOTE-006 (corrección): API_BACKEND_ALLOWED_ORIGIN -- mecanismo positi
     assert.ok(!body.includes('autorizado-secreto'));
   });
 });
+
+describe('STAGING_READINESS_001 (cierre final, Opción A): resolvePublicOriginForEnvironment() aplicada a API_BACKEND_URL/API_BACKEND_ALLOWED_ORIGIN', () => {
+  test('E1. staging con API_BACKEND_URL https pública válida y ALLOWED_ORIGIN igual permite fetch', async () => {
+    const { getCalls } = stubFetch();
+    const response = await onRequest({ request: makeRequest({}), env: STAGING_ENV });
+    assert.equal(response.status, 200);
+    assert.equal(getCalls(), 1);
+  });
+
+  test('E2. staging con API_BACKEND_URL http:// (sin TLS) responde 503 sin fetch, incluso si ALLOWED_ORIGIN coincide en texto', async () => {
+    const { getCalls } = stubFetch();
+    const response = await onRequest({
+      request: makeRequest({}),
+      env: {
+        APP_ENV: 'staging',
+        API_BACKEND_URL: 'http://backend-staging.example.com',
+        API_BACKEND_ALLOWED_ORIGIN: 'http://backend-staging.example.com',
+      },
+    });
+    assert.equal(response.status, 503);
+    assert.equal(getCalls(), 0);
+  });
+
+  test('E3. staging con API_BACKEND_URL apuntando a localhost responde 503 sin fetch', async () => {
+    const { getCalls } = stubFetch();
+    const response = await onRequest({
+      request: makeRequest({}),
+      env: {
+        APP_ENV: 'staging',
+        API_BACKEND_URL: 'https://localhost:3001',
+        API_BACKEND_ALLOWED_ORIGIN: 'https://localhost:3001',
+      },
+    });
+    assert.equal(response.status, 503);
+    assert.equal(getCalls(), 0);
+  });
+
+  test('E4. production con API_BACKEND_URL apuntando a 127.0.0.1 responde 503 sin fetch', async () => {
+    const { getCalls } = stubFetch();
+    const response = await onRequest({
+      request: makeRequest({}),
+      env: {
+        APP_ENV: 'production',
+        API_BACKEND_URL: 'https://127.0.0.1:3001',
+        API_BACKEND_ALLOWED_ORIGIN: 'https://127.0.0.1:3001',
+      },
+    });
+    assert.equal(response.status, 503);
+    assert.equal(getCalls(), 0);
+  });
+
+  test('E5. production con API_BACKEND_URL apuntando a loopback IPv6 (::1) responde 503 sin fetch', async () => {
+    const { getCalls } = stubFetch();
+    const response = await onRequest({
+      request: makeRequest({}),
+      env: {
+        APP_ENV: 'production',
+        API_BACKEND_URL: 'https://[::1]:3001',
+        API_BACKEND_ALLOWED_ORIGIN: 'https://[::1]:3001',
+      },
+    });
+    assert.equal(response.status, 503);
+    assert.equal(getCalls(), 0);
+  });
+
+  test('E6. staging con API_BACKEND_URL de hostname wildcard responde 503 sin fetch', async () => {
+    const { getCalls } = stubFetch();
+    const response = await onRequest({
+      request: makeRequest({}),
+      env: {
+        APP_ENV: 'staging',
+        API_BACKEND_URL: 'https://*.backend-staging.example.com',
+        API_BACKEND_ALLOWED_ORIGIN: 'https://*.backend-staging.example.com',
+      },
+    });
+    assert.equal(response.status, 503);
+    assert.equal(getCalls(), 0);
+  });
+
+  test('E7. staging con API_BACKEND_URL con credenciales embebidas responde 503 sin fetch', async () => {
+    const { getCalls } = stubFetch();
+    const response = await onRequest({
+      request: makeRequest({}),
+      env: {
+        APP_ENV: 'staging',
+        API_BACKEND_URL: 'https://user:password@backend-staging.example.com',
+        API_BACKEND_ALLOWED_ORIGIN: 'https://user:password@backend-staging.example.com',
+      },
+    });
+    assert.equal(response.status, 503);
+    assert.equal(getCalls(), 0);
+  });
+
+  test('E8. staging con API_BACKEND_URL válida pero API_BACKEND_ALLOWED_ORIGIN distinta (mismatch) responde 503 sin fetch', async () => {
+    const { getCalls } = stubFetch();
+    const response = await onRequest({
+      request: makeRequest({}),
+      env: {
+        APP_ENV: 'staging',
+        API_BACKEND_URL: 'https://backend-staging.example.com',
+        API_BACKEND_ALLOWED_ORIGIN: 'https://otro-backend-staging.example.com',
+      },
+    });
+    assert.equal(response.status, 503);
+    assert.equal(getCalls(), 0);
+  });
+
+  test('E9. production con API_BACKEND_URL y API_BACKEND_ALLOWED_ORIGIN exactamente iguales (https pública válida) permite fetch', async () => {
+    const { getCalls } = stubFetch();
+    const response = await onRequest({ request: makeRequest({}), env: PRODUCTION_ENV });
+    assert.equal(response.status, 200);
+    assert.equal(getCalls(), 1);
+  });
+
+  test('E10. development sigue permitiendo API_BACKEND_URL local (resolvePublicOriginForEnvironment no restringe fuera de staging/production)', async () => {
+    const { getCalls } = stubFetch();
+    const response = await onRequest({
+      request: makeRequest({}),
+      env: {
+        APP_ENV: 'development',
+        API_BACKEND_URL: 'http://127.0.0.1:3001',
+        API_BACKEND_ALLOWED_ORIGIN: 'http://127.0.0.1:3001',
+      },
+    });
+    assert.equal(response.status, 200);
+    assert.equal(getCalls(), 1);
+  });
+
+  test('E11. ningún valor inseguro de API_BACKEND_URL/API_BACKEND_ALLOWED_ORIGIN se expone en los errores', async () => {
+    const response = await onRequest({
+      request: makeRequest({}),
+      env: {
+        APP_ENV: 'staging',
+        API_BACKEND_URL: 'https://user:supersecreto@backend-staging.example.com',
+        API_BACKEND_ALLOWED_ORIGIN: 'https://user:supersecreto@backend-staging.example.com',
+      },
+    });
+    const body = await response.text();
+    assert.equal(response.status, 503);
+    assert.ok(!body.includes('supersecreto'));
+    assert.ok(!body.includes('backend-staging.example.com'));
+  });
+});
