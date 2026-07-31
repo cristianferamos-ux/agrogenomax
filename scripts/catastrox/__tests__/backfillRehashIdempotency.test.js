@@ -47,6 +47,7 @@ let counter = 0;
 async function cleanupTestCustomer(customerId) {
   if (!dbAvailable || !customerId) return;
   await query('delete from public.catastrox_email_verifications where customer_id = $1', [customerId]);
+  await query('delete from public.catastrox_customer_otp_state where customer_id = $1', [customerId]);
   await query('delete from public.catastrox_customers where id = $1', [customerId]);
 }
 

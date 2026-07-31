@@ -144,6 +144,7 @@ async function cleanupTestData() {
   await query("delete from public.catastrox_payment_webhook_events where wompi_transaction_id like 'txn-webhook-%'");
   if (customerIds.length) {
     await query('delete from public.catastrox_email_verifications where customer_id = any($1)', [customerIds]);
+    await query('delete from public.catastrox_customer_otp_state where customer_id = any($1)', [customerIds]);
     await query('delete from public.catastrox_customers where id = any($1)', [customerIds]);
   }
   await query(
