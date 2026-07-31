@@ -45,6 +45,14 @@ export function normalizeOrigin(rawValue) {
   if (parsed.username || parsed.password) return null;
   if (parsed.pathname !== '' && parsed.pathname !== '/') return null;
   if (parsed.search || parsed.hash) return null;
+  // STAGING_READINESS_001 (revisión final): el parser WHATWG URL no incluye
+  // `*` entre los "forbidden host code points" -- `https://*.agrogenomax.com`
+  // se parsea sin error, con hostname literal "*.agrogenomax.com". Un host
+  // comodín nunca es un origen real (ni de CORS explícito ni de
+  // API_BACKEND_URL/CATASTROX_FRONTEND_URL) -- se rechaza aquí, en el único
+  // punto de normalización, para cerrar el hueco en todos los llamadores a
+  // la vez (allowlist de CORS y resolvePublicOriginForEnvironment).
+  if (parsed.hostname.includes('*')) return null;
 
   return parsed.origin;
 }
@@ -126,6 +134,65 @@ export function buildCorsPolicy({
 export function isOriginAllowed(policy, origin) {
   const normalized = normalizeOrigin(origin);
   return normalized !== null && policy.allowedOrigins.includes(normalized);
+}
+
+// STAGING_READINESS_001 (revisión final): comparación exacta por hostname
+// ya parseado -- nunca `includes()` sobre el string completo del origen.
+// Un `includes('127.0.0.1')` dejaría pasar, sin querer, un hostname público
+// legítimo que contuviera esa subcadena en otra parte (poco probable pero
+// posible); comparar el hostname exacto también es la única forma correcta
+// de cubrir el rango completo 127.0.0.0/8 y las formas equivalentes de
+// loopback IPv6 (`::1`, que `URL.hostname` siempre normaliza a la forma
+// canónica entre corchetes `[::1]`, sin importar cómo se haya escrito la
+// entrada -- `[0:0:0:0:0:0:0:1]` incluida).
+function isLocalOrLoopbackHostname(hostname) {
+  const lowered = hostname.toLowerCase();
+  // "localhost.localdomain" es el alias de loopback por defecto en /etc/hosts
+  // de muchas distribuciones Linux -- startsWith('localhost.') lo cubre sin
+  // bloquear por error un dominio real que solo contenga "localhost" en
+  // otra posición (p. ej. "notlocalhost.example.com" no coincide).
+  if (lowered === 'localhost' || lowered.startsWith('localhost.') || lowered.endsWith('.localhost')) return true;
+  if (lowered === '0.0.0.0') return true;
+  if (lowered === '[::1]' || lowered === '[::]') return true;
+  if (/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(lowered)) return true;
+  return false;
+}
+
+/**
+ * Resuelve y valida una URL pública "de verdad" (STAGING_READINESS_001,
+ * Bloque 4) -- usada tanto para `API_BACKEND_URL` (relays de Cloudflare,
+ * functions/api/catastrox/[[path]].js y su gemela de pagos) como para
+ * `CATASTROX_FRONTEND_URL` (server/config/env.js, redirectUrl de Wompi).
+ * En staging/production exige https y prohíbe localhost, todo el rango de
+ * loopback IPv4 (127.0.0.0/8), loopback/unspecified IPv6 (`::1`/`::`) y
+ * `0.0.0.0` -- un valor así solo tiene sentido copiado por error desde
+ * development. En development/test no se restringe más allá de lo que
+ * `normalizeOrigin()` ya exige (http local es el caso normal). Nunca
+ * lanza -- devuelve `null` si el valor no es válido para el ambiente, para
+ * que el llamador decida cómo fallar (503 en el relay, ConfigurationError
+ * en el backend Express).
+ *
+ * @param {string} rawValue
+ * @param {string} appEnv
+ * @returns {string|null}
+ */
+export function resolvePublicOriginForEnvironment(rawValue, appEnv) {
+  const normalized = normalizeOrigin(rawValue);
+  if (!normalized) return null;
+
+  if (appEnv === 'staging' || appEnv === 'production') {
+    if (!normalized.startsWith('https://')) return null;
+
+    let hostname;
+    try {
+      hostname = new URL(normalized).hostname;
+    } catch {
+      return null;
+    }
+    if (isLocalOrLoopbackHostname(hostname)) return null;
+  }
+
+  return normalized;
 }
 
 // Allowlist obligatoria por ambiente (LOTE-004, ADR-014 §7 Barrera 4) --

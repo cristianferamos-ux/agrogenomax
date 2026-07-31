@@ -18,6 +18,31 @@ import {
 const TEST_PII_ENCRYPTION_KEY = '/7cHJDrllkKZ+qVKEMuaM+205+vEvpCTRKUArWkx+cc=';
 const TEST_PII_HASH_SECRET = 'b'.repeat(32);
 
+// STAGING_READINESS_001 (Bloque 4): staging ahora también exige
+// WOMPI_PUBLIC_KEY_TEST/WOMPI_INTEGRITY_SECRET_TEST/WOMPI_EVENTS_SECRET_TEST/
+// CATASTROX_FRONTEND_URL -- valores sintéticos válidos, reutilizados como
+// base por los casos de este archivo que necesitan un staging "completo".
+const TEST_WOMPI_PUBLIC_KEY_TEST = 'pub_test_synthetic_key_1234567890';
+const TEST_WOMPI_INTEGRITY_SECRET_TEST = 'c'.repeat(32);
+const TEST_WOMPI_EVENTS_SECRET_TEST = 'd'.repeat(32);
+const TEST_CATASTROX_FRONTEND_URL = 'https://staging.agrogenomax.com';
+
+function validStagingSource(overrides = {}) {
+  return {
+    APP_ENV: 'staging',
+    DATABASE_URL: 'postgres://staging-host/agx',
+    CATASTROX_DATABASE_URL: 'postgres://staging-host/gis',
+    HEALTH_MONITOR_TOKEN: 'a'.repeat(32),
+    CATASTROX_PII_ENCRYPTION_KEY: TEST_PII_ENCRYPTION_KEY,
+    CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
+    WOMPI_PUBLIC_KEY_TEST: TEST_WOMPI_PUBLIC_KEY_TEST,
+    WOMPI_INTEGRITY_SECRET_TEST: TEST_WOMPI_INTEGRITY_SECRET_TEST,
+    WOMPI_EVENTS_SECRET_TEST: TEST_WOMPI_EVENTS_SECRET_TEST,
+    CATASTROX_FRONTEND_URL: TEST_CATASTROX_FRONTEND_URL,
+    ...overrides,
+  };
+}
+
 // Todas las pruebas de este archivo operan exclusivamente sobre objetos
 // planos inyectados como `source` (nunca sobre el `process.env` real).
 // Esto garantiza aislamiento total: no se lee ni se modifica el entorno
@@ -346,18 +371,7 @@ describe('LOTE-007 (ADR-012 §35.A): HEALTH_MONITOR_TOKEN', () => {
 
   test('staging con HEALTH_MONITOR_TOKEN de menos de 32 caracteres falla', () => {
     assert.throws(
-      () =>
-        getConfig(
-          {
-            APP_ENV: 'staging',
-            DATABASE_URL: 'postgres://staging-host/agx',
-            CATASTROX_DATABASE_URL: 'postgres://staging-host/gis',
-            HEALTH_MONITOR_TOKEN: 'a'.repeat(31),
-            CATASTROX_PII_ENCRYPTION_KEY: TEST_PII_ENCRYPTION_KEY,
-            CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
-          },
-          {},
-        ),
+      () => getConfig(validStagingSource({ HEALTH_MONITOR_TOKEN: 'a'.repeat(31) }), {}),
       (error) =>
         error instanceof ConfigurationError &&
         error.code === 'INSECURE_VALUE' &&
@@ -398,17 +412,7 @@ describe('LOTE-007 (ADR-012 §35.A): HEALTH_MONITOR_TOKEN', () => {
       assert.ok(!JSON.stringify(error).includes(secretToken));
     }
 
-    const config = getConfig(
-      {
-        APP_ENV: 'staging',
-        DATABASE_URL: 'postgres://staging-host/agx',
-        CATASTROX_DATABASE_URL: 'postgres://staging-host/gis',
-        HEALTH_MONITOR_TOKEN: secretToken,
-        CATASTROX_PII_ENCRYPTION_KEY: TEST_PII_ENCRYPTION_KEY,
-        CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
-      },
-      {},
-    );
+    const config = getConfig(validStagingSource({ HEALTH_MONITOR_TOKEN: secretToken }), {});
     assert.ok(!JSON.stringify(config).includes(secretToken));
   });
 });
@@ -555,19 +559,292 @@ describe('LOTE-004: resolveCorsAllowedOrigins() y appConfig.cors', () => {
   });
 
   test('getConfig() expone appConfig.cors.allowedOrigins ya resuelto e inmutable', () => {
+    const config = getConfig(validStagingSource({ DATABASE_URL: 'x', CATASTROX_DATABASE_URL: 'y' }), {});
+    assert.deepEqual(config.cors.allowedOrigins, ['https://staging.agrogenomax.com']);
+    assert.ok(Object.isFrozen(config.cors));
+    assert.ok(Object.isFrozen(config.cors.allowedOrigins));
+  });
+});
+
+describe('STAGING_READINESS_001 (Bloque 4): validaciones nuevas de configuración de staging', () => {
+  beforeEach(() => {
+    __resetValidationStateForTests();
+  });
+
+  test('staging con configuración completa y válida no falla', () => {
+    const config = getConfig(validStagingSource(), {});
+    assert.equal(config.appEnv, 'staging');
+  });
+
+  test('production NO exige WOMPI_PUBLIC_KEY_TEST/WOMPI_INTEGRITY_SECRET_TEST/WOMPI_EVENTS_SECRET_TEST/CATASTROX_FRONTEND_URL (riesgo residual documentado, no implementado aún)', () => {
     const config = getConfig(
       {
-        APP_ENV: 'staging',
-        DATABASE_URL: 'x',
-        CATASTROX_DATABASE_URL: 'y',
+        APP_ENV: 'production',
+        DATABASE_URL: 'postgres://real-prod-host/agx',
+        CATASTROX_DATABASE_URL: 'postgres://real-prod-host/gis',
         HEALTH_MONITOR_TOKEN: 'a'.repeat(32),
         CATASTROX_PII_ENCRYPTION_KEY: TEST_PII_ENCRYPTION_KEY,
         CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
       },
       {},
     );
-    assert.deepEqual(config.cors.allowedOrigins, ['https://staging.agrogenomax.com']);
-    assert.ok(Object.isFrozen(config.cors));
-    assert.ok(Object.isFrozen(config.cors.allowedOrigins));
+    assert.equal(config.appEnv, 'production');
+  });
+
+  test('staging sin WOMPI_PUBLIC_KEY_TEST falla (variable requerida)', () => {
+    const source = validStagingSource();
+    delete source.WOMPI_PUBLIC_KEY_TEST;
+    assert.throws(
+      () => getConfig(source, {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'REQUIRED_VARIABLE_MISSING' &&
+        error.variable === 'WOMPI_PUBLIC_KEY_TEST',
+    );
+  });
+
+  test('staging sin WOMPI_INTEGRITY_SECRET_TEST falla (variable requerida)', () => {
+    const source = validStagingSource();
+    delete source.WOMPI_INTEGRITY_SECRET_TEST;
+    assert.throws(
+      () => getConfig(source, {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'REQUIRED_VARIABLE_MISSING' &&
+        error.variable === 'WOMPI_INTEGRITY_SECRET_TEST',
+    );
+  });
+
+  test('staging sin WOMPI_EVENTS_SECRET_TEST falla (variable requerida)', () => {
+    const source = validStagingSource();
+    delete source.WOMPI_EVENTS_SECRET_TEST;
+    assert.throws(
+      () => getConfig(source, {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'REQUIRED_VARIABLE_MISSING' &&
+        error.variable === 'WOMPI_EVENTS_SECRET_TEST',
+    );
+  });
+
+  test('staging sin CATASTROX_FRONTEND_URL falla (variable requerida)', () => {
+    const source = validStagingSource();
+    delete source.CATASTROX_FRONTEND_URL;
+    assert.throws(
+      () => getConfig(source, {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'REQUIRED_VARIABLE_MISSING' &&
+        error.variable === 'CATASTROX_FRONTEND_URL',
+    );
+  });
+
+  test('WOMPI_PUBLIC_KEY_TEST con valor de marcador de posición falla, incluso fuera de staging', () => {
+    assert.throws(
+      () => getConfig({ APP_ENV: 'development', WOMPI_PUBLIC_KEY_TEST: 'pub_test_REEMPLAZAR' }, {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'INSECURE_VALUE' &&
+        error.variable === 'WOMPI_PUBLIC_KEY_TEST',
+    );
+  });
+
+  test('WOMPI_PUBLIC_KEY_TEST que no inicia con pub_test_ falla (rechaza llaves de producción por error)', () => {
+    assert.throws(
+      () => getConfig(validStagingSource({ WOMPI_PUBLIC_KEY_TEST: 'pub_prod_abcdef123456' }), {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'INSECURE_VALUE' &&
+        error.variable === 'WOMPI_PUBLIC_KEY_TEST',
+    );
+  });
+
+  test('WOMPI_PUBLIC_KEY_TEST válido (pub_test_...) no falla en staging', () => {
+    const config = getConfig(validStagingSource(), {});
+    assert.equal(config.appEnv, 'staging');
+  });
+
+  test('CATASTROX_FRONTEND_URL con http:// (sin TLS) falla en staging', () => {
+    assert.throws(
+      () => getConfig(validStagingSource({ CATASTROX_FRONTEND_URL: 'http://staging.agrogenomax.com' }), {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'INSECURE_VALUE' &&
+        error.variable === 'CATASTROX_FRONTEND_URL',
+    );
+  });
+
+  test('CATASTROX_FRONTEND_URL apuntando a localhost falla en staging', () => {
+    assert.throws(
+      () => getConfig(validStagingSource({ CATASTROX_FRONTEND_URL: 'https://localhost:5173' }), {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'INSECURE_VALUE' &&
+        error.variable === 'CATASTROX_FRONTEND_URL',
+    );
+  });
+
+  test('CATASTROX_FRONTEND_URL apuntando a 127.0.0.1 falla en staging', () => {
+    assert.throws(
+      () => getConfig(validStagingSource({ CATASTROX_FRONTEND_URL: 'https://127.0.0.1:5173' }), {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'INSECURE_VALUE' &&
+        error.variable === 'CATASTROX_FRONTEND_URL',
+    );
+  });
+
+  test('CATASTROX_FRONTEND_URL https pública válida no falla en staging', () => {
+    const config = getConfig(validStagingSource({ CATASTROX_FRONTEND_URL: 'https://staging.agrogenomax.com' }), {});
+    assert.equal(config.appEnv, 'staging');
+  });
+
+  test('CATASTROX_FRONTEND_URL con localhost no falla fuera de staging/production (development sigue permitiendo localhost)', () => {
+    const config = getConfig({ APP_ENV: 'development', CATASTROX_FRONTEND_URL: 'http://127.0.0.1:5173' }, {});
+    assert.equal(config.appEnv, 'development');
+  });
+
+  test('ningún secreto/llave nuevo se expone en los mensajes de error de las validaciones de staging', () => {
+    const secretKey = `pub_test_${'s'.repeat(24)}`;
+    try {
+      getConfig(validStagingSource({ WOMPI_PUBLIC_KEY_TEST: `${secretKey}_REEMPLAZAR` }), {});
+      assert.fail('Se esperaba que getConfig lanzara ConfigurationError');
+    } catch (error) {
+      assert.ok(error instanceof ConfigurationError);
+      assert.ok(!error.message.includes(secretKey));
+      assert.ok(!JSON.stringify(error).includes(secretKey));
+    }
+  });
+
+  // --- Revisión final: casos encontrados al auditar resolvePublicOriginForEnvironment() ---
+
+  test('CATASTROX_FRONTEND_URL con credenciales embebidas (user:password@) falla en staging', () => {
+    assert.throws(
+      () =>
+        getConfig(validStagingSource({ CATASTROX_FRONTEND_URL: 'https://user:password@staging.agrogenomax.com' }), {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'INSECURE_VALUE' &&
+        error.variable === 'CATASTROX_FRONTEND_URL',
+    );
+  });
+
+  test('CATASTROX_FRONTEND_URL con hostname wildcard falla en staging', () => {
+    assert.throws(
+      () => getConfig(validStagingSource({ CATASTROX_FRONTEND_URL: 'https://*.agrogenomax.com' }), {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'INSECURE_VALUE' &&
+        error.variable === 'CATASTROX_FRONTEND_URL',
+    );
+  });
+
+  test('CATASTROX_FRONTEND_URL apuntando a loopback IPv6 (::1) falla en staging', () => {
+    assert.throws(
+      () => getConfig(validStagingSource({ CATASTROX_FRONTEND_URL: 'https://[::1]:5173' }), {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'INSECURE_VALUE' &&
+        error.variable === 'CATASTROX_FRONTEND_URL',
+    );
+  });
+
+  test('CATASTROX_FRONTEND_URL apuntando a 0.0.0.0 falla en staging', () => {
+    assert.throws(
+      () => getConfig(validStagingSource({ CATASTROX_FRONTEND_URL: 'https://0.0.0.0:5173' }), {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'INSECURE_VALUE' &&
+        error.variable === 'CATASTROX_FRONTEND_URL',
+    );
+  });
+
+  test('WOMPI_INTEGRITY_SECRET_TEST con placeholder falla (antes no tenía ninguna validación de formato)', () => {
+    assert.throws(
+      () => getConfig(validStagingSource({ WOMPI_INTEGRITY_SECRET_TEST: 'test_integrity_REEMPLAZAR' }), {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'INSECURE_VALUE' &&
+        error.variable === 'WOMPI_INTEGRITY_SECRET_TEST',
+    );
+  });
+
+  test('WOMPI_INTEGRITY_SECRET_TEST con espacios iniciales/finales falla', () => {
+    assert.throws(
+      () => getConfig(validStagingSource({ WOMPI_INTEGRITY_SECRET_TEST: ` ${'c'.repeat(32)}` }), {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'INSECURE_VALUE' &&
+        error.variable === 'WOMPI_INTEGRITY_SECRET_TEST',
+    );
+  });
+
+  test('WOMPI_EVENTS_SECRET_TEST con placeholder largo (>=32 caracteres) falla igual (no basta con burlar el check de longitud)', () => {
+    assert.throws(
+      () =>
+        getConfig(
+          validStagingSource({ WOMPI_EVENTS_SECRET_TEST: 'events_secret_REEMPLAZAR_padded_to_thirty_two_chars' }),
+          {},
+        ),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'INSECURE_VALUE' &&
+        error.variable === 'WOMPI_EVENTS_SECRET_TEST',
+    );
+  });
+
+  test('CATASTROX_PII_HASH_SECRET con el placeholder literal de .env.example (49 caracteres, pasaría el check de longitud) falla', () => {
+    assert.throws(
+      () =>
+        getConfig(
+          validStagingSource({ CATASTROX_PII_HASH_SECRET: 'pii_hash_secret_REEMPLAZAR_treinta_dos_caracteres' }),
+          {},
+        ),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'INSECURE_VALUE' &&
+        error.variable === 'CATASTROX_PII_HASH_SECRET',
+    );
+  });
+
+  test('ninguna variable WOMPI_*_PRODUCTION/WOMPI_*_PROD es requerida en staging (no implementadas aún)', () => {
+    // Config válida sin absolutamente ninguna variable de producción de
+    // Wompi presente -- si alguna llegara a exigirse por error, esto
+    // fallaría con REQUIRED_VARIABLE_MISSING.
+    const source = validStagingSource();
+    for (const key of Object.keys(source)) {
+      assert.ok(!key.includes('PRODUCTION') && !key.includes('_PROD'), `variable inesperada de producción: ${key}`);
+    }
+    const config = getConfig(source, {});
+    assert.equal(config.appEnv, 'staging');
+  });
+
+  test('ningún valor de WOMPI_INTEGRITY_SECRET_TEST/CATASTROX_PII_HASH_SECRET/CATASTROX_FRONTEND_URL se expone en los mensajes de error', () => {
+    const secretIntegrity = `c${'x'.repeat(40)}`;
+    try {
+      getConfig(validStagingSource({ WOMPI_INTEGRITY_SECRET_TEST: `${secretIntegrity} ` }), {});
+      assert.fail('Se esperaba ConfigurationError');
+    } catch (error) {
+      assert.ok(!error.message.includes(secretIntegrity));
+      assert.ok(!JSON.stringify(error).includes(secretIntegrity));
+    }
+
+    const secretHash = `h${'y'.repeat(40)}`;
+    try {
+      getConfig(validStagingSource({ CATASTROX_PII_HASH_SECRET: `${secretHash} ` }), {});
+      assert.fail('Se esperaba ConfigurationError');
+    } catch (error) {
+      assert.ok(!error.message.includes(secretHash));
+      assert.ok(!JSON.stringify(error).includes(secretHash));
+    }
+
+    const frontendHost = 'user:pass@staging.agrogenomax.com';
+    try {
+      getConfig(validStagingSource({ CATASTROX_FRONTEND_URL: `https://${frontendHost}` }), {});
+      assert.fail('Se esperaba ConfigurationError');
+    } catch (error) {
+      assert.ok(!error.message.includes('user:pass'));
+      assert.ok(!JSON.stringify(error).includes('user:pass'));
+    }
   });
 });

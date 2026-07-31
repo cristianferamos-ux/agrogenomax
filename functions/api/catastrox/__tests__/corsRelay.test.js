@@ -211,6 +211,83 @@ for (const relay of RELAYS) {
       assert.equal(getCalls(), 0);
     });
 
+    test('15b. STAGING_READINESS_001: API_BACKEND_URL con http:// (sin TLS) en staging devuelve 503', async () => {
+      const getCalls = stubFetch();
+      const request = makeRequest({ origin: 'https://staging.agrogenomax.com' });
+      const response = await relay.onRequest({
+        request,
+        env: { APP_ENV: 'staging', API_BACKEND_URL: 'http://backend-staging.internal' },
+      });
+      assert.equal(response.status, 503);
+      assert.equal(getCalls(), 0);
+    });
+
+    test('15c. STAGING_READINESS_001: API_BACKEND_URL apuntando a localhost en staging devuelve 503', async () => {
+      const getCalls = stubFetch();
+      const request = makeRequest({ origin: 'https://staging.agrogenomax.com' });
+      const response = await relay.onRequest({
+        request,
+        env: { APP_ENV: 'staging', API_BACKEND_URL: 'https://localhost:3001' },
+      });
+      assert.equal(response.status, 503);
+      assert.equal(getCalls(), 0);
+    });
+
+    test('15d. STAGING_READINESS_001: API_BACKEND_URL apuntando a 127.0.0.1 en production devuelve 503', async () => {
+      const getCalls = stubFetch();
+      const request = makeRequest({ origin: 'https://agrogenomax.com' });
+      const response = await relay.onRequest({
+        request,
+        env: { APP_ENV: 'production', API_BACKEND_URL: 'https://127.0.0.1:3001' },
+      });
+      assert.equal(response.status, 503);
+      assert.equal(getCalls(), 0);
+    });
+
+    test('15f. STAGING_READINESS_001 (revisión final): API_BACKEND_URL con credenciales embebidas en staging devuelve 503', async () => {
+      const getCalls = stubFetch();
+      const request = makeRequest({ origin: 'https://staging.agrogenomax.com' });
+      const response = await relay.onRequest({
+        request,
+        env: { APP_ENV: 'staging', API_BACKEND_URL: 'https://user:password@backend-staging.internal' },
+      });
+      assert.equal(response.status, 503);
+      assert.equal(getCalls(), 0);
+    });
+
+    test('15g. STAGING_READINESS_001 (revisión final): API_BACKEND_URL con hostname wildcard en staging devuelve 503', async () => {
+      const getCalls = stubFetch();
+      const request = makeRequest({ origin: 'https://staging.agrogenomax.com' });
+      const response = await relay.onRequest({
+        request,
+        env: { APP_ENV: 'staging', API_BACKEND_URL: 'https://*.backend-staging.internal' },
+      });
+      assert.equal(response.status, 503);
+      assert.equal(getCalls(), 0);
+    });
+
+    test('15h. STAGING_READINESS_001 (revisión final): API_BACKEND_URL apuntando a loopback IPv6 (::1) en staging devuelve 503', async () => {
+      const getCalls = stubFetch();
+      const request = makeRequest({ origin: 'https://staging.agrogenomax.com' });
+      const response = await relay.onRequest({
+        request,
+        env: { APP_ENV: 'staging', API_BACKEND_URL: 'https://[::1]:3001' },
+      });
+      assert.equal(response.status, 503);
+      assert.equal(getCalls(), 0);
+    });
+
+    test('15e. STAGING_READINESS_001: API_BACKEND_URL https pública válida en staging sí llama upstream', async () => {
+      const getCalls = stubFetch();
+      const request = makeRequest({ origin: 'https://staging.agrogenomax.com' });
+      const response = await relay.onRequest({
+        request,
+        env: { APP_ENV: 'staging', API_BACKEND_URL: 'https://backend-staging.internal' },
+      });
+      assert.equal(response.status, 200);
+      assert.equal(getCalls(), 1);
+    });
+
     test('16. no existe fallback Railway', async () => {
       const getCalls = stubFetch();
       const request = makeRequest({ origin: 'https://agrogenomax.com' });

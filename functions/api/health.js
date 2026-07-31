@@ -30,8 +30,8 @@ import {
   DEFAULT_CORS_METHODS,
   buildCorsPolicy,
   evaluateCorsRequest,
-  normalizeOrigin,
   resolveAllowedOriginsForEnvironment,
+  resolvePublicOriginForEnvironment,
 } from '../../shared/security/corsPolicy.js';
 
 const ALLOWED_RELAY_ENVIRONMENTS = Object.freeze(['development', 'test', 'staging', 'production']);
@@ -233,7 +233,20 @@ export async function onRequest(context) {
   // permitido): en ambos casos se puede consultar el upstream, solo
   // después de validar API_BACKEND_URL y, a continuación,
   // API_BACKEND_ALLOWED_ORIGIN (mecanismo positivo definitivo).
-  const backendOrigin = isNonEmpty(env.API_BACKEND_URL) ? normalizeOrigin(env.API_BACKEND_URL) : null;
+  // STAGING_READINESS_001 (cierre final, Opción A): antes se validaba con
+  // `normalizeOrigin()` puro -- no exigía https ni rechazaba localhost/
+  // 127.0.0.1/loopback IPv6/0.0.0.0/wildcard en staging/production, a
+  // diferencia de los dos relays de CatastroX. El pinning positivo de más
+  // abajo (API_BACKEND_ALLOWED_ORIGIN) mitigaba el riesgo en la práctica,
+  // pero no lo eliminaba: nada impedía configurar AMBAS variables con el
+  // mismo valor inseguro (p. ej. http://, o localhost) y que el relay lo
+  // aceptara igual. `resolvePublicOriginForEnvironment()` cierra ese hueco
+  // aquí también, sin tocar el mecanismo de pinning ni el filtro adicional
+  // `isBackendOriginAllowedForEnv()` (ambos se conservan, capas de defensa
+  // adicionales, nunca el control principal).
+  const backendOrigin = isNonEmpty(env.API_BACKEND_URL)
+    ? resolvePublicOriginForEnvironment(env.API_BACKEND_URL, appEnv)
+    : null;
   if (!backendOrigin) {
     reportHealthRelayEvent(
       { type: 'relay_health_configuration_error', appEnv, reason: 'api_backend_url_missing_or_invalid', method, path: '/api/health' },
@@ -258,7 +271,12 @@ export async function onRequest(context) {
   }
 
   if (isNonEmpty(rawBackendAllowedOrigin)) {
-    const backendAllowedOrigin = normalizeOrigin(rawBackendAllowedOrigin);
+    // Misma regla que API_BACKEND_URL arriba -- API_BACKEND_ALLOWED_ORIGIN
+    // es el valor contra el que se hace pinning positivo, así que debe
+    // cumplir exactamente los mismos requisitos (https, sin local/loopback/
+    // wildcard en staging/production) o la comparación de igualdad de más
+    // abajo carecería de sentido.
+    const backendAllowedOrigin = resolvePublicOriginForEnvironment(rawBackendAllowedOrigin, appEnv);
     if (!backendAllowedOrigin) {
       reportHealthRelayEvent(
         { type: 'relay_health_configuration_error', appEnv, reason: 'api_backend_allowed_origin_invalid', method, path: '/api/health' },
