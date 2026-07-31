@@ -12,6 +12,7 @@ import {
   resolveAllowedOriginsForEnvironment,
   resolvePublicOriginForEnvironment,
 } from '../../shared/security/corsPolicy.js';
+import { isEmailFromValidForEnvironment } from '../services/catastrox/emailSender.js';
 
 export const ALLOWED_APP_ENVIRONMENTS = Object.freeze([
   'development',
@@ -55,6 +56,13 @@ const REQUIRED_VARIABLES_BY_ENV = Object.freeze({
     'WOMPI_INTEGRITY_SECRET_TEST',
     'WOMPI_EVENTS_SECRET_TEST',
     'CATASTROX_FRONTEND_URL',
+    // EMAIL_PROVIDER_002: sin estas tres, POST /customers respondería
+    // siempre 503 EMAIL_DELIVERY_UNAVAILABLE en staging -- mejor fallar al
+    // arrancar con un mensaje claro que dejar el backend "arriba" pero con
+    // el flujo de comprador roto desde la primera solicitud real.
+    'EMAIL_PROVIDER',
+    'RESEND_API_KEY',
+    'EMAIL_FROM',
   ]),
   production: Object.freeze([
     'DATABASE_URL',
@@ -457,6 +465,84 @@ export function validateEnv(appEnv, source = process.env) {
         'CATASTROX_FRONTEND_URL debe ser una URL https pública, nunca localhost/127.0.0.1, en este ambiente.',
         { code: 'INSECURE_VALUE', environment: appEnv, variable: 'CATASTROX_FRONTEND_URL' },
       );
+    }
+  }
+
+  // EMAIL_PROVIDER_002: selecciona la implementación real de envío de OTP
+  // (server/services/catastrox/emailSender.js). Dondequiera que esté
+  // presente debe ser un valor soportado; en staging, además, debe ser
+  // exactamente 'resend' -- 'stub' en staging desactivaría el flujo de
+  // comprador real sin que el arranque lo señale.
+  if (isNonEmpty(source.EMAIL_PROVIDER)) {
+    const provider = source.EMAIL_PROVIDER.trim().toLowerCase();
+
+    if (provider !== 'stub' && provider !== 'resend') {
+      throw new ConfigurationError(
+        "EMAIL_PROVIDER debe ser 'stub' o 'resend'.",
+        { code: 'INSECURE_VALUE', environment: appEnv, variable: 'EMAIL_PROVIDER' },
+      );
+    }
+
+    if (appEnv === 'staging' && provider !== 'resend') {
+      throw new ConfigurationError("EMAIL_PROVIDER debe ser 'resend' en staging.", {
+        code: 'INSECURE_VALUE',
+        environment: appEnv,
+        variable: 'EMAIL_PROVIDER',
+      });
+    }
+  }
+
+  // RESEND_API_KEY: mismo formato mínimo que los demás secretos de este
+  // módulo -- nunca se expone su valor en el error.
+  if (isNonEmpty(source.RESEND_API_KEY)) {
+    const key = source.RESEND_API_KEY;
+
+    if (key !== key.trim()) {
+      throw new ConfigurationError('RESEND_API_KEY no puede tener espacios iniciales o finales.', {
+        code: 'INSECURE_VALUE',
+        environment: appEnv,
+        variable: 'RESEND_API_KEY',
+      });
+    }
+
+    if (WOMPI_PLACEHOLDER_PATTERN.test(key)) {
+      throw new ConfigurationError('RESEND_API_KEY tiene un valor de marcador de posición, no una llave real.', {
+        code: 'INSECURE_VALUE',
+        environment: appEnv,
+        variable: 'RESEND_API_KEY',
+      });
+    }
+  }
+
+  // EMAIL_FROM: debe ser `Nombre <correo@dominio>` o `correo@dominio`. En
+  // staging/producción, además, el dominio debe ser público -- nunca
+  // localhost/127.0.0.1/TLD reservado para uso no público
+  // (isEmailFromValidForEnvironment, compartida con
+  // server/services/catastrox/emailSender.js para aplicar la misma regla
+  // otra vez en tiempo de request, sin depender de que este módulo ya haya
+  // corrido).
+  if (isNonEmpty(source.EMAIL_FROM) && !isEmailFromValidForEnvironment(source.EMAIL_FROM, appEnv)) {
+    throw new ConfigurationError(
+      'EMAIL_FROM debe tener el formato "Nombre <correo@dominio>" o "correo@dominio", con un dominio público en este ambiente.',
+      { code: 'INSECURE_VALUE', environment: appEnv, variable: 'EMAIL_FROM' },
+    );
+  }
+
+  // EMAIL_SEND_TIMEOUT_MS (opcional, entero 1000-15000ms, default 5000):
+  // límite del AbortController alrededor de la llamada al proveedor de
+  // correo (server/services/catastrox/emailSender.js). Mismo criterio que
+  // TRUST_PROXY_HOPS -- un valor fuera de rango falla-rápido en vez de
+  // degradar silenciosamente.
+  if (isNonEmpty(source.EMAIL_SEND_TIMEOUT_MS)) {
+    const raw = source.EMAIL_SEND_TIMEOUT_MS.trim();
+    const parsed = Number(raw);
+
+    if (!/^\d+$/.test(raw) || !Number.isInteger(parsed) || parsed < 1000 || parsed > 15000) {
+      throw new ConfigurationError('EMAIL_SEND_TIMEOUT_MS debe ser un entero entre 1000 y 15000.', {
+        code: 'INSECURE_VALUE',
+        environment: appEnv,
+        variable: 'EMAIL_SEND_TIMEOUT_MS',
+      });
     }
   }
 

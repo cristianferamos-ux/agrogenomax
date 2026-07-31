@@ -23,7 +23,7 @@ import { OrderConflictError } from '../services/catastrox/paymentOrderRepository
 import * as recoverySessions from '../services/catastrox/recoverySessionRepository.js';
 import * as customers from '../services/catastrox/customerRepository.js';
 import { validateCustomerInput } from '../services/catastrox/customerValidation.js';
-import { sendEmail } from '../services/catastrox/emailSender.js';
+import { sendVerificationEmail } from '../services/catastrox/emailSender.js';
 import { createDeliveryJobForOrder, processDeliveryJob } from '../services/catastrox/deliveryJobService.js';
 import { createInvoiceJobForOrder } from '../services/catastrox/invoiceJobService.js';
 import {
@@ -88,6 +88,27 @@ export function buildRedirectUrl({ frontendUrl }) {
 export function isLocalFrontendUrl(value) {
   const url = String(value || '').toLowerCase();
   return url.includes('localhost') || url.includes('127.0.0.1');
+}
+
+// EMAIL_PROVIDER_002: nombre a mostrar en el correo de verificación --
+// prioriza la razón social (persona jurídica) sobre nombre/apellido, y
+// devuelve null si no hay ninguno (la plantilla usa un saludo genérico).
+export function buildCustomerDisplayNameForEmail(decryptedCustomer) {
+  if (!decryptedCustomer) return null;
+  if (decryptedCustomer.legalName) return decryptedCustomer.legalName;
+  const parts = [decryptedCustomer.firstName, decryptedCustomer.lastName].filter(Boolean);
+  return parts.length ? parts.join(' ') : null;
+}
+
+// EMAIL_PROVIDER_002: el Idempotency-Key enviado a Resend debe ser estable
+// dentro de un mismo intento de verificación (incluyendo el único
+// reintento interno de sendVerificationEmail ante un fallo transitorio) --
+// nunca aleatorio en cada llamada, o el reintento por transporte/429/5xx se
+// vería, para Resend, como dos envíos distintos. Se deriva del id de la
+// fila de catastrox_email_verifications recién creada -- único por
+// emisión, estable durante todo el ciclo de vida de esta request.
+export function buildEmailIdempotencyKey(verificationId) {
+  return `catastrox-otp-${verificationId}`;
 }
 
 // El retorno local (redirectUrl apuntando a localhost/127.0.0.1) solo se permite
@@ -340,31 +361,96 @@ router.post('/customers', customerLimiter, async (req, res) => {
 
   try {
     const customer = await customers.upsertCustomer(validated);
-    const { code } = await customers.createEmailVerification(customer.id);
+
+    // Cooldown backend de emisión de OTP (cierre de protección backend): el
+    // cooldown de 30s del frontend (CatastroXOtpVerification.jsx) no
+    // protege el endpoint en sí -- esta es la contraparte de backend,
+    // respaldada en Postgres (nunca en memoria del proceso, ver
+    // reserveEmailVerificationSend()). Se reserva el derecho a enviar ANTES
+    // de generar el código o llamar a Resend -- si otra solicitud para el
+    // mismo comprador ya está en curso, o si el último envío REALMENTE
+    // entregado fue hace menos de 30s, se responde 429 de inmediato: no se
+    // genera código nuevo, no se llama al proveedor, no se persiste nada.
+    const reservation = await customers.reserveEmailVerificationSend(customer.id);
+    if (!reservation.allowed) {
+      return res.status(429).json({
+        ok: false,
+        code: 'EMAIL_VERIFICATION_COOLDOWN',
+        retryAfterSeconds: reservation.retryAfterSeconds,
+        message: 'Ya se envió un código recientemente. Espera unos segundos antes de solicitar uno nuevo.',
+      });
+    }
+
+    const appEnv = String(process.env.APP_ENV || '').toLowerCase();
+    const isDevOrTest = appEnv === 'development' || appEnv === 'test';
+
+    // El comprador se persiste siempre (upsert idempotente), pero el código
+    // de verificación NO se escribe todavía -- ver política transaccional
+    // más abajo (revisión de reenvío, EMAIL_PROVIDER_002 §12/§13).
+    const pending = customers.generatePendingEmailVerification();
     // El correo se descifra solo en memoria, en este instante, para poder
     // transportarlo -- nunca se reintroduce en email_normalized (columna
     // deprecada, ver migración 005).
     const decryptedCustomer = customers.decryptCustomerPii(customer);
 
-    const emailResult = await sendEmail({
-      to: decryptedCustomer.email,
-      subject: 'Tu código de verificación de CatastroX',
-    });
+    // La reserva se libera pase lo que pase -- éxito, fallo honesto de
+    // sendVerificationEmail(), o una excepción inesperada (no debería
+    // ocurrir dado su contrato fail-closed, pero nunca debe dejar
+    // reserved_at "colgado" hasta que expire solo por TTL). `finally`
+    // envuelve la llamada completa; el resultado se usa después, fuera de
+    // este bloque, para decidir persistencia y la respuesta HTTP.
+    let emailResult;
+    try {
+      emailResult = await sendVerificationEmail({
+        to: decryptedCustomer.email,
+        verificationCode: pending.code,
+        expiresAt: pending.expiresAt,
+        customerName: buildCustomerDisplayNameForEmail(decryptedCustomer),
+        // Estable dentro de este intento (incluyendo el reintento interno de
+        // sendVerificationEmail); cada llamada a este endpoint -- incluido un
+        // reenvío real -- genera un pending.id nuevo y por tanto una
+        // idempotencyKey nueva -- ver buildEmailIdempotencyKey().
+        idempotencyKey: buildEmailIdempotencyKey(pending.id),
+      });
+    } finally {
+      await customers.releaseEmailVerificationSend(customer.id, {
+        delivered: Boolean(emailResult?.delivered || isDevOrTest),
+      });
+    }
 
-    const appEnv = String(process.env.APP_ENV || '').toLowerCase();
-    const isDevOrTest = appEnv === 'development' || appEnv === 'test';
-
-    // Bloque 2 (revisión de seguridad): fuera de development/test no hay
-    // ninguna vía alterna (devOtpCode) para que el comprador reciba el
-    // código -- si el envío real no se entregó (siempre el caso hoy, sin
-    // proveedor conectado, ver emailSender.js), se falla explícitamente en
-    // vez de responder como si el correo se hubiera enviado. El comprador
-    // y el código ya quedaron registrados (upsert idempotente); solo la
-    // respuesta HTTP se rechaza, para nunca crear una expectativa falsa.
-    if (!emailResult.delivered && !isDevOrTest) {
-      console.error('[CatastroX Payments] No fue posible entregar el correo de verificación (sin proveedor conectado)', {
+    // Política transaccional (revisión de reenvío): verifyEmailCode() más
+    // abajo siempre valida contra la fila MÁS RECIENTE no consumida/no
+    // expirada -- si se persistiera esta fila sin importar el resultado del
+    // envío, un fallo de Resend dejaría "activo" un código que el
+    // comprador nunca recibió, ensombreciendo cualquier código anterior que
+    // sí le hubiera llegado (candado autoinfligido). Por eso solo se
+    // persiste si: (a) el envío se confirmó entregado, o (b)
+    // development/test, donde no hay entrega real que confirmar y
+    // devOtpCode es la vía de prueba ya autorizada -- en ese caso SIEMPRE
+    // se persiste, para que verify-email tenga contra qué validar.
+    if (emailResult.delivered || isDevOrTest) {
+      await customers.persistEmailVerification({
+        id: pending.id,
         customerId: customer.id,
-        mode: emailResult.mode,
+        codeHash: pending.codeHash,
+        expiresAt: pending.expiresAt,
+      });
+    }
+
+    // Bloque 2 (revisión de seguridad), EMAIL_PROVIDER_002: fuera de
+    // development/test no hay ninguna vía alterna (devOtpCode) para que el
+    // comprador reciba el código -- si el envío real no se entregó, se
+    // falla explícitamente en vez de responder como si el correo se
+    // hubiera enviado ("código enviado" nunca se afirma sin
+    // delivered:true). El comprador ya quedó registrado (upsert
+    // idempotente); el código NUNCA quedó persistido (ver arriba) -- el
+    // comprador puede reintentar de inmediato, o seguir usando un código
+    // anterior todavía vigente si lo tiene.
+    if (!emailResult.delivered && !isDevOrTest) {
+      console.error('[CatastroX Payments] No fue posible entregar el correo de verificación', {
+        customerId: customer.id,
+        provider: emailResult.provider,
+        errorCode: emailResult.errorCode,
       });
       return res.status(503).json({
         ok: false,
@@ -377,10 +463,11 @@ router.post('/customers', customerLimiter, async (req, res) => {
       ok: true,
       customerId: customer.id,
       emailVerificationRequired: true,
-      // Solo en development/test: sin proveedor de correo real conectado
-      // (ver server/services/catastrox/emailSender.js), esta es la única
-      // vía de completar el flujo en pruebas -- NUNCA en staging/producción.
-      ...(isDevOrTest ? { devOtpCode: code } : {}),
+      // Solo en development/test: sendVerificationEmail() siempre es el
+      // stub ahí (ver server/services/catastrox/emailSender.js), así que
+      // esta es la única vía de completar el flujo en pruebas -- NUNCA en
+      // staging/producción, sin importar delivered/provider.
+      ...(isDevOrTest ? { devOtpCode: pending.code } : {}),
     });
   } catch (error) {
     console.error('[CatastroX Payments] Error creando/actualizando comprador', { message: error.message });

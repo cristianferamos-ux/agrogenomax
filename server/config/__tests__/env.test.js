@@ -27,6 +27,13 @@ const TEST_WOMPI_INTEGRITY_SECRET_TEST = 'c'.repeat(32);
 const TEST_WOMPI_EVENTS_SECRET_TEST = 'd'.repeat(32);
 const TEST_CATASTROX_FRONTEND_URL = 'https://staging.agrogenomax.com';
 
+// EMAIL_PROVIDER_002: staging ahora también exige EMAIL_PROVIDER=resend,
+// RESEND_API_KEY y EMAIL_FROM -- valores sintéticos válidos, reutilizados
+// como base por los casos de este archivo que necesitan un staging
+// "completo".
+const TEST_RESEND_API_KEY = 're_synthetic_key_1234567890';
+const TEST_EMAIL_FROM = 'CatastroX <no-reply@mail.staging.agrogenomax.com>';
+
 function validStagingSource(overrides = {}) {
   return {
     APP_ENV: 'staging',
@@ -39,6 +46,9 @@ function validStagingSource(overrides = {}) {
     WOMPI_INTEGRITY_SECRET_TEST: TEST_WOMPI_INTEGRITY_SECRET_TEST,
     WOMPI_EVENTS_SECRET_TEST: TEST_WOMPI_EVENTS_SECRET_TEST,
     CATASTROX_FRONTEND_URL: TEST_CATASTROX_FRONTEND_URL,
+    EMAIL_PROVIDER: 'resend',
+    RESEND_API_KEY: TEST_RESEND_API_KEY,
+    EMAIL_FROM: TEST_EMAIL_FROM,
     ...overrides,
   };
 }
@@ -845,6 +855,167 @@ describe('STAGING_READINESS_001 (Bloque 4): validaciones nuevas de configuració
     } catch (error) {
       assert.ok(!error.message.includes('user:pass'));
       assert.ok(!JSON.stringify(error).includes('user:pass'));
+    }
+  });
+});
+
+describe('EMAIL_PROVIDER_002: EMAIL_PROVIDER/RESEND_API_KEY/EMAIL_FROM/EMAIL_SEND_TIMEOUT_MS', () => {
+  beforeEach(() => {
+    __resetValidationStateForTests();
+  });
+
+  test('staging con configuración de correo completa y válida no falla', () => {
+    const config = getConfig(validStagingSource(), {});
+    assert.equal(config.appEnv, 'staging');
+  });
+
+  test('staging sin EMAIL_PROVIDER falla (variable requerida)', () => {
+    const source = validStagingSource();
+    delete source.EMAIL_PROVIDER;
+    assert.throws(
+      () => getConfig(source, {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'REQUIRED_VARIABLE_MISSING' &&
+        error.variable === 'EMAIL_PROVIDER',
+    );
+  });
+
+  test('staging sin RESEND_API_KEY falla (variable requerida)', () => {
+    const source = validStagingSource();
+    delete source.RESEND_API_KEY;
+    assert.throws(
+      () => getConfig(source, {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'REQUIRED_VARIABLE_MISSING' &&
+        error.variable === 'RESEND_API_KEY',
+    );
+  });
+
+  test('staging sin EMAIL_FROM falla (variable requerida)', () => {
+    const source = validStagingSource();
+    delete source.EMAIL_FROM;
+    assert.throws(
+      () => getConfig(source, {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'REQUIRED_VARIABLE_MISSING' &&
+        error.variable === 'EMAIL_FROM',
+    );
+  });
+
+  test('EMAIL_PROVIDER con un valor no soportado falla, incluso fuera de staging', () => {
+    assert.throws(
+      () => getConfig({ APP_ENV: 'development', EMAIL_PROVIDER: 'sendgrid' }, {}),
+      (error) =>
+        error instanceof ConfigurationError && error.code === 'INSECURE_VALUE' && error.variable === 'EMAIL_PROVIDER',
+    );
+  });
+
+  test('EMAIL_PROVIDER=stub en staging falla (staging exige exactamente resend)', () => {
+    assert.throws(
+      () => getConfig(validStagingSource({ EMAIL_PROVIDER: 'stub' }), {}),
+      (error) =>
+        error instanceof ConfigurationError && error.code === 'INSECURE_VALUE' && error.variable === 'EMAIL_PROVIDER',
+    );
+  });
+
+  test('EMAIL_PROVIDER=stub no falla fuera de staging (development conserva el stub)', () => {
+    const config = getConfig({ APP_ENV: 'development', EMAIL_PROVIDER: 'stub' }, {});
+    assert.equal(config.appEnv, 'development');
+  });
+
+  test('production NO exige EMAIL_PROVIDER/RESEND_API_KEY/EMAIL_FROM (riesgo residual documentado, Resend no habilitado en producción en este lote)', () => {
+    const config = getConfig(
+      {
+        APP_ENV: 'production',
+        DATABASE_URL: 'postgres://real-prod-host/agx',
+        CATASTROX_DATABASE_URL: 'postgres://real-prod-host/gis',
+        HEALTH_MONITOR_TOKEN: 'a'.repeat(32),
+        CATASTROX_PII_ENCRYPTION_KEY: TEST_PII_ENCRYPTION_KEY,
+        CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
+      },
+      {},
+    );
+    assert.equal(config.appEnv, 'production');
+  });
+
+  test('RESEND_API_KEY con valor de marcador de posición falla', () => {
+    assert.throws(
+      () => getConfig(validStagingSource({ RESEND_API_KEY: 're_REEMPLAZAR' }), {}),
+      (error) =>
+        error instanceof ConfigurationError && error.code === 'INSECURE_VALUE' && error.variable === 'RESEND_API_KEY',
+    );
+  });
+
+  test('RESEND_API_KEY con espacios iniciales/finales falla', () => {
+    assert.throws(
+      () => getConfig(validStagingSource({ RESEND_API_KEY: ` ${TEST_RESEND_API_KEY}` }), {}),
+      (error) =>
+        error instanceof ConfigurationError && error.code === 'INSECURE_VALUE' && error.variable === 'RESEND_API_KEY',
+    );
+  });
+
+  test('EMAIL_FROM con formato inválido (sin @) falla', () => {
+    assert.throws(
+      () => getConfig(validStagingSource({ EMAIL_FROM: 'no-es-un-correo' }), {}),
+      (error) => error instanceof ConfigurationError && error.code === 'INSECURE_VALUE' && error.variable === 'EMAIL_FROM',
+    );
+  });
+
+  test('EMAIL_FROM apuntando a localhost falla en staging', () => {
+    assert.throws(
+      () => getConfig(validStagingSource({ EMAIL_FROM: 'CatastroX <no-reply@localhost>' }), {}),
+      (error) => error instanceof ConfigurationError && error.code === 'INSECURE_VALUE' && error.variable === 'EMAIL_FROM',
+    );
+  });
+
+  test('EMAIL_FROM apuntando a un TLD no público (.internal) falla en staging', () => {
+    assert.throws(
+      () => getConfig(validStagingSource({ EMAIL_FROM: 'no-reply@backend.internal' }), {}),
+      (error) => error instanceof ConfigurationError && error.code === 'INSECURE_VALUE' && error.variable === 'EMAIL_FROM',
+    );
+  });
+
+  test('EMAIL_FROM formato "correo@dominio" plano (sin nombre) es válido en staging', () => {
+    const config = getConfig(validStagingSource({ EMAIL_FROM: 'no-reply@mail.staging.agrogenomax.com' }), {});
+    assert.equal(config.appEnv, 'staging');
+  });
+
+  test('EMAIL_SEND_TIMEOUT_MS fuera de rango (menor a 1000) falla', () => {
+    assert.throws(
+      () => getConfig(validStagingSource({ EMAIL_SEND_TIMEOUT_MS: '500' }), {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'INSECURE_VALUE' &&
+        error.variable === 'EMAIL_SEND_TIMEOUT_MS',
+    );
+  });
+
+  test('EMAIL_SEND_TIMEOUT_MS fuera de rango (mayor a 15000) falla', () => {
+    assert.throws(
+      () => getConfig(validStagingSource({ EMAIL_SEND_TIMEOUT_MS: '20000' }), {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'INSECURE_VALUE' &&
+        error.variable === 'EMAIL_SEND_TIMEOUT_MS',
+    );
+  });
+
+  test('EMAIL_SEND_TIMEOUT_MS dentro de rango no falla', () => {
+    const config = getConfig(validStagingSource({ EMAIL_SEND_TIMEOUT_MS: '8000' }), {});
+    assert.equal(config.appEnv, 'staging');
+  });
+
+  test('ningún valor de RESEND_API_KEY/EMAIL_FROM se expone en los mensajes de error', () => {
+    const secretKey = `re_${'s'.repeat(24)}`;
+    try {
+      getConfig(validStagingSource({ RESEND_API_KEY: `${secretKey}_REEMPLAZAR` }), {});
+      assert.fail('Se esperaba ConfigurationError');
+    } catch (error) {
+      assert.ok(!error.message.includes(secretKey));
+      assert.ok(!JSON.stringify(error).includes(secretKey));
     }
   });
 });
