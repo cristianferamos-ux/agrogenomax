@@ -34,6 +34,29 @@ const CATASTROX_ORIGEN_NACIONAL_PROJ =
 // decisiones de negocio ni de pago por sí sola.
 const CATASTROX_DATASET_VERSION = process.env.CATASTROX_DATASET_VERSION || '2026-01';
 
+// Lookup sin dependencia dura de gis.*: gis.catastro_caqueta,
+// gis.municipios_colombia y catastrox_clean.v_predios_enriquecidos son
+// relaciones OPCIONALES en Railway (ver docs/catastrox/, ADR-006) -- pueden
+// no existir todavía sin que eso sea un error real. 42P01 es el SQLSTATE de
+// Postgres para "relación inexistente" (mismo código ya usado como
+// convención en server/health/dbReadiness.js). Solo ese código específico
+// se trata como "fuente opcional ausente"; cualquier otro (auth, conexión,
+// timeout, columna inexistente, etc.) se re-lanza sin tocar y sigue
+// produciendo 500 -- ver cada call site abajo para qué relación concreta
+// cubre cada uso de queryOptional.
+export function isUndefinedRelationError(error) {
+  return Boolean(error) && error.code === '42P01';
+}
+
+async function queryOptional(queryImpl, sql, params) {
+  try {
+    return await queryImpl(sql, params);
+  } catch (error) {
+    if (isUndefinedRelationError(error)) return null;
+    throw error;
+  }
+}
+
 /**
  * Identidad canónica de un predio (Bloque 3/4/5): estable entre los tres
  * métodos de búsqueda (código, coordenadas manuales, "mi ubicación
@@ -646,8 +669,12 @@ function buildNotFoundResponse({ queryPoint, municipio, coverage }) {
   };
 }
 
-async function findMunicipioByPoint(lng, lat) {
-  const directMatch = await query(
+// gis.municipios_colombia es OPCIONAL (enriquecimiento de gestor/municipio,
+// ver POST /lookup): si la relación no existe (42P01), se degrada a "sin
+// municipio" en vez de 500 -- el llamador ya tolera un resultado null.
+export async function findMunicipioByPoint(lng, lat, queryImpl = query) {
+  const directMatch = await queryOptional(
+    queryImpl,
     `with point as (
        select ST_SetSRID(ST_MakePoint($1, $2), 4326) as geom
      )
@@ -663,11 +690,14 @@ async function findMunicipioByPoint(lng, lat) {
     [lng, lat],
   );
 
+  if (directMatch === null) return null;
+
   if (directMatch.rows[0]) {
     return normalizeMunicipioRow(directMatch.rows[0]);
   }
 
-  const nearestMatch = await query(
+  const nearestMatch = await queryOptional(
+    queryImpl,
     `with point as (
        select ST_SetSRID(ST_MakePoint($1, $2), 4326) as geom
      )
@@ -682,7 +712,7 @@ async function findMunicipioByPoint(lng, lat) {
     [lng, lat],
   );
 
-  return normalizeMunicipioRow(nearestMatch.rows[0]);
+  return nearestMatch ? normalizeMunicipioRow(nearestMatch.rows[0]) : null;
 }
 
 // Devuelve hasta 2 filas (no 1): el llamador (POST /lookup) usa la segunda
@@ -690,9 +720,13 @@ async function findMunicipioByPoint(lng, lat) {
 // mismo criterio que la consulta legacy en el mismo archivo) -- el
 // desempate ST_Covers-antes-que-ST_Intersects/área/código para el caso no
 // ambiguo no cambia.
-async function findCleanPredioCandidatesByPoint(lng, lat) {
-  const result = await query(
-    `with punto as (
+//
+// municipio_nombre/departamento_nombre se seleccionan aquí (Fuente 1)
+// porque ya existen como columnas propias del dataset limpio -- evita
+// depender de gis.municipios_colombia solo para esos dos campos (ver
+// POST /lookup, que ahora los usa como fuente primaria).
+function buildCleanCandidatesSql(fromRelation) {
+  return `with punto as (
        select ST_SetSRID(
          ST_Transform(
            ST_SetSRID(ST_MakePoint($1, $2), 4326),
@@ -705,6 +739,8 @@ async function findCleanPredioCandidatesByPoint(lng, lat) {
        select
          p.codigo_predial,
          p.zona,
+         p.municipio_nombre,
+         p.departamento_nombre,
          p.fid,
          ST_Multi(
            ST_CollectionExtract(
@@ -715,11 +751,13 @@ async function findCleanPredioCandidatesByPoint(lng, lat) {
              3
            )
          ) as lookup_geom
-       from catastrox_clean.predios p
+       from ${fromRelation} p
      )
      select
        c.codigo_predial,
        c.zona,
+       c.municipio_nombre,
+       c.departamento_nombre,
        c.fid,
        case when ST_Covers(c.lookup_geom, p.geom) then 0 else 1 end as priority_tier
      from candidatos c, punto p
@@ -736,9 +774,31 @@ async function findCleanPredioCandidatesByPoint(lng, lat) {
        end,
        ST_Area(c.lookup_geom) asc,
        c.codigo_predial asc
-     limit 2`,
+     limit 2`;
+}
+
+// catastrox_clean.v_predios_enriquecidos (Fuente 2, principal) y
+// catastrox_clean.predios (Fuente 3, fallback si la vista no existe) son
+// las dos relaciones opcionales de esta función -- ambas con las mismas
+// columnas, así que el fallback no pierde datos. Si ninguna existe (42P01
+// en las dos), se devuelve [] -- el llamador ya trata "sin candidatos"
+// como "seguir la cascada", nunca 500.
+export async function findCleanPredioCandidatesByPoint(lng, lat, queryImpl = query) {
+  let result = await queryOptional(
+    queryImpl,
+    buildCleanCandidatesSql('catastrox_clean.v_predios_enriquecidos'),
     [lng, lat, CATASTROX_ORIGEN_NACIONAL_PROJ],
   );
+
+  if (result === null) {
+    result = await queryOptional(
+      queryImpl,
+      buildCleanCandidatesSql('catastrox_clean.predios'),
+      [lng, lat, CATASTROX_ORIGEN_NACIONAL_PROJ],
+    );
+  }
+
+  if (result === null) return [];
 
   return result.rows;
 }
@@ -927,7 +987,16 @@ router.post('/lookup', async (req, res, next) => {
     const lat = parseCoordinate(req.body?.lat, 'lat');
     const lng = parseCoordinate(req.body?.lng, 'lng');
 
-    const predioResult = await query(
+    // Fuente 1 (legacy, opcional): esta consulta única referencia
+    // gis.catastro_caqueta y gis.municipios_colombia -- si cualquiera de
+    // las dos no existe (42P01), toda la sentencia falla igual (no se
+    // puede distinguir cuál faltó dentro de una sola query), y eso se
+    // trata como "fuente legacy no disponible": se sigue la cascada hacia
+    // catastrox_clean, nunca 500. catastrox_clean.v_predios_enriquecidos
+    // también participa aquí (left join) solo para 'zona'; si falta, cae
+    // en el mismo caso -- la Fuente 2 más abajo la vuelve a intentar sola.
+    const predioResult = await queryOptional(
+      query,
       `with punto as (
          select ST_SetSRID(ST_MakePoint($1, $2), 4326) as geom
        ),
@@ -1003,7 +1072,7 @@ router.post('/lookup', async (req, res, next) => {
       [lng, lat],
     );
 
-    if (predioResult.rows[0]) {
+    if (predioResult && predioResult.rows[0]) {
       const [firstCandidate, secondCandidate] = predioResult.rows;
 
       // Bloque 4/5: dos filas con la MISMA prioridad (ambas ST_Covers, o
@@ -1105,6 +1174,9 @@ router.post('/lookup', async (req, res, next) => {
       }
 
       const cleanPredio = firstCleanCandidate;
+      // Fuente 4 (opcional, solo enriquecimiento de gestor): gis.municipios_colombia
+      // no tiene equivalente en catastrox_clean -- si no existe, findMunicipioByPoint
+      // ya degrada a null (ver su propio comentario) y gestor queda null, nunca 500.
       const municipio = await findMunicipioByPoint(lng, lat);
       const coverage = municipio ? resolveCoverageStatus({ municipio, lat, lng }) : null;
       const lookupId = buildLookupId();
@@ -1117,14 +1189,21 @@ router.post('/lookup', async (req, res, next) => {
         queryPoint: buildQueryPoint(lat, lng),
       });
 
+      // municipio_nombre/departamento_nombre de catastrox_clean son la fuente
+      // primaria (Requisito 2) -- gis.municipios_colombia solo rellena si el
+      // dato limpio viniera vacío. gestor no tiene fuente en catastrox_clean,
+      // así que sigue dependiendo exclusivamente de gis (puede ser null).
+      const municipioNombre = cleanPredio.municipio_nombre || municipio?.municipio || null;
+      const departamentoNombre = cleanPredio.departamento_nombre || municipio?.departamento || null;
+
       res.json({
         lookup_id: lookupId,
         routeId: lookupId,
         canonicalPredioId,
         found: true,
         status: 'FOUND',
-        municipio: toNullableString(municipio?.municipio),
-        departamento: toNullableString(municipio?.departamento),
+        municipio: toNullableString(municipioNombre),
+        departamento: toNullableString(departamentoNombre),
         tipoZona: toNullableString(cleanPredio.zona),
         gestor: toNullableString(municipio?.gestorCatastral),
         canPurchase: true,
@@ -1132,8 +1211,8 @@ router.post('/lookup', async (req, res, next) => {
           'Predio identificado. Para conocer área, perímetro, códigos prediales, plano y archivos descargables, seleccione un paquete.',
         legalNotice: CATASTROX_LEGAL_NOTICE,
         coverage: {
-          municipio: coverage?.municipio || municipio?.municipio || null,
-          departamento: coverage?.departamento || municipio?.departamento || null,
+          municipio: coverage?.municipio || municipioNombre,
+          departamento: coverage?.departamento || departamentoNombre,
           gestorCatastral: coverage?.gestorCatastral || municipio?.gestorCatastral || null,
           estadoCobertura: coverage?.estadoCobertura || null,
         },
@@ -1141,8 +1220,8 @@ router.post('/lookup', async (req, res, next) => {
           lookup_id: lookupId,
           routeId: lookupId,
           canonicalPredioId,
-          municipio: toNullableString(municipio?.municipio),
-          departamento: toNullableString(municipio?.departamento),
+          municipio: toNullableString(municipioNombre),
+          departamento: toNullableString(departamentoNombre),
           tipoZona: toNullableString(cleanPredio.zona),
           gestor: toNullableString(municipio?.gestorCatastral),
           estadoPredial:
