@@ -10,6 +10,21 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import dotenv from 'dotenv';
 
+// CI (npm test / GitHub Actions) no tiene .env ni server/.env -- a
+// diferencia del entorno local, donde ambos existen con APP_ENV=development
+// y ocultan esta dependencia. getConfig() exige APP_ENV explícita sin
+// inferencia (server/config/env.js), así que se fija aquí, antes de
+// cualquier dotenv.config()/getConfig(), igual que
+// server/__tests__/catastroxDb.test.js. 'test' no exige ninguna otra
+// variable (server/config/env.js: requiredVars.test = []). No se
+// necesita una base real: CATASTROX_DATABASE_URL usa la misma dirección
+// reservada RFC 5737 (nunca conecta) que ya usa catastroxDb.test.js --
+// getCatastroxDbPool() solo necesita un connection string sintácticamente
+// válido para no devolver null; el Pool real nunca se usa porque cada
+// prueba de endpoint sustituye pool.query() por un doble.
+process.env.APP_ENV = 'test';
+process.env.CATASTROX_DATABASE_URL = 'postgres://test:test@192.0.2.1:5432/never_connects';
+
 dotenv.config({ path: '.env', quiet: true });
 dotenv.config({ path: 'server/.env', quiet: true });
 
