@@ -14,11 +14,16 @@ dotenv.config({ path: '.env', quiet: true });
 dotenv.config({ path: 'server/.env', quiet: true });
 
 const TEST_CODIGO = '900000000000000000000000000099';
+// Corrección de seguridad (checkout sin fallback inseguro): POST /checkout
+// exige un routeId que resuelva a un lookup vigente -- ver la misma nota
+// en catastroxPaymentOrders.test.js.
+const TEST_ROUTE_ID = 'cx-test-history-route';
 
 let dbAvailable = false;
 let getDbPool;
 let query;
 let catastroxPaymentsRouter;
+let __rememberLookupPreviewForTests;
 
 try {
   const { getConfig } = await import('../../config/env.js');
@@ -38,6 +43,8 @@ let normalizeDocumentNumber;
 
 if (dbAvailable) {
   ({ default: catastroxPaymentsRouter } = await import('../catastroxPayments.js'));
+  ({ __rememberLookupPreviewForTests } = await import('../catastrox.js'));
+  __rememberLookupPreviewForTests(TEST_ROUTE_ID, { canonicalPredioId: TEST_CODIGO, codigoPredial: TEST_CODIGO });
   const limiterModule = await import('../../middleware/rateLimit.js');
   rateLimiters = [
     limiterModule.checkoutLimiter,
@@ -1030,9 +1037,8 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             packageId: 'basico',
-            codigoPredial: TEST_CODIGO,
             customerId: customer.customerId,
-            routeId: 'cx-history-1',
+            routeId: TEST_ROUTE_ID,
             purchaseAttemptId: crypto.randomUUID(),
           }),
         });
@@ -1082,17 +1088,17 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
         assert.equal(approvedOrder.invoiceStatus, 'NOT_REQUESTED');
         assert.notEqual(approvedOrder.invoiceStatus, 'ISSUED');
 
-        // 21) Una segunda compra (mismo comprador, predio distinto para no
-        // chocar con la idempotencia de doble clic) debe SUMARSE al
-        // historial de la sesión, nunca reemplazar la primera.
+        // 21) Una segunda compra (mismo comprador y predio, paquete y
+        // purchaseAttemptId distintos para no chocar con la idempotencia
+        // de doble clic) debe SUMARSE al historial de la sesión, nunca
+        // reemplazar la primera.
         const secondCheckout = await fetch(`${app.baseUrl}/checkout`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Cookie: cookie },
           body: JSON.stringify({
             packageId: 'plus',
-            codigoPredial: TEST_CODIGO,
             customerId: customer.customerId,
-            routeId: 'cx-history-2',
+            routeId: TEST_ROUTE_ID,
             purchaseAttemptId: crypto.randomUUID(),
           }),
         });

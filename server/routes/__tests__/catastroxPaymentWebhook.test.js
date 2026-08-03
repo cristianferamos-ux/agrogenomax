@@ -12,6 +12,10 @@ dotenv.config({ path: 'server/.env', quiet: true });
 
 const TEST_CODIGO = '900000000000000000000000000003';
 const EVENTS_SECRET = 'events_secret_de_prueba_treinta_dos_caracteres_o_mas_1234';
+// Corrección de seguridad (checkout sin fallback inseguro): POST /checkout
+// exige un routeId que resuelva a un lookup vigente -- ver la misma nota
+// en catastroxPaymentOrders.test.js.
+const TEST_ROUTE_ID = 'cx-test-webhook-route';
 
 let dbAvailable = false;
 let getConfig;
@@ -19,6 +23,7 @@ let getDbPool;
 let query;
 let catastroxPaymentsRouter;
 let computeWompiEventChecksum;
+let __rememberLookupPreviewForTests;
 
 try {
   ({ getConfig } = await import('../../config/env.js'));
@@ -35,6 +40,8 @@ try {
 if (dbAvailable) {
   ({ default: catastroxPaymentsRouter } = await import('../catastroxPayments.js'));
   ({ computeWompiEventChecksum } = await import('../../services/catastrox/wompiEventVerification.js'));
+  ({ __rememberLookupPreviewForTests } = await import('../catastrox.js'));
+  __rememberLookupPreviewForTests(TEST_ROUTE_ID, { canonicalPredioId: TEST_CODIGO, codigoPredial: TEST_CODIGO });
 }
 
 const originalFetch = globalThis.fetch;
@@ -224,7 +231,7 @@ test('webhook de eventos de Wompi (integración, requiere Postgres real)', { ski
       const checkoutResponse = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', canonicalPredioId: TEST_CODIGO, customerId, purchaseAttemptId: crypto.randomUUID() }),
+        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID, customerId, purchaseAttemptId: crypto.randomUUID() }),
       });
       const { reference, orderToken } = (await checkoutResponse.json()).checkout;
 
@@ -296,9 +303,8 @@ test('webhook de eventos de Wompi (integración, requiere Postgres real)', { ski
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             packageId: 'plus',
-            canonicalPredioId: TEST_CODIGO,
             customerId,
-            routeId: 'cx-fallo-webhook',
+            routeId: TEST_ROUTE_ID,
             purchaseAttemptId: crypto.randomUUID(),
           }),
         });

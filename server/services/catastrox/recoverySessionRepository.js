@@ -108,6 +108,27 @@ export async function findApprovedOrderForSession({ sessionId, canonicalPredioId
 }
 
 /**
+ * ¿Esta sesión tiene ALGUNA orden APPROVED, sin importar el predio?
+ * Usada exclusivamente para distinguir, en el gate de full-result
+ * (server/routes/catastrox.js), "sin ninguna compra aprobada todavía"
+ * (403 ENTITLEMENT_REQUIRED) de "sí compró algo, pero un predio distinto
+ * al de este lookup" (403 PREDIO_MISMATCH) -- nunca decide acceso por sí
+ * sola, solo clasifica el motivo del rechazo.
+ */
+export async function findAnyApprovedOrderForSession(sessionId, client = null) {
+  const result = await run(
+    client,
+    `select po.* from ${ORDERS_TABLE} po
+       join ${SESSION_ORDERS_TABLE} so on so.payment_order_id = po.id
+      where so.recovery_session_id = $1
+        and po.status = 'APPROVED'
+      limit 1`,
+    [sessionId],
+  );
+  return result.rows[0] || null;
+}
+
+/**
  * Órdenes CREATED/PENDING de esta sesión para el mismo predio+paquete,
  * usadas por la idempotencia de doble clic (server/routes/catastroxPayments.js)
  * como respaldo cuando no hay idempotency_key coincidente pero sí una

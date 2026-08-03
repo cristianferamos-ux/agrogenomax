@@ -40,11 +40,15 @@ test('getRecoverySessionTokenFromCookieHeader: valor mal codificado -> null, no 
   });
 });
 
-test('buildRecoverySetCookieHeader: incluye HttpOnly, SameSite=Lax y el Path acotado a pagos', () => {
+test('buildRecoverySetCookieHeader: incluye HttpOnly, SameSite=Lax y el Path cubre /api/catastrox (pagos + lookups/full-result)', () => {
   const header = buildRecoverySetCookieHeader({ token: 'tok-xyz', appEnv: 'development' });
   assert.match(header, /HttpOnly/);
   assert.match(header, /SameSite=Lax/);
-  assert.match(header, /Path=\/api\/catastrox\/payments/);
+  // Ampliado desde /api/catastrox/payments (corrección de seguridad:
+  // full-result vive fuera de ese prefijo, ver server/routes/catastrox.js
+  // resolveFullResultAccess) -- exactamente '/api/catastrox;', no un
+  // subconjunto más angosto.
+  assert.match(header, /Path=\/api\/catastrox;/);
   assert.match(header, new RegExp(`${RECOVERY_COOKIE_NAME}=tok-xyz`));
 });
 
@@ -73,7 +77,7 @@ test('el valor emitido por buildRecoverySetCookieHeader se recupera exacto con g
 test('buildRecoveryClearCookieHeader: Max-Age=0 y mismos atributos Path/SameSite que el de emisión', () => {
   const header = buildRecoveryClearCookieHeader({ appEnv: 'production' });
   assert.match(header, /Max-Age=0/);
-  assert.match(header, /Path=\/api\/catastrox\/payments/);
+  assert.match(header, /Path=\/api\/catastrox;/);
   assert.match(header, /SameSite=Lax/);
   assert.match(header, /Secure/);
 });

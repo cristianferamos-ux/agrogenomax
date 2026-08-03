@@ -858,23 +858,37 @@ async function requestCheckoutSession({ packageId, lookup, customerId, purchaseA
     };
   }
 
+  // routeId (== lookup_id, mismo valor en todo este archivo -- nunca dos
+  // nombres para la misma identidad) es el ÚNICO campo con el que el
+  // backend resuelve el predio de la compra (server/routes/catastroxPayments.js,
+  // resolveCheckoutCanonicalPredioId -- SIN fallback hacia ningún otro dato
+  // del cliente). Defensa en profundidad equivalente a customerId/
+  // purchaseAttemptId arriba: sin routeId, /checkout ya rechaza con 400
+  // LOOKUP_REQUIRED, así que este cliente ni siquiera intenta la llamada.
+  const normalizedRouteId = String(lookup?.routeId || lookup?.predio?.routeId || lookup?.predio?.id || '').trim();
+  if (!normalizedRouteId) {
+    return {
+      ok: false,
+      status: 'error',
+      message: 'Debe realizar la búsqueda del predio nuevamente antes de comprar.',
+    };
+  }
+
   // Cuerpo exhaustivo a propósito (Bloque 6 del pedido): SOLO estos campos
   // viajan al backend. Nunca precio/amountInCents/currency/reference/
   // transactionId/status/email/datos de documento/datos cifrados/token de
   // sesión -- todo eso lo decide o ya lo tiene el backend por su cuenta
   // (monto desde CATASTROX_PAYMENT_PACKAGE_PRICES_COP_CENTS, sesión desde
-  // el cookie HttpOnly que el navegador adjunta solo).
+  // el cookie HttpOnly que el navegador adjunta solo). canonicalPredioId/
+  // codigoPredial YA NO viajan aquí (corrección de seguridad): el backend
+  // los ignoraría de todas formas -- resolveCheckoutCanonicalPredioId()
+  // los resuelve exclusivamente desde routeId, nunca desde el body.
+  // Enviarlos solo arriesgaba un 403 PREDIO_MISMATCH espurio si quedara
+  // algún valor residual de localStorage desalineado con el lookup actual.
   const body = {
     packageId,
     customerId: normalizedCustomerId,
-    // canonicalPredioId (Bloque 3/4/5): la misma identidad sin importar si
-    // el predio se encontró por código, coordenadas o "mi ubicación
-    // actual" -- las tres vías de búsqueda ya la devuelven (ver
-    // server/routes/catastrox.js). codigoPredial se conserva como
-    // compatibilidad/metadato si el backend todavía no la recibió.
-    canonicalPredioId: lookup?.predio?.canonicalPredioId || '',
-    codigoPredial: lookup?.predio?.codigoPredial || lookup?.predio?.codigo || '',
-    routeId: lookup?.routeId || lookup?.predio?.routeId || lookup?.predio?.id || '',
+    routeId: normalizedRouteId,
     purchaseKey: checkoutIntent.purchaseKey,
     // Protección de doble clic (revisión de seguridad): generado UNA sola
     // vez por CatastroXPackagePage al entrar al resumen final, reutilizado

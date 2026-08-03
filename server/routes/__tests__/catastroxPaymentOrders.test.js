@@ -21,11 +21,24 @@ dotenv.config({ path: 'server/.env', quiet: true });
 const TEST_CODIGO_A = '900000000000000000000000000001';
 const TEST_CODIGO_B = '900000000000000000000000000002';
 
+// Corrección de seguridad (checkout sin fallback inseguro): POST /checkout
+// ya no acepta canonicalPredioId/codigoPredial del body -- exige un
+// routeId que resuelva a un lookup vigente. Estos códigos son sintéticos
+// (no existen en la base geográfica real), así que no pueden pasar por un
+// POST /lookup real; en su lugar se registra un preview directamente en
+// el Map en memoria de catastrox.js vía __rememberLookupPreviewForTests
+// (mismo mecanismo que usaría un POST /lookup real, sin SQL). Un solo
+// routeId por código, reutilizado por todas las pruebas de este archivo
+// que compran ese predio -- un preview no se consume al usarse.
+const TEST_ROUTE_ID_A = 'cx-test-route-a';
+const TEST_ROUTE_ID_B = 'cx-test-route-b';
+
 let dbAvailable = false;
 let getConfig;
 let getDbPool;
 let query;
 let catastroxPaymentsRouter;
+let __rememberLookupPreviewForTests;
 
 try {
   ({ getConfig } = await import('../../config/env.js'));
@@ -43,6 +56,9 @@ let rateLimiters = [];
 
 if (dbAvailable) {
   ({ default: catastroxPaymentsRouter } = await import('../catastroxPayments.js'));
+  ({ __rememberLookupPreviewForTests } = await import('../catastrox.js'));
+  __rememberLookupPreviewForTests(TEST_ROUTE_ID_A, { canonicalPredioId: TEST_CODIGO_A, codigoPredial: TEST_CODIGO_A });
+  __rememberLookupPreviewForTests(TEST_ROUTE_ID_B, { canonicalPredioId: TEST_CODIGO_B, codigoPredial: TEST_CODIGO_B });
   const limiterModule = await import('../../middleware/rateLimit.js');
   // Los limitadores son singletons de módulo (mismo store en memoria en
   // todo el proceso de test, ver server/middleware/__tests__/rateLimit.test.js)
@@ -196,17 +212,62 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
     }
   });
 
-  await t.test('checkout rechaza códigos prediales mal formados (defensa en profundidad, sin necesitar customerId)', async () => {
+  // CORRECCIÓN DE SEGURIDAD (sin fallback): antes este caso probaba que un
+  // codigoPredial mal formado en el body era rechazado (INVALID_CADASTRAL_CODE)
+  // -- ya no aplica, porque el body ya NO es fuente de identidad del predio
+  // en ningún caso, formato válido o no. Lo que corresponde probar ahora es
+  // que la AUSENCIA de un lookup vigente (routeId) se rechaza primero,
+  // incluso con un body por lo demás completo -- sin necesitar customerId,
+  // exactamente el mismo espíritu de "defensa en profundidad" del caso
+  // original.
+  await t.test('checkout sin routeId -> 400 LOOKUP_REQUIRED (defensa en profundidad, sin necesitar customerId)', async () => {
     resetRateLimiters();
     const app = await startTestApp();
     try {
       const response = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', codigoPredial: '123', purchaseAttemptId: crypto.randomUUID() }),
+        body: JSON.stringify({ packageId: 'basico', purchaseAttemptId: crypto.randomUUID() }),
       });
       assert.equal(response.status, 400);
-      assert.equal((await response.json()).code, 'INVALID_CADASTRAL_CODE');
+      assert.equal((await response.json()).code, 'LOOKUP_REQUIRED');
+    } finally {
+      await app.close();
+    }
+  });
+
+  await t.test('checkout con routeId que nunca existió (lookup inventado) -> 404 LOOKUP_NOT_FOUND', async () => {
+    resetRateLimiters();
+    const app = await startTestApp();
+    try {
+      const response = await fetch(`${app.baseUrl}/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packageId: 'basico', routeId: 'cx-jamas-existio', purchaseAttemptId: crypto.randomUUID() }),
+      });
+      assert.equal(response.status, 404);
+      assert.equal((await response.json()).code, 'LOOKUP_NOT_FOUND');
+    } finally {
+      await app.close();
+    }
+  });
+
+  await t.test('checkout con canonicalPredioId manipulado en el body (distinto al del lookup) -> 403 PREDIO_MISMATCH', async () => {
+    resetRateLimiters();
+    const app = await startTestApp();
+    try {
+      const response = await fetch(`${app.baseUrl}/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          packageId: 'basico',
+          routeId: TEST_ROUTE_ID_A,
+          canonicalPredioId: 'valor-inventado-por-el-cliente',
+          purchaseAttemptId: crypto.randomUUID(),
+        }),
+      });
+      assert.equal(response.status, 403);
+      assert.equal((await response.json()).code, 'PREDIO_MISMATCH');
     } finally {
       await app.close();
     }
@@ -219,7 +280,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const response = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', codigoPredial: TEST_CODIGO_A, purchaseAttemptId: crypto.randomUUID() }),
+        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, purchaseAttemptId: crypto.randomUUID() }),
       });
       assert.equal(response.status, 400);
       assert.equal((await response.json()).code, 'CUSTOMER_ID_REQUIRED');
@@ -284,7 +345,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const response = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', codigoPredial: TEST_CODIGO_A, customerId, purchaseAttemptId: crypto.randomUUID() }),
+        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, customerId, purchaseAttemptId: crypto.randomUUID() }),
       });
       assert.equal(response.status, 403);
       assert.equal((await response.json()).code, 'EMAIL_NOT_VERIFIED');
@@ -303,9 +364,8 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           packageId: 'basico',
-          codigoPredial: TEST_CODIGO_A,
           customerId,
-          routeId: 'cx-test-1',
+          routeId: TEST_ROUTE_ID_A,
           purchaseAttemptId: crypto.randomUUID(),
         }),
       });
@@ -336,7 +396,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       // sigue en curso).
       const body = JSON.stringify({
         packageId: 'plus',
-        codigoPredial: TEST_CODIGO_A,
+        routeId: TEST_ROUTE_ID_A,
         customerId,
         purchaseAttemptId: crypto.randomUUID(),
       });
@@ -376,7 +436,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             packageId: 'basico',
-            codigoPredial: TEST_CODIGO_A,
+            routeId: TEST_ROUTE_ID_A,
             customerId,
             purchaseAttemptId: crypto.randomUUID(),
           }),
@@ -392,7 +452,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             packageId: 'basico',
-            codigoPredial: TEST_CODIGO_A,
+            routeId: TEST_ROUTE_ID_A,
             customerId,
             purchaseAttemptId: crypto.randomUUID(),
           }),
@@ -420,12 +480,12 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const checkoutA = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', codigoPredial: TEST_CODIGO_A, customerId: customerA, purchaseAttemptId: sharedAttemptId }),
+        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, customerId: customerA, purchaseAttemptId: sharedAttemptId }),
       });
       const checkoutB = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', codigoPredial: TEST_CODIGO_A, customerId: customerB, purchaseAttemptId: sharedAttemptId }),
+        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, customerId: customerB, purchaseAttemptId: sharedAttemptId }),
       });
 
       const payloadA = await checkoutA.json();
@@ -447,7 +507,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
         const checkoutA = await fetch(`${app.baseUrl}/checkout`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packageId: 'basico', codigoPredial: TEST_CODIGO_B, customerId: customerA, routeId: 'cx-a', purchaseAttemptId: crypto.randomUUID() }),
+          body: JSON.stringify({ packageId: 'basico', customerId: customerA, routeId: TEST_ROUTE_ID_B, purchaseAttemptId: crypto.randomUUID() }),
         });
         const cookieA = extractSessionCookiePair(checkoutA);
         const payloadA = await checkoutA.json();
@@ -455,7 +515,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
         const checkoutB = await fetch(`${app.baseUrl}/checkout`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packageId: 'basico', codigoPredial: TEST_CODIGO_B, customerId: customerB, routeId: 'cx-b', purchaseAttemptId: crypto.randomUUID() }),
+          body: JSON.stringify({ packageId: 'basico', customerId: customerB, routeId: TEST_ROUTE_ID_B, purchaseAttemptId: crypto.randomUUID() }),
         });
         const cookieB = extractSessionCookiePair(checkoutB);
         const payloadB = await checkoutB.json();
@@ -504,7 +564,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
         const checkoutC = await fetch(`${app.baseUrl}/checkout`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packageId: 'basico', codigoPredial: TEST_CODIGO_B, customerId: customerC, routeId: 'cx-c', purchaseAttemptId: crypto.randomUUID() }),
+          body: JSON.stringify({ packageId: 'basico', customerId: customerC, routeId: TEST_ROUTE_ID_B, purchaseAttemptId: crypto.randomUUID() }),
         });
         const payloadC = await checkoutC.json();
         assert.equal(payloadC.checkout.status, 'CREATED');
@@ -524,7 +584,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const checkoutResponse = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', codigoPredial: TEST_CODIGO_A, customerId, purchaseAttemptId: crypto.randomUUID() }),
+        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, customerId, purchaseAttemptId: crypto.randomUUID() }),
       });
       const cookie = extractSessionCookiePair(checkoutResponse);
       const { reference } = (await checkoutResponse.json()).checkout;
@@ -592,7 +652,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const checkoutResponse = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', codigoPredial: TEST_CODIGO_A, customerId, purchaseAttemptId: crypto.randomUUID() }),
+        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, customerId, purchaseAttemptId: crypto.randomUUID() }),
       });
       const { orderToken } = (await checkoutResponse.json()).checkout;
 
@@ -618,7 +678,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const checkoutResponse = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', codigoPredial: TEST_CODIGO_A, customerId, purchaseAttemptId: crypto.randomUUID() }),
+        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, customerId, purchaseAttemptId: crypto.randomUUID() }),
       });
       const { reference } = (await checkoutResponse.json()).checkout;
 
@@ -650,7 +710,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const checkoutResponse = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', codigoPredial: TEST_CODIGO_A, customerId, purchaseAttemptId: crypto.randomUUID() }),
+        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, customerId, purchaseAttemptId: crypto.randomUUID() }),
       });
       const cookie = extractSessionCookiePair(checkoutResponse);
       const { reference } = (await checkoutResponse.json()).checkout;

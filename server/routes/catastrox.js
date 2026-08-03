@@ -7,6 +7,9 @@ import {
 } from '../data/catastroxCoberturaMunicipal.js';
 import { catastroxQuery as query } from '../catastroxDb.js';
 import { createCatastroxResolverShadow } from '../services/catastrox/catastroxResolverShadow.js';
+import { getRecoverySessionTokenFromCookieHeader } from '../security/recoveryCookie.js';
+import * as recoverySessions from '../services/catastrox/recoverySessionRepository.js';
+import { packageSatisfies } from '../services/catastrox/paymentOrderTransitions.js';
 
 const router = Router();
 
@@ -115,7 +118,7 @@ function rememberAdvancedLookupPreview(lookupId, codigoPredial, extras = null) {
   });
 }
 
-function resolveLookupPreview(lookupId) {
+export function resolveLookupPreview(lookupId) {
   const record = lookupPreviewStore.get(lookupId);
   if (!record) return null;
   if (Date.now() - record.createdAt > LOOKUP_PREVIEW_TTL_MS) {
@@ -132,6 +135,17 @@ export function __getLookupPreviewForTests(lookupId) {
 export function __clearLookupStateForTests() {
   lookupPreviewStore.clear();
   lookupByCodeRateStore.clear();
+}
+
+// Exclusivamente para pruebas de integración (p. ej.
+// server/routes/__tests__/catastroxPaymentOrders.test.js): registra un
+// preview de lookup sintético sin pasar por una consulta PostGIS real --
+// necesario porque, tras la corrección de seguridad que elimina el
+// fallback inseguro de checkout, POST /checkout exige un routeId que
+// resuelva a un preview real (con canonicalPredioId) y esas pruebas usan
+// códigos prediales sintéticos que no existen en la base geográfica.
+export function __rememberLookupPreviewForTests(lookupId, record = {}) {
+  lookupPreviewStore.set(lookupId, { createdAt: Date.now(), ...record });
 }
 
 export function __getLookupByCodeRateStoreSizeForTests() {
@@ -564,7 +578,19 @@ function buildLookupByCodeFoundResponse(lookupId, candidate) {
 }
 
 export function createLookupByCodeSuccessState(lookupId, normalizedCode, candidate) {
+  // canonicalPredioId se guarda en el propio preview (no solo en la
+  // respuesta JSON) -- es la fuente de verdad que usan resolveFullResultAccess()
+  // y POST /checkout más abajo; nunca se vuelve a confiar en lo que el
+  // cliente reenvíe. Cálculo puro (sin SQL), igual al de
+  // buildLookupByCodeFoundResponse -- mismo resultado determinístico.
+  const canonicalPredioId = resolveCanonicalPredioId({
+    codigoPredial: candidate.codigoPredial,
+    source: 'code',
+    terrenoId: null,
+  });
+
   rememberAdvancedLookupPreview(lookupId, candidate.codigoPredial, {
+    canonicalPredioId,
     queryPoint: candidate.queryPoint,
     searchType: 'code',
     queriedCode: normalizedCode,
@@ -1103,6 +1129,7 @@ router.post('/lookup', async (req, res, next) => {
         terrenoId: row.id,
       });
       rememberLookupPreview(lookupId, row.id, {
+        canonicalPredioId,
         codigoPredial: row.codigo || row.codigo_predial || null,
         queryPoint: buildQueryPoint(lat, lng),
       });
@@ -1186,6 +1213,7 @@ router.post('/lookup', async (req, res, next) => {
         terrenoId: cleanPredio.fid,
       });
       rememberAdvancedLookupPreview(lookupId, cleanPredio.codigo_predial, {
+        canonicalPredioId,
         queryPoint: buildQueryPoint(lat, lng),
       });
 
@@ -1861,12 +1889,83 @@ const CLEAN_FULL_RESULT_QUERY = `select
   };
 }
 
+const FULL_RESULT_REQUIRED_PACKAGE_ID = 'basico';
+
+// CORRECCIÓN DE SEGURIDAD (vulnerabilidad confirmada en producción):
+// GET /lookups/:lookupId/full-result devolvía área/perímetro/geometría
+// exacta y todos los atributos del predio con solo tener un lookup_id
+// vigente (obtenible gratis, sin pago, sin sesión, vía POST /lookup) --
+// nunca verificaba una compra. Esta función es la ÚNICA fuente de verdad
+// para decidir acceso: lookup_id -> canonicalPredioId (guardado en el
+// propio preview al crear el lookup, NUNCA recibido del cliente en esta
+// ruta -- no acepta canonicalPredioId/codigoPredial/routeId por query ni
+// body) -> sesión de recuperación (cookie HttpOnly, RECOVERY_COOKIE_PATH
+// ahora cubre /api/catastrox además de /api/catastrox/payments, ver
+// server/security/recoveryCookie.js) -> orden APPROVED de esa sesión para
+// ESE canonicalPredioId exacto. Firma con inyección de dependencias
+// (mismo patrón que findMunicipioByPoint/findCleanPredioCandidatesByPoint
+// en este archivo) para permitir pruebas unitarias sin base de datos real.
+export async function resolveFullResultAccess({
+  lookupId,
+  cookieHeader,
+  getPreview = resolveLookupPreview,
+  getSessionToken = getRecoverySessionTokenFromCookieHeader,
+  hashSessionToken = recoverySessions.hashSessionToken,
+  findActiveSessionByTokenHash = recoverySessions.findActiveSessionByTokenHash,
+  findApprovedOrderForSession = recoverySessions.findApprovedOrderForSession,
+  findAnyApprovedOrderForSession = recoverySessions.findAnyApprovedOrderForSession,
+}) {
+  const preview = getPreview(lookupId);
+  if (!preview || !preview.canonicalPredioId) {
+    return { ok: false, status: 404, code: 'LOOKUP_NOT_FOUND' };
+  }
+
+  const sessionToken = getSessionToken(cookieHeader);
+  if (!sessionToken) {
+    return { ok: false, status: 401, code: 'SESSION_REQUIRED' };
+  }
+
+  const tokenHash = hashSessionToken(sessionToken);
+  const session = await findActiveSessionByTokenHash(tokenHash);
+  if (!session) {
+    return { ok: false, status: 401, code: 'SESSION_REQUIRED' };
+  }
+
+  const order = await findApprovedOrderForSession({
+    sessionId: session.id,
+    canonicalPredioId: preview.canonicalPredioId,
+  });
+
+  if (!order || !packageSatisfies({ ownedPackageId: order.package_id, requiredPackageId: FULL_RESULT_REQUIRED_PACKAGE_ID })) {
+    // Distingue "nunca compró nada" de "compró, pero otro predio" -- ambos
+    // son 403, pero con código distinto (Requisito 4). Nunca decide acceso
+    // por sí sola: solo clasifica el motivo cuando ya se sabe que no hay
+    // una orden aprobada válida para ESTE predio.
+    const anyApprovedOrder = await findAnyApprovedOrderForSession(session.id);
+    if (anyApprovedOrder) {
+      return { ok: false, status: 403, code: 'PREDIO_MISMATCH' };
+    }
+    return { ok: false, status: 403, code: 'ENTITLEMENT_REQUIRED' };
+  }
+
+  return { ok: true, canonicalPredioId: preview.canonicalPredioId, order };
+}
+
 router.get('/lookups/:lookupId/full-result', async (req, res, next) => {
   try {
     const lookupId = String(req.params?.lookupId || '').trim();
+    const access = await resolveFullResultAccess({ lookupId, cookieHeader: req.headers.cookie });
+
+    if (!access.ok) {
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(access.status).json({ found: false, status: access.code });
+      return;
+    }
+
     const result = await buildLookupFullResultPayload(lookupId);
 
     if (result.errorStatus) {
+      res.setHeader('Cache-Control', 'no-store');
       res.status(result.errorStatus).json(result.payload);
       return;
     }
@@ -1874,6 +1973,7 @@ router.get('/lookups/:lookupId/full-result', async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     res.json({
       ...result.payload,
+      status: 'FULL_RESULT_READY',
       lookupId,
     });
   } catch (error) {
@@ -1982,6 +2082,11 @@ router.post('/advanced/lookup', async (req, res, next) => {
 
     const lookupId = buildLookupId();
     rememberAdvancedLookupPreview(lookupId, row.codigo_predial, {
+      canonicalPredioId: resolveCanonicalPredioId({
+        codigoPredial: row.codigo_predial || null,
+        source: 'clean',
+        terrenoId: row.fid ?? null,
+      }),
       queryPoint: buildQueryPoint(lat, lng),
     });
 
