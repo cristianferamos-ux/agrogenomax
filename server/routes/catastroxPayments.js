@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { Router } from 'express';
-import { resolveCanonicalPredioId, validateCadastralCodeInput } from './catastrox.js';
+import { resolveCanonicalPredioId, resolveLookupPreview, validateCadastralCodeInput } from './catastrox.js';
 import { resolveCorsAllowedOrigins } from '../config/env.js';
 import { isOriginAllowed } from '../security/corsPolicy.js';
 import {
@@ -247,6 +247,52 @@ function resolveCanonicalPredioIdFromRequestBody(body) {
   // nunca dos reglas de normalización distintas para la misma identidad.
   const normalizedCode = validateCadastralCodeInput(body?.codigoPredial);
   return resolveCanonicalPredioId({ codigoPredial: normalizedCode, source: 'code', terrenoId: null });
+}
+
+// CORRECCIÓN DE SEGURIDAD -- SIN FALLBACK: fuente de verdad EXCLUSIVA
+// server-side para el predio que se compra en POST /checkout. Reemplaza
+// por completo la versión anterior de esta función, que caía al body
+// (canonicalPredioId/codigoPredial del cliente) cuando no había lookup
+// vigente -- eso seguía permitiendo crear una orden para un predio no
+// asociado a una consulta real. Ahora:
+//
+//   1) routeId es OBLIGATORIO -- es el campo real que usa el frontend en
+//      todo este código (respuesta de /lookup y /lookup-by-code,
+//      localStorage, entitlements/check: mismo valor que lookup_id, nunca
+//      dos nombres para la misma identidad aquí). Sin routeId -> 400
+//      LOOKUP_REQUIRED, ni siquiera se intenta resolver nada más.
+//   2) routeId debe resolver a un lookup vigente (server/routes/catastrox.js,
+//      resolveLookupPreview -- TTL 30 min) con canonicalPredioId ya
+//      calculado al crear ese lookup. Sin resolución -> 404 LOOKUP_NOT_FOUND.
+//   3) canonicalPredioId SIEMPRE sale de ahí -- nunca de
+//      body.canonicalPredioId ni de body.codigoPredial, con o sin lookup.
+//      Si el body además trae un canonicalPredioId que NO coincide con el
+//      resuelto, se rechaza explícitamente (403 PREDIO_MISMATCH) en vez de
+//      ignorarlo en silencio -- evita compras confusas por datos
+//      residuales de localStorage/frontend desactualizado.
+//
+// Firma con inyección de dependencias (mismo patrón que
+// resolveFullResultAccess en catastrox.js) para pruebas unitarias sin base
+// de datos ni HTTP real.
+export function resolveCheckoutCanonicalPredioId({ routeId, body, getPreview = resolveLookupPreview }) {
+  const normalizedRouteId = String(routeId || '').trim();
+  if (!normalizedRouteId) {
+    return { ok: false, status: 400, code: 'LOOKUP_REQUIRED' };
+  }
+
+  const preview = getPreview(normalizedRouteId);
+  if (!preview || !preview.canonicalPredioId) {
+    return { ok: false, status: 404, code: 'LOOKUP_NOT_FOUND' };
+  }
+
+  const canonicalPredioId = preview.canonicalPredioId;
+
+  const clientSuppliedCanonicalPredioId = String(body?.canonicalPredioId || '').trim();
+  if (clientSuppliedCanonicalPredioId && clientSuppliedCanonicalPredioId !== canonicalPredioId) {
+    return { ok: false, status: 403, code: 'PREDIO_MISMATCH' };
+  }
+
+  return { ok: true, canonicalPredioId, codigoPredial: preview.codigoPredial || null };
 }
 
 // Idempotencia de doble clic (Bloque 6, endurecida en la revisión de
@@ -634,20 +680,24 @@ router.post('/checkout', checkoutLimiter, async (req, res) => {
     });
   }
 
-  // Validación de formato (predio) antes de exigir un comprador registrado
-  // -- una solicitud con datos de identidad de predio mal formados debe
-  // fallar por ese motivo específico, sin importar si además le falta
-  // customerId.
-  let canonicalPredioId;
-  try {
-    canonicalPredioId = resolveCanonicalPredioIdFromRequestBody(req.body);
-  } catch (error) {
-    return res.status(error.status || 400).json({
+  // CORRECCIÓN DE SEGURIDAD -- SIN FALLBACK: canonicalPredioId se resuelve
+  // EXCLUSIVAMENTE desde el lookup vigente (routeId). Ver
+  // resolveCheckoutCanonicalPredioId() arriba para la cadena completa de
+  // validación y el porqué de cada código de error.
+  const predioResolution = resolveCheckoutCanonicalPredioId({ routeId, body: req.body });
+  if (!predioResolution.ok) {
+    const messageByCode = {
+      LOOKUP_REQUIRED: 'Debe iniciar la compra desde una consulta predial vigente. Vuelva a buscar el predio.',
+      LOOKUP_NOT_FOUND: 'La consulta predial no existe o expiró. Vuelva a realizar la búsqueda antes de comprar.',
+      PREDIO_MISMATCH: 'El predio indicado no coincide con la consulta predial vigente.',
+    };
+    return res.status(predioResolution.status).json({
       ok: false,
-      code: error.publicCode || 'INVALID_CADASTRAL_CODE',
-      message: error.publicMessage || error.message,
+      code: predioResolution.code,
+      message: messageByCode[predioResolution.code] || 'No fue posible validar el predio de la compra.',
     });
   }
+  const { canonicalPredioId } = predioResolution;
 
   if (!customerId) {
     return res.status(400).json({
@@ -658,11 +708,15 @@ router.post('/checkout', checkoutLimiter, async (req, res) => {
   }
 
   // codigoPredial se conserva solo como metadato de referencia/legado (no
-  // como llave de entitlement) -- si no vino uno explícito válido, se
-  // guarda null en vez de inventar un valor.
+  // como llave de entitlement) -- SIEMPRE derivado del lookup resuelto
+  // arriba, nunca del body (mismo motivo que canonicalPredioId: sin
+  // fallback hacia datos del cliente). Si el lookup no traía uno válido,
+  // se guarda null en vez de inventar un valor.
   let codigoPredialNormalized = null;
   try {
-    codigoPredialNormalized = req.body?.codigoPredial ? validateCadastralCodeInput(req.body.codigoPredial) : null;
+    codigoPredialNormalized = predioResolution.codigoPredial
+      ? validateCadastralCodeInput(predioResolution.codigoPredial)
+      : null;
   } catch {
     codigoPredialNormalized = null;
   }

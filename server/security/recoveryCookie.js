@@ -27,10 +27,21 @@ export const RECOVERY_COOKIE_NAME = 'catastrox_recovery_session';
 // días/semanas después" siga funcionando, sin ser indefinido.
 export const RECOVERY_COOKIE_MAX_AGE_SECONDS = 180 * 24 * 60 * 60;
 
-// Ámbito del cookie: solo las rutas de pago de CatastroX lo reciben --
-// nunca viaja a ningún otro endpoint de la API (aislamiento adicional,
-// independiente de que CORS credentials esté activado globalmente).
-const RECOVERY_COOKIE_PATH = '/api/catastrox/payments';
+// Ámbito del cookie: todo /api/catastrox (pagos + lookups) -- nunca viaja
+// a ningún otro endpoint de la API (aislamiento adicional, independiente
+// de que CORS credentials esté activado globalmente).
+//
+// CORRECCIÓN DE SEGURIDAD (full-result sin pago): antes era
+// '/api/catastrox/payments' exclusivamente. GET /api/catastrox/lookups/
+// :lookupId/full-result vive fuera de ese prefijo -- con el Path anterior,
+// el navegador NUNCA habría enviado esta cookie a esa ruta, así que el
+// nuevo gate de entitlement (resolveFullResultAccess en catastrox.js)
+// habría bloqueado también a compradores legítimos. Se amplía al ancestro
+// común de ambos ('/api/catastrox') para que la sesión viaje a los dos.
+// Transición: cookies YA emitidas en navegadores con el Path anterior
+// (más angosto) seguirán sin llegar a /lookups/... hasta que se reemitan
+// (próximo checkout) o expiren -- ver informe de riesgos pendientes.
+const RECOVERY_COOKIE_PATH = '/api/catastrox';
 
 function shouldUseSecureCookie(appEnv) {
   // Secure exige HTTPS real -- en development local (HTTP plano) el
