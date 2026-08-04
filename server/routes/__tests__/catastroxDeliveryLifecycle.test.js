@@ -61,24 +61,55 @@ if (dbAvailable) {
 
 const originalFetch = globalThis.fetch;
 
-// Solo intercepta llamadas HACIA proveedores externos (Wompi sandbox,
-// Resend) -- cualquier otra URL (en particular las llamadas que este mismo
-// archivo hace hacia app.baseUrl, el servidor Express local de prueba) debe
-// seguir usando fetch real. Sin este fallback, instalar el mock rompería la
-// propia llamada HTTP de la prueba al endpoint bajo prueba (defecto real
-// que se reprodujo y corrigió mientras se escribían estas pruebas).
+// CATX-PDF-PARITY-002: toda orden APPROVED en este archivo dispara
+// generación real de PDF (deliveryJobService -> catastroxPdfGenerator),
+// que ahora dibuja un mosaico satelital real (fetch de teselas Esri,
+// server/services/catastrox/pdf/catastroxPdfMap.js). Estas pruebas deben
+// seguir siendo deterministas y no depender de red/terceros -- se
+// intercepta arcgisonline.com de forma PERMANENTE (activa durante todo
+// este archivo, no solo dentro de withFetchMock/restoreFetch) devolviendo
+// siempre la misma imagen PNG mínima válida, salvo cuando una prueba
+// específica active `withMapFailureMock` para simular MAP_RENDER_FAILED.
+const MOCK_TILE_BUFFER = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+  'base64',
+);
+
+let activeExternalHandler = null; // Wompi/Resend -- opt-in por prueba (withFetchMock/restoreFetch)
+let activeMapFailureHandler = null; // Esri -- opt-in por prueba (withMapFailureMock/restoreMapMock)
+
+globalThis.fetch = async (url, options) => {
+  const urlString = String(url);
+  if (urlString.includes('arcgisonline.com')) {
+    if (activeMapFailureHandler) return activeMapFailureHandler(urlString, options);
+    return new Response(MOCK_TILE_BUFFER, { status: 200, headers: { 'Content-Type': 'image/png' } });
+  }
+  // Solo intercepta llamadas HACIA proveedores externos (Wompi sandbox,
+  // Resend) -- cualquier otra URL (en particular las llamadas que este mismo
+  // archivo hace hacia app.baseUrl, el servidor Express local de prueba) debe
+  // seguir usando fetch real. Sin este fallback, instalar el mock rompería la
+  // propia llamada HTTP de la prueba al endpoint bajo prueba (defecto real
+  // que se reprodujo y corrigió mientras se escribían estas pruebas).
+  if ((urlString.includes('sandbox.wompi.co') || urlString.includes('api.resend.com')) && activeExternalHandler) {
+    return activeExternalHandler(urlString, options);
+  }
+  return originalFetch(url, options);
+};
+
 function withFetchMock(handler) {
-  globalThis.fetch = async (url, options) => {
-    const urlString = String(url);
-    if (urlString.includes('sandbox.wompi.co') || urlString.includes('api.resend.com')) {
-      return handler(urlString, options);
-    }
-    return originalFetch(url, options);
-  };
+  activeExternalHandler = handler;
 }
 
 function restoreFetch() {
-  globalThis.fetch = originalFetch;
+  activeExternalHandler = null;
+}
+
+function withMapFailureMock(handler) {
+  activeMapFailureHandler = handler;
+}
+
+function restoreMapMock() {
+  activeMapFailureHandler = null;
 }
 
 function jsonResponse(status, body) {
@@ -484,6 +515,43 @@ test('CATX-DELIVERY-001: ciclo de vida del delivery job (integración, requiere 
     } finally {
       await cleanupOrder(created?.order, created?.customerId);
       await cleanupOrder(otherCreated?.order, otherCreated?.customerId);
+      await app.close();
+    }
+  });
+
+  // CATX-PDF-PARITY-002 (ajuste obligatorio #6): si el proveedor de teselas
+  // falla, el job debe abortar con MAP_RENDER_FAILED -- nunca almacenar ni
+  // enviar un PDF incompleto (nunca se llega a insertar en
+  // catastrox_deliverables, porque generateCatastroxPdfBuffer lanza ANTES
+  // de que generateAndStoreDeliverable pueda hacer el INSERT).
+  await t.test('8) el proveedor de teselas satelitales cae -> FAILED + MAP_RENDER_FAILED, sin deliverable almacenado, reintentable', async () => {
+    const app = await startTestApp();
+    let created;
+    try {
+      withMapFailureMock(() => new Response('servicio no disponible', { status: 503 }));
+      try {
+        created = await createApprovedOrder(app, { transactionId: 'txn-lifecycle-8' });
+        const failedJob = await waitForDeliveryJobTerminal(created.order.id);
+        assert.equal(failedJob.status, 'FAILED');
+        assert.equal(failedJob.last_error_code, 'MAP_RENDER_FAILED');
+
+        const deliverables = await deliveryJobService.listDeliverablesForJob(failedJob.id);
+        assert.equal(deliverables.length, 0, 'un fallo de mapa nunca debe dejar un deliverable almacenado');
+      } finally {
+        restoreMapMock();
+      }
+
+      // Reintentable: con el proveedor "recuperado" (mock por defecto,
+      // siempre 200), un reintento posterior debe poder generar y
+      // almacenar el PDF con normalidad.
+      const jobRow = await deliveryJobService.findLatestDeliveryJobForOrder(created.order.id);
+      const retried = await deliveryJobService.retryDeliveryJob(jobRow.id);
+      assert.notEqual(retried.last_error_code, 'MAP_RENDER_FAILED');
+      const deliverablesAfterRetry = await deliveryJobService.listDeliverablesForJob(jobRow.id);
+      assert.equal(deliverablesAfterRetry.length, 1, 'el reintento exitoso debe generar y almacenar exactamente un deliverable');
+    } finally {
+      restoreMapMock();
+      await cleanupOrder(created?.order, created?.customerId);
       await app.close();
     }
   });

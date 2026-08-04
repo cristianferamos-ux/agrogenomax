@@ -54,8 +54,22 @@ function sha256Hex(buffer) {
   return crypto.createHash('sha256').update(buffer).digest('hex');
 }
 
+// CATX-PDF-PARITY-002: la página 1 ahora dibuja un mosaico satelital real
+// (fetch de teselas Esri, ver ../catastroxPdfMap.js) -- estas pruebas NUNCA
+// deben depender de red real ni de Postgres. `fetchTile` es inyectable en
+// generateCatastroxPdfBuffer exactamente para esto: se sustituye por un
+// mock determinista que siempre devuelve la misma imagen PNG mínima válida
+// (1x1 rojo), sin llamar a `fetch` en absoluto.
+const MINIMAL_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+const MOCK_TILE_BUFFER = Buffer.from(MINIMAL_PNG_BASE64, 'base64');
+
+async function mockFetchTile() {
+  return MOCK_TILE_BUFFER;
+}
+
 test('generateCatastroxPdfBuffer produce un PDF real (magic bytes %PDF-)', async () => {
-  const buffer = await generateCatastroxPdfBuffer({ predioData: buildSamplePredioData(), packageId: 'basico' });
+  const buffer = await generateCatastroxPdfBuffer({ predioData: buildSamplePredioData(), packageId: 'basico', fetchTile: mockFetchTile });
   assert.ok(Buffer.isBuffer(buffer));
   assert.ok(buffer.length > 0);
   assert.equal(buffer.subarray(0, 5).toString('latin1'), '%PDF-');
@@ -71,14 +85,14 @@ test('generateCatastroxPdfBuffer produce un PDF real (magic bytes %PDF-)', async
 // puro/estable, y que dos generaciones del mismo predio producen documentos
 // de tamaño comparable (ninguna diverge en orden de magnitud).
 test('el checksum sha256 de un Buffer ya generado es estable (recalcularlo no cambia el resultado)', async () => {
-  const buffer = await generateCatastroxPdfBuffer({ predioData: buildSamplePredioData(), packageId: 'basico' });
+  const buffer = await generateCatastroxPdfBuffer({ predioData: buildSamplePredioData(), packageId: 'basico', fetchTile: mockFetchTile });
   assert.equal(sha256Hex(buffer), sha256Hex(buffer));
 });
 
 test('dos generaciones independientes del mismo predioData producen PDFs válidos de tamaño comparable', async () => {
   const predioData = buildSamplePredioData();
-  const bufferA = await generateCatastroxPdfBuffer({ predioData, packageId: 'basico' });
-  const bufferB = await generateCatastroxPdfBuffer({ predioData, packageId: 'basico' });
+  const bufferA = await generateCatastroxPdfBuffer({ predioData, packageId: 'basico', fetchTile: mockFetchTile });
+  const bufferB = await generateCatastroxPdfBuffer({ predioData, packageId: 'basico', fetchTile: mockFetchTile });
   assert.equal(bufferA.subarray(0, 5).toString('latin1'), '%PDF-');
   assert.equal(bufferB.subarray(0, 5).toString('latin1'), '%PDF-');
   const ratio = bufferA.length / bufferB.length;
@@ -86,18 +100,19 @@ test('dos generaciones independientes del mismo predioData producen PDFs válido
 });
 
 test('generateCatastroxPdfBuffer produce checksums distintos para predios distintos', async () => {
-  const bufferA = await generateCatastroxPdfBuffer({ predioData: buildSamplePredioData(), packageId: 'basico' });
+  const bufferA = await generateCatastroxPdfBuffer({ predioData: buildSamplePredioData(), packageId: 'basico', fetchTile: mockFetchTile });
   const bufferB = await generateCatastroxPdfBuffer({
     predioData: buildSamplePredioData({ codigoPredial: '999900002000000030015000000000', areaHa: 12.5 }),
     packageId: 'basico',
+    fetchTile: mockFetchTile,
   });
   assert.notEqual(sha256Hex(bufferA), sha256Hex(bufferB));
 });
 
 test('generateCatastroxPdfBuffer genera más páginas para paquetes de mayor rango (plus/profesional vs básico)', async () => {
   const predioData = buildSamplePredioData();
-  const basico = await generateCatastroxPdfBuffer({ predioData, packageId: 'basico' });
-  const profesional = await generateCatastroxPdfBuffer({ predioData, packageId: 'profesional' });
+  const basico = await generateCatastroxPdfBuffer({ predioData, packageId: 'basico', fetchTile: mockFetchTile });
+  const profesional = await generateCatastroxPdfBuffer({ predioData, packageId: 'profesional', fetchTile: mockFetchTile });
   // No se afirma paridad de contenido con el generador de navegador (riesgo
   // documentado) -- solo que el contenido varía honestamente según el
   // paquete comprado, nunca el mismo documento para paquetes distintos.

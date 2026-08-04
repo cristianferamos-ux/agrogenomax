@@ -467,6 +467,36 @@ export function projectRingToViewport(ring, mapState, viewportWidth, viewportHei
   return ring.map((point) => projectPointToViewport(point, mapState, viewportWidth, viewportHeight));
 }
 
+// CATX-PDF-PARITY-002: escala gráfica dinámica del mapa satelital -- copiado
+// literal de src/modules/catastrox/utils/catastroxDeliverables.js
+// (computeMetersPerPixel/roundToNiceScaleMeters/computeDynamicScaleMeters,
+// ~líneas 1740-1765), mismo constante de Web Mercator (circunferencia
+// ecuatorial / 256px a zoom 0). Necesario para que "ESCALA GRÁFICA" en la
+// página 1 del PDF server-side sea coherente con el mapState real usado
+// para posicionar las teselas, no un valor inventado.
+const WEB_MERCATOR_METERS_PER_WORLD_UNIT_AT_ZOOM0 = 156543.03392;
+
+export function computeMetersPerPixel(mapState, extraScale = 1) {
+  const latRad = ((mapState?.centerLat ?? 0) * Math.PI) / 180;
+  const metersPerPixelBase = (WEB_MERCATOR_METERS_PER_WORLD_UNIT_AT_ZOOM0 * Math.cos(latRad)) / (mapState?.scale || 1);
+  return metersPerPixelBase / (extraScale || 1);
+}
+
+// Redondea a la serie 1-2-5 x 10^n mas cercana (convención estándar de escalas gráficas).
+export function roundToNiceScaleMeters(value) {
+  if (!Number.isFinite(value) || value <= 0) return 10;
+  const exponent = Math.floor(Math.log10(value));
+  const base = value / 10 ** exponent;
+  const niceBase = base < 1.5 ? 1 : base < 3.5 ? 2 : base < 7.5 ? 5 : 10;
+  return niceBase * 10 ** exponent;
+}
+
+export function computeDynamicScaleMeters(mapState, mapWidthPx, extraScale = 1) {
+  const metersPerPixel = computeMetersPerPixel(mapState, extraScale);
+  const desiredMeters = mapWidthPx * 0.3 * metersPerPixel;
+  return roundToNiceScaleMeters(desiredMeters);
+}
+
 // --- origen: src/modules/catastrox/utils/VisibleReferencePointEngine.js ---
 function determineTargetVisiblePoints(vertexCount, averageTurn) {
   if (vertexCount <= 18 && averageTurn < 18) return 6;

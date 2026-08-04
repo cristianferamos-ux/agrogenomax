@@ -147,7 +147,7 @@ function resolveTipoConstruccionResumen(predio) {
   return semanticText(direct, 'No registra');
 }
 
-function toSentenceCase(text) {
+export function toSentenceCase(text) {
   const clean = cleanText(text);
   if (!clean) return '';
   const lower = clean.toLocaleLowerCase('es-CO');
@@ -184,10 +184,142 @@ function humanizeDashSeparatedList(text) {
   return `${head.join(', ')} y ${lowered[lowered.length - 1]}`;
 }
 
-function buildUsosConstructivosList(predio) {
+export function buildUsosConstructivosList(predio) {
   const usos = collectUsosConstructivos(predio);
   if (!usos.length) return ['Información no disponible'];
   return usos.map((value) => toSentenceCase(humanizeDashSeparatedList(value)));
+}
+
+// CATX-PDF-PARITY-002 (tercera vuelta): porte literal de
+// simplifyUsoLabelForSummary/buildUsosConstructivosResumen
+// (catastroxDeliverables.js:297-324) -- la tarjeta "Usos constructivos" de
+// la página 1 usa este resumen deduplicado, NUNCA un join() directo de
+// uso1/uso2/uso3 (eso mostraba el mismo uso dos veces cuando uso2Nombre y
+// uso3Nombre llegaban duplicados de la fuente).
+function simplifyUsoLabelForSummary(value) {
+  const clean = cleanText(value);
+  if (!clean) return '';
+  const humanized = humanizeDashSeparatedList(clean);
+  const stripped = humanized.replace(/\s+(HASTA|DESDE|DE|CON|A)\s+\d+.*$/i, '').trim();
+  return toSentenceCase(stripped || humanized);
+}
+
+export function buildUsosConstructivosResumen(predio) {
+  const usos = collectUsosConstructivos(predio);
+  if (!usos.length) return 'Información no disponible';
+
+  const seen = new Set();
+  const simplified = [];
+  usos.forEach((value) => {
+    const label = simplifyUsoLabelForSummary(value);
+    const key = label.toUpperCase();
+    if (!label || seen.has(key)) return;
+    seen.add(key);
+    simplified.push(label);
+  });
+
+  if (!simplified.length) return 'Información no disponible';
+  if (simplified.length === 1) return simplified[0];
+  const last = simplified[simplified.length - 1];
+  const head = simplified.slice(0, -1);
+  return `${head.join(', ')} y ${last.charAt(0).toLowerCase()}${last.slice(1)}`;
+}
+
+// Porte literal de toProperNameTitleCase (catastroxDeliverables.js:332-354).
+const TITLE_CASE_LOWERCASE_CONNECTORS = new Set(['de', 'del', 'la', 'las', 'los', 'y', 'el', 'en']);
+
+export function toProperNameTitleCase(text) {
+  const clean = cleanText(text);
+  if (!clean) return '';
+  let sawWord = false;
+  const titled = clean
+    .toLocaleLowerCase('es-CO')
+    .split(/(\s+)/)
+    .map((chunk) => {
+      if (!chunk.trim()) return chunk;
+      const isFirst = !sawWord;
+      sawWord = true;
+      if (!isFirst && TITLE_CASE_LOWERCASE_CONNECTORS.has(chunk)) return chunk;
+      return chunk.charAt(0).toUpperCase() + chunk.slice(1);
+    })
+    .join('');
+  return titled.replace(/\bN\.?\s+(\d+)/gi, 'N.° $1');
+}
+
+// Porte literal de formatFuenteDisplay/formatFechaProcesoDisplay
+// (catastroxDeliverables.js:356-382) -- el panel FUENTE de la ficha
+// técnica debe mostrar el nombre legible de la fuente y la fecha en
+// español, nunca los códigos crudos (p.ej. "IGAC_PUBLICO_ABRIL_2026" /
+// "2026-06-30").
+const KNOWN_FUENTE_DISPLAY = {
+  IGAC_PUBLICO_ABRIL_2026: 'IGAC - Base Catastral Pública, abril de 2026',
+};
+
+export function formatFuenteDisplay(value) {
+  const clean = cleanText(value);
+  if (!clean) return 'No registrado';
+  const known = KNOWN_FUENTE_DISPLAY[clean.toUpperCase()];
+  if (known) return known;
+  return clean.split('_').map((part) => toSentenceCase(part)).join(' ');
+}
+
+const SPANISH_MONTH_NAMES = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+];
+
+export function formatFechaProcesoDisplay(value) {
+  const clean = cleanText(value);
+  if (!clean) return 'No registrado';
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(clean);
+  if (!match) return clean;
+  const [, year, month, day] = match;
+  const monthName = SPANISH_MONTH_NAMES[Number(month) - 1];
+  if (!monthName) return clean;
+  return `${Number(day)} de ${monthName} de ${year}`;
+}
+
+// Porte literal de LEGACY_EMPTY_FIELD_LABELS/resolveFieldOrNotRegistered/
+// resolveUrbanFieldOrNotApplicable/isUrbanZona (catastroxDeliverables.js:384-403)
+// -- gobierna qué campos se muestran, con qué fallback, y diferencia
+// predios urbanos de rurales (Barrio/Manzana no aplican en rural; en
+// urbano, si faltan, es un dato que debería existir pero no está en la
+// fuente -- fallback distinto en cada caso).
+const LEGACY_EMPTY_FIELD_LABELS = new Set([
+  '', 'NO DISPONIBLE', 'NO APLICA / NO REGISTRA', 'NO REGISTRA', 'NO REGISTRADO', 'NO APLICA',
+]);
+
+export function resolveFieldOrNotRegistered(value) {
+  const clean = cleanText(value);
+  return LEGACY_EMPTY_FIELD_LABELS.has(clean.toUpperCase()) ? 'No registrado' : clean;
+}
+
+export function resolveUrbanFieldOrNotApplicable(value, zona) {
+  const clean = cleanText(value);
+  if (clean && !LEGACY_EMPTY_FIELD_LABELS.has(clean.toUpperCase())) return clean;
+  return /rural/i.test(cleanText(zona)) ? 'No aplica' : 'No registrado';
+}
+
+export function isUrbanZona(predio) {
+  return /urbano/i.test(cleanText(predio?.tipoZona || predio?.zona));
+}
+
+// Porte literal de KNOWN_TOPONYM_TITLE_CASE/toDisplayToponymTitleCase
+// (catastroxDeliverables.js:239-257) -- correcciones tipográficas de
+// topónimos conocidos de la cobertura Caquetá (la fuente exporta nombres
+// en mayúsculas sin tilde); ámbito presentación únicamente.
+const KNOWN_TOPONYM_TITLE_CASE = {
+  CAQUETA: 'Caquetá',
+  'CARTAGENA DEL CHAIRA': 'Cartagena del Chairá',
+  'LA MONTANITA': 'La Montañita',
+  'PUERTO RICO': 'Puerto Rico',
+  FLORENCIA: 'Florencia',
+};
+
+export function toDisplayToponymTitleCase(text) {
+  const clean = cleanText(text);
+  if (!clean) return '';
+  return KNOWN_TOPONYM_TITLE_CASE[clean.toUpperCase()] || toSentenceCase(clean);
 }
 
 function formatTiposConstruccionDisplayLines(value) {
@@ -326,6 +458,14 @@ export function normalizePredioForDeliverables(source) {
     fechaProceso: cleanText(predio.fechaProceso || predio.fecha_proceso, 'No disponible'),
     deliverablePackageId: cleanText(predio.deliverablePackageId || source?.deliverablePackageId),
     queryPoint: predio.queryPoint || source?.queryPoint || null,
+    // Estructura OPCIONAL de anotaciones CatastroX (no forma parte de los
+    // datos catastrales de catastrox_clean/migración 007) -- linderos por
+    // fuente hídrica u otros tipos futuros de lindero, ver
+    // catastroxPdfBoundaryAnnotations.js. Ausente/vacío por defecto: ningún
+    // predio se agrupa automáticamente. Ver esa asignación manual/futura
+    // interfaz -- este campo solo se pasa tal cual si el llamador ya lo
+    // incluyó explícitamente en predioData.
+    boundaryAnnotations: Array.isArray(predio.boundaryAnnotations) ? predio.boundaryAnnotations : [],
     geometry,
     geometryParts,
     geometryBounds,
