@@ -127,6 +127,15 @@ async function findReusableDeliverable(jobId) {
  * Genera el PDF, lo persiste (metadatos + bytes) y devuelve el deliverable
  * + bytes. Nunca confía en datos del cliente -- canonicalPredioId/packageId
  * vienen exclusivamente de `order` (fila real de catastrox_payment_orders).
+ *
+ * ESTADO: `predioData` (devuelto por resolvePredioDataForDelivery) nunca
+ * incluye `boundaryAnnotations` -- esa capacidad es preparatoria y
+ * actualmente no está conectada al flujo real de compras ni entregas. Solo
+ * se activa cuando predioData.boundaryAnnotations es suministrado
+ * explícitamente (ver server/services/catastrox/pdf/catastroxPdfBoundaryAnnotations.js).
+ * Su operación real requiere el sprint CATX-BOUNDARIES-001, incluyendo
+ * almacenamiento persistente, servicio administrativo, propagación al
+ * delivery job y auditoría de actor.
  */
 async function generateAndStoreDeliverable({ job, order }) {
   const predioData = await resolvePredioDataForDelivery(order.canonical_predio_id);
