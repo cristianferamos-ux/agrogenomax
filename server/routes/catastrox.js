@@ -1889,6 +1889,123 @@ const CLEAN_FULL_RESULT_QUERY = `select
   };
 }
 
+function buildDeliveryPredioSql(fromRelation) {
+  return `select
+         p.codigo_predial,
+         p.codigo_anterior,
+         p.departamento_nombre,
+         p.municipio_nombre,
+         p.zona,
+         p.nombre_predio,
+         p.direccion_real,
+         p.vereda_nombre,
+         p.barrio_nombre,
+         p.sector_codigo,
+         p.manzana_codigo,
+         p.area_terreno_m2,
+         p.area_terreno_ha,
+         ST_Area(p.geom) as area_m2_exact,
+         ST_Perimeter(p.geom) as perimetro_m,
+         p.destino_economico_nombre,
+         p.uso_1_nombre,
+         p.uso_2_nombre,
+         p.uso_3_nombre,
+         p.numero_construcciones,
+         p.area_construida_m2,
+         p.tipos_construccion_resumen,
+         p.fuente,
+         p.fecha_proceso,
+         ST_AsGeoJSON(
+           ST_Transform(
+             ST_Multi(
+               ST_CollectionExtract(
+                 case
+                   when ST_IsValid(p.geom) then p.geom
+                   else ST_MakeValid(p.geom)
+                 end,
+                 3
+               )
+             ),
+             $2,
+             4326
+           )
+         )::json as geometry
+       from ${fromRelation} p
+       where p.codigo_predial = $1`;
+}
+
+// CATX-DELIVERY-001: resuelve los datos completos del predio EXCLUSIVAMENTE
+// desde canonicalPredioId -- usado por el generador de PDF server-side
+// (server/services/catastrox/pdf/catastroxPdfGenerator.js) para reconstruir
+// el predio de una orden APROBADA, días o semanas después de que el lookup
+// original (efímero, TTL 30 min) ya haya expirado. Nunca recibe datos del
+// cliente -- el llamador ya resolvió canonicalPredioId desde la orden en
+// Postgres (columna catastrox_payment_orders.canonical_predio_id), nunca
+// del body/lookup_id del frontend.
+//
+// canonicalPredioId, cuando existe un código predial real, es siempre el
+// codigo_predial de 30 dígitos (nunca codigo_anterior de 20 -- ver
+// resolveCanonicalPredioId/resolveLookupByCodeCandidates, ambas rutas de
+// búsqueda usan exclusivamente row.codigo_predial). La identidad de
+// respaldo `fuente:version:idDeFila` (predios sin código conocido) no es
+// re-consultable de forma estable con el tiempo -- para esa forma, o si el
+// predio ya no aparece en la base (código cambiado/depurado), se devuelve
+// null y el job de entrega falla explícitamente con PREDIO_DATA_UNAVAILABLE,
+// nunca con datos inventados.
+//
+// Misma cascada gis-opcional que el resto del archivo: vista primero,
+// tabla base como respaldo si la vista no existe (queryOptional).
+export async function resolvePredioDataForDelivery(canonicalPredioId, queryImpl = query) {
+  const normalized = String(canonicalPredioId || '').trim();
+  if (!/^\d{30}$/.test(normalized)) return null;
+
+  let result = await queryOptional(
+    queryImpl,
+    buildDeliveryPredioSql('catastrox_clean.v_predios_enriquecidos'),
+    [normalized, CATASTROX_ORIGEN_NACIONAL_PROJ],
+  );
+
+  if (result === null) {
+    result = await queryOptional(
+      queryImpl,
+      buildDeliveryPredioSql('catastrox_clean.predios'),
+      [normalized, CATASTROX_ORIGEN_NACIONAL_PROJ],
+    );
+  }
+
+  const row = result?.rows?.[0];
+  if (!row || !isValidPredioGeometry(row.geometry)) return null;
+
+  return {
+    codigoPredial: toNullableString(row.codigo_predial),
+    codigoAnterior: toNullableString(row.codigo_anterior) || 'No disponible',
+    municipio: toNullableString(row.municipio_nombre),
+    departamento: toNullableString(row.departamento_nombre),
+    nombrePredio: toNullableString(row.nombre_predio),
+    direccionReal: toNullableString(row.direccion_real),
+    veredaDisplay: getVeredaDisplay(row.vereda_nombre),
+    barrioNombre: toNullableString(row.barrio_nombre),
+    sectorCodigo: toNullableString(row.sector_codigo),
+    manzanaCodigo: toNullableString(row.manzana_codigo),
+    areaM2: Number(row.area_m2_exact || row.area_terreno_m2 || 0),
+    areaHa: Number(row.area_terreno_ha || (Number(row.area_m2_exact || 0) / 10000)),
+    perimetroM: Number(row.perimetro_m || 0),
+    estadoPredial: 'Predio identificado en la base catastral consultada.',
+    tipoZona: toNullableString(row.zona) || 'Rural',
+    destinoEconomicoNombre: toNullableString(row.destino_economico_nombre),
+    uso1Nombre: toNullableString(row.uso_1_nombre),
+    uso2Nombre: toNullableString(row.uso_2_nombre),
+    uso3Nombre: toNullableString(row.uso_3_nombre),
+    numeroConstrucciones: toNullableNumber(row.numero_construcciones),
+    areaConstruidaM2: toNullableNumber(row.area_construida_m2),
+    tiposConstruccionResumen: toNullableString(row.tipos_construccion_resumen),
+    fuente: toNullableString(row.fuente),
+    fechaProceso: toNullableString(row.fecha_proceso),
+    geometry: row.geometry,
+    polygonGeoJson: { type: 'Feature', properties: {}, geometry: row.geometry },
+  };
+}
+
 const FULL_RESULT_REQUIRED_PACKAGE_ID = 'basico';
 
 // CORRECCIÓN DE SEGURIDAD (vulnerabilidad confirmada en producción):

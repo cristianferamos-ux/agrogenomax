@@ -1018,4 +1018,75 @@ describe('EMAIL_PROVIDER_002: EMAIL_PROVIDER/RESEND_API_KEY/EMAIL_FROM/EMAIL_SEN
       assert.ok(!JSON.stringify(error).includes(secretKey));
     }
   });
+
+  // CATX-DELIVERY-001 (ajuste obligatorio #1): producción NUNCA puede
+  // arrancar con CATASTROX_STORAGE_DRIVER=local-dev-only -- ese driver
+  // escribe al disco efímero del proceso, y en Railway se pierde en cada
+  // redeploy/reinicio. Se falla-rápido aquí, no cuando ya se perdió un PDF.
+  function validProductionSource(overrides = {}) {
+    return {
+      APP_ENV: 'production',
+      DATABASE_URL: 'postgres://prod-db.internal/agx',
+      CATASTROX_DATABASE_URL: 'postgres://prod-db.internal/gis',
+      HEALTH_MONITOR_TOKEN: 'a'.repeat(32),
+      CATASTROX_PII_ENCRYPTION_KEY: TEST_PII_ENCRYPTION_KEY,
+      CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
+      ...overrides,
+    };
+  }
+
+  test('CATASTROX_STORAGE_DRIVER=local-dev-only en producción falla (INCOMPATIBLE_COMBINATION)', () => {
+    assert.throws(
+      () => getConfig(validProductionSource({ CATASTROX_STORAGE_DRIVER: 'local-dev-only' }), {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'INCOMPATIBLE_COMBINATION' &&
+        error.variable === 'CATASTROX_STORAGE_DRIVER',
+    );
+  });
+
+  test('CATASTROX_STORAGE_DRIVER=postgres en producción no falla', () => {
+    const config = getConfig(validProductionSource({ CATASTROX_STORAGE_DRIVER: 'postgres' }), {});
+    assert.equal(config.appEnv, 'production');
+  });
+
+  test('CATASTROX_STORAGE_DRIVER sin definir en producción no falla (default postgres, implícito)', () => {
+    const config = getConfig(validProductionSource(), {});
+    assert.equal(config.appEnv, 'production');
+  });
+
+  test('CATASTROX_STORAGE_DRIVER=local-dev-only SÍ está permitido fuera de producción (p. ej. staging)', () => {
+    const config = getConfig(validStagingSource({ CATASTROX_STORAGE_DRIVER: 'local-dev-only' }), {});
+    assert.equal(config.appEnv, 'staging');
+  });
+
+  test('CATASTROX_STORAGE_DRIVER con valor desconocido falla en cualquier ambiente (INSECURE_VALUE)', () => {
+    assert.throws(
+      () => getConfig({ APP_ENV: 'development', CATASTROX_STORAGE_DRIVER: 's3-nunca-implementado' }, {}),
+      (error) =>
+        error instanceof ConfigurationError &&
+        error.code === 'INSECURE_VALUE' &&
+        error.variable === 'CATASTROX_STORAGE_DRIVER',
+    );
+  });
+
+  // CATX-DELIVERY-001 (ajuste obligatorio #6): límite máximo documentado de
+  // tamaño de PDF antes de insertarlo en Postgres.
+  test('CATASTROX_DELIVERABLE_MAX_BYTES fuera de rango (0, negativo, o mayor a 10 MB) falla', () => {
+    for (const invalid of ['0', '-1', '10485761', 'not-a-number']) {
+      assert.throws(
+        () => getConfig({ APP_ENV: 'development', CATASTROX_DELIVERABLE_MAX_BYTES: invalid }, {}),
+        (error) =>
+          error instanceof ConfigurationError &&
+          error.code === 'INSECURE_VALUE' &&
+          error.variable === 'CATASTROX_DELIVERABLE_MAX_BYTES',
+        `debía fallar para "${invalid}"`,
+      );
+    }
+  });
+
+  test('CATASTROX_DELIVERABLE_MAX_BYTES dentro de rango (1..10485760) no falla', () => {
+    const config = getConfig({ APP_ENV: 'development', CATASTROX_DELIVERABLE_MAX_BYTES: '5242880' }, {});
+    assert.equal(config.appEnv, 'development');
+  });
 });

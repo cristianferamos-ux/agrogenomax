@@ -546,6 +546,48 @@ export function validateEnv(appEnv, source = process.env) {
     }
   }
 
+  // CATASTROX_STORAGE_DRIVER (opcional, default 'postgres'): backend de
+  // almacenamiento de los PDF entregables (CATX-DELIVERY-001). 'local-dev-only'
+  // escribe al sistema de archivos del proceso -- en Railway ese disco es
+  // efímero (se pierde en cada redeploy/reinicio), así que ese driver NUNCA
+  // puede usarse en producción bajo ninguna circunstancia (ajuste obligatorio
+  // del plan aprobado) -- se falla-rápido aquí, en vez de dejar que
+  // storage/localFsStorage.js lo descubra en tiempo de ejecución con el
+  // primer PDF perdido.
+  const STORAGE_DRIVERS = ['postgres', 'local-dev-only'];
+  if (isNonEmpty(source.CATASTROX_STORAGE_DRIVER)) {
+    const driver = source.CATASTROX_STORAGE_DRIVER.trim();
+    if (!STORAGE_DRIVERS.includes(driver)) {
+      throw new ConfigurationError(
+        `CATASTROX_STORAGE_DRIVER tiene un valor no soportado. Valores permitidos: ${STORAGE_DRIVERS.join(', ')}.`,
+        { code: 'INSECURE_VALUE', environment: appEnv, variable: 'CATASTROX_STORAGE_DRIVER' },
+      );
+    }
+    if (appEnv === 'production' && driver !== 'postgres') {
+      throw new ConfigurationError(
+        'CATASTROX_STORAGE_DRIVER debe ser "postgres" en producción -- local-dev-only usa disco efímero y perdería los PDF entregados.',
+        { code: 'INCOMPATIBLE_COMBINATION', environment: appEnv, variable: 'CATASTROX_STORAGE_DRIVER' },
+      );
+    }
+  }
+
+  // CATASTROX_DELIVERABLE_MAX_BYTES (opcional, entero 1-10485760, default
+  // 10 MB = 10485760): límite documentado antes de insertar un PDF en
+  // Postgres (bytea) -- ver server/services/catastrox/storage/postgresBlobStorage.js
+  // y el CHECK equivalente en la migración 007. Falla-rápido con el mismo
+  // patrón que TRUST_PROXY_HOPS/EMAIL_SEND_TIMEOUT_MS más abajo.
+  if (isNonEmpty(source.CATASTROX_DELIVERABLE_MAX_BYTES)) {
+    const raw = source.CATASTROX_DELIVERABLE_MAX_BYTES.trim();
+    const parsed = Number(raw);
+    if (!/^\d+$/.test(raw) || !Number.isInteger(parsed) || parsed < 1 || parsed > 10485760) {
+      throw new ConfigurationError('CATASTROX_DELIVERABLE_MAX_BYTES debe ser un entero entre 1 y 10485760 (10 MB).', {
+        code: 'INSECURE_VALUE',
+        environment: appEnv,
+        variable: 'CATASTROX_DELIVERABLE_MAX_BYTES',
+      });
+    }
+  }
+
   // TRUST_PROXY_HOPS (opcional, default 0 = no confiar en ningún proxy):
   // número exacto de saltos de reverse proxy confiables (p. ej. Cloudflare +
   // ALB) para resolver la IP real del cliente en rate limiting. Restrictivo

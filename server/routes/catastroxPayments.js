@@ -24,7 +24,13 @@ import * as recoverySessions from '../services/catastrox/recoverySessionReposito
 import * as customers from '../services/catastrox/customerRepository.js';
 import { validateCustomerInput } from '../services/catastrox/customerValidation.js';
 import { sendVerificationEmail } from '../services/catastrox/emailSender.js';
-import { createDeliveryJobForOrder, processDeliveryJob } from '../services/catastrox/deliveryJobService.js';
+import {
+  createDeliveryJobForOrder,
+  processDeliveryJob,
+  retryDeliveryJob,
+  findLatestDeliveryJobForOrder,
+  fetchVerifiedDeliverableForOrder,
+} from '../services/catastrox/deliveryJobService.js';
 import { createInvoiceJobForOrder } from '../services/catastrox/invoiceJobService.js';
 import {
   CATASTROX_PAYMENT_PACKAGE_PRICES_COP_CENTS,
@@ -353,12 +359,22 @@ async function resolveSessionForCheckout(req, client) {
 /**
  * Se ejecuta después de una transición REAL a APPROVED (nunca en un
  * replay/idempotente -- ver los dos únicos llamadores). Crea el trabajo de
- * entrega y el de facturación (Bloque 8/11) -- la generación/envío
- * reales quedan como interfaz stub documentada (ver deliveryJobService.js).
+ * entrega y el de facturación (Bloque 8/11).
+ *
+ * Ajuste obligatorio del plan aprobado (CATX-DELIVERY-001, #8): el webhook
+ * de Wompi y GET /verify NO deben esperar a que termine la generación del
+ * PDF, su almacenamiento ni el envío del correo -- eso puede tomar tiempo
+ * (PDFKit + red hacia el proveedor de correo) y no debe bloquear la
+ * respuesta HTTP del pago, que ya está aprobado y persistido. Por eso solo
+ * se espera la creación (rápida, un INSERT) del delivery job; el
+ * procesamiento real se dispara sin `await` -- `processDeliveryJob` sigue
+ * siendo awaitable directamente (así lo usan las pruebas de integración y
+ * el endpoint de reintento manual).
+ *
  * Errores aquí se registran pero NUNCA hacen fallar la respuesta al
- * cliente/webhook -- el pago ya está aprobado y persistido; un problema en
- * el disparo de entrega es recuperable por separado (el job queda en la
- * tabla, reintentable), no debe parecer que el pago falló.
+ * cliente/webhook -- un problema en el disparo de entrega es recuperable
+ * por separado (el job queda en la tabla, reintentable), no debe parecer
+ * que el pago falló.
  */
 async function triggerPostApprovalWorkflows(order) {
   try {
@@ -371,7 +387,13 @@ async function triggerPostApprovalWorkflows(order) {
         customerId: order.customer_id,
         deliveryEmail,
       });
-      await processDeliveryJob(job.id);
+      processDeliveryJob(job.id).catch((error) => {
+        console.error('[CatastroX Payments] Error procesando delivery job en segundo plano', {
+          orderId: order.id,
+          jobId: job.id,
+          message: error.message,
+        });
+      });
     } else {
       console.error('[CatastroX Payments] Orden aprobada sin comprador/correo asociado -- no se crea delivery job', {
         orderId: order.id,
@@ -1164,6 +1186,107 @@ router.post('/entitlements/check', entitlementLimiter, async (req, res) => {
   } catch (error) {
     console.error('[CatastroX Payments] Error consultando entitlement', { message: error.message });
     return res.status(500).json({ ok: false, error: 'No fue posible consultar el estado del pago.' });
+  }
+});
+
+// Resuelve la sesión de recuperación activa a partir del cookie de la
+// request, o null si no hay cookie/sesión vigente -- helper compartido por
+// los dos endpoints de entrega abajo (descarga y reintento), mismo patrón
+// de auth que /entitlements/check y GET /lookups/:lookupId/full-result
+// (server/routes/catastrox.js).
+async function resolveActiveSessionFromRequest(req) {
+  const sessionToken = getRecoverySessionTokenFromCookieHeader(req.headers.cookie);
+  if (!sessionToken) return null;
+  const tokenHash = recoverySessions.hashSessionToken(sessionToken);
+  return recoverySessions.findActiveSessionByTokenHash(tokenHash);
+}
+
+// GET .../orders/:orderToken/deliverable/download -- sirve el PDF comprado.
+// Ownership real: cookie de sesión -> sesión activa -> la orden con este
+// orderToken debe estar ENLAZADA a esa sesión y APPROVED (nunca basta con
+// poseer el orderToken, ver nota en GET /orders/:orderToken/status).
+// El checksum se re-verifica en este mismo momento dentro de
+// fetchVerifiedDeliverableForOrder -- nunca se sirven bytes sin confirmar
+// que coinciden con el content_hash persistido (ajuste obligatorio #5).
+// Disponible tan pronto el PDF quede generado/almacenado (job en READY o
+// posterior), sin depender de que el correo se haya enviado -- ajuste
+// obligatorio #3: un EMAIL_PROVIDER_DISABLED nunca debe bloquear la
+// descarga de un archivo que sí se generó correctamente.
+router.get('/orders/:orderToken/deliverable/download', orderStatusLimiter, async (req, res) => {
+  const orderToken = String(req.params?.orderToken || '').trim();
+  res.setHeader('Cache-Control', 'no-store');
+
+  if (!orderToken) {
+    return res.status(404).json({ ok: false, code: 'ORDER_NOT_FOUND' });
+  }
+
+  try {
+    const session = await resolveActiveSessionFromRequest(req);
+    if (!session) {
+      return res.status(401).json({ ok: false, code: 'SESSION_REQUIRED' });
+    }
+
+    const order = await recoverySessions.findApprovedOrderForSessionByToken({ sessionId: session.id, orderToken });
+    if (!order) {
+      return res.status(403).json({ ok: false, code: 'ORDER_ACCESS_DENIED' });
+    }
+
+    const deliverable = await fetchVerifiedDeliverableForOrder(order.id);
+    if (!deliverable) {
+      return res.status(404).json({ ok: false, code: 'DELIVERABLE_NOT_READY' });
+    }
+
+    res.setHeader('Content-Type', deliverable.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${deliverable.filename}"`);
+    res.setHeader('Content-Length', String(deliverable.bytes.length));
+    return res.status(200).send(deliverable.bytes);
+  } catch (error) {
+    console.error('[CatastroX Payments] Error sirviendo descarga de entregable', { message: error.message });
+    return res.status(500).json({ ok: false, error: 'No fue posible descargar el archivo.' });
+  }
+});
+
+// POST .../orders/:orderToken/delivery/retry -- mismo ownership que la
+// descarga. 409 si el job de entrega más reciente no está FAILED (incluye
+// el caso "ya SENT" -- nunca se reenvía sin necesidad, ajuste #4).
+router.post('/orders/:orderToken/delivery/retry', orderStatusLimiter, async (req, res) => {
+  const orderToken = String(req.params?.orderToken || '').trim();
+  res.setHeader('Cache-Control', 'no-store');
+
+  if (!orderToken) {
+    return res.status(404).json({ ok: false, code: 'ORDER_NOT_FOUND' });
+  }
+
+  try {
+    const session = await resolveActiveSessionFromRequest(req);
+    if (!session) {
+      return res.status(401).json({ ok: false, code: 'SESSION_REQUIRED' });
+    }
+
+    const order = await recoverySessions.findApprovedOrderForSessionByToken({ sessionId: session.id, orderToken });
+    if (!order) {
+      return res.status(403).json({ ok: false, code: 'ORDER_ACCESS_DENIED' });
+    }
+
+    const job = await findLatestDeliveryJobForOrder(order.id);
+    if (!job) {
+      return res.status(404).json({ ok: false, code: 'DELIVERY_JOB_NOT_FOUND' });
+    }
+    if (job.status !== 'FAILED') {
+      return res.status(409).json({ ok: false, code: 'DELIVERY_NOT_RETRYABLE', status: job.status });
+    }
+
+    const updated = await retryDeliveryJob(job.id);
+    return res.json({ ok: true, status: updated.status, errorCode: updated.last_error_code || null });
+  } catch (error) {
+    if (error.code === 'DELIVERY_NOT_RETRYABLE') {
+      return res.status(409).json({ ok: false, code: 'DELIVERY_NOT_RETRYABLE' });
+    }
+    if (error.code === 'DELIVERY_JOB_NOT_FOUND') {
+      return res.status(404).json({ ok: false, code: 'DELIVERY_JOB_NOT_FOUND' });
+    }
+    console.error('[CatastroX Payments] Error reintentando entrega', { message: error.message });
+    return res.status(500).json({ ok: false, error: 'No fue posible reintentar el envío.' });
   }
 });
 

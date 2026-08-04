@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   sendVerificationEmail,
+  sendDeliverableEmail,
   parseEmailFromHeader,
   isEmailFromValidForEnvironment,
 } from '../emailSender.js';
@@ -577,5 +578,151 @@ describe('EMAIL_PROVIDER_002: parseEmailFromHeader()/isEmailFromValidForEnvironm
 
   test('28b. un valor sin @ (sintácticamente inválido) se rechaza en cualquier ambiente, incluido development', () => {
     assert.equal(isEmailFromValidForEnvironment('no-es-un-correo', 'development'), false);
+  });
+});
+
+// CATX-DELIVERY-001: sendDeliverableEmail() -- función paralela a
+// sendVerificationEmail, mismo gate REAL_PROVIDER_ENABLED_ENVIRONMENTS
+// (=['staging']), pero con adjunto (el PDF comprado) y con el código de
+// error específico EMAIL_PROVIDER_DISABLED (nunca EMAIL_PROVIDER_NOT_CONFIGURED)
+// cuando el ambiente no tiene el proveedor real habilitado -- señal que
+// deliveryJobService.js necesita para nunca declarar "enviado" sin una
+// confirmación real (ajuste obligatorio del plan aprobado).
+describe('CATX-DELIVERY-001: sendDeliverableEmail() -- adjunto + gate por ambiente', () => {
+  const DELIVERABLE_BASE_INPUT = {
+    to: 'comprador@example.com',
+    customerName: 'Ana Pérez',
+    orderReference: 'CATX-BASICO-20260101-ABCDE',
+    packageLabel: 'Básico',
+    predioLabel: '184600002000000030015000000000',
+    pdfBuffer: Buffer.from('%PDF-1.4 contenido de prueba', 'utf8'),
+    pdfFilename: '184600002000000030015000000000_basico.pdf',
+    idempotencyKey: 'catastrox-deliverable-11111111-1111-1111-1111-111111111111',
+  };
+
+  test('1. development nunca llama al proveedor real -- EMAIL_PROVIDER_DISABLED, no EMAIL_PROVIDER_NOT_CONFIGURED', async () => {
+    const { getCalls } = stubFetch(() => jsonResponse(200, { id: 'msg_1' }));
+    process.env.APP_ENV = 'development';
+    process.env.EMAIL_PROVIDER = 'resend';
+    process.env.RESEND_API_KEY = 're_synthetic_test_key_1234567890';
+    process.env.EMAIL_FROM = 'CatastroX <no-reply@mail.staging.agrogenomax.com>';
+
+    const result = await sendDeliverableEmail(DELIVERABLE_BASE_INPUT);
+
+    assert.equal(getCalls(), 0);
+    assert.deepEqual(result, { delivered: false, provider: 'stub', providerMessageId: null, errorCode: 'EMAIL_PROVIDER_DISABLED' });
+  });
+
+  test('2. test nunca llama al proveedor real -- EMAIL_PROVIDER_DISABLED', async () => {
+    const { getCalls } = stubFetch(() => jsonResponse(200, { id: 'msg_1' }));
+    process.env.APP_ENV = 'test';
+
+    const result = await sendDeliverableEmail(DELIVERABLE_BASE_INPUT);
+
+    assert.equal(getCalls(), 0);
+    assert.equal(result.delivered, false);
+    assert.equal(result.errorCode, 'EMAIL_PROVIDER_DISABLED');
+  });
+
+  test('3. production no habilita el proveedor -- EMAIL_PROVIDER_DISABLED (nunca declara enviado)', async () => {
+    const { getCalls } = stubFetch(() => jsonResponse(200, { id: 'msg_1' }));
+    process.env.APP_ENV = 'production';
+    process.env.EMAIL_PROVIDER = 'resend';
+    process.env.RESEND_API_KEY = 're_synthetic_test_key_1234567890';
+    process.env.EMAIL_FROM = 'CatastroX <no-reply@mail.agrogenomax.com>';
+
+    const result = await sendDeliverableEmail(DELIVERABLE_BASE_INPUT);
+
+    assert.equal(getCalls(), 0);
+    assert.equal(result.delivered, false);
+    assert.equal(result.errorCode, 'EMAIL_PROVIDER_DISABLED');
+  });
+
+  test('4. sin pdfBuffer (o vacío) -- EMAIL_ATTACHMENT_MISSING, sin llamar fetch', async () => {
+    const { getCalls } = stubFetch(() => jsonResponse(200, { id: 'msg_1' }));
+    setStagingEnv();
+
+    const result = await sendDeliverableEmail({ ...DELIVERABLE_BASE_INPUT, pdfBuffer: Buffer.alloc(0) });
+
+    assert.equal(getCalls(), 0);
+    assert.equal(result.errorCode, 'EMAIL_ATTACHMENT_MISSING');
+  });
+
+  test('5. envío 200 válido en staging -- delivered:true, adjunto presente en el body enviado a Resend', async () => {
+    const { getCalls, getArgs } = stubFetch(() => jsonResponse(200, { id: 'msg_deliverable_1' }));
+    setStagingEnv();
+
+    const result = await sendDeliverableEmail(DELIVERABLE_BASE_INPUT);
+
+    assert.equal(getCalls(), 1);
+    assert.deepEqual(result, {
+      delivered: true,
+      provider: 'resend',
+      providerMessageId: 'msg_deliverable_1',
+      errorCode: null,
+    });
+
+    const [, options] = getArgs()[0];
+    const sentBody = JSON.parse(options.body);
+    assert.equal(sentBody.attachments.length, 1);
+    assert.equal(sentBody.attachments[0].filename, DELIVERABLE_BASE_INPUT.pdfFilename);
+    assert.equal(sentBody.attachments[0].content, DELIVERABLE_BASE_INPUT.pdfBuffer.toString('base64'));
+    assert.ok(sentBody.subject.includes(DELIVERABLE_BASE_INPUT.orderReference));
+  });
+
+  test('6. HTTP 400 no reintenta -- EMAIL_PROVIDER_REJECTED', async () => {
+    const { getCalls } = stubFetch(() => jsonResponse(400, { message: 'invalid' }));
+    setStagingEnv();
+
+    const result = await sendDeliverableEmail(DELIVERABLE_BASE_INPUT);
+
+    assert.equal(getCalls(), 1);
+    assert.equal(result.errorCode, 'EMAIL_PROVIDER_REJECTED');
+  });
+
+  test('7. HTTP 500 reintenta una vez y tiene éxito en el segundo intento', async () => {
+    const { getCalls } = stubFetch((url, options, callNumber) =>
+      callNumber === 1 ? jsonResponse(500, { message: 'down' }) : jsonResponse(200, { id: 'msg_retry' }),
+    );
+    setStagingEnv();
+
+    const result = await sendDeliverableEmail(DELIVERABLE_BASE_INPUT);
+
+    assert.equal(getCalls(), 2);
+    assert.equal(result.delivered, true);
+    assert.equal(result.providerMessageId, 'msg_retry');
+  });
+
+  test('8. falta RESEND_API_KEY -- EMAIL_API_KEY_MISSING, sin llamar fetch', async () => {
+    const { getCalls } = stubFetch(() => jsonResponse(200, { id: 'msg_1' }));
+    setStagingEnv({ RESEND_API_KEY: '' });
+
+    const result = await sendDeliverableEmail(DELIVERABLE_BASE_INPUT);
+
+    assert.equal(getCalls(), 0);
+    assert.equal(result.errorCode, 'EMAIL_API_KEY_MISSING');
+  });
+
+  test('9. EMAIL_FROM inválido para el ambiente -- EMAIL_FROM_INVALID, sin llamar fetch', async () => {
+    const { getCalls } = stubFetch(() => jsonResponse(200, { id: 'msg_1' }));
+    setStagingEnv({ EMAIL_FROM: 'no-reply@localhost' });
+
+    const result = await sendDeliverableEmail(DELIVERABLE_BASE_INPUT);
+
+    assert.equal(getCalls(), 0);
+    assert.equal(result.errorCode, 'EMAIL_FROM_INVALID');
+  });
+
+  test('10. sendVerificationEmail() (OTP) sigue sin adjuntos y con su propio código de error -- no se cruzó lógica entre ambas funciones', async () => {
+    const { getCalls, getArgs } = stubFetch(() => jsonResponse(200, { id: 'msg_otp_1' }));
+    setStagingEnv();
+
+    const result = await sendVerificationEmail(BASE_INPUT);
+
+    assert.equal(getCalls(), 1);
+    assert.equal(result.delivered, true);
+    const [, options] = getArgs()[0];
+    const sentBody = JSON.parse(options.body);
+    assert.equal('attachments' in sentBody, false, 'el correo de OTP nunca debe llevar adjuntos');
   });
 });

@@ -188,6 +188,59 @@ function buildOtpEmailContent({ verificationCode, expiresAt, customerName }) {
   return { subject, html, text };
 }
 
+// --- CATX-DELIVERY-001: plantilla del correo de entrega del PDF comprado ---
+// Función paralela a buildOtpEmailContent -- misma disciplina (el llamador
+// nunca decide asunto/cuerpo como texto libre, todo escapado en HTML).
+
+function buildDeliverableEmailContent({ customerName, orderReference, packageLabel, predioLabel }) {
+  const safeName = isNonEmpty(customerName) ? escapeHtml(String(customerName).trim()) : null;
+  const safeReference = escapeHtml(String(orderReference || '').trim());
+  const safePackage = escapeHtml(String(packageLabel || '').trim());
+  const safePredio = escapeHtml(String(predioLabel || '').trim());
+  const greeting = safeName ? `Hola ${safeName},` : 'Hola,';
+  const subject = `Tu diagnóstico predial CatastroX está listo — Orden ${orderReference || ''}`.trim();
+
+  const legalNotice =
+    'CatastroX realiza análisis técnico sobre información geográfica y catastral pública disponible. ' +
+    'No reemplaza certificados oficiales del IGAC, gestor catastral, oficina de registro ni autoridad competente.';
+  const supportMessage =
+    '¿Necesitas ayuda? Conserva el número de tu orden y contacta a soporte de CatastroX.';
+
+  const html = `<!doctype html>
+<html lang="es">
+  <body style="font-family: Arial, sans-serif; color: #1a1a1a; line-height: 1.5;">
+    <p><strong>CatastroX</strong> — AgroGenomaX</p>
+    <p>${greeting}</p>
+    <p>Tu documento predial ya está listo. Lo adjuntamos a este correo en formato PDF.</p>
+    <ul>
+      <li><strong>Orden:</strong> ${safeReference}</li>
+      <li><strong>Paquete:</strong> ${safePackage}</li>
+      <li><strong>Predio:</strong> ${safePredio}</li>
+    </ul>
+    <p>${escapeHtml(supportMessage)}</p>
+    <p style="font-size: 11px; color: #666;">${escapeHtml(legalNotice)}</p>
+  </body>
+</html>`;
+
+  const text = [
+    'CatastroX — AgroGenomaX',
+    '',
+    greeting,
+    '',
+    'Tu documento predial ya está listo. Lo adjuntamos a este correo en formato PDF.',
+    '',
+    `Orden: ${orderReference || ''}`,
+    `Paquete: ${packageLabel || ''}`,
+    `Predio: ${predioLabel || ''}`,
+    '',
+    supportMessage,
+    '',
+    legalNotice,
+  ].join('\n');
+
+  return { subject, html, text };
+}
+
 // --- Idempotencia ---
 
 /**
@@ -348,6 +401,113 @@ async function sendViaResend({ to, verificationCode, expiresAt, customerName, id
   return { delivered: true, provider: 'resend', providerMessageId, errorCode: null };
 }
 
+// --- CATX-DELIVERY-001: envío real del PDF comprado vía Resend ---
+// Reutiliza exactamente la misma infraestructura de transporte que
+// sendViaResend (fetchWithTimeout/performResendRequest/isRetryableOutcome/
+// resolveTimeoutMs/sanitizeIdempotencyKey/validación de API key y de
+// EMAIL_FROM) -- función paralela, no una rama condicional dentro de
+// sendViaResend, para no arriesgar ningún comportamiento ya cubierto por
+// las pruebas existentes del envío de OTP.
+async function sendDeliverableViaResend({
+  to,
+  customerName,
+  orderReference,
+  packageLabel,
+  predioLabel,
+  pdfBuffer,
+  pdfFilename,
+  idempotencyKey,
+}) {
+  const apiKey = process.env.RESEND_API_KEY || '';
+  if (!isNonEmpty(apiKey) || EMAIL_PLACEHOLDER_PATTERN.test(apiKey)) {
+    logEmailFailure('envío de entregable fallido', { to, provider: 'resend', errorCode: 'EMAIL_API_KEY_MISSING' });
+    return { delivered: false, provider: 'resend', providerMessageId: null, errorCode: 'EMAIL_API_KEY_MISSING' };
+  }
+
+  const appEnvForFrom = String(process.env.APP_ENV || '').trim().toLowerCase();
+  const fromHeader = process.env.EMAIL_FROM || '';
+  if (!isEmailFromValidForEnvironment(fromHeader, appEnvForFrom)) {
+    logEmailFailure('envío de entregable fallido', { to, provider: 'resend', errorCode: 'EMAIL_FROM_INVALID' });
+    return { delivered: false, provider: 'resend', providerMessageId: null, errorCode: 'EMAIL_FROM_INVALID' };
+  }
+
+  if (!Buffer.isBuffer(pdfBuffer) || pdfBuffer.length === 0) {
+    logEmailFailure('envío de entregable fallido', { to, provider: 'resend', errorCode: 'EMAIL_ATTACHMENT_MISSING' });
+    return { delivered: false, provider: 'resend', providerMessageId: null, errorCode: 'EMAIL_ATTACHMENT_MISSING' };
+  }
+
+  const timeoutMs = resolveTimeoutMs();
+  const sanitizedIdempotencyKey = sanitizeIdempotencyKey(idempotencyKey);
+  const { subject, html, text } = buildDeliverableEmailContent({ customerName, orderReference, packageLabel, predioLabel });
+
+  const headers = {
+    Authorization: `Bearer ${apiKey}`,
+    'Content-Type': 'application/json',
+    ...(sanitizedIdempotencyKey ? { 'Idempotency-Key': sanitizedIdempotencyKey } : {}),
+  };
+
+  // Adjunto en base64 -- campo soportado por la API de Resend
+  // (attachments: [{ filename, content }]), no usado hasta ahora por el
+  // envío de OTP (nunca lleva adjunto).
+  const body = JSON.stringify({
+    from: fromHeader,
+    to: [to],
+    subject,
+    html,
+    text,
+    attachments: [{ filename: String(pdfFilename || 'documento.pdf'), content: pdfBuffer.toString('base64') }],
+  });
+
+  const requestArgs = { url: RESEND_API_URL, options: { method: 'POST', headers, body }, timeoutMs };
+
+  logEmailEvent('intento de envío de entregable', { to, provider: 'resend' });
+
+  let outcome = await performResendRequest(requestArgs);
+
+  if (isRetryableOutcome(outcome)) {
+    await delay(RETRY_DELAY_MS);
+    outcome = await performResendRequest(requestArgs);
+  }
+
+  if (outcome.errorCode) {
+    logEmailFailure('envío de entregable fallido', { to, provider: 'resend', errorCode: outcome.errorCode });
+    return { delivered: false, provider: 'resend', providerMessageId: null, errorCode: outcome.errorCode };
+  }
+
+  const { response } = outcome;
+
+  if (response.status === 429) {
+    logEmailFailure('envío de entregable fallido', { to, provider: 'resend', errorCode: 'EMAIL_RATE_LIMITED' });
+    return { delivered: false, provider: 'resend', providerMessageId: null, errorCode: 'EMAIL_RATE_LIMITED' };
+  }
+  if (response.status >= 500) {
+    logEmailFailure('envío de entregable fallido', { to, provider: 'resend', errorCode: 'EMAIL_PROVIDER_UNAVAILABLE' });
+    return { delivered: false, provider: 'resend', providerMessageId: null, errorCode: 'EMAIL_PROVIDER_UNAVAILABLE' };
+  }
+  if (!response.ok) {
+    const errorCode = 'EMAIL_PROVIDER_REJECTED';
+    logEmailFailure('envío de entregable fallido', { to, provider: 'resend', errorCode });
+    return { delivered: false, provider: 'resend', providerMessageId: null, errorCode };
+  }
+
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    logEmailFailure('envío de entregable fallido', { to, provider: 'resend', errorCode: 'EMAIL_RESPONSE_INVALID' });
+    return { delivered: false, provider: 'resend', providerMessageId: null, errorCode: 'EMAIL_RESPONSE_INVALID' };
+  }
+
+  const providerMessageId = typeof payload?.id === 'string' && payload.id ? payload.id : null;
+  if (!providerMessageId) {
+    logEmailFailure('envío de entregable fallido', { to, provider: 'resend', errorCode: 'EMAIL_RESPONSE_INVALID' });
+    return { delivered: false, provider: 'resend', providerMessageId: null, errorCode: 'EMAIL_RESPONSE_INVALID' };
+  }
+
+  logEmailEvent('envío de entregable confirmado', { to, provider: 'resend' });
+  return { delivered: true, provider: 'resend', providerMessageId, errorCode: null };
+}
+
 // --- Punto de entrada único ---
 
 const REAL_PROVIDER_ENABLED_ENVIRONMENTS = new Set(['staging']);
@@ -407,4 +567,77 @@ export async function sendVerificationEmail({ to, verificationCode, expiresAt, c
   }
 
   return sendViaResend({ to, verificationCode, expiresAt, customerName, idempotencyKey });
+}
+
+/**
+ * CATX-DELIVERY-001: envía el PDF comprado (adjunto) al correo verificado
+ * del comprador. Mismo gate de ambiente que sendVerificationEmail
+ * (REAL_PROVIDER_ENABLED_ENVIRONMENTS) -- deliberadamente NO se habilita
+ * producción por separado en este sprint (decisión explícita pendiente,
+ * documentada como riesgo residual). A diferencia de sendVerificationEmail,
+ * el código de error cuando el ambiente no tiene el proveedor habilitado es
+ * `EMAIL_PROVIDER_DISABLED` (no `EMAIL_PROVIDER_NOT_CONFIGURED`) -- señal
+ * específica que deliveryJobService.js usa para NUNCA marcar la orden como
+ * "enviada" cuando en realidad no se intentó ningún envío real (ajuste
+ * obligatorio del plan aprobado: nunca declarar SENT sin una confirmación
+ * real del proveedor).
+ *
+ * @param {{
+ *   to: string,
+ *   customerName: string | null,
+ *   orderReference: string,
+ *   packageLabel: string,
+ *   predioLabel: string,
+ *   pdfBuffer: Buffer,
+ *   pdfFilename: string,
+ *   idempotencyKey: string | null,
+ * }} input
+ * @returns {Promise<{ delivered: boolean, provider: string, providerMessageId: string|null, errorCode: string|null }>}
+ */
+export async function sendDeliverableEmail({
+  to,
+  customerName,
+  orderReference,
+  packageLabel,
+  predioLabel,
+  pdfBuffer,
+  pdfFilename,
+  idempotencyKey,
+}) {
+  const appEnv = String(process.env.APP_ENV || '').trim().toLowerCase();
+
+  if (appEnv === 'development' || appEnv === 'test') {
+    logEmailEvent('intento de envío de entregable (stub)', { to, provider: 'stub' });
+    // A diferencia de sendVerificationEmail (donde development/test tiene
+    // un bypass real -- devOtpCode -- que hace innecesario un errorCode),
+    // aquí no existe ningún bypass equivalente: el PDF nunca se envía de
+    // verdad en este ambiente. errorCode explícito para que
+    // deliveryJobService.js deje el job en FAILED con una causa clara, en
+    // vez de un código genérico.
+    return { delivered: false, provider: 'stub', providerMessageId: null, errorCode: 'EMAIL_PROVIDER_DISABLED' };
+  }
+
+  if (!REAL_PROVIDER_ENABLED_ENVIRONMENTS.has(appEnv)) {
+    logEmailEvent('intento de envío de entregable (proveedor no habilitado en este ambiente)', { to, provider: 'stub' });
+    return { delivered: false, provider: 'stub', providerMessageId: null, errorCode: 'EMAIL_PROVIDER_DISABLED' };
+  }
+
+  const configuredProvider = String(process.env.EMAIL_PROVIDER || '').trim().toLowerCase();
+  if (!configuredProvider) {
+    return { delivered: false, provider: 'stub', providerMessageId: null, errorCode: 'EMAIL_PROVIDER_DISABLED' };
+  }
+  if (configuredProvider !== 'resend') {
+    return { delivered: false, provider: 'stub', providerMessageId: null, errorCode: 'EMAIL_PROVIDER_UNSUPPORTED' };
+  }
+
+  return sendDeliverableViaResend({
+    to,
+    customerName,
+    orderReference,
+    packageLabel,
+    predioLabel,
+    pdfBuffer,
+    pdfFilename,
+    idempotencyKey,
+  });
 }

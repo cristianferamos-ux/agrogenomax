@@ -167,6 +167,26 @@ async function createCustomer(baseUrl, overrides = {}) {
   return response.json();
 }
 
+// CATX-DELIVERY-001 (ajuste obligatorio #8): triggerPostApprovalWorkflows ya
+// no espera a que termine processDeliveryJob antes de responder -- se
+// dispara desacoplado. Las pruebas que necesitan el estado TERMINAL del
+// delivery job para GET /orders/mine deben esperarlo explícitamente en vez
+// de asumir que ya terminó cuando /verify respondió.
+async function waitForOrderDeliveryStatus(app, cookie, orderToken, { timeoutMs = 5000, intervalMs = 50 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let lastOrder = null;
+  for (;;) {
+    const response = await fetch(`${app.baseUrl}/orders/mine`, { headers: { Cookie: cookie } });
+    const payload = await response.json();
+    lastOrder = payload.orders.find((order) => order.orderToken === orderToken) || null;
+    if (lastOrder && (lastOrder.deliveryStatus === 'SENT' || lastOrder.deliveryStatus === 'FAILED')) {
+      return lastOrder;
+    }
+    if (Date.now() >= deadline) return lastOrder;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
 async function cleanupTestData() {
   if (!dbAvailable) return;
   const orders = await query('select id, customer_id from public.catastrox_payment_orders where canonical_predio_id = $1', [
@@ -1074,13 +1094,15 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
         }
 
         // 25/26) Tras aprobar: pago APPROVED, pero entrega/factura siguen
-        // siendo honestos -- el único proveedor disponible en este alcance
-        // (deliveryJobService/invoiceJobService) nunca simula éxito, así
-        // que el estado real tras la aprobación es FAILED/NOT_REQUESTED,
-        // JAMÁS "enviado"/"emitida".
-        const afterApproval = await fetch(`${app.baseUrl}/orders/mine`, { headers: { Cookie: cookie } });
-        const afterApprovalPayload = await afterApproval.json();
-        const approvedOrder = afterApprovalPayload.orders.find((order) => order.orderToken === orderToken);
+        // siendo honestos -- el predio de prueba (TEST_CODIGO) no existe en
+        // catastrox_clean, así que la generación real (PDFKit) falla con
+        // PREDIO_DATA_UNAVAILABLE -- el estado real tras la aprobación es
+        // FAILED/NOT_REQUESTED, JAMÁS "enviado"/"emitida". El procesamiento
+        // ahora es desacoplado (ajuste #8) -- se espera a que el job llegue
+        // a un estado terminal antes de aseverar, en vez de asumir que ya
+        // terminó cuando /verify respondió.
+        const approvedOrder = await waitForOrderDeliveryStatus(app, cookie, orderToken);
+        assert.ok(approvedOrder, 'la orden aprobada debe seguir apareciendo en el historial de la sesión');
         assert.equal(approvedOrder.paymentStatus, 'APPROVED');
         assert.equal(approvedOrder.deliveryStatus, 'FAILED');
         assert.notEqual(approvedOrder.deliveryStatus, 'SENT');

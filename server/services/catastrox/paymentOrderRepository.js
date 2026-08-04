@@ -48,6 +48,15 @@ export async function findOrderByToken(orderToken, client = null) {
   return result.rows[0] || null;
 }
 
+// CATX-DELIVERY-001: deliveryJobService.js recibe orderId (uuid interno),
+// nunca order_token (público) -- el job de entrega se crea a partir de
+// order.id (server/routes/catastroxPayments.js, triggerPostApprovalWorkflows).
+export async function findOrderById(orderId, client = null) {
+  if (!orderId) return null;
+  const result = await run(client, `select * from ${TABLE} where id = $1`, [orderId]);
+  return result.rows[0] || null;
+}
+
 export async function insertPendingOrder(
   {
     orderToken,
