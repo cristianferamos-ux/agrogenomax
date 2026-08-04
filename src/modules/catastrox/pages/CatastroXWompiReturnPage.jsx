@@ -11,11 +11,13 @@ import {
 } from '../services/catastroxApi.js';
 import {
   clearPendingPaymentByReference,
+  downloadDeliverablePdf,
   getMyOrders,
   getPendingPaymentByReference,
   isPendingPaymentContextExpired,
   markPackageAsPaidByPurchaseKey,
   recoverPendingLikeContextForReference,
+  retryDeliveryForOrder,
   verifyWompiTransaction,
 } from '../services/catastroxPaymentService.js';
 import { getDeliveryStatusCopy, getInvoiceStatusCopy } from '../utils/catastroxOrderStatusCopy.js';
@@ -55,6 +57,7 @@ export default function CatastroXWompiReturnPage() {
   // GET /orders/mine (la única fuente que expone estos dos campos) -- nunca
   // se afirma "enviado"/"facturado" mientras esto siga en null.
   const [deliveryInvoiceState, setDeliveryInvoiceState] = useState(null);
+  const [deliveryAction, setDeliveryAction] = useState({});
 
   const transactionId = searchParams.get('id') || searchParams.get('transaction_id') || '';
 
@@ -175,7 +178,9 @@ export default function CatastroXWompiReturnPage() {
       transaction: verifiedTransaction,
       targetRoute,
       hasLookup: Boolean(recoveredLookup),
+      orderToken: order.orderToken || null,
     });
+    setDeliveryAction({});
 
     // Estado honesto de entrega/factura (Bloque 8): se busca por
     // orderToken en el historial de la sesión -- GET /orders/mine es la
@@ -201,6 +206,45 @@ export default function CatastroXWompiReturnPage() {
 
   const handleRetryVerification = () => {
     void runVerification();
+  };
+
+  // El PDF puede estar listo aunque el job de entrega haya quedado FAILED
+  // (correo deshabilitado en este entorno -- ajuste obligatorio del plan
+  // aprobado, ver EMAIL_PROVIDER_DISABLED en deliveryJobService.js): la
+  // descarga se ofrece también en ese caso, nunca solo en SENT.
+  const canDownloadDeliverable =
+    state.orderToken && ['SENT', 'DELIVERED', 'FAILED'].includes(deliveryInvoiceState?.deliveryStatus);
+  const canRetryDelivery = state.orderToken && deliveryInvoiceState?.deliveryStatus === 'FAILED';
+
+  const handleDownloadDeliverable = async () => {
+    if (!state.orderToken) return;
+    setDeliveryAction({ downloading: true, message: null });
+    const result = await downloadDeliverablePdf(state.orderToken);
+    setDeliveryAction({
+      downloading: false,
+      message: result.ok ? null : result.message,
+      tone: result.ok ? null : 'danger',
+    });
+  };
+
+  const handleRetryDelivery = async () => {
+    if (!state.orderToken) return;
+    setDeliveryAction({ retrying: true, message: null });
+    const result = await retryDeliveryForOrder(state.orderToken);
+    setDeliveryAction({
+      retrying: false,
+      message: result.ok ? null : result.message,
+      tone: result.ok ? null : 'danger',
+    });
+    if (result.ok) {
+      const refreshed = await getMyOrders();
+      if (refreshed.ok) {
+        const match = refreshed.orders.find((entry) => entry.orderToken === state.orderToken);
+        if (match) {
+          setDeliveryInvoiceState({ deliveryStatus: match.deliveryStatus, invoiceStatus: match.invoiceStatus });
+        }
+      }
+    }
   };
 
   return (
@@ -294,6 +338,33 @@ export default function CatastroXWompiReturnPage() {
                 <strong>{getInvoiceStatusCopy(deliveryInvoiceState.invoiceStatus).label}</strong>
                 <span>{getInvoiceStatusCopy(deliveryInvoiceState.invoiceStatus).message}</span>
               </div>
+              {canDownloadDeliverable || canRetryDelivery ? (
+                <div className="catastrox-action-row">
+                  {canDownloadDeliverable ? (
+                    <button
+                      type="button"
+                      className="catastrox-button is-secondary"
+                      onClick={handleDownloadDeliverable}
+                      disabled={deliveryAction.downloading}
+                    >
+                      {deliveryAction.downloading ? 'Descargando...' : 'Descargar PDF'}
+                    </button>
+                  ) : null}
+                  {canRetryDelivery ? (
+                    <button
+                      type="button"
+                      className="catastrox-button is-secondary"
+                      onClick={handleRetryDelivery}
+                      disabled={deliveryAction.retrying}
+                    >
+                      {deliveryAction.retrying ? 'Reintentando...' : 'Reintentar envío'}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+              {deliveryAction.message ? (
+                <p className={`catastrox-copy is-${deliveryAction.tone || 'warning'}`}>{deliveryAction.message}</p>
+              ) : null}
             </>
           ) : (
             <p className="catastrox-copy">Consultando estado de entrega y facturación...</p>

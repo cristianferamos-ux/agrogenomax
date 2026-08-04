@@ -283,3 +283,36 @@ test('26) getInvoiceStatusCopy nunca afirma "emitida" salvo para ISSUED', () => 
   }
   assert.equal(statusCopy.getInvoiceStatusCopy('ISSUED').label, 'Factura emitida');
 });
+
+// CATX-DELIVERY-001: los 4 textos exactos pedidos para las pantallas de
+// estado de entrega, mapeados desde los 6 valores reales del enum que usa
+// deliveryJobService.js (QUEUED/GENERATING/READY/SENDING/SENT/FAILED).
+test('27) getDeliveryStatusCopy: los 4 textos exactos pedidos por estado (PENDING/PROCESSING/SENT/FAILED)', () => {
+  assert.equal(statusCopy.getDeliveryStatusCopy('QUEUED').message, 'Estamos preparando tus archivos.');
+  for (const status of ['GENERATING', 'READY', 'SENDING']) {
+    assert.equal(
+      statusCopy.getDeliveryStatusCopy(status).message,
+      'Generando tu diagnóstico predial.',
+      `estado "${status}" debe colapsar al texto de PROCESSING`,
+    );
+  }
+  assert.equal(
+    statusCopy.getDeliveryStatusCopy('SENT').message,
+    'Entregable enviado al correo y disponible para descarga.',
+  );
+  assert.equal(
+    statusCopy.getDeliveryStatusCopy('FAILED').message,
+    'No fue posible completar el envío. Puedes reintentar o contactar soporte.',
+  );
+});
+
+test('28) getInvoiceStatusCopy: NOT_REQUESTED usa el texto exacto pedido sobre facturación pendiente de integración', () => {
+  assert.equal(
+    statusCopy.getInvoiceStatusCopy('NOT_REQUESTED').message,
+    'Facturación electrónica pendiente de integración con el operador autorizado.',
+  );
+  assert.equal(
+    statusCopy.getInvoiceStatusCopy(undefined).message,
+    'Facturación electrónica pendiente de integración con el operador autorizado.',
+  );
+});

@@ -108,6 +108,29 @@ export async function findApprovedOrderForSession({ sessionId, canonicalPredioId
 }
 
 /**
+ * ¿La orden identificada por `orderToken` está enlazada a esta sesión Y
+ * APPROVED? A diferencia de GET /orders/:orderToken/status (que responde a
+ * cualquiera que posea el token, por diseño), esto es el gate real de
+ * ownership para descarga/reintento de entrega (CATX-DELIVERY-001) -- el
+ * orderToken por sí solo nunca basta, tiene que estar enlazado a ESTA
+ * sesión de recuperación.
+ */
+export async function findApprovedOrderForSessionByToken({ sessionId, orderToken }, client = null) {
+  if (!sessionId || !orderToken) return null;
+  const result = await run(
+    client,
+    `select po.* from ${ORDERS_TABLE} po
+       join ${SESSION_ORDERS_TABLE} so on so.payment_order_id = po.id
+      where so.recovery_session_id = $1
+        and po.order_token = $2
+        and po.status = 'APPROVED'
+      limit 1`,
+    [sessionId, orderToken],
+  );
+  return result.rows[0] || null;
+}
+
+/**
  * ¿Esta sesión tiene ALGUNA orden APPROVED, sin importar el predio?
  * Usada exclusivamente para distinguir, en el gate de full-result
  * (server/routes/catastrox.js), "sin ninguna compra aprobada todavía"

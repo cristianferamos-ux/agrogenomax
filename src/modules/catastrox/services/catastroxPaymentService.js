@@ -1240,6 +1240,122 @@ export async function getMyOrders() {
   return { ok: false, orders: [], message: 'No fue posible consultar su historial de compras.' };
 }
 
+// --- Entrega del PDF comprado (CATX-DELIVERY-001) --------------------------
+//
+// Mismo patrón de auth que getMyOrders/checkEntitlement: credentials:'include'
+// -- la sesión de recuperación HttpOnly es la única credencial, este cliente
+// nunca la lee ni la maneja. El orderToken por sí solo NO basta en el
+// backend (ver server/services/catastrox/recoverySessionRepository.js,
+// findApprovedOrderForSessionByToken) -- debe estar enlazado a la sesión
+// activa de este navegador.
+
+/**
+ * Descarga el PDF del entregable de una orden ya aprobada. Se hace vía
+ * fetch+blob (no un <a href> directo) para poder: (a) probar los mismos
+ * candidatos de apiBase que el resto de este archivo, y (b) mostrar un
+ * mensaje de error controlado (401/403/404) en vez de dejar que el
+ * navegador navegue a una respuesta JSON de error.
+ */
+export async function downloadDeliverablePdf(orderToken) {
+  const normalizedOrderToken = String(orderToken || '').trim();
+  if (!normalizedOrderToken) {
+    return { ok: false, code: 'ORDER_NOT_FOUND', message: 'Orden no encontrada.' };
+  }
+
+  let lastError = null;
+
+  for (const apiBase of getApiBaseCandidates()) {
+    const url = `${apiBase}/catastrox/payments/orders/${encodeURIComponent(normalizedOrderToken)}/deliverable/download`;
+
+    try {
+      const response = await fetch(url, { credentials: 'include' });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        return {
+          ok: false,
+          code: payload?.code || 'DOWNLOAD_ERROR',
+          message: payload?.message || 'No fue posible descargar el archivo.',
+        };
+      }
+
+      const disposition = response.headers.get('Content-Disposition') || '';
+      const filenameMatch = disposition.match(/filename="?([^"]+)"?/);
+      const filename = filenameMatch?.[1] || 'catastrox.pdf';
+      const blob = await response.blob();
+
+      if (isBrowser()) {
+        const objectUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 1000);
+      }
+
+      return { ok: true, filename };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  return {
+    ok: false,
+    code: 'NETWORK_ERROR',
+    message:
+      lastError instanceof Error
+        ? lastError.message
+        : 'No fue posible conectar con el backend de pagos de CatastroX.',
+  };
+}
+
+/**
+ * Reintenta el envío de correo de una orden cuyo job de entrega quedó
+ * FAILED. El backend rechaza (409) si el job no está FAILED (p. ej. ya
+ * SENT) -- este cliente solo traduce esa respuesta, nunca decide por su
+ * cuenta si el reintento es válido.
+ */
+export async function retryDeliveryForOrder(orderToken) {
+  const normalizedOrderToken = String(orderToken || '').trim();
+  if (!normalizedOrderToken) {
+    return { ok: false, code: 'ORDER_NOT_FOUND', message: 'Orden no encontrada.' };
+  }
+
+  let lastError = null;
+
+  for (const apiBase of getApiBaseCandidates()) {
+    const url = `${apiBase}/catastrox/payments/orders/${encodeURIComponent(normalizedOrderToken)}/delivery/retry`;
+
+    try {
+      const response = await fetch(url, { method: 'POST', credentials: 'include' });
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok || payload?.ok !== true) {
+        return {
+          ok: false,
+          code: payload?.code || 'RETRY_ERROR',
+          message: payload?.message || 'No fue posible reintentar el envío.',
+        };
+      }
+
+      return { ok: true, status: payload.status, errorCode: payload.errorCode || null };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  return {
+    ok: false,
+    code: 'NETWORK_ERROR',
+    message:
+      lastError instanceof Error
+        ? lastError.message
+        : 'No fue posible conectar con el backend de pagos de CatastroX.',
+  };
+}
+
 export async function startPackageCheckout({
   packageId,
   lookup,

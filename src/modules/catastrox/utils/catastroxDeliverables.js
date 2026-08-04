@@ -512,7 +512,10 @@ function buildMapRingFromParts(parts) {
   return normalizeRing(points);
 }
 
-function partPredio(predio, part, totalParts = 1) {
+// CATX-DELIVERY-001: exportada (sin ningún otro cambio) para que el
+// generador server-side (server/services/catastrox/pdf/catastroxPdfGenerator.js)
+// reutilice exactamente esta misma lógica de datos -- nunca una copia.
+export function partPredio(predio, part, totalParts = 1) {
   return {
     ...predio,
     ring: part.outerRing,
@@ -526,7 +529,7 @@ function partPredio(predio, part, totalParts = 1) {
   };
 }
 
-function normalizePredioForDeliverables(source) {
+export function normalizePredioForDeliverables(source) {
   const predio = source?.predio || source || {};
   const geometry =
     predio.geometry ||
@@ -1283,7 +1286,7 @@ function drawDistanceTablePanel(context, rect, referenceSegments) {
   }
 }
 
-function resolvePlanLayoutOptions(predio, options = {}) {
+export function resolvePlanLayoutOptions(predio, options = {}) {
   const { preferDenseVisiblePoints: _preferDenseVisiblePoints, ...rest } = options;
   return rest;
 }
@@ -2328,7 +2331,7 @@ function buildContextoPredioText(predio) {
   return `Predio ${zona.toLowerCase()} denominado ${toProperNameTitleCase(predio.nombrePredio)}, ubicado en el municipio de ${municipio}, ${departamento}. La fuente catastral registra ${destinacionText}${usosText}.`;
 }
 
-function estimateFichaTecnicaPageCount(predio) {
+export function estimateFichaTecnicaPageCount(predio) {
   const usosCount = buildUsosConstructivosList(predio).length;
   const tiposLineCount = formatTiposConstruccionDisplayLines(predio.tiposConstruccionResumen).length;
   return usosCount > 3 || tiposLineCount > 3 ? 2 : 1;
@@ -3394,7 +3397,7 @@ function recoverLongVisibleSpanCandidates(allVisibleCandidates, visibleCandidate
   };
 }
 
-function buildLayoutData(predio, options = {}) {
+export function buildLayoutData(predio, options = {}) {
   const previewMapRect = insetRect(SATELLITE_LAYOUT.mapArea, 10);
   const presentationRing = predio.displayRing?.length ? predio.displayRing : predio.ring;
   const presentationOpenRing = presentationRing.slice(0, -1);

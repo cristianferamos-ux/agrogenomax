@@ -23,30 +23,31 @@ export function getPaymentStatusCopy(status) {
   }
 }
 
-// Texto EXACTO requerido para el único modo de fallo real hoy
-// (SERVER_SIDE_GENERATION_NOT_IMPLEMENTED, ver deliveryJobService.js) --
-// nunca se muestra "enviado" para una orden en este estado.
-const DELIVERY_NOT_IMPLEMENTED_MESSAGE =
-  'Pago aprobado. Estamos preparando la generación y entrega de los archivos. ' +
-  'El sistema de envío automático aún no está disponible en este entorno. ' +
-  'Conserva la referencia de tu orden y contacta soporte.';
+// Textos EXACTOS requeridos por el pedido (CATX-DELIVERY-001) para los 4
+// estados de entrega que el usuario final debe ver. El backend usa el enum
+// completo de catastrox_delivery_job_status (9 valores, ver
+// server/services/catastrox/deliveryJobService.js) -- aquí se colapsa a los
+// 4 pedidos: QUEUED->PENDING, GENERATING/READY/SENDING->PROCESSING,
+// SENT->SENT, FAILED->FAILED. DELIVERED/EXPIRED no los usa el pipeline
+// actual pero quedan mapeados de forma razonable (no eliminados del enum).
+const PENDING_MESSAGE = 'Estamos preparando tus archivos.';
+const PROCESSING_MESSAGE = 'Generando tu diagnóstico predial.';
+const SENT_MESSAGE = 'Entregable enviado al correo y disponible para descarga.';
+const FAILED_MESSAGE = 'No fue posible completar el envío. Puedes reintentar o contactar soporte.';
 
 export function getDeliveryStatusCopy(status, { paymentApproved = false } = {}) {
   switch (status) {
-    case 'DELIVERED':
-      return { label: 'Entregados', message: 'Los archivos fueron entregados a su correo.', tone: 'success' };
     case 'SENT':
-      return { label: 'Enviados', message: 'Los archivos fueron enviados a su correo.', tone: 'success' };
+    case 'DELIVERED':
+      return { label: 'Entregado', message: SENT_MESSAGE, tone: 'success' };
     case 'SENDING':
-      return { label: 'Envío en proceso', message: 'El envío de los archivos está en curso.', tone: 'warning' };
     case 'READY':
-      return { label: 'Archivos listos', message: 'Los archivos están listos, en espera de envío.', tone: 'warning' };
     case 'GENERATING':
-      return { label: 'Generando archivos', message: 'Estamos generando los archivos de su compra.', tone: 'warning' };
+      return { label: 'En proceso', message: PROCESSING_MESSAGE, tone: 'warning' };
     case 'QUEUED':
-      return { label: 'En cola para generación', message: 'Su solicitud está en cola para generarse.', tone: 'warning' };
+      return { label: 'En preparación', message: PENDING_MESSAGE, tone: 'warning' };
     case 'FAILED':
-      return { label: 'Error de generación/envío', message: DELIVERY_NOT_IMPLEMENTED_MESSAGE, tone: 'warning' };
+      return { label: 'Envío no completado', message: FAILED_MESSAGE, tone: 'warning' };
     case 'EXPIRED':
       return { label: 'Ventana de entrega expirada', message: 'Contacte soporte para reactivar la entrega.', tone: 'danger' };
     case 'WAITING_FOR_PAYMENT':
@@ -55,7 +56,7 @@ export function getDeliveryStatusCopy(status, { paymentApproved = false } = {}) 
       return {
         label: paymentApproved ? 'Pendiente de generación' : 'Pendiente de aprobación del pago',
         message: paymentApproved
-          ? 'Su pago fue aprobado; la generación de archivos todavía no ha comenzado.'
+          ? PENDING_MESSAGE
           : 'La generación de archivos comienza únicamente después de un pago aprobado.',
         tone: 'warning',
       };
@@ -74,6 +75,10 @@ export function getInvoiceStatusCopy(status) {
       return { label: 'Factura cancelada', message: 'La solicitud de factura fue cancelada.', tone: 'danger' };
     case 'NOT_REQUESTED':
     default:
-      return { label: 'Factura no disponible todavía', message: 'La facturación electrónica todavía no ha sido solicitada.', tone: 'warning' };
+      return {
+        label: 'Factura no disponible todavía',
+        message: 'Facturación electrónica pendiente de integración con el operador autorizado.',
+        tone: 'warning',
+      };
   }
 }

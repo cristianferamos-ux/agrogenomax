@@ -133,6 +133,23 @@ function buildSignedEvent({ transactionId, reference, status = 'APPROVED', amoun
   };
 }
 
+// CATX-DELIVERY-001 (ajuste obligatorio #8): triggerPostApprovalWorkflows ya
+// no espera a que termine processDeliveryJob -- lo dispara desacoplado para
+// no bloquear la respuesta del webhook/verify. Las pruebas que necesitan el
+// estado TERMINAL del delivery job (para no aseverar contra un QUEUED/
+// GENERATING todavía en curso) deben esperarlo explícitamente en vez de
+// asumir que ya terminó cuando la petición HTTP responde.
+async function waitForDeliveryJobTerminal(orderId, { timeoutMs = 5000, intervalMs = 50 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const result = await query('select status from public.catastrox_delivery_jobs where payment_order_id = $1', [orderId]);
+    const status = result.rows[0]?.status;
+    if (status === 'SENT' || status === 'FAILED') return result.rows;
+    if (Date.now() >= deadline) return result.rows;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
 async function cleanupTestData() {
   if (!dbAvailable) return;
   const orders = await query('select id, customer_id from public.catastrox_payment_orders where canonical_predio_id = $1', [
@@ -274,9 +291,13 @@ test('webhook de eventos de Wompi (integración, requiere Postgres real)', { ski
       // el trabajo de entrega y el de facturación exactamente una vez.
       const orderRow = await query('select id from public.catastrox_payment_orders where wompi_reference = $1', [reference]);
       const orderId = orderRow.rows[0].id;
-      const deliveryJobs = await query('select status from public.catastrox_delivery_jobs where payment_order_id = $1', [orderId]);
-      assert.equal(deliveryJobs.rows.length, 1, 'exactamente un delivery job, el replay no debe duplicarlo');
-      assert.equal(deliveryJobs.rows[0].status, 'FAILED', 'generación no implementada en este alcance -- FAILED documentado, nunca DELIVERED simulado');
+      const deliveryJobRows = await waitForDeliveryJobTerminal(orderId);
+      assert.equal(deliveryJobRows.length, 1, 'exactamente un delivery job, el replay no debe duplicarlo');
+      // El predio de prueba (TEST_CODIGO) no existe en catastrox_clean, así
+      // que la generación real (PDFKit) falla con PREDIO_DATA_UNAVAILABLE --
+      // FAILED sigue siendo el resultado honesto esperado aquí, nunca
+      // SENT/DELIVERED simulado.
+      assert.equal(deliveryJobRows[0].status, 'FAILED', 'predio de prueba no resoluble -- FAILED esperado, nunca SENT/DELIVERED simulado');
 
       const invoiceJobs = await query('select status from public.catastrox_invoice_jobs where payment_order_id = $1', [orderId]);
       assert.equal(invoiceJobs.rows.length, 1, 'exactamente un invoice job, el replay no debe duplicarlo');

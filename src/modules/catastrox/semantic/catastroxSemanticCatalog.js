@@ -1,4 +1,11 @@
-import catalog from './catastroxSemanticCatalog.caqueta.json';
+// CATX-DELIVERY-001: atributo de importación explícito -- necesario para
+// que este archivo (y todo lo que depende de él, incluida
+// catastroxDeliverables.js, ahora también importada desde
+// server/services/catastrox/pdf/catastroxPdfGenerator.js) sea cargable
+// directamente por Node además de por Vite. Vite ya soporta esta sintaxis
+// de forma nativa (ES2025 import attributes) -- sin cambio de comportamiento
+// en el navegador.
+import catalog from './catastroxSemanticCatalog.caqueta.json' with { type: 'json' };
 
 const AMBIGUOUS_DESTINO_CODES = new Set(['V']);
 const EMPTY_VALUES = new Set(['', 'NO DISPONIBLE', 'NO REGISTRA', 'NO ESPECIFICADO', 'NULL', 'UNDEFINED']);
