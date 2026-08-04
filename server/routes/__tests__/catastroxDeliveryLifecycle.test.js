@@ -51,12 +51,38 @@ try {
   dbAvailable = false;
 }
 
+let rateLimiters = [];
+
 if (dbAvailable) {
   ({ default: catastroxPaymentsRouter } = await import('../catastroxPayments.js'));
   ({ computeWompiEventChecksum } = await import('../../services/catastrox/wompiEventVerification.js'));
   ({ __rememberLookupPreviewForTests } = await import('../catastrox.js'));
   __rememberLookupPreviewForTests(TEST_ROUTE_ID, { canonicalPredioId: REAL_TEST_CODIGO, codigoPredial: REAL_TEST_CODIGO });
   deliveryJobService = await import('../../services/catastrox/deliveryJobService.js');
+  const limiterModule = await import('../../middleware/rateLimit.js');
+  // Los limitadores son singletons de módulo (mismo store en memoria durante
+  // todo este proceso de test, ver catastroxPaymentOrders.test.js) -- este
+  // archivo por sí solo ya hace más llamadas a /checkout de las que
+  // checkoutLimiter permitiría en una ventana real de 5 minutos. Se
+  // resetean antes de cada prueba que abre un checkout nuevo -- se prueba
+  // la lógica de negocio de la entrega, no el rate limiting (que tiene su
+  // propia suite dedicada en middleware/__tests__/rateLimit.test.js).
+  rateLimiters = [
+    limiterModule.checkoutLimiter,
+    limiterModule.customerLimiter,
+    limiterModule.emailVerificationLimiter,
+    limiterModule.verifyLimiter,
+    limiterModule.entitlementLimiter,
+    limiterModule.orderStatusLimiter,
+  ];
+}
+
+function resetRateLimiters() {
+  for (const limiter of rateLimiters) {
+    for (const candidateKey of ['127.0.0.1', '::1', '::ffff:127.0.0.1']) {
+      limiter.resetKey(candidateKey);
+    }
+  }
 }
 
 const originalFetch = globalThis.fetch;
@@ -233,6 +259,7 @@ async function waitForDeliveryJobTerminal(orderId, { timeoutMs = 5000, intervalM
 async function cleanupOrder(order, customerId) {
   if (!dbAvailable || !order) return;
   await query('delete from public.catastrox_deliverable_blobs where deliverable_id in (select id from public.catastrox_deliverables where delivery_job_id in (select id from public.catastrox_delivery_jobs where payment_order_id = $1))', [order.id]);
+  await query('delete from public.catastrox_delivery_attempts where delivery_job_id in (select id from public.catastrox_delivery_jobs where payment_order_id = $1)', [order.id]);
   await query('delete from public.catastrox_deliverables where delivery_job_id in (select id from public.catastrox_delivery_jobs where payment_order_id = $1)', [order.id]);
   await query('delete from public.catastrox_delivery_jobs where payment_order_id = $1', [order.id]);
   await query('delete from public.catastrox_invoice_jobs where payment_order_id = $1', [order.id]);
@@ -257,6 +284,12 @@ test('CATX-DELIVERY-001: ciclo de vida del delivery job (integración, requiere 
     delete process.env.RESEND_API_KEY;
     delete process.env.EMAIL_FROM;
   });
+
+  // CATX-DELIVERY-OBSERVABILITY-001: sumadas, las pruebas de este archivo
+  // ya superan el máximo real de checkoutLimiter (10 por 5 minutos) --
+  // resetear antes de cada subprueba evita falsos 429 (mismo mecanismo que
+  // catastroxPaymentOrders.test.js).
+  t.beforeEach(() => resetRateLimiters());
 
   await t.test('1) una orden NO aprobada nunca genera un deliverable', async () => {
     const app = await startTestApp();
@@ -552,6 +585,132 @@ test('CATX-DELIVERY-001: ciclo de vida del delivery job (integración, requiere 
     } finally {
       restoreMapMock();
       await cleanupOrder(created?.order, created?.customerId);
+      await app.close();
+    }
+  });
+
+  // CATX-DELIVERY-OBSERVABILITY-001 (requisito 9): el escenario completo
+  // pedido explícitamente -- un primer intento que falla ANTES de crear
+  // ningún deliverable (orden aún no aprobada), un segundo intento (tras la
+  // aprobación real) que genera exactamente un deliverable, y el historial
+  // en catastrox_delivery_attempts conservando AMBAS filas sin sobrescribir
+  // la primera. La aprobación se fuerza por SQL directo en vez de un
+  // segundo webhook a propósito: aísla la condición de carrera real
+  // (job creado/procesado antes de que la orden esté APPROVED) sin
+  // depender de reproducir la firma/checksum de Wompi otra vez.
+  await t.test('9) primer intento falla antes del deliverable; segundo intento (ya aprobada) crea uno solo; el historial conserva ambos', async () => {
+    const app = await startTestApp();
+    let order = null;
+    let customerId = null;
+    try {
+      const { customerId: cid } = await createVerifiedTestCustomer(app.baseUrl);
+      customerId = cid;
+      const checkoutResponse = await fetch(`${app.baseUrl}/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID, customerId, purchaseAttemptId: crypto.randomUUID() }),
+      });
+      const { reference } = (await checkoutResponse.json()).checkout;
+      const orderRow = await query('select * from public.catastrox_payment_orders where wompi_reference = $1', [reference]);
+      order = orderRow.rows[0];
+      assert.equal(order.status, 'PENDING');
+
+      const job = await deliveryJobService.createDeliveryJobForOrder({
+        orderId: order.id,
+        customerId,
+        deliveryEmail: 'no-approved-yet@example.com',
+      });
+
+      // --- Primer intento: la orden todavía no está APPROVED. ---
+      const firstAttemptJob = await deliveryJobService.processDeliveryJob(job.id);
+      assert.equal(firstAttemptJob.status, 'FAILED');
+      assert.equal(firstAttemptJob.last_error_code, 'ORDER_NOT_APPROVED');
+      assert.equal(
+        (await deliveryJobService.listDeliverablesForJob(job.id)).length,
+        0,
+        'el primer intento no debe dejar ningún deliverable almacenado',
+      );
+
+      const attemptsAfterFirst = await deliveryJobService.listAttemptsForJob(job.id);
+      assert.equal(attemptsAfterFirst.length, 1, 'debe existir exactamente una fila de historial tras el primer intento');
+      assert.equal(attemptsAfterFirst[0].attempt_number, 1);
+      assert.equal(attemptsAfterFirst[0].status, 'FAILED');
+      assert.equal(attemptsAfterFirst[0].error_code, 'ORDER_NOT_APPROVED');
+      assert.equal(attemptsAfterFirst[0].deliverable_id, null);
+
+      // --- La orden pasa a APPROVED (aprobación real, fuera de este job). ---
+      await query("update public.catastrox_payment_orders set status = 'APPROVED' where id = $1", [order.id]);
+
+      // --- Segundo intento: ahora sí debe generar y almacenar el PDF. ---
+      const secondAttemptJob = await deliveryJobService.retryDeliveryJob(job.id);
+      assert.equal(secondAttemptJob.attempt_count, 2);
+      // En dev/test el proveedor de correo real sigue deshabilitado -- el
+      // job vuelve a quedar FAILED, pero esta vez el deliverable SÍ debe
+      // haberse generado y almacenado (ajuste obligatorio #3).
+      assert.equal(secondAttemptJob.last_error_code, 'EMAIL_PROVIDER_DISABLED');
+
+      const deliverablesAfterSecond = await deliveryJobService.listDeliverablesForJob(job.id);
+      assert.equal(deliverablesAfterSecond.length, 1, 'el segundo intento debe crear un único deliverable, no duplicarlo');
+      const deliverable = deliverablesAfterSecond[0];
+
+      const attemptsAfterSecond = await deliveryJobService.listAttemptsForJob(job.id);
+      assert.equal(attemptsAfterSecond.length, 2, 'el historial debe conservar ambos intentos como filas separadas');
+      assert.equal(attemptsAfterSecond[0].attempt_number, 1);
+      assert.equal(attemptsAfterSecond[0].error_code, 'ORDER_NOT_APPROVED', 'el primer intento no debe reescribirse al insertar el segundo');
+      assert.equal(attemptsAfterSecond[0].deliverable_id, null);
+      assert.equal(attemptsAfterSecond[1].attempt_number, 2);
+      assert.equal(attemptsAfterSecond[1].error_code, 'EMAIL_PROVIDER_DISABLED');
+      assert.equal(attemptsAfterSecond[1].deliverable_id, deliverable.id);
+
+      // --- Checksum: blob almacenado / descarga / adjunto de correo deben coincidir. ---
+      // fetchVerifiedDeliverableForOrder es exactamente la función que usa
+      // el endpoint GET .../deliverable/download (server/routes/catastroxPayments.js)
+      // para servir los bytes -- reutilizarla aquí prueba la misma ruta de
+      // lectura+re-verificación de checksum que atraviesa una descarga real,
+      // sin necesidad de duplicar aquí la lógica de sesión/ownership ya
+      // cubierta por la prueba 6.
+      const verified = await deliveryJobService.fetchVerifiedDeliverableForOrder(order.id);
+      const blobChecksum = crypto.createHash('sha256').update(verified.bytes).digest('hex');
+      assert.equal(blobChecksum, deliverable.content_hash);
+
+      const originalAppEnv = process.env.APP_ENV;
+      process.env.APP_ENV = 'staging';
+      process.env.EMAIL_PROVIDER = 'resend';
+      process.env.RESEND_API_KEY = 're_synthetic_test_key_1234567890';
+      process.env.EMAIL_FROM = 'CatastroX <no-reply@mail.staging.agrogenomax.com>';
+
+      let capturedAttachmentBase64 = null;
+      withFetchMock((url, options) => {
+        if (url.includes('api.resend.com')) {
+          capturedAttachmentBase64 = JSON.parse(options.body).attachments[0].content;
+          return jsonResponse(200, { id: 'msg_lifecycle_9' });
+        }
+        return jsonResponse(500, { message: 'no debería llamarse en este paso' });
+      });
+      let sentJob;
+      try {
+        sentJob = await deliveryJobService.retryDeliveryJob(job.id);
+      } finally {
+        restoreFetch();
+        if (originalAppEnv === undefined) delete process.env.APP_ENV;
+        else process.env.APP_ENV = originalAppEnv;
+      }
+      assert.equal(sentJob.status, 'SENT');
+      assert.ok(capturedAttachmentBase64, 'el correo enviado debe llevar el PDF como adjunto');
+      const emailChecksum = crypto.createHash('sha256').update(Buffer.from(capturedAttachmentBase64, 'base64')).digest('hex');
+      assert.equal(emailChecksum, deliverable.content_hash, 'el adjunto del correo debe tener el mismo checksum que el blob almacenado');
+
+      assert.equal(
+        (await deliveryJobService.listDeliverablesForJob(job.id)).length,
+        1,
+        'el envío exitoso final tampoco debe duplicar el deliverable',
+      );
+      const attemptsFinal = await deliveryJobService.listAttemptsForJob(job.id);
+      assert.equal(attemptsFinal.length, 3, 'el tercer intento (envío exitoso) agrega su propia fila, sin tocar las dos anteriores');
+      assert.equal(attemptsFinal[2].status, 'SENT');
+      assert.equal(attemptsFinal[2].content_hash, deliverable.content_hash);
+    } finally {
+      await cleanupOrder(order, customerId);
       await app.close();
     }
   });

@@ -90,6 +90,8 @@ async function cleanupTestData() {
   const customerIds = orders.rows.map((row) => row.customer_id).filter(Boolean);
 
   if (orderIds.length) {
+    await query('delete from public.catastrox_delivery_attempts where delivery_job_id in (select id from public.catastrox_delivery_jobs where payment_order_id = any($1))', [orderIds]);
+    await query('delete from public.catastrox_deliverables where delivery_job_id in (select id from public.catastrox_delivery_jobs where payment_order_id = any($1))', [orderIds]);
     await query('delete from public.catastrox_delivery_jobs where payment_order_id = any($1)', [orderIds]);
     await query('delete from public.catastrox_invoice_jobs where payment_order_id = any($1)', [orderIds]);
     await query('delete from public.catastrox_billing_profiles where payment_order_id = any($1)', [orderIds]);
