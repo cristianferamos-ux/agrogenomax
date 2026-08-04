@@ -11,7 +11,7 @@ import {
   CorsConfigurationError,
   resolveAllowedOriginsForEnvironment,
   resolvePublicOriginForEnvironment,
-} from '../../shared/security/corsPolicy.js';
+} from '../security/corsPolicyCore.js';
 import { isEmailFromValidForEnvironment } from '../services/catastrox/emailSender.js';
 
 export const ALLOWED_APP_ENVIRONMENTS = Object.freeze([
