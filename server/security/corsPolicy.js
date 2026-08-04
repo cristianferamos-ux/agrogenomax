@@ -1,9 +1,11 @@
 /**
  * Adaptador Express de la política CORS (LOTE-004, ADR-014 §7 Barrera 4/
  * §21, ADR-013 §21). La lógica de decisión pura vive en
- * shared/security/corsPolicy.js -- este módulo únicamente construye la
- * política final (con los métodos/headers/credentials que no varían por
- * `APP_ENV`) y la conecta a `req`/`res`/`next`.
+ * server/security/corsPolicyCore.js (copia server-side de
+ * shared/security/corsPolicy.js -- ver hotfix Railway en ese archivo) --
+ * este módulo únicamente construye la política final (con los
+ * métodos/headers/credentials que no varían por `APP_ENV`) y la conecta a
+ * `req`/`res`/`next`.
  *
  * CORS no es autenticación (decisión vinculante de este lote): un origen
  * permitido aquí no exime a ninguna ruta de exigir autenticación,
@@ -17,7 +19,7 @@ import {
   evaluateCorsRequest,
   isOriginAllowed,
   normalizeOrigin,
-} from '../../shared/security/corsPolicy.js';
+} from './corsPolicyCore.js';
 
 export { DEFAULT_CORS_HEADERS, DEFAULT_CORS_METHODS, buildCorsPolicy, evaluateCorsRequest, isOriginAllowed, normalizeOrigin };
 

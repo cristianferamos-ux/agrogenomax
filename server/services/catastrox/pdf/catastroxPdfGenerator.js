@@ -5,17 +5,18 @@
 // canvas hecho a mano) se mantiene intacto como respaldo -- este módulo NO
 // lo reemplaza, coexiste con él.
 //
-// Reutiliza directamente la capa de DATOS/GEOMETRÍA de catastroxDeliverables.js
-// (verificada libre de document/window/canvas -- ver auditoría del sprint):
-// normalizePredioForDeliverables, resolvePlanLayoutOptions, buildLayoutData,
-// estimateFichaTecnicaPageCount, resolvePdfContentMode,
-// resolvePdfSummaryCardContent, resolvePdfUsoAlcanceContent,
-// resolveExecutiveTableHeaders, buildUnifiedTableRows,
-// resolvePdfTechnicalPageTitle, resolvePdfExecutiveBottomNote,
-// buildCatastroxDeliverableFilename. Solo se reescribe la capa de DIBUJO
-// (antes canvas, ahora PDFKit) -- prioriza paridad de contenido y
-// estructura de página sobre replicar píxel a píxel el diseño satelital
-// del navegador (riesgo documentado en el informe del sprint).
+// HOTFIX RAILWAY (producción: ERR_MODULE_NOT_FOUND al importar src/ -- la
+// imagen de Railway solo contiene server/, npm ci/start corren con
+// --prefix server): este archivo ya NO importa nada desde src/. Las
+// funciones de datos/layout viven copiadas y autosuficientes en
+// ./catastroxPdfLayout.js (que a su vez usa ./catastroxPdfGeometry.js y
+// ./catastroxPdfFormatting.js) -- mismo contenido que catastroxDeliverables.js,
+// extraído por cierre de dependencias (AST) sobre exactamente las funciones
+// que este generador usa. server/__tests__/architecture/noSrcImports.test.js
+// falla el build si algo bajo server/ vuelve a importar desde src/.
+// Solo se reescribe la capa de DIBUJO (antes canvas, ahora PDFKit) --
+// prioriza paridad de contenido y estructura de página sobre replicar
+// píxel a píxel el diseño satelital del navegador (riesgo ya documentado).
 import PDFDocument from 'pdfkit';
 import {
   normalizePredioForDeliverables,
@@ -30,7 +31,7 @@ import {
   resolvePdfTechnicalPageTitle,
   resolvePdfExecutiveBottomNote,
   buildCatastroxDeliverableFilename,
-} from '../../../../src/modules/catastrox/utils/catastroxDeliverables.js';
+} from './catastroxPdfLayout.js';
 
 const PAGE_SIZE = 'LETTER';
 const MARGIN = 50;
