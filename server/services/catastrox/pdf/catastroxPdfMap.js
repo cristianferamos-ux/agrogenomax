@@ -47,11 +47,19 @@ function tileUrl(template, z, x, y) {
 }
 
 class MapRenderError extends Error {
-  constructor(message, { cause } = {}) {
+  constructor(message, { cause, httpStatus, transient } = {}) {
     super(message);
     this.name = 'MapRenderError';
     this.code = 'MAP_RENDER_FAILED';
     if (cause) this.cause = cause;
+    if (typeof httpStatus === 'number') this.httpStatus = httpStatus;
+    // Por defecto todo fallo de red/timeout/tesela vacía se considera
+    // TRANSITORIO (vale la pena reintentar); una respuesta HTTP 4xx
+    // explícita (petición mal formada, tesela fuera de rango válido, etc.)
+    // se marca explícitamente como NO transitoria más abajo -- nunca se
+    // reintenta un error de datos/validación, solo fallos de
+    // infraestructura (CATX-DELIVERY-OBSERVABILITY-001, requisito 7).
+    this.transient = typeof transient === 'boolean' ? transient : true;
   }
 }
 
@@ -61,7 +69,15 @@ async function fetchTileBuffer(url, { timeoutMs = DEFAULT_TILE_TIMEOUT_MS } = {}
   try {
     const response = await fetch(url, { signal: controller.signal });
     if (!response.ok) {
-      throw new MapRenderError(`El proveedor de teselas respondió ${response.status} para ${url}.`);
+      // 4xx = petición/tesela inválida (dato), no un problema transitorio
+      // de infraestructura -- reintentarla no cambiaría el resultado.
+      // 5xx/429 sí se tratan como transitorios (sobrecarga temporal del
+      // proveedor).
+      const isClientError = response.status >= 400 && response.status < 500 && response.status !== 429;
+      throw new MapRenderError(`El proveedor de teselas respondió ${response.status} para ${url}.`, {
+        httpStatus: response.status,
+        transient: !isClientError,
+      });
     }
     const arrayBuffer = await response.arrayBuffer();
     if (!arrayBuffer.byteLength) {
@@ -77,6 +93,43 @@ async function fetchTileBuffer(url, { timeoutMs = DEFAULT_TILE_TIMEOUT_MS } = {}
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+// CATX-DELIVERY-OBSERVABILITY-001 (requisito 7): reintento automático con
+// espera incremental corta, EXCLUSIVAMENTE para fallos transitorios de una
+// tesela individual (timeout, error de red, 5xx/429) -- máximo 2
+// reintentos adicionales por tesela (3 intentos totales). Un error NO
+// transitorio (4xx, dato/predio inválido) se propaga de inmediato, sin
+// reintentar. Cada tesela de cada capa tiene su propio presupuesto de
+// reintentos independiente (se llama una vez por tesela, en paralelo).
+const DEFAULT_TILE_RETRY_COUNT = 2;
+const DEFAULT_TILE_RETRY_BASE_DELAY_MS = 150;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchTileBufferWithRetry(url, {
+  timeoutMs = DEFAULT_TILE_TIMEOUT_MS,
+  fetchTile = fetchTileBuffer,
+  retries = DEFAULT_TILE_RETRY_COUNT,
+  retryBaseDelayMs = DEFAULT_TILE_RETRY_BASE_DELAY_MS,
+  sleepImpl = sleep,
+  onRetry = null,
+} = {}) {
+  let lastError;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await fetchTile(url, { timeoutMs });
+    } catch (error) {
+      lastError = error;
+      const transient = error?.transient !== false;
+      if (!transient || attempt === retries) throw error;
+      if (onRetry) onRetry({ url, attempt: attempt + 1, error });
+      await sleepImpl(retryBaseDelayMs * (attempt + 1));
+    }
+  }
+  throw lastError;
 }
 
 /**
@@ -125,7 +178,13 @@ export function computeTilePlacements(mapState, zoneWidth, zoneHeight) {
  *
  * @returns {Promise<Array<{buffer: Buffer, drawX: number, drawY: number}>>}
  */
-export async function fetchSatelliteMosaic(mapState, zoneWidth, zoneHeight, { timeoutMs = DEFAULT_TILE_TIMEOUT_MS, fetchTile = fetchTileBuffer } = {}) {
+export async function fetchSatelliteMosaic(mapState, zoneWidth, zoneHeight, {
+  timeoutMs = DEFAULT_TILE_TIMEOUT_MS,
+  fetchTile = fetchTileBuffer,
+  retries = DEFAULT_TILE_RETRY_COUNT,
+  retryBaseDelayMs = DEFAULT_TILE_RETRY_BASE_DELAY_MS,
+  onTileRetry = null,
+} = {}) {
   const placements = computeTilePlacements(mapState, zoneWidth, zoneHeight);
   if (!placements.length) {
     throw new MapRenderError('No fue posible determinar ninguna tesela satelital para el recuadro del mapa.');
@@ -137,11 +196,12 @@ export async function fetchSatelliteMosaic(mapState, zoneWidth, zoneHeight, { ti
   for (const template of layers) {
     // Secuencial por capa (imagería primero, etiquetas encima) para que el
     // orden de dibujo en PDFKit sea determinista; dentro de cada capa las
-    // teselas se piden en paralelo.
+    // teselas se piden en paralelo -- cada tesela con su propio
+    // presupuesto de reintentos (fetchTileBufferWithRetry).
     const layerTiles = await Promise.all(
       placements.map(async (placement) => {
         const url = tileUrl(template, mapState.zoom, placement.tileX, placement.tileY);
-        const buffer = await fetchTile(url, { timeoutMs });
+        const buffer = await fetchTileBufferWithRetry(url, { timeoutMs, fetchTile, retries, retryBaseDelayMs, onRetry: onTileRetry });
         return { buffer, drawX: placement.drawX, drawY: placement.drawY };
       }),
     );
@@ -151,4 +211,13 @@ export async function fetchSatelliteMosaic(mapState, zoneWidth, zoneHeight, { ti
   return allTiles;
 }
 
-export { MapRenderError, TILE_SIZE, IMAGERY_TILE_URL, LABELS_TILE_URL, fetchTileBuffer };
+export {
+  MapRenderError,
+  TILE_SIZE,
+  IMAGERY_TILE_URL,
+  LABELS_TILE_URL,
+  fetchTileBuffer,
+  fetchTileBufferWithRetry,
+  DEFAULT_TILE_RETRY_COUNT,
+  DEFAULT_TILE_RETRY_BASE_DELAY_MS,
+};

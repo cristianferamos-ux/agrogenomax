@@ -17,11 +17,23 @@
 // el PDF YA quedó generado y almacenado correctamente (deliverable
 // persistido antes del intento de envío), la descarga sigue funcionando,
 // y NUNCA se declara "enviado al correo" cuando no ocurrió de verdad.
+//
+// CATX-DELIVERY-OBSERVABILITY-001: cada llamada a processDeliveryJob (sea
+// el disparo automático tras APPROVED o un reintento manual) es un
+// "intento" con su propia fila INMUTABLE en catastrox_delivery_attempts
+// (migración 008, ver deliveryAttemptRepository.js) -- nunca se sobrescribe
+// ni se borra el historial de un intento anterior. Justo antes de enviar el
+// correo se re-verifica sha256(pdfBytes) contra deliverable.content_hash
+// (nunca confiar ciegamente en la variable en memoria) y se aborta con un
+// error controlado si no coincide -- defensa en profundidad, motivada por
+// un incidente real donde no había forma de reconstruir, después del
+// hecho, cuántos intentos hubo ni qué falló en cada uno.
 import crypto from 'crypto';
 import { query } from '../../db.js';
 import { encryptPii, hashEmail, decryptPii } from './piiCrypto.js';
 import * as paymentOrders from './paymentOrderRepository.js';
 import * as customers from './customerRepository.js';
+import { startDeliveryAttempt, completeDeliveryAttempt, listAttemptsForJob } from './deliveryAttemptRepository.js';
 // Reutiliza el mismo patrón de importación cruzada ruta->servicio ya
 // establecido en este repo (server/routes/catastroxPayments.js importa de
 // server/routes/catastrox.js) -- resolvePredioDataForDelivery es la única
@@ -63,6 +75,20 @@ function sha256Hex(buffer) {
   return crypto.createHash('sha256').update(buffer).digest('hex');
 }
 
+// CATX-DELIVERY-OBSERVABILITY-001 (requisito 3): logging estructurado --
+// mismo patrón ya usado en emailSender.js (console.log/console.error +
+// objeto plano), nunca un logger externo nuevo. Campos EXACTOS pedidos:
+// order_id, order_token, delivery_job_id, deliverable_id, attempt_count,
+// byte_size, checksum, provider_message_id, etapa, error_code,
+// error_message, timestamp -- cualquier campo ausente para una etapa dada
+// simplemente no se incluye (nunca null artificial). Nunca PII (sin email,
+// sin nombre, sin geometría).
+function logDeliveryEvent(stage, fields = {}) {
+  const level = fields.error_code ? console.error : console.log;
+  const entry = { timestamp: new Date().toISOString(), etapa: stage, ...fields };
+  level('[CatastroX Delivery]', entry);
+}
+
 /**
  * Crea el job principal de entrega de una orden -- EXACTAMENTE una fila
  * por payment_order_id (UNIQUE, migración 005). Sin cambios de
@@ -83,7 +109,20 @@ export async function createDeliveryJobForOrder({ orderId, customerId, deliveryE
   return result.rows[0];
 }
 
-async function markDeliveryJobFailed(jobId, errorCode) {
+/**
+ * Reemplaza el markDeliveryJobFailed original -- ahora, además de marcar el
+ * job FAILED, cierra la fila del intento en curso (catastrox_delivery_attempts)
+ * con el mismo error_code/error_message, y emite el log estructurado.
+ * `attemptId` puede ser null (p.ej. si processDeliveryJob falla ANTES de
+ * poder insertar la fila del intento) -- en ese caso solo se marca el job.
+ */
+async function markDeliveryJobFailed(jobId, errorCode, {
+  attemptId = null,
+  errorMessage = null,
+  stage = null,
+  order = null,
+  deliverable = null,
+} = {}) {
   const result = await query(
     `update ${DELIVERY_JOBS_TABLE}
         set status = 'FAILED',
@@ -95,7 +134,35 @@ async function markDeliveryJobFailed(jobId, errorCode) {
       returning *`,
     [jobId, errorCode],
   );
-  return result.rows[0] || null;
+  const job = result.rows[0] || null;
+
+  if (attemptId) {
+    // Aunque el intento haya fallado, si el PDF ya se generó y almacenó
+    // antes de la falla (p. ej. correo deshabilitado/rechazado, checksum
+    // pre-envío) el historial debe conservar ESE deliverable_id -- perderlo
+    // sería justo el tipo de detalle que este sprint (CATX-DELIVERY-
+    // OBSERVABILITY-001) existe para dejar de perder.
+    await completeDeliveryAttempt(attemptId, {
+      status: 'FAILED',
+      errorCode,
+      errorMessage,
+      deliverableId: deliverable?.id || null,
+      byteSize: deliverable?.byte_size || null,
+      contentHash: deliverable?.content_hash || null,
+    });
+  }
+
+  logDeliveryEvent(stage || 'failed', {
+    order_id: order?.id,
+    order_token: order?.order_token,
+    delivery_job_id: jobId,
+    deliverable_id: deliverable?.id,
+    attempt_count: job?.attempt_count,
+    error_code: errorCode,
+    error_message: errorMessage || undefined,
+  });
+
+  return job;
 }
 
 /**
@@ -181,25 +248,54 @@ async function generateAndStoreDeliverable({ job, order }) {
  * correo. Idempotente y seguro de llamar repetidamente (reintentos) --
  * nunca duplica el deliverable, nunca reenvía sin necesidad (el llamador
  * HTTP decide si permite el reintento, ver server/routes/catastroxPayments.js).
+ *
+ * CATX-DELIVERY-OBSERVABILITY-001: cada invocación es UN intento -- se
+ * inserta una fila propia en catastrox_delivery_attempts al empezar
+ * (attempt_number = job.attempt_count + 1, calculado ANTES de tocar el
+ * contador) y se cierra esa misma fila al terminar, éxito o fallo. Nunca
+ * se inserta una segunda fila para el mismo intento ni se sobrescribe la
+ * de un intento anterior.
  */
 export async function processDeliveryJob(jobId) {
   const jobResult = await query(`select * from ${DELIVERY_JOBS_TABLE} where id = $1`, [jobId]);
   const job = jobResult.rows[0];
   if (!job) return null;
 
-  // Requisito 8: nunca se envía el PDF antes de que la orden esté APPROVED.
-  // Defensa en profundidad -- en la práctica este job solo se crea después
-  // de una transición real a APPROVED (triggerPostApprovalWorkflows), pero
-  // esta función debe seguir siendo segura si algún día se llama desde
-  // otro lugar (p. ej. un reintento manual mucho después).
   const order = await paymentOrders.findOrderById(job.payment_order_id);
+  const attemptNumber = (job.attempt_count || 0) + 1;
+  const attempt = await startDeliveryAttempt({ deliveryJobId: jobId, attemptNumber });
+
+  logDeliveryEvent('attempt_started', {
+    order_id: order?.id,
+    order_token: order?.order_token,
+    delivery_job_id: jobId,
+    attempt_count: attemptNumber,
+  });
+
+  // Requisito 8 del plan aprobado: nunca se envía el PDF antes de que la
+  // orden esté APPROVED. Defensa en profundidad -- en la práctica este job
+  // solo se crea después de una transición real a APPROVED
+  // (triggerPostApprovalWorkflows), pero esta función debe seguir siendo
+  // segura si algún día se llama desde otro lugar (p. ej. un reintento
+  // manual mucho después).
   if (!order || order.status !== 'APPROVED') {
-    return markDeliveryJobFailed(jobId, 'ORDER_NOT_APPROVED');
+    return markDeliveryJobFailed(jobId, 'ORDER_NOT_APPROVED', {
+      attemptId: attempt.id,
+      errorMessage: 'La orden no está en estado APPROVED al momento de procesar el job de entrega.',
+      stage: 'order_approval_check',
+      order,
+    });
   }
 
+  // Declarado fuera del try para que el catch (unhandled_exception) también
+  // pueda registrar el deliverable si la falla ocurrió DESPUÉS de generarlo
+  // y almacenarlo (p. ej. una excepción durante el envío de correo) --
+  // nunca perder ese dato en el historial solo porque el error fue
+  // inesperado.
+  let deliverable = null;
   try {
     const existing = await findReusableDeliverable(jobId);
-    let deliverable = existing?.deliverable || null;
+    deliverable = existing?.deliverable || null;
     let pdfBytes = existing?.bytes || null;
 
     if (!deliverable) {
@@ -215,7 +311,31 @@ export async function processDeliveryJob(jobId) {
       // Solo alcanzable si el deliverable existía en la fila pero sus
       // bytes ya no verifican contra content_hash (corrupción/borrado
       // externo del blob) -- nunca se envía un archivo no verificado.
-      return markDeliveryJobFailed(jobId, 'DELIVERABLE_CHECKSUM_MISMATCH');
+      return markDeliveryJobFailed(jobId, 'DELIVERABLE_CHECKSUM_MISMATCH', {
+        attemptId: attempt.id,
+        errorMessage: 'El deliverable existente no superó la verificación de checksum al releer el blob almacenado.',
+        stage: 'reuse_checksum_verification',
+        order,
+        deliverable,
+      });
+    }
+
+    // CATX-DELIVERY-OBSERVABILITY-001 (requisito 2): re-verificación
+    // explícita, justo antes de enviar, de que los bytes que se van a
+    // adjuntar coinciden exactamente con el checksum ya persistido para
+    // este deliverable -- defensa en profundidad adicional a la que ya
+    // hace findReusableDeliverable() al releer del storage. Si no
+    // coincide, se aborta con un error controlado; NUNCA se envía un PDF
+    // sin esta verificación.
+    const preSendChecksum = sha256Hex(pdfBytes);
+    if (preSendChecksum !== deliverable.content_hash) {
+      return markDeliveryJobFailed(jobId, 'DELIVERABLE_CHECKSUM_MISMATCH', {
+        attemptId: attempt.id,
+        errorMessage: `El checksum de pdfBytes (${preSendChecksum}) no coincide con deliverable.content_hash (${deliverable.content_hash}) justo antes de enviar el correo.`,
+        stage: 'pre_send_checksum_verification',
+        order,
+        deliverable,
+      });
     }
 
     // --- Envío por correo ---
@@ -226,7 +346,13 @@ export async function processDeliveryJob(jobId) {
     const recipientEmail = decryptedCustomer?.email || decryptPii(job.delivery_email_encrypted);
 
     if (!recipientEmail) {
-      return markDeliveryJobFailed(jobId, 'DELIVERY_EMAIL_UNAVAILABLE');
+      return markDeliveryJobFailed(jobId, 'DELIVERY_EMAIL_UNAVAILABLE', {
+        attemptId: attempt.id,
+        errorMessage: 'No hay un correo de entrega disponible (ni en el cliente ni en el job) para enviar el PDF.',
+        stage: 'recipient_resolution',
+        order,
+        deliverable,
+      });
     }
 
     const emailResult = await sendDeliverableEmail({
@@ -241,7 +367,13 @@ export async function processDeliveryJob(jobId) {
     });
 
     if (!emailResult.delivered) {
-      return markDeliveryJobFailed(jobId, emailResult.errorCode || 'EMAIL_DELIVERY_FAILED');
+      return markDeliveryJobFailed(jobId, emailResult.errorCode || 'EMAIL_DELIVERY_FAILED', {
+        attemptId: attempt.id,
+        errorMessage: 'sendDeliverableEmail no confirmó la entrega (delivered=false).',
+        stage: 'email_send',
+        order,
+        deliverable,
+      });
     }
 
     const sentResult = await query(
@@ -250,15 +382,51 @@ export async function processDeliveryJob(jobId) {
               delivered_at = now(),
               attempt_count = attempt_count + 1,
               last_attempt_at = now(),
+              -- CATX-DELIVERY-OBSERVABILITY-001 (requisito 4): el error del
+              -- intento anterior NUNCA se limpia en silencio -- su valor se
+              -- copia a last_resolved_error_code/last_resolved_error_at
+              -- ANTES de poner last_error_code en NULL (que sigue
+              -- reflejando "¿hay un error activo ahora mismo?"). El
+              -- historial completo, con más detalle, vive además en
+              -- catastrox_delivery_attempts.
+              last_resolved_error_code = case when last_error_code is not null then last_error_code else last_resolved_error_code end,
+              last_resolved_error_at = case when last_error_code is not null then now() else last_resolved_error_at end,
               last_error_code = null,
               provider_message_id = $2
         where id = $1
         returning *`,
       [jobId, emailResult.providerMessageId],
     );
-    return sentResult.rows[0];
+    const sentJob = sentResult.rows[0];
+
+    await completeDeliveryAttempt(attempt.id, {
+      status: 'SENT',
+      deliverableId: deliverable.id,
+      providerMessageId: emailResult.providerMessageId,
+      byteSize: deliverable.byte_size,
+      contentHash: deliverable.content_hash,
+    });
+
+    logDeliveryEvent('attempt_sent', {
+      order_id: order.id,
+      order_token: order.order_token,
+      delivery_job_id: jobId,
+      deliverable_id: deliverable.id,
+      attempt_count: sentJob?.attempt_count,
+      byte_size: deliverable.byte_size,
+      checksum: deliverable.content_hash,
+      provider_message_id: emailResult.providerMessageId,
+    });
+
+    return sentJob;
   } catch (error) {
-    return markDeliveryJobFailed(jobId, error.code || GENERATION_NOT_IMPLEMENTED_ERROR_CODE);
+    return markDeliveryJobFailed(jobId, error.code || GENERATION_NOT_IMPLEMENTED_ERROR_CODE, {
+      attemptId: attempt.id,
+      errorMessage: error.message,
+      stage: 'unhandled_exception',
+      order,
+      deliverable,
+    });
   }
 }
 
@@ -301,6 +469,12 @@ export async function listDeliverablesForJob(jobId) {
   const result = await query(`select * from ${DELIVERABLES_TABLE} where delivery_job_id = $1`, [jobId]);
   return result.rows;
 }
+
+// CATX-DELIVERY-OBSERVABILITY-001: re-exportado para que llamadores (rutas,
+// pruebas) puedan inspeccionar el historial completo de intentos sin
+// importar deliveryAttemptRepository.js directamente -- mismo patrón que
+// listDeliverablesForJob arriba.
+export { listAttemptsForJob };
 
 /**
  * Recupera los bytes del entregable más reciente de una orden, con el
