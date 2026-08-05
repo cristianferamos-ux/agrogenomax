@@ -14,6 +14,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  executeCatastroxPackageDownloadDecision,
+  resolveDeliverableOrderTokenForPredio,
+} from '../../utils/catastroxDeliverableDownload.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PAGES_DIR = path.resolve(__dirname, '..');
@@ -42,12 +46,58 @@ test('CatastroXPackagePage.jsx enruta el botón "Descargar PDF" de una compra re
     'debe existir el chequeo que decide usar el endpoint oficial para una compra real',
   );
   assert.ok(
-    packagePageSource.includes('await handleOfficialPdfDownload();'),
-    'el camino de compra real debe invocar el handler que llama a downloadDeliverablePdf, no `action` (downloadPlanPdf)',
+    packagePageSource.includes('executeCatastroxPackageDownloadDecision({'),
+    'el camino de compra real debe invocar la decisión funcional que llama al handler oficial, no `action` (downloadPlanPdf)',
   );
   assert.ok(
     packagePageSource.includes('await downloadDeliverablePdf(deliverableOrderToken)'),
     'handleOfficialPdfDownload debe llamar a downloadDeliverablePdf con el orderToken real',
+  );
+});
+
+test('clic funcional de PDF oficial: compra real APPROVED usa downloadDeliverablePdf con token compatible y nunca downloadPlanPdf', async () => {
+  const codigoPredial = '184600002000000030015000000000';
+  const orders = [
+    { orderToken: 'tok-basico', packageId: 'basico', codigoPredial, paymentStatus: 'APPROVED' },
+    { orderToken: 'tok-plus', packageId: 'plus', codigoPredial, paymentStatus: 'APPROVED' },
+    { orderToken: 'tok-otro-predio', packageId: 'profesional', codigoPredial: '999', paymentStatus: 'APPROVED' },
+  ];
+  const deliverableOrderToken = resolveDeliverableOrderTokenForPredio({
+    orders,
+    codigoPredial,
+    requiredPackageId: 'plus',
+  });
+
+  const calls = { official: [], local: 0 };
+  const result = await executeCatastroxPackageDownloadDecision({
+    fileType: 'pdf',
+    useAuditEndpoint: false,
+    deliverableOrderToken,
+    officialDownload: async (token) => {
+      calls.official.push(token);
+      return { ok: true };
+    },
+    localDownload: async () => {
+      calls.local += 1;
+      return { ok: true };
+    },
+  });
+
+  assert.equal(deliverableOrderToken, 'tok-plus');
+  assert.equal(result.mode, 'official');
+  assert.deepEqual(calls.official, ['tok-plus']);
+  assert.equal(calls.local, 0, 'downloadPlanPdf/localDownload nunca debe ejecutarse en compra real');
+});
+
+test('CatastroXPackagePage.jsx rehidrata el orderToken cuando cambia packageId y limpia el token anterior', () => {
+  assert.ok(
+    packagePageSource.includes('setDeliverableOrderToken(null);') &&
+      packagePageSource.includes('setPdfDownloadState({});'),
+    'el efecto debe limpiar token y errores antes de resolver otra orden',
+  );
+  assert.ok(
+    packagePageSource.includes('[isPaid, isAuditUnlocked, packageId, predio.codigoPredial, predio.codigo]'),
+    'packageId debe estar en las dependencias del efecto de deliverableOrderToken',
   );
 });
 

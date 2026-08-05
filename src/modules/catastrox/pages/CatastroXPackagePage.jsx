@@ -50,6 +50,7 @@ import {
   downloadShpZip,
 } from '../utils/catastroxDeliverables.js';
 import {
+  executeCatastroxPackageDownloadDecision,
   resolveDeliverableDownloadErrorMessage,
   resolveDeliverableOrderTokenForPredio,
   shouldUseOfficialPdfDownload,
@@ -402,8 +403,10 @@ export default function CatastroXPackagePage({ packageId }) {
   // y almacenó (isPackageUnlockedForLookup/getPackageRank ya usan ese
   // mismo criterio de rango en esta misma pantalla).
   useEffect(() => {
+    setDeliverableOrderToken(null);
+    setPdfDownloadState({});
+
     if (!isPaid || isAuditUnlocked) {
-      setDeliverableOrderToken(null);
       return undefined;
     }
 
@@ -421,7 +424,7 @@ export default function CatastroXPackagePage({ packageId }) {
     return () => {
       cancelled = true;
     };
-  }, [isPaid, isAuditUnlocked, predio.codigoPredial, predio.codigo]);
+  }, [isPaid, isAuditUnlocked, packageId, predio.codigoPredial, predio.codigo]);
 
   const handleEnableAuditDownloads = async () => {
     try {
@@ -479,7 +482,13 @@ export default function CatastroXPackagePage({ packageId }) {
     // (downloadPlanPdf, generador de navegador) porque no existe ningún
     // pedido en el backend del que descargar.
     if (shouldUseOfficialPdfDownload({ fileType, useAuditEndpoint })) {
-      await handleOfficialPdfDownload();
+      await executeCatastroxPackageDownloadDecision({
+        fileType,
+        useAuditEndpoint,
+        deliverableOrderToken,
+        officialDownload: handleOfficialPdfDownload,
+        localDownload: action,
+      });
       return;
     }
 

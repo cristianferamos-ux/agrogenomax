@@ -387,7 +387,7 @@ async function triggerPostApprovalWorkflows(order) {
         customerId: order.customer_id,
         deliveryEmail,
       });
-      processDeliveryJob(job.id).catch((error) => {
+      void processDeliveryJob(job.id).catch((error) => {
         console.error('[CatastroX Payments] Error procesando delivery job en segundo plano', {
           orderId: order.id,
           jobId: job.id,
@@ -1272,11 +1272,17 @@ router.post('/orders/:orderToken/delivery/retry', orderStatusLimiter, async (req
     if (!job) {
       return res.status(404).json({ ok: false, code: 'DELIVERY_JOB_NOT_FOUND' });
     }
-    if (job.status !== 'FAILED') {
+    if (job.status === 'SENT' || job.status === 'DELIVERED') {
+      return res.json({ ok: true, status: job.status, errorCode: null });
+    }
+    if (job.status !== 'FAILED' && !['GENERATING', 'READY', 'SENDING'].includes(job.status)) {
       return res.status(409).json({ ok: false, code: 'DELIVERY_NOT_RETRYABLE', status: job.status });
     }
 
     const updated = await retryDeliveryJob(job.id);
+    if (['GENERATING', 'READY', 'SENDING'].includes(updated.status)) {
+      return res.status(409).json({ ok: false, code: 'DELIVERY_ALREADY_PROCESSING', status: updated.status });
+    }
     return res.json({ ok: true, status: updated.status, errorCode: updated.last_error_code || null });
   } catch (error) {
     if (error.code === 'DELIVERY_NOT_RETRYABLE') {

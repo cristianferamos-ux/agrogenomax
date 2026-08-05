@@ -414,7 +414,7 @@ describe('EMAIL_PROVIDER_002: seguridad -- logs y errores saneados', () => {
     assert.ok(!joined.includes(BASE_INPUT.verificationCode));
   });
 
-  test('19. el correo completo del destinatario nunca aparece en ningún log (solo el dominio)', async () => {
+  test('19. el correo completo del destinatario y su dominio nunca aparecen en ningún log', async () => {
     stubFetch(() => jsonResponse(200, { id: 'msg_1' }));
     setStagingEnv();
     const capture = captureConsole();
@@ -425,7 +425,8 @@ describe('EMAIL_PROVIDER_002: seguridad -- logs y errores saneados', () => {
     }
     const joined = JSON.stringify(capture.lines);
     assert.ok(!joined.includes(BASE_INPUT.to));
-    assert.ok(joined.includes('example.com')); // el dominio sí es observable
+    assert.ok(!joined.includes('example.com'));
+    assert.ok(!joined.includes('toDomain'));
   });
 
   test('19b. ni el OTP ni el correo completo aparecen en logs de un envío fallido', async () => {
@@ -668,6 +669,23 @@ describe('CATX-DELIVERY-001: sendDeliverableEmail() -- adjunto + gate por ambien
     assert.equal(sentBody.attachments[0].filename, DELIVERABLE_BASE_INPUT.pdfFilename);
     assert.equal(sentBody.attachments[0].content, DELIVERABLE_BASE_INPUT.pdfBuffer.toString('base64'));
     assert.ok(sentBody.subject.includes(DELIVERABLE_BASE_INPUT.orderReference));
+  });
+
+  test('5b. logs de email no incluyen correo completo ni dominio derivado', async () => {
+    const consoleCapture = captureConsole();
+    stubFetch(() => jsonResponse(200, { id: 'msg_log_minimized' }));
+    setStagingEnv();
+    try {
+      const result = await sendDeliverableEmail(DELIVERABLE_BASE_INPUT);
+      assert.equal(result.delivered, true);
+    } finally {
+      consoleCapture.restore();
+    }
+
+    const serializedLogs = JSON.stringify(consoleCapture.lines);
+    assert.equal(serializedLogs.includes(DELIVERABLE_BASE_INPUT.to), false);
+    assert.equal(serializedLogs.includes('example.com'), false);
+    assert.equal(serializedLogs.includes('toDomain'), false);
   });
 
   test('6. HTTP 400 no reintenta -- EMAIL_PROVIDER_REJECTED', async () => {
