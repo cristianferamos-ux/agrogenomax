@@ -45,7 +45,7 @@ import {
   toDisplayToponymTitleCase,
   toSentenceCase,
 } from './catastroxPdfLayout.js';
-import { computeMapState, projectRingToViewport, computeDynamicScaleMeters } from './catastroxPdfGeometry.js';
+import { computeMapState, projectRingToViewport, projectPointToViewport, computeDynamicScaleMeters } from './catastroxPdfGeometry.js';
 import { fetchSatelliteMosaic, TILE_SIZE, ESRI_IMAGERY_ATTRIBUTION, ESRI_LABELS_ATTRIBUTION, MapRenderError } from './catastroxPdfMap.js';
 import {
   buildVisiblePointPlacements,
@@ -828,6 +828,30 @@ export async function generateCatastroxPdfBuffer({ predioData, packageId, fetchT
   const planoMapState = computeMapState(ring, planoMapRect.width, planoMapRect.height, 20);
   const planoProjectedClosed = projectRingToViewport(ring, planoMapState, planoMapRect.width, planoMapRect.height).map(([px, py]) => [planoMapRect.x + px, planoMapRect.y + py]);
   const planoPoints = planoProjectedClosed.slice(0, -1);
+  // CATX-POSTPAYMENT-UX-001 (defecto C -- causa raíz): hasta esta corrección,
+  // los círculos/etiquetas Pn del plano y las cotas de distancia se
+  // construían sobre `planoPoints` (TODOS los vértices del anillo de
+  // presentación, ~92 para geometrías complejas), mientras que la tabla de
+  // vértices (páginas siguientes) se construye sobre
+  // `layoutData.referencePoints` (el subconjunto YA reducido por
+  // VisibleReferencePointEngine, ~70) -- dos colecciones distintas,
+  // numeradas cada una por su propio índice, así que el plano mostraba
+  // etiquetas hasta P92 mientras la tabla terminaba en P70. El generador de
+  // navegador (buildTechnicalPagesCanvases, catastroxDeliverables.js:3779-3780)
+  // SIEMPRE usó `referencePoints` (proyectados con esta misma
+  // projectPointToViewport) para los puntos/etiquetas/cotas -- `planoPoints`
+  // (el anillo denso) solo debe usarse para el CONTORNO del polígono y como
+  // referencia de colisión (`polygonPoints`), nunca para decidir cuántos
+  // puntos se numeran. `planoReferencePoints` es la única colección
+  // canónica de puntos representativos para esta página -- point circles,
+  // etiquetas de distancia y ancla de la escala gráfica usan exclusivamente
+  // este array (mismo orden/índices que layoutData.referenceRows/
+  // referenceSegments, que ya alimentan la tabla), garantizando
+  // visiblePointIds === tablePointIds.
+  const planoReferencePoints = layoutData.referencePoints.map((entry) => {
+    const [vx, vy] = projectPointToViewport(entry.point || entry, planoMapState, planoMapRect.width, planoMapRect.height);
+    return [planoMapRect.x + vx, planoMapRect.y + vy];
+  });
   doc.save();
   doc.rect(planoMapRect.x, planoMapRect.y, planoMapRect.width, planoMapRect.height).clip();
   doc.polygon(...planoProjectedClosed).strokeColor('#1170cf').lineWidth(2).stroke();
@@ -840,7 +864,7 @@ export async function generateCatastroxPdfBuffer({ predioData, packageId, fetchT
   // buildVisiblePointPlacements (catastroxDeliverables.js:1623-1687): busca,
   // para cada vértice, la posición de su círculo (ángulo+distancia
   // crecientes) que no choque con otro círculo ni salga del recuadro.
-  const pointPlacements = buildVisiblePointPlacements(planoPoints, planoMapRect, planoPoints, []);
+  const pointPlacements = buildVisiblePointPlacements(planoReferencePoints, planoMapRect, planoPoints, []);
 
   // chooseScaleBarAnchor en 2 pasadas -- misma secuencia exacta que
   // buildTechnicalPagesCanvases (catastroxDeliverables.js:3813-3840):
@@ -848,7 +872,7 @@ export async function generateCatastroxPdfBuffer({ predioData, packageId, fetchT
   //    como rect bloqueado para la búsqueda de etiquetas de distancia;
   // 2) tras dibujar las etiquetas, se recalcula la posición FINAL
   //    considerando las etiquetas ya colocadas -- nunca una esquina fija.
-  const preliminaryScaleAnchor = chooseScaleBarAnchor(planoMapRect, planoPoints, planoPoints, pointPlacements, true);
+  const preliminaryScaleAnchor = chooseScaleBarAnchor(planoMapRect, planoPoints, planoReferencePoints, pointPlacements, true);
 
   // buildTechnicalSegmentDimensionPlacements (catastroxDeliverables.js:2792-2900):
   // para cada tramo, evalúa la grilla completa de candidatos (2 normales
@@ -861,7 +885,7 @@ export async function generateCatastroxPdfBuffer({ predioData, packageId, fetchT
   const dimensionResult = buildTechnicalSegmentDimensionPlacements({
     measureTextWidth: (text, size) => widthOf(doc, text, size, false),
     formatDistanceLabel: (meters) => `${formatNumberEs(meters, 2)} m`,
-    projectedRefs: planoPoints,
+    projectedRefs: planoReferencePoints,
     referenceSegments: layoutData.referenceSegments,
     polygonPoints: planoPoints,
     pointPlacements,
@@ -885,7 +909,7 @@ export async function generateCatastroxPdfBuffer({ predioData, packageId, fetchT
   // recta entre extremos).
   hydricGroups.forEach((group) => {
     const groupVertexIndices = [group.startVertexIndex, ...group.intermediateVertexIndices, group.endVertexIndex];
-    const groupPoints = groupVertexIndices.map((index) => planoPoints[index]).filter(Boolean);
+    const groupPoints = groupVertexIndices.map((index) => planoReferencePoints[index]).filter(Boolean);
     if (!groupPoints.length) return;
     const centerX = groupPoints.reduce((sum, p) => sum + p[0], 0) / groupPoints.length;
     const centerY = groupPoints.reduce((sum, p) => sum + p[1], 0) / groupPoints.length;
@@ -893,7 +917,7 @@ export async function generateCatastroxPdfBuffer({ predioData, packageId, fetchT
   });
   drawCompassRose(doc, compassCenter.x, compassCenter.y, { dark: true });
 
-  const planoScaleAnchor = chooseScaleBarAnchor(planoMapRect, planoPoints, planoPoints, [...dimensionResult.placements, ...pointPlacements], true);
+  const planoScaleAnchor = chooseScaleBarAnchor(planoMapRect, planoPoints, planoReferencePoints, [...dimensionResult.placements, ...pointPlacements], true);
   const planoScaleMeters = computeDynamicScaleMeters(planoMapState, planoMapRect.width);
   drawScaleBar(doc, planoScaleAnchor.x, planoScaleAnchor.y, planoScaleMeters, { compact: true });
 

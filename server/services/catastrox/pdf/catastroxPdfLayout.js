@@ -107,6 +107,43 @@ function resolveVeredaNombre(predio, source) {
   );
 }
 
+// CATX-POSTPAYMENT-UX-001: `predio.veredaDisplay || getVeredaDisplay(...)`
+// (más abajo) es un chequeo superficial -- si `predio.veredaDisplay` está
+// PRESENTE pero incompleto (p. ej. le falta `.label`, como ocurría en un
+// fixture de prueba), pasaba sin cambios hasta el renderizador y aparecía
+// literalmente "UNDEFINED" en el PDF (veredaDisplay.label se imprime
+// directamente como rótulo). Hoy el único constructor real de
+// veredaDisplay en producción es getVeredaDisplay() (server/routes/catastrox.js,
+// tres sitios), que siempre devuelve un objeto completo -- así que este no
+// es un defecto alcanzable por el flujo real actual -- pero
+// normalizePredioForDeliverables no tiene forma de saberlo si un llamador
+// futuro (otro origen de predioData, un script de reconstrucción) le pasa
+// un objeto parcial.
+//
+// Se valida campo por campo en vez de confiar en la verdad superficial de
+// `||`: si `label`/`value` faltan o están vacíos, se rellenan desde el
+// fallback canónico (getVeredaDisplay) -- pero cualquier campo que SÍ venga
+// bien formado (p. ej. un `value` real con un `label` faltante) se
+// conserva tal cual. Nunca se descarta un dato real solo porque otro campo
+// del mismo objeto esté mal formado.
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function normalizeVeredaDisplayShape(veredaDisplay, fallbackVeredaNombre) {
+  if (isNonEmptyString(veredaDisplay?.label) && isNonEmptyString(veredaDisplay?.value)) {
+    return veredaDisplay;
+  }
+  const fallback = getVeredaDisplay(fallbackVeredaNombre);
+  if (!veredaDisplay || typeof veredaDisplay !== 'object') return fallback;
+  return {
+    ...fallback,
+    ...veredaDisplay,
+    label: isNonEmptyString(veredaDisplay.label) ? veredaDisplay.label : fallback.label,
+    value: isNonEmptyString(veredaDisplay.value) ? veredaDisplay.value : fallback.value,
+  };
+}
+
 function resolveFirstValue(...values) {
   return values.find((value) => cleanText(value));
 }
@@ -437,7 +474,7 @@ export function normalizePredioForDeliverables(source) {
     estadoPredial: cleanText(predio.estadoPredial, 'Predio identificado en la base catastral consultada.'),
     tipoZona: cleanText(predio.tipoZona || predio.zona, 'Rural'),
     zona: cleanText(predio.zona || predio.tipoZona, 'Rural'),
-    veredaDisplay: predio.veredaDisplay || getVeredaDisplay(resolveVeredaNombre(predio, source)),
+    veredaDisplay: normalizeVeredaDisplayShape(predio.veredaDisplay, resolveVeredaNombre(predio, source)),
     nombrePredio: predioName(predio),
     direccionReal: cleanText(predio.direccionReal || predio.direccion_real, 'No disponible'),
     barrioNombre: cleanText(predio.barrioNombre || predio.barrio_nombre, ''),

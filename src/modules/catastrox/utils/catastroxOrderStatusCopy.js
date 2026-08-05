@@ -3,6 +3,31 @@
 // CatastroXWompiReturnPage, para que ninguna pantalla afirme "enviado" o
 // "facturado" cuando el backend todavía no lo confirmó de verdad.
 
+// CATX-POSTPAYMENT-UX-001 (defecto B): los montos de orden que llegan del
+// backend (state.transaction.amountInCents, order.expectedAmountInCents,
+// etc.) están en CENTAVOS -- mostrarlos crudos ("3990000 COP") es el
+// defecto reportado. Única utilidad de formateo para toda vista que
+// muestre el monto de una orden (retorno Wompi, verificación manual, y
+// cualquier vista futura de compras/comprobantes) -- misma convención de
+// salida ($<monto> COP) que formatCatastroxPackagePrice en
+// catastroxPackages.js (que ya formatea priceCop, un valor en pesos
+// enteros, no en centavos -- unidades distintas, por eso no se comparte
+// una sola función entre ambos, pero el estilo de salida es idéntico).
+// Nunca toca el valor real enviado a Wompi ni el almacenado en base de
+// datos -- es puramente de presentación.
+export function formatCopFromCents(value) {
+  const cents = typeof value === 'string' ? Number(value.trim()) : Number(value);
+  if (!Number.isFinite(cents)) {
+    return 'Monto no disponible';
+  }
+
+  const pesos = cents / 100;
+  // Intl.NumberFormat('es-CO') sin opciones explícitas ya usa punto como
+  // separador de miles, coma como decimal, y omite decimales cuando el
+  // valor es un entero (no hay que calcular "hasFraction" a mano).
+  return `$${new Intl.NumberFormat('es-CO').format(pesos)} COP`;
+}
+
 export function getPaymentStatusCopy(status) {
   switch (status) {
     case 'APPROVED':
@@ -61,6 +86,57 @@ export function getDeliveryStatusCopy(status, { paymentApproved = false } = {}) 
         tone: 'warning',
       };
   }
+}
+
+// CATX-POSTPAYMENT-UX-001 (defecto A): estados de catastrox_delivery_job_status
+// que representan un desenlace FINAL -- una vez alcanzado uno, dejar de
+// consultar el backend (detener el polling de CatastroXWompiReturnPage.jsx)
+// tiene sentido. Exportado como función pura (no un Set importado
+// directamente) para que tanto el componente como sus pruebas puedan usar
+// la misma regla sin repetirla.
+const TERMINAL_DELIVERY_STATUSES = new Set(['SENT', 'DELIVERED', 'FAILED', 'EXPIRED']);
+
+export function isTerminalDeliveryStatus(status) {
+  return TERMINAL_DELIVERY_STATUSES.has(status);
+}
+
+// Decide, de forma pura (sin timers/DOM/red), si conviene iniciar el
+// polling de estado de entrega -- extraído para poder probar la regla
+// exacta sin montar el componente (este proyecto no tiene un harness de
+// pruebas de componentes React; toda la lógica de decisión se prueba como
+// función pura, siguiendo el mismo patrón que recoverLookupForPending en
+// CatastroXWompiReturnPage.jsx).
+export function shouldStartDeliveryPolling({ paymentStatus, orderToken, currentDeliveryStatus } = {}) {
+  if (paymentStatus !== 'approved' || !orderToken) return false;
+  if (currentDeliveryStatus && isTerminalDeliveryStatus(currentDeliveryStatus)) return false;
+  return true;
+}
+
+// Decide qué hacer en UN tick del polling -- 'timeout' si ya se agotó el
+// tiempo máximo (requisito: nunca presentar esto como error, solo dejar de
+// consultar automáticamente); 'stop' si el nuevo estado ya es terminal;
+// 'continue' en cualquier otro caso (seguir esperando el próximo tick).
+export function resolveDeliveryPollTick({ elapsedMs, maxDurationMs, nextDeliveryStatus = null } = {}) {
+  if (elapsedMs >= maxDurationMs) {
+    return { action: 'timeout' };
+  }
+  if (nextDeliveryStatus && isTerminalDeliveryStatus(nextDeliveryStatus)) {
+    return { action: 'stop' };
+  }
+  return { action: 'continue' };
+}
+
+// Copy exacto pedido (requisito 3/4 de CATX-POSTPAYMENT-UX-001) para la
+// pantalla de retorno Wompi -- distinto del texto genérico de
+// getDeliveryStatusCopy (que sigue usándolo CatastroXMyPurchases/
+// CatastroXPackagePage sin cambios, fuera del alcance de este defecto).
+// FAILED reutiliza el texto genérico tal cual porque ya coincide
+// (label "Envío no completado" + mensaje amigable ya existían).
+export function getWompiReturnDeliveryCopy(status) {
+  if (status === 'SENT' || status === 'DELIVERED') {
+    return { label: 'Entrega completada', message: 'Tu diagnóstico predial está disponible.', tone: 'success' };
+  }
+  return getDeliveryStatusCopy(status, { paymentApproved: true });
 }
 
 export function getInvoiceStatusCopy(status) {

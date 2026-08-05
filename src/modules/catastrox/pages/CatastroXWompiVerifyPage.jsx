@@ -13,6 +13,7 @@ import {
   verifyWompiTransaction,
 } from '../services/catastroxPaymentService.js';
 import { saveLastLookup } from '../services/catastroxApi.js';
+import { formatCopFromCents } from '../utils/catastroxOrderStatusCopy.js';
 
 function normalizeRouteId({ routeId, predioId, purchaseKey }) {
   const directRouteId = String(routeId || '').trim();
@@ -233,7 +234,7 @@ export default function CatastroXWompiVerifyPage() {
           <div className="catastrox-copy">
             <p><strong>Transaccion:</strong> {state.transaction.id}</p>
             <p><strong>Referencia:</strong> {state.transaction.reference}</p>
-            <p><strong>Monto:</strong> {state.transaction.amountInCents} {state.transaction.currency}</p>
+            <p><strong>Monto:</strong> {formatCopFromCents(state.transaction.amountInCents)}</p>
             <p><strong>Estado:</strong> {state.transaction.status}</p>
           </div>
         ) : null}
