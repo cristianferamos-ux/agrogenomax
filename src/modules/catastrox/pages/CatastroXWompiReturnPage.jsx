@@ -20,9 +20,25 @@ import {
   retryDeliveryForOrder,
   verifyWompiTransaction,
 } from '../services/catastroxPaymentService.js';
-import { getDeliveryStatusCopy, getInvoiceStatusCopy } from '../utils/catastroxOrderStatusCopy.js';
+import {
+  getInvoiceStatusCopy,
+  formatCopFromCents,
+  getWompiReturnDeliveryCopy,
+  isTerminalDeliveryStatus,
+  resolveDeliveryPollTick,
+  shouldStartDeliveryPolling,
+} from '../utils/catastroxOrderStatusCopy.js';
 
 const DEFAULT_TARGET_ROUTE = '/catastrox/planes';
+
+// CATX-POSTPAYMENT-UX-001 (defecto A): el estado de entrega solo se
+// consultaba UNA vez, justo después de confirmar el pago -- en ese
+// instante el job de entrega casi siempre sigue QUEUED/GENERATING (se
+// procesa de forma desacoplada, fire-and-forget, tras el pago), así que la
+// pantalla quedaba congelada en "En proceso" para siempre, aunque el
+// backend terminara segundos después.
+const DELIVERY_POLL_INTERVAL_MS = 2000;
+const DELIVERY_POLL_MAX_DURATION_MS = 30000;
 
 export async function recoverLookupForPending(pending) {
   if (!pending?.routeId) return null;
@@ -58,8 +74,44 @@ export default function CatastroXWompiReturnPage() {
   // se afirma "enviado"/"facturado" mientras esto siga en null.
   const [deliveryInvoiceState, setDeliveryInvoiceState] = useState(null);
   const [deliveryAction, setDeliveryAction] = useState({});
+  // true solo cuando los 30s de polling se agotaron sin llegar a un estado
+  // terminal -- nunca se presenta como error (requisito 5): el job puede
+  // seguir procesándose, solo dejamos de consultarlo automáticamente y
+  // ofrecemos un botón para que el usuario lo haga cuando quiera.
+  const [pollTimedOut, setPollTimedOut] = useState(false);
+  // Espejo en ref del último deliveryInvoiceState conocido -- permite que
+  // el efecto de polling (más abajo) lea el valor más reciente sin tener
+  // que declarar deliveryInvoiceState como dependencia (eso reiniciaría el
+  // temporizador de 30s en cada actualización de estado, no solo cuando
+  // cambia realmente la orden que se está siguiendo).
+  const deliveryInvoiceStateRef = useRef(null);
+  // Evita que dos consultas de estado (dos ticks del polling, o un tick y
+  // un refresco manual) viajen en paralelo -- "evitar requests duplicados"
+  // del requisito funcional.
+  const fetchInFlightRef = useRef(false);
+
+  useEffect(() => {
+    deliveryInvoiceStateRef.current = deliveryInvoiceState;
+  }, [deliveryInvoiceState]);
 
   const transactionId = searchParams.get('id') || searchParams.get('transaction_id') || '';
+
+  // Única vía de lectura del estado de entrega/factura -- usada tanto por
+  // el chequeo inicial (dentro de runVerification) como por cada tick del
+  // polling y por el refresco manual, para no duplicar la lógica de
+  // búsqueda por orderToken en tres lugares distintos.
+  const fetchDeliveryInvoiceState = useCallback(async (orderToken) => {
+    if (!orderToken || fetchInFlightRef.current) return null;
+    fetchInFlightRef.current = true;
+    try {
+      const result = await getMyOrders();
+      if (!result.ok) return null;
+      const match = result.orders.find((entry) => entry.orderToken === orderToken);
+      return match ? { deliveryStatus: match.deliveryStatus, invoiceStatus: match.invoiceStatus } : null;
+    } finally {
+      fetchInFlightRef.current = false;
+    }
+  }, []);
 
   const runVerification = useCallback(async () => {
     setState((current) => ({ ...current, status: 'loading', message: 'Verificando el pago aprobado con Wompi...' }));
@@ -188,15 +240,11 @@ export default function CatastroXWompiReturnPage() {
     // propósito (endpoint deliberadamente mínimo). Un fallo aquí nunca
     // debe alterar el estado "approved" ya fijado arriba.
     if (order.orderToken) {
-      void getMyOrders().then((result) => {
-        if (!result.ok) return;
-        const match = result.orders.find((entry) => entry.orderToken === order.orderToken);
-        if (match) {
-          setDeliveryInvoiceState({ deliveryStatus: match.deliveryStatus, invoiceStatus: match.invoiceStatus });
-        }
+      void fetchDeliveryInvoiceState(order.orderToken).then((next) => {
+        if (next) setDeliveryInvoiceState(next);
       });
     }
-  }, [transactionId]);
+  }, [transactionId, fetchDeliveryInvoiceState]);
 
   useEffect(() => {
     if (hasRunRef.current) return;
@@ -204,8 +252,83 @@ export default function CatastroXWompiReturnPage() {
     void runVerification();
   }, [runVerification]);
 
+  // CATX-POSTPAYMENT-UX-001 (defecto A): polling controlado del estado de
+  // entrega -- arranca únicamente después de que el pago quede APPROVED
+  // (con un orderToken real), y se detiene solo: (a) al llegar a un
+  // estado terminal, (b) al agotar 30s sin llegar a uno, o (c) al
+  // desmontar el componente/cambiar de orden. Nunca reintenta el ENVÍO por
+  // su cuenta -- exclusivamente relee el estado ya decidido por el
+  // backend (fetchDeliveryInvoiceState -> GET /orders/mine).
+  useEffect(() => {
+    if (
+      !shouldStartDeliveryPolling({
+        paymentStatus: state.status,
+        orderToken: state.orderToken,
+        currentDeliveryStatus: deliveryInvoiceStateRef.current?.deliveryStatus,
+      })
+    ) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    let elapsedMs = 0;
+    const orderToken = state.orderToken;
+
+    setPollTimedOut(false);
+
+    const timerId = window.setInterval(() => {
+      if (cancelled) return;
+      elapsedMs += DELIVERY_POLL_INTERVAL_MS;
+
+      // Chequeo de vencimiento ANTES de disparar la solicitud -- al minuto
+      // exacto en que se agotan los 30s, ya no se envía una consulta más.
+      const timeoutCheck = resolveDeliveryPollTick({ elapsedMs, maxDurationMs: DELIVERY_POLL_MAX_DURATION_MS });
+      if (timeoutCheck.action === 'timeout') {
+        window.clearInterval(timerId);
+        setPollTimedOut(true);
+        return;
+      }
+
+      void fetchDeliveryInvoiceState(orderToken).then((next) => {
+        if (cancelled || !next) return;
+        setDeliveryInvoiceState(next);
+
+        const tickOutcome = resolveDeliveryPollTick({
+          elapsedMs,
+          maxDurationMs: DELIVERY_POLL_MAX_DURATION_MS,
+          nextDeliveryStatus: next.deliveryStatus,
+        });
+        if (tickOutcome.action === 'stop') {
+          window.clearInterval(timerId);
+        }
+      });
+    }, DELIVERY_POLL_INTERVAL_MS);
+
+    // Limpieza: se ejecuta al desmontar el componente Y cada vez que este
+    // efecto vuelve a correr (cambio real de orderToken/status) -- nunca
+    // deja un temporizador huérfano corriendo en segundo plano.
+    return () => {
+      cancelled = true;
+      window.clearInterval(timerId);
+    };
+  }, [state.status, state.orderToken, fetchDeliveryInvoiceState]);
+
   const handleRetryVerification = () => {
     void runVerification();
+  };
+
+  // Refresco manual (requisito 5: "Actualizar estado" cuando el polling
+  // vence) -- reutiliza la misma consulta que cada tick del polling, sin
+  // reiniciar automáticamente el temporizador de 30s.
+  const handleRefreshDeliveryStatus = async () => {
+    if (!state.orderToken) return;
+    const next = await fetchDeliveryInvoiceState(state.orderToken);
+    if (next) {
+      setDeliveryInvoiceState(next);
+      if (isTerminalDeliveryStatus(next.deliveryStatus)) {
+        setPollTimedOut(false);
+      }
+    }
   };
 
   // El PDF puede estar listo aunque el job de entrega haya quedado FAILED
@@ -215,6 +338,8 @@ export default function CatastroXWompiReturnPage() {
   const canDownloadDeliverable =
     state.orderToken && ['SENT', 'DELIVERED', 'FAILED'].includes(deliveryInvoiceState?.deliveryStatus);
   const canRetryDelivery = state.orderToken && deliveryInvoiceState?.deliveryStatus === 'FAILED';
+  const isDeliveryTerminal = isTerminalDeliveryStatus(deliveryInvoiceState?.deliveryStatus);
+  const deliveryStatusCopy = getWompiReturnDeliveryCopy(deliveryInvoiceState?.deliveryStatus);
 
   const handleDownloadDeliverable = async () => {
     if (!state.orderToken) return;
@@ -237,13 +362,8 @@ export default function CatastroXWompiReturnPage() {
       tone: result.ok ? null : 'danger',
     });
     if (result.ok) {
-      const refreshed = await getMyOrders();
-      if (refreshed.ok) {
-        const match = refreshed.orders.find((entry) => entry.orderToken === state.orderToken);
-        if (match) {
-          setDeliveryInvoiceState({ deliveryStatus: match.deliveryStatus, invoiceStatus: match.invoiceStatus });
-        }
-      }
+      const next = await fetchDeliveryInvoiceState(state.orderToken);
+      if (next) setDeliveryInvoiceState(next);
     }
   };
 
@@ -296,7 +416,7 @@ export default function CatastroXWompiReturnPage() {
           <div className="catastrox-copy">
             <p><strong>Transaccion:</strong> {state.transaction.id}</p>
             <p><strong>Referencia:</strong> {state.transaction.reference}</p>
-            <p><strong>Monto:</strong> {state.transaction.amountInCents} {state.transaction.currency}</p>
+            <p><strong>Monto:</strong> {formatCopFromCents(state.transaction.amountInCents)}</p>
             <p><strong>Estado:</strong> {state.transaction.status}</p>
           </div>
         ) : null}
@@ -330,14 +450,24 @@ export default function CatastroXWompiReturnPage() {
           </div>
           {deliveryInvoiceState ? (
             <>
-              <div className={`catastrox-inline-panel is-${getDeliveryStatusCopy(deliveryInvoiceState.deliveryStatus, { paymentApproved: true }).tone}`}>
-                <strong>{getDeliveryStatusCopy(deliveryInvoiceState.deliveryStatus, { paymentApproved: true }).label}</strong>
-                <span>{getDeliveryStatusCopy(deliveryInvoiceState.deliveryStatus, { paymentApproved: true }).message}</span>
+              <div className={`catastrox-inline-panel is-${deliveryStatusCopy.tone}`}>
+                <strong>{deliveryStatusCopy.label}</strong>
+                <span>{deliveryStatusCopy.message}</span>
               </div>
               <div className={`catastrox-inline-panel is-${getInvoiceStatusCopy(deliveryInvoiceState.invoiceStatus).tone}`}>
                 <strong>{getInvoiceStatusCopy(deliveryInvoiceState.invoiceStatus).label}</strong>
                 <span>{getInvoiceStatusCopy(deliveryInvoiceState.invoiceStatus).message}</span>
               </div>
+              {/* Requisito 5: si el polling venció sin llegar a un estado
+                  terminal, nunca se presenta como error -- solo se ofrece
+                  actualizar manualmente. */}
+              {!isDeliveryTerminal && pollTimedOut ? (
+                <div className="catastrox-action-row">
+                  <button type="button" className="catastrox-button is-secondary" onClick={handleRefreshDeliveryStatus}>
+                    Actualizar estado
+                  </button>
+                </div>
+              ) : null}
               {canDownloadDeliverable || canRetryDelivery ? (
                 <div className="catastrox-action-row">
                   {canDownloadDeliverable ? (

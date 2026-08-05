@@ -218,6 +218,102 @@ test('CATX-PDF-PARITY-002: la tabla de la página 5 tiene el mismo número de v�
   assert.equal(rows.length, 4, `se esperaban 4 filas de vértices/distancias (cuadrado de prueba), se encontraron ${rows.length}`);
 });
 
+// CATX-POSTPAYMENT-UX-001 (defecto C): geometría sintética de 60 vértices
+// (un círculo perturbado, radio ~800m, sin(theta*5) para variar la
+// curvatura y así garantizar puntos genuinamente insignificantes) que
+// dispara la reducción real de VisibleReferencePointEngine -- verificado
+// empíricamente: 60 vértices de anillo -> 50 puntos de referencia. Antes de
+// la corrección, el plano (página 4) dibujaba círculos P1..P60 (el anillo
+// denso completo) mientras la tabla mostraba solo P1..P50 (el conjunto ya
+// reducido) -- exactamente el defecto reportado (caso real: predio
+// 184100001000000510012000000000, plano hasta ~P92, tabla hasta P70). Esta
+// geometría sintética es un caso equivalente, sin depender de red/DB real.
+function buildComplexRing({ vertexCount = 60, radiusMeters = 800, centerLng = -75.9, centerLat = 1.1 } = {}) {
+  const degPerMeterLat = 1 / 111320;
+  const degPerMeterLng = 1 / (111320 * Math.cos((centerLat * Math.PI) / 180));
+  const ring = [];
+  for (let i = 0; i < vertexCount; i += 1) {
+    const theta = (i / vertexCount) * 2 * Math.PI;
+    const r = radiusMeters * (1 + 0.15 * Math.sin(theta * 5));
+    ring.push([
+      centerLng + r * degPerMeterLng * Math.cos(theta),
+      centerLat + r * degPerMeterLat * Math.sin(theta),
+    ]);
+  }
+  ring.push(ring[0]);
+  return ring;
+}
+
+test('CATX-POSTPAYMENT-UX-001: geometría compleja -- el plano (círculos Pn) y la tabla (filas Pn) muestran EXACTAMENTE el mismo conjunto de puntos', async () => {
+  const complexRing = buildComplexRing();
+  const buffer = await generateSamplePdf({
+    predioData: buildSamplePredioData({
+      geometry: { type: 'Polygon', coordinates: [complexRing] },
+      polygonGeoJson: { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [complexRing] } },
+    }),
+  });
+  const pages = extractPdfPageTexts(buffer);
+
+  // Mismo criterio que la prueba "página 4 es un plano independiente..." de
+  // arriba: el subtítulo interno ("PLANO INFORMATIVO"/"PLANO TÉCNICO") es
+  // exclusivo de la página del plano -- el título de encabezado ("PLANO
+  // PREDIAL CATASTROX") NO sirve para distinguir, porque las páginas de
+  // tabla lo reutilizan tal cual (ver comentario más abajo, línea ~99).
+  const planoPageIndex = pages.findIndex(
+    (text) =>
+      (text.includes('PLANO INFORMATIVO') || text.includes('PLANO TÉCNICO')) &&
+      !text.toUpperCase().includes('TABLA DE VÉRTICES'),
+  );
+  assert.ok(planoPageIndex >= 0, 'no se encontró la página del plano en el PDF generado');
+  const planoPage = pages[planoPageIndex];
+
+  // La cantidad de puntos de referencia depende de VisibleReferencePointEngine
+  // (36 para esta geometría sintética con el paquete "basico"); con 18
+  // filas por página (TABLE_ROW_HEIGHT en catastroxPdfGenerator.js), la
+  // tabla se reparte en varias páginas -- se concatenan todas para no
+  // perder filas de páginas posteriores a la primera.
+  const tablePagesText = pages
+    .filter((text) => text.toUpperCase().includes('TABLA DE VÉRTICES'))
+    .join('\n');
+  assert.ok(tablePagesText.length > 0, 'no se encontró ninguna página de tabla en el PDF generado');
+
+  // Puntos visibles en el plano: únicamente los círculos P1..Pn
+  // (drawVertexCircles) -- las cotas de distancia en esta página nunca
+  // incluyen el prefijo "P" (solo el valor en metros), así que ningún otro
+  // texto de la página produce falsos positivos para /\bP\d+\b/.
+  const visiblePointIds = new Set(planoPage.match(/\bP\d+\b/g) || []);
+
+  // Puntos tabulados: primera columna ("Pn") de cada fila "Pn Pm <dist> m".
+  const tableRowMatches = [...tablePagesText.matchAll(/\bP(\d+)\s+P(\d+)\s+[\d.,]+\s*m/g)];
+  assert.ok(tableRowMatches.length > 0, 'no se encontró ninguna fila de vértices/distancias en la tabla');
+  const tablePointIds = new Set(tableRowMatches.map((match) => `P${match[1]}`));
+
+  // La reducción realmente ocurrió (si no, esta prueba no distinguiría el
+  // defecto de un caso donde plano y tabla coinciden por casualidad al usar
+  // el anillo completo en ambos lados).
+  assert.ok(
+    visiblePointIds.size < complexRing.length - 1,
+    `se esperaba que VisibleReferencePointEngine redujera el anillo de ${complexRing.length - 1} vértices -- el plano mostró ${visiblePointIds.size}, igual al anillo completo (la geometría de prueba no dispara reducción real)`,
+  );
+
+  assert.equal(
+    visiblePointIds.size,
+    tablePointIds.size,
+    `cantidad de puntos visibles en el plano (${visiblePointIds.size}) debe igualar la cantidad de puntos tabulados (${tablePointIds.size})`,
+  );
+  const sortByNumber = (a, b) => Number(a.slice(1)) - Number(b.slice(1));
+  assert.deepEqual(
+    [...visiblePointIds].sort(sortByNumber),
+    [...tablePointIds].sort(sortByNumber),
+    'el conjunto exacto de IDs de punto debe coincidir entre el plano y la tabla (ningún punto visible fuera de la tabla, ninguno tabulado ausente del plano)',
+  );
+
+  // Cierre Pn -> P1: la última fila de la tabla debe volver al primer punto.
+  const [, lastFrom, lastTo] = tableRowMatches[tableRowMatches.length - 1];
+  assert.equal(lastTo, '1', `la última fila debe cerrar hacia P1, cerró hacia P${lastTo} (desde P${lastFrom})`);
+  assert.equal(Number(lastFrom), tablePointIds.size, 'la última fila debe partir del último punto (Pn), no de uno intermedio');
+});
+
 test('CATX-PDF-PARITY-002: checksum del PDF servido para descarga/correo se calcula sobre el mismo Buffer (mismo sha256)', async () => {
   // No repite la integración completa (ya cubierta por
   // catastroxDeliveryLifecycle.test.js, que reutiliza deliveryJobService.js
@@ -270,6 +366,42 @@ test('CATX-PDF-PARITY-002: predio rural cuya vereda solo tiene código catastral
   const fichaPage = pages[1];
   assert.ok(fichaPage.toUpperCase().includes('CÓDIGO CATASTRAL DE VEREDA'), 'debe mostrarse la fila "Código catastral de vereda" cuando la fuente solo trae el código, no un nombre común');
   assert.ok(fichaPage.includes('184600002000'), 'debe mostrarse el valor real del código catastral de vereda');
+});
+
+// CATX-POSTPAYMENT-UX-001: encontrado durante la generación de los PDFs de
+// validación de este mismo sprint -- un veredaDisplay PRESENTE pero
+// incompleto (le faltaba `.label`, como en el fixture de prueba usado)
+// pasaba sin cambios por el chequeo superficial `predio.veredaDisplay || ...`
+// (normalizePredioForDeliverables, catastroxPdfLayout.js) y aparecía
+// literalmente "UNDEFINED" como rótulo en la página 2. No es alcanzable
+// hoy por el flujo real (el único constructor real, getVeredaDisplay() en
+// server/routes/catastrox.js, siempre devuelve un objeto completo), pero
+// nada impedía que un llamador futuro con datos parciales lo disparara.
+// Esta prueba cubre el requisito absoluto: nunca debe imprimirse
+// literalmente "undefined"/"null"/"NaN"/"[object Object]" en ninguna
+// página del PDF, ni siquiera con la entrada deliberadamente malformada
+// que causó el defecto real.
+test('CATX-POSTPAYMENT-UX-001: veredaDisplay incompleto (sin .label) nunca imprime "UNDEFINED" -- se reconstruye con el fallback completo', async () => {
+  const buffer = await generateSamplePdf({
+    predioData: buildSamplePredioData({ tipoZona: 'RURAL', veredaDisplay: { value: 'Vereda de prueba' } }),
+  });
+  const pages = extractPdfPageTexts(buffer);
+  const fichaPage = pages[1];
+
+  assert.ok(fichaPage.toUpperCase().includes('VEREDA'), 'un veredaDisplay incompleto debe seguir mostrando la fila "Vereda", reconstruida con el fallback completo');
+  assert.ok(fichaPage.includes('Vereda de prueba'), 'el valor real suministrado no debe perderse -- solo la forma inválida se descarta, no necesariamente el dato');
+
+  // Ninguna página del documento completo debe filtrar un valor técnico no
+  // definido -- lista exacta pedida: undefined, null, NaN, [object Object].
+  const forbiddenTokens = ['undefined', 'null', 'NaN', '[object Object]'];
+  pages.forEach((pageText, index) => {
+    forbiddenTokens.forEach((token) => {
+      assert.ok(
+        !pageText.includes(token),
+        `la página ${index + 1} no debe contener el token técnico "${token}" -- texto: ${pageText.slice(0, 200)}`,
+      );
+    });
+  });
 });
 
 test('CATX-PDF-PARITY-002: campos faltantes (código anterior, barrio, manzana) nunca rompen la generación -- muestran su fallback textual', async () => {
