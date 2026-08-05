@@ -4650,6 +4650,18 @@ export async function downloadDiagnosticPdf(source) {
   }
 }
 
+// CATX-DELIVERABLE-CANONICAL-001: para una compra real y aprobada, el botón
+// "Descargar PDF" de "Descargas habilitadas" (CatastroXPackagePage.jsx) ya
+// NO llama a esta función -- descarga el mismo blob oficial PDFKit del
+// backend (GET .../deliverable/download) que ya usan el correo, "Entrega y
+// facturación" y "Mis compras", en vez de regenerar un PDF rasterizado
+// (canvas -> JPEG por página) en el navegador. downloadPlanPdf/
+// buildPlanPdfBytes/buildImageOnlyPdf se conservan intactos porque siguen
+// siendo el ÚNICO generador disponible para el modo "auditoría local"
+// (handleEnableAuditDownloads, mismo archivo) -- ese modo, por diseño, no
+// crea ninguna orden real en el backend, así que no existe ningún
+// deliverable oficial del que descargar. No eliminar sin antes retirar
+// también el modo auditoría.
 export async function downloadPlanPdf(source) {
   const predio = normalizePredioForDeliverables(source);
   try {

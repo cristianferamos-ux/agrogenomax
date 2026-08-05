@@ -10,6 +10,7 @@ import { createCatastroxResolverShadow } from '../services/catastrox/catastroxRe
 import { getRecoverySessionTokenFromCookieHeader } from '../security/recoveryCookie.js';
 import * as recoverySessions from '../services/catastrox/recoverySessionRepository.js';
 import { packageSatisfies } from '../services/catastrox/paymentOrderTransitions.js';
+import { resolveCanonicalAreaForRow } from '../services/catastrox/catastroxCanonicalArea.js';
 
 const router = Router();
 
@@ -1831,6 +1832,15 @@ const CLEAN_FULL_RESULT_QUERY = `select
     };
   }
 
+  // CATX-DELIVERABLE-CANONICAL-001: fuente canónica única -- areaM2/areaHa
+  // SIEMPRE se derivan uno del otro desde la misma fuente elegida, nunca
+  // dos cadenas de prioridad independientes (ver catastroxCanonicalArea.js,
+  // causa raíz del defecto donde un mismo predio mostraba 84,38 ha junto a
+  // 866.710,71 m², valores matemáticamente incompatibles).
+  const canonicalArea = resolveCanonicalAreaForRow(row, {
+    codigoPredial: source === 'clean' ? row.codigo_predial : (row.codigo || row.codigo_predial),
+  });
+
   return {
     errorStatus: null,
     payload: {
@@ -1863,8 +1873,8 @@ const CLEAN_FULL_RESULT_QUERY = `select
         barrioNombre: toNullableString(row.barrio_nombre),
         sectorCodigo: toNullableString(row.sector_codigo),
         manzanaCodigo: toNullableString(row.manzana_codigo),
-        areaM2: Number(row.area_m2_exact || row.shape_area || row.area_terreno_m2 || 0),
-        areaHa: Number(row.area_terreno_ha || (Number(row.area_m2_exact || row.shape_area || 0) / 10000)),
+        areaM2: canonicalArea.canonicalAreaM2 ?? 0,
+        areaHa: canonicalArea.canonicalAreaHa ?? 0,
         perimetroM: Number(row.shape_length || row.perimetro_m || 0),
         estadoPredial: 'Predio identificado en la base catastral consultada.',
         tipoZona: toNullableString(row.zona) || 'Rural',
@@ -1976,6 +1986,14 @@ export async function resolvePredioDataForDelivery(canonicalPredioId, queryImpl 
   const row = result?.rows?.[0];
   if (!row || !isValidPredioGeometry(row.geometry)) return null;
 
+  // CATX-DELIVERABLE-CANONICAL-001: misma fuente canónica que
+  // buildLookupFullResultPayload (arriba) -- este es el único otro sitio
+  // que construye areaM2/areaHa, y alimenta directamente el generador de
+  // PDF (generateCatastroxPdfBuffer). Sin esta unificación, el PDF podía
+  // mostrar una combinación de área distinta a la del diagnóstico/ficha
+  // técnica para el mismo predio.
+  const canonicalArea = resolveCanonicalAreaForRow(row, { codigoPredial: row.codigo_predial });
+
   return {
     codigoPredial: toNullableString(row.codigo_predial),
     codigoAnterior: toNullableString(row.codigo_anterior) || 'No disponible',
@@ -1987,8 +2005,8 @@ export async function resolvePredioDataForDelivery(canonicalPredioId, queryImpl 
     barrioNombre: toNullableString(row.barrio_nombre),
     sectorCodigo: toNullableString(row.sector_codigo),
     manzanaCodigo: toNullableString(row.manzana_codigo),
-    areaM2: Number(row.area_m2_exact || row.area_terreno_m2 || 0),
-    areaHa: Number(row.area_terreno_ha || (Number(row.area_m2_exact || 0) / 10000)),
+    areaM2: canonicalArea.canonicalAreaM2 ?? 0,
+    areaHa: canonicalArea.canonicalAreaHa ?? 0,
     perimetroM: Number(row.perimetro_m || 0),
     estadoPredial: 'Predio identificado en la base catastral consultada.',
     tipoZona: toNullableString(row.zona) || 'Rural',
