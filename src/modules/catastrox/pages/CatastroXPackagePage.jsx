@@ -27,7 +27,9 @@ import {
   checkEntitlement,
   clearPendingPaymentByReference,
   createCustomer,
+  downloadDeliverablePdf,
   getApprovedPurchaseRecordByKeys,
+  getMyOrders,
   getPackageRank,
   getLookupPurchaseKey,
   getPurchasedPackageForLookup,
@@ -47,6 +49,11 @@ import {
   downloadPlanPdf,
   downloadShpZip,
 } from '../utils/catastroxDeliverables.js';
+import {
+  resolveDeliverableDownloadErrorMessage,
+  resolveDeliverableOrderTokenForPredio,
+  shouldUseOfficialPdfDownload,
+} from '../utils/catastroxDeliverableDownload.js';
 
 const PACKAGE_PAGE_COPY = {
   [CATASTROX_PACKAGE_IDS.BASICO]: {
@@ -185,6 +192,14 @@ export default function CatastroXPackagePage({ packageId }) {
   // localStorage diga (corrige el defecto de cobro duplicado: localStorage
   // ya no es la fuente de verdad, ver informe de auditoría).
   const [entitlementState, setEntitlementState] = useState({ isPaid: null });
+  // CATX-DELIVERABLE-CANONICAL-001: orderToken de la orden APROBADA real
+  // (no auditoría) que corresponde a este predio -- única forma de
+  // descargar el PDF OFICIAL ya generado/almacenado por el backend (mismo
+  // blob que el correo y "Entrega y facturación"), en vez de regenerarlo en
+  // el navegador. null mientras no se resuelve o no hay ninguna orden
+  // aprobada para este predio.
+  const [deliverableOrderToken, setDeliverableOrderToken] = useState(null);
+  const [pdfDownloadState, setPdfDownloadState] = useState({});
 
   // Flujo de comprador/OTP/resumen (Bloque 2-10 del pedido) -- todo en
   // memoria de React, nunca en localStorage/sessionStorage. `purchaseFlowStep`
@@ -378,6 +393,36 @@ export default function CatastroXPackagePage({ packageId }) {
     };
   }, [auditLookup, deliverableLookup, isPaid, lookup]);
 
+  // CATX-DELIVERABLE-CANONICAL-001: resuelve el orderToken de la orden
+  // APROBADA real para este predio -- nunca en modo auditoría (ahí no
+  // existe ninguna orden real, ver handleEnableAuditDownloads). Si hay más
+  // de una orden aprobada para el mismo predio (p. ej. una compra de rango
+  // inferior seguida de una de rango superior), se prefiere la de mayor
+  // rango -- coincide con el paquete cuyo PDF oficial realmente se generó
+  // y almacenó (isPackageUnlockedForLookup/getPackageRank ya usan ese
+  // mismo criterio de rango en esta misma pantalla).
+  useEffect(() => {
+    if (!isPaid || isAuditUnlocked) {
+      setDeliverableOrderToken(null);
+      return undefined;
+    }
+
+    const codigoPredial = String(predio.codigoPredial || predio.codigo || '').trim();
+    if (!codigoPredial) return undefined;
+
+    let cancelled = false;
+
+    void getMyOrders().then((result) => {
+      if (cancelled || !result.ok) return;
+      const orderToken = resolveDeliverableOrderTokenForPredio({ orders: result.orders, codigoPredial, requiredPackageId: packageId });
+      if (orderToken) setDeliverableOrderToken(orderToken);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isPaid, isAuditUnlocked, predio.codigoPredial, predio.codigo]);
+
   const handleEnableAuditDownloads = async () => {
     try {
       setIsLoadingAudit(true);
@@ -400,8 +445,44 @@ export default function CatastroXPackagePage({ packageId }) {
     }
   };
 
+  // CATX-DELIVERABLE-CANONICAL-001: descarga el blob OFICIAL ya generado y
+  // almacenado por el backend (mismo mecanismo que "Mis compras" y la
+  // sección "Entrega y facturación" del retorno Wompi) -- nunca recalcula
+  // el PDF en el navegador. Solo se usa para la compra real (no
+  // auditoría); handleDownload decide cuándo llamar esta función en vez de
+  // `action` directamente.
+  const handleOfficialPdfDownload = async () => {
+    setPdfDownloadState({ downloading: true, message: null });
+    if (!deliverableOrderToken) {
+      setPdfDownloadState({
+        downloading: false,
+        message: resolveDeliverableDownloadErrorMessage('ORDER_NOT_FOUND'),
+        tone: 'danger',
+      });
+      return;
+    }
+    const result = await downloadDeliverablePdf(deliverableOrderToken);
+    setPdfDownloadState({
+      downloading: false,
+      message: result.ok ? null : resolveDeliverableDownloadErrorMessage(result.code),
+      tone: result.ok ? null : 'danger',
+    });
+  };
+
   const handleDownload = async (action, fileType) => {
     const useAuditEndpoint = fileType === 'coords9377' ? false : isAuditUnlocked;
+
+    // El botón "Descargar PDF" de una compra real (no auditoría) nunca debe
+    // regenerar el archivo en el navegador -- descarga el mismo blob
+    // oficial que correo/Entrega y facturación/Mis compras. El modo
+    // auditoría local (sin orden real, sin pago) sigue usando `action`
+    // (downloadPlanPdf, generador de navegador) porque no existe ningún
+    // pedido en el backend del que descargar.
+    if (shouldUseOfficialPdfDownload({ fileType, useAuditEndpoint })) {
+      await handleOfficialPdfDownload();
+      return;
+    }
+
     try {
       if (packageId === CATASTROX_PACKAGE_IDS.PROFESIONAL && !isAuditUnlocked) {
         setIsHydratingDeliverables(true);
@@ -778,6 +859,9 @@ export default function CatastroXPackagePage({ packageId }) {
               />
             ))}
           </div>
+          {!isAuditUnlocked && pdfDownloadState.message ? (
+            <p className={`catastrox-copy is-${pdfDownloadState.tone || 'warning'}`}>{pdfDownloadState.message}</p>
+          ) : null}
         </section>
       ) : purchaseFlowStep === null ? (
         <section className="catastrox-card">
