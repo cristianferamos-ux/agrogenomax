@@ -10,7 +10,7 @@
 //   - envío exitoso -> SENT + delivered_at
 //   - error de correo -> FAILED + last_error_code
 //   - reintento de FAILED incrementa attempts y puede terminar SENT
-//   - reintento de SENT se rechaza (409, vía retryDeliveryJob y vía la ruta HTTP)
+//   - reintento de SENT es idempotente (sin nuevos intentos/envíos)
 //   - descarga sin sesión -> 401; de otra orden/sesión -> 403; válida -> 200 application/pdf
 //   - reintento HTTP sin sesión -> 401; de otra orden -> 403
 import test from 'node:test';
@@ -273,6 +273,50 @@ async function cleanupOrder(order, customerId) {
   }
 }
 
+async function hasConstraint(constraintName) {
+  const result = await query(
+    `select 1
+       from pg_constraint
+      where conname = $1
+        and connamespace = 'public'::regnamespace
+      limit 1`,
+    [constraintName],
+  );
+  return result.rows.length > 0;
+}
+
+async function countBlobsForJob(jobId) {
+  const result = await query(
+    `select count(*)::int as count
+       from public.catastrox_deliverable_blobs
+      where deliverable_id in (
+        select id from public.catastrox_deliverables where delivery_job_id = $1
+      )`,
+    [jobId],
+  );
+  return result.rows[0]?.count || 0;
+}
+
+async function createApprovedDeliveryJobForDirectProcessing(app, { email = 'delivery-concurrency@example.com' } = {}) {
+  const { customerId } = await createVerifiedTestCustomer(app.baseUrl);
+  const checkoutResponse = await fetch(`${app.baseUrl}/checkout`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID, customerId, purchaseAttemptId: crypto.randomUUID() }),
+  });
+  const { reference } = (await checkoutResponse.json()).checkout;
+  const orderRow = await query('select * from public.catastrox_payment_orders where wompi_reference = $1', [reference]);
+  const order = orderRow.rows[0];
+  await query("update public.catastrox_payment_orders set status = 'APPROVED' where id = $1", [order.id]);
+  order.status = 'APPROVED';
+  const job = await deliveryJobService.createDeliveryJobForOrder({
+    orderId: order.id,
+    customerId,
+    deliveryEmail: email,
+  });
+  return { order, customerId, job };
+}
+
 test('CATX-DELIVERY-001: ciclo de vida del delivery job (integración, requiere Postgres real)', { skip: !dbAvailable }, async (t) => {
   const originalEventsSecret = process.env.WOMPI_EVENTS_SECRET_TEST;
   process.env.WOMPI_EVENTS_SECRET_TEST = EVENTS_SECRET;
@@ -444,7 +488,7 @@ test('CATX-DELIVERY-001: ciclo de vida del delivery job (integración, requiere 
     }
   });
 
-  await t.test('5) reintentar un job SENT se rechaza (DELIVERY_NOT_RETRYABLE), directo y vía la ruta HTTP (409)', async () => {
+  await t.test('5) reintentar un job SENT es idempotente: no crea intentos nuevos y HTTP responde OK', async () => {
     const app = await startTestApp();
     let created;
     const originalAppEnv = process.env.APP_ENV;
@@ -465,18 +509,20 @@ test('CATX-DELIVERY-001: ciclo de vida del delivery job (integración, requiere 
       }
       assert.equal(sentJob.status, 'SENT');
 
-      await assert.rejects(
-        () => deliveryJobService.retryDeliveryJob(sentJob.id),
-        (error) => error.code === 'DELIVERY_NOT_RETRYABLE',
-      );
+      const attemptsBefore = await deliveryJobService.listAttemptsForJob(sentJob.id);
+      const directRetry = await deliveryJobService.retryDeliveryJob(sentJob.id);
+      assert.equal(directRetry.status, 'SENT');
+      assert.equal((await deliveryJobService.listAttemptsForJob(sentJob.id)).length, attemptsBefore.length);
 
       const retryResponse = await fetch(`${app.baseUrl}/orders/${encodeURIComponent(created.orderToken)}/delivery/retry`, {
         method: 'POST',
         headers: { Cookie: created.cookie },
       });
-      assert.equal(retryResponse.status, 409);
+      assert.equal(retryResponse.status, 200);
       const retryPayload = await retryResponse.json();
-      assert.equal(retryPayload.code, 'DELIVERY_NOT_RETRYABLE');
+      assert.equal(retryPayload.ok, true);
+      assert.equal(retryPayload.status, 'SENT');
+      assert.equal((await deliveryJobService.listAttemptsForJob(sentJob.id)).length, attemptsBefore.length);
     } finally {
       if (originalAppEnv === undefined) delete process.env.APP_ENV;
       else process.env.APP_ENV = originalAppEnv;
@@ -711,6 +757,227 @@ test('CATX-DELIVERY-001: ciclo de vida del delivery job (integración, requiere 
       assert.equal(attemptsFinal[2].content_hash, deliverable.content_hash);
     } finally {
       await cleanupOrder(order, customerId);
+      await app.close();
+    }
+  });
+
+  await t.test('10) dos processDeliveryJob concurrentes reclaman una sola vez, crean un deliverable y envían un solo correo', async () => {
+    const app = await startTestApp();
+    let created;
+    const originalAppEnv = process.env.APP_ENV;
+    try {
+      created = await createApprovedDeliveryJobForDirectProcessing(app);
+      process.env.APP_ENV = 'staging';
+      process.env.EMAIL_PROVIDER = 'resend';
+      process.env.RESEND_API_KEY = 're_synthetic_test_key_1234567890';
+      process.env.EMAIL_FROM = 'CatastroX <no-reply@mail.staging.agrogenomax.com>';
+
+      let sendCount = 0;
+      withFetchMock((url) => {
+        if (url.includes('api.resend.com')) {
+          sendCount += 1;
+          return jsonResponse(200, { id: `msg_concurrent_${sendCount}` });
+        }
+        return jsonResponse(500, { message: 'no debería llamarse en este paso' });
+      });
+      try {
+        await Promise.all([
+          deliveryJobService.processDeliveryJob(created.job.id),
+          deliveryJobService.processDeliveryJob(created.job.id),
+        ]);
+      } finally {
+        restoreFetch();
+      }
+
+      const finalJob = await deliveryJobService.findLatestDeliveryJobForOrder(created.order.id);
+      const attempts = await deliveryJobService.listAttemptsForJob(created.job.id);
+      const deliverables = await deliveryJobService.listDeliverablesForJob(created.job.id);
+
+      assert.equal(finalJob.status, 'SENT');
+      assert.equal(finalJob.attempt_count, 1);
+      assert.equal(attempts.length, 1);
+      assert.equal(attempts[0].attempt_number, 1);
+      assert.equal(attempts[0].status, 'SENT');
+      assert.equal(deliverables.length, 1);
+      assert.equal(await countBlobsForJob(created.job.id), 1);
+      assert.equal(sendCount, 1);
+    } finally {
+      restoreFetch();
+      if (originalAppEnv === undefined) delete process.env.APP_ENV;
+      else process.env.APP_ENV = originalAppEnv;
+      await cleanupOrder(created?.order, created?.customerId);
+      await app.close();
+    }
+  });
+
+  await t.test('11) dos retries simultáneos sobre FAILED producen un solo intento nuevo y un solo correo', async () => {
+    const app = await startTestApp();
+    let created;
+    const originalAppEnv = process.env.APP_ENV;
+    try {
+      created = await createApprovedDeliveryJobForDirectProcessing(app);
+      const failed = await deliveryJobService.processDeliveryJob(created.job.id);
+      assert.equal(failed.status, 'FAILED');
+      assert.equal(failed.attempt_count, 1);
+
+      process.env.APP_ENV = 'staging';
+      process.env.EMAIL_PROVIDER = 'resend';
+      process.env.RESEND_API_KEY = 're_synthetic_test_key_1234567890';
+      process.env.EMAIL_FROM = 'CatastroX <no-reply@mail.staging.agrogenomax.com>';
+
+      let sendCount = 0;
+      withFetchMock((url) => {
+        if (url.includes('api.resend.com')) {
+          sendCount += 1;
+          return jsonResponse(200, { id: `msg_retry_concurrent_${sendCount}` });
+        }
+        return jsonResponse(500, { message: 'no debería llamarse en este paso' });
+      });
+      try {
+        await Promise.all([
+          deliveryJobService.retryDeliveryJob(created.job.id),
+          deliveryJobService.retryDeliveryJob(created.job.id),
+        ]);
+      } finally {
+        restoreFetch();
+      }
+
+      const finalJob = await deliveryJobService.findLatestDeliveryJobForOrder(created.order.id);
+      const attempts = await deliveryJobService.listAttemptsForJob(created.job.id);
+      const deliverables = await deliveryJobService.listDeliverablesForJob(created.job.id);
+
+      assert.equal(finalJob.status, 'SENT');
+      assert.equal(finalJob.attempt_count, 2);
+      assert.equal(attempts.length, 2);
+      assert.equal(attempts[1].attempt_number, 2);
+      assert.equal(attempts[1].status, 'SENT');
+      assert.equal(deliverables.length, 1, 'el retry exitoso reutiliza el deliverable existente');
+      assert.equal(await countBlobsForJob(created.job.id), 1);
+      assert.equal(sendCount, 1);
+    } finally {
+      restoreFetch();
+      if (originalAppEnv === undefined) delete process.env.APP_ENV;
+      else process.env.APP_ENV = originalAppEnv;
+      await cleanupOrder(created?.order, created?.customerId);
+      await app.close();
+    }
+  });
+
+  await t.test('12) dos ejecuciones sobre un job SENT son idempotentes: cero intentos, cero deliverables y cero correos nuevos', async () => {
+    const app = await startTestApp();
+    let created;
+    const originalAppEnv = process.env.APP_ENV;
+    try {
+      created = await createApprovedDeliveryJobForDirectProcessing(app);
+      process.env.APP_ENV = 'staging';
+      process.env.EMAIL_PROVIDER = 'resend';
+      process.env.RESEND_API_KEY = 're_synthetic_test_key_1234567890';
+      process.env.EMAIL_FROM = 'CatastroX <no-reply@mail.staging.agrogenomax.com>';
+
+      withFetchMock((url) => (url.includes('api.resend.com') ? jsonResponse(200, { id: 'msg_sent_once' }) : jsonResponse(500, {})));
+      try {
+        await deliveryJobService.processDeliveryJob(created.job.id);
+      } finally {
+        restoreFetch();
+      }
+
+      const attemptsBefore = await deliveryJobService.listAttemptsForJob(created.job.id);
+      const deliverablesBefore = await deliveryJobService.listDeliverablesForJob(created.job.id);
+      let sendCount = 0;
+      withFetchMock((url) => {
+        if (url.includes('api.resend.com')) sendCount += 1;
+        return jsonResponse(500, { message: 'no debería llamarse para SENT' });
+      });
+      try {
+        await Promise.all([
+          deliveryJobService.processDeliveryJob(created.job.id),
+          deliveryJobService.processDeliveryJob(created.job.id),
+        ]);
+      } finally {
+        restoreFetch();
+      }
+
+      assert.equal((await deliveryJobService.listAttemptsForJob(created.job.id)).length, attemptsBefore.length);
+      assert.equal((await deliveryJobService.listDeliverablesForJob(created.job.id)).length, deliverablesBefore.length);
+      assert.equal(await countBlobsForJob(created.job.id), 1);
+      assert.equal(sendCount, 0);
+    } finally {
+      restoreFetch();
+      if (originalAppEnv === undefined) delete process.env.APP_ENV;
+      else process.env.APP_ENV = originalAppEnv;
+      await cleanupOrder(created?.order, created?.customerId);
+      await app.close();
+    }
+  });
+
+  await t.test('13) conflicto UNIQUE de intento se maneja sin generar deliverable ni enviar correo', { skip: !(await hasConstraint('uq_catastrox_delivery_attempts_job_attempt')) }, async () => {
+    const app = await startTestApp();
+    let created;
+    try {
+      created = await createApprovedDeliveryJobForDirectProcessing(app);
+      await query(
+        `insert into public.catastrox_delivery_attempts (delivery_job_id, attempt_number, status)
+         values ($1, 1, 'FAILED')`,
+        [created.job.id],
+      );
+      const processed = await deliveryJobService.processDeliveryJob(created.job.id);
+      assert.equal(processed.status, 'FAILED');
+      assert.equal(processed.last_error_code, 'DELIVERY_ATTEMPT_CONFLICT');
+      assert.equal((await deliveryJobService.listDeliverablesForJob(created.job.id)).length, 0);
+      assert.equal(await countBlobsForJob(created.job.id), 0);
+    } finally {
+      await cleanupOrder(created?.order, created?.customerId);
+      await app.close();
+    }
+  });
+
+  await t.test('14) estado activo vencido es recuperable por timeout y no queda bloqueado permanentemente', async () => {
+    const app = await startTestApp();
+    let created;
+    const originalAppEnv = process.env.APP_ENV;
+    try {
+      created = await createApprovedDeliveryJobForDirectProcessing(app);
+      const failed = await deliveryJobService.processDeliveryJob(created.job.id);
+      assert.equal(failed.status, 'FAILED');
+      await query(
+        `update public.catastrox_delivery_jobs
+            set status = 'SENDING',
+                provider_message_id = null,
+                last_attempt_at = now() - interval '31 minutes'
+          where id = $1`,
+        [created.job.id],
+      );
+
+      process.env.APP_ENV = 'staging';
+      process.env.EMAIL_PROVIDER = 'resend';
+      process.env.RESEND_API_KEY = 're_synthetic_test_key_1234567890';
+      process.env.EMAIL_FROM = 'CatastroX <no-reply@mail.staging.agrogenomax.com>';
+
+      let sendCount = 0;
+      withFetchMock((url) => {
+        if (url.includes('api.resend.com')) {
+          sendCount += 1;
+          return jsonResponse(200, { id: 'msg_stale_sending_recovered' });
+        }
+        return jsonResponse(500, { message: 'no debería llamarse en este paso' });
+      });
+      try {
+        await deliveryJobService.processDeliveryJob(created.job.id);
+      } finally {
+        restoreFetch();
+      }
+
+      const finalJob = await deliveryJobService.findLatestDeliveryJobForOrder(created.order.id);
+      assert.equal(finalJob.status, 'SENT');
+      assert.equal(finalJob.attempt_count, 2);
+      assert.equal(sendCount, 1);
+      assert.equal((await deliveryJobService.listDeliverablesForJob(created.job.id)).length, 1);
+      assert.equal(await countBlobsForJob(created.job.id), 1);
+    } finally {
+      restoreFetch();
+      if (originalAppEnv === undefined) delete process.env.APP_ENV;
+      else process.env.APP_ENV = originalAppEnv;
+      await cleanupOrder(created?.order, created?.customerId);
       await app.close();
     }
   });

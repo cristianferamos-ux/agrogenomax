@@ -38,6 +38,26 @@ export function shouldUseOfficialPdfDownload({ fileType, useAuditEndpoint }) {
   return fileType === 'pdf' && !useAuditEndpoint;
 }
 
+export async function executeCatastroxPackageDownloadDecision({
+  fileType,
+  useAuditEndpoint,
+  deliverableOrderToken,
+  officialDownload,
+  localDownload,
+}) {
+  if (shouldUseOfficialPdfDownload({ fileType, useAuditEndpoint })) {
+    return {
+      mode: 'official',
+      result: await officialDownload(deliverableOrderToken),
+    };
+  }
+
+  return {
+    mode: 'local',
+    result: await localDownload(),
+  };
+}
+
 // Encuentra, entre las órdenes de la sesión (GET /orders/mine, ya ordenadas
 // por created_at desc por el backend), la orden APROBADA compatible con el
 // paquete que se está viendo -- mismo codigoPredial, estado APPROVED, y

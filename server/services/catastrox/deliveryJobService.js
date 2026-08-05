@@ -46,6 +46,9 @@ import { sendDeliverableEmail } from './emailSender.js';
 
 const DELIVERY_JOBS_TABLE = 'public.catastrox_delivery_jobs';
 const DELIVERABLES_TABLE = 'public.catastrox_deliverables';
+const CLAIMABLE_STATUSES = Object.freeze(['QUEUED', 'FAILED']);
+const ACTIVE_STATUSES = Object.freeze(['GENERATING', 'READY', 'SENDING']);
+const STALE_ACTIVE_INTERVAL = "30 minutes";
 
 // Conservada por compatibilidad -- clasificador genérico para cualquier
 // fallo de generación que no tenga un código más específico (p. ej. un
@@ -89,6 +92,117 @@ function logDeliveryEvent(stage, fields = {}) {
   level('[CatastroX Delivery]', entry);
 }
 
+function isDuplicateConstraintError(error) {
+  return error?.code === '23505';
+}
+
+function isActiveDeliveryStatus(status) {
+  return ACTIVE_STATUSES.includes(status);
+}
+
+function resolveUnclaimedReason(job) {
+  if (!job) return 'not_found';
+  if (job.status === 'SENT' || job.status === 'DELIVERED') return 'already_sent';
+  if (isActiveDeliveryStatus(job.status)) return 'already_processing';
+  return 'not_claimable';
+}
+
+/**
+ * Reclamo atomico y corto: solo una ejecucion puede mover QUEUED/FAILED (o
+ * un estado activo claramente vencido) a GENERATING e incrementar
+ * attempt_count. No mantiene ninguna transaccion abierta durante PDF, tiles
+ * ni proveedor de correo.
+ */
+async function claimDeliveryJob(jobId) {
+  const claimResult = await query(
+    `update ${DELIVERY_JOBS_TABLE}
+        set status = 'GENERATING',
+            started_at = coalesce(started_at, now()),
+            attempt_count = attempt_count + 1,
+            last_attempt_at = now(),
+            last_error_code = null,
+            next_retry_at = null
+      where id = $1
+        and status = any($2::public.catastrox_delivery_job_status[])
+      returning *`,
+    [jobId, CLAIMABLE_STATUSES],
+  );
+  if (claimResult.rows[0]) {
+    return { claimed: true, job: claimResult.rows[0], recoveredFromStale: false };
+  }
+
+  const staleClaimResult = await query(
+    `update ${DELIVERY_JOBS_TABLE}
+        set status = 'GENERATING',
+            started_at = coalesce(started_at, now()),
+            attempt_count = attempt_count + 1,
+            last_attempt_at = now(),
+            last_error_code = null,
+            next_retry_at = null
+      where id = $1
+        and status = any($2::public.catastrox_delivery_job_status[])
+        and provider_message_id is null
+        and last_attempt_at < now() - $3::interval
+      returning *`,
+    [jobId, ACTIVE_STATUSES, STALE_ACTIVE_INTERVAL],
+  );
+  if (staleClaimResult.rows[0]) {
+    return { claimed: true, job: staleClaimResult.rows[0], recoveredFromStale: true };
+  }
+
+  const currentResult = await query(`select * from ${DELIVERY_JOBS_TABLE} where id = $1`, [jobId]);
+  const currentJob = currentResult.rows[0] || null;
+  return { claimed: false, job: currentJob, reason: resolveUnclaimedReason(currentJob) };
+}
+
+async function transitionDeliveryJobToReady({ jobId, attemptNumber }) {
+  const result = await query(
+    `update ${DELIVERY_JOBS_TABLE}
+        set status = 'READY',
+            completed_at = now()
+      where id = $1
+        and status = 'GENERATING'
+        and attempt_count = $2
+      returning *`,
+    [jobId, attemptNumber],
+  );
+  return result.rows[0] || null;
+}
+
+async function claimEmailSending({ jobId, attemptNumber }) {
+  const result = await query(
+    `update ${DELIVERY_JOBS_TABLE}
+        set status = 'SENDING',
+            last_attempt_at = now()
+      where id = $1
+        and status = 'READY'
+        and attempt_count = $2
+        and provider_message_id is null
+      returning *`,
+    [jobId, attemptNumber],
+  );
+  return result.rows[0] || null;
+}
+
+async function markDeliveryJobSent({ jobId, attemptNumber, providerMessageId }) {
+  const result = await query(
+    `update ${DELIVERY_JOBS_TABLE}
+        set status = 'SENT',
+            delivered_at = now(),
+            last_attempt_at = now(),
+            last_resolved_error_code = case when last_error_code is not null then last_error_code else last_resolved_error_code end,
+            last_resolved_error_at = case when last_error_code is not null then now() else last_resolved_error_at end,
+            last_error_code = null,
+            provider_message_id = $3
+      where id = $1
+        and status = 'SENDING'
+        and attempt_count = $2
+      returning *`,
+    [jobId, attemptNumber, providerMessageId],
+  );
+  return result.rows[0] || null;
+}
+
 /**
  * Crea el job principal de entrega de una orden -- EXACTAMENTE una fila
  * por payment_order_id (UNIQUE, migración 005). Sin cambios de
@@ -126,7 +240,6 @@ async function markDeliveryJobFailed(jobId, errorCode, {
   const result = await query(
     `update ${DELIVERY_JOBS_TABLE}
         set status = 'FAILED',
-            attempt_count = attempt_count + 1,
             last_attempt_at = now(),
             last_error_code = $2,
             next_retry_at = now() + interval '1 hour'
@@ -179,6 +292,7 @@ async function findReusableDeliverable(jobId) {
   );
   const deliverable = result.rows[0];
   if (!deliverable) return null;
+  if (!deliverable.storage_key) return null;
 
   const storage = resolveStorageAdapter();
   const stored = await storage.get(deliverable.storage_key.replace(/^(pg|local):/, ''));
@@ -220,18 +334,35 @@ async function generateAndStoreDeliverable({ job, order }) {
     deliverableType: 'pdf',
   });
 
-  // Metadatos primero (para tener deliverable_id antes de escribir bytes),
-  // storage_key se completa después de que storage.put() confirme.
-  const insertResult = await query(
-    `insert into ${DELIVERABLES_TABLE} (delivery_job_id, file_type, content_hash, byte_size, file_name)
-     values ($1, 'pdf', $2, $3, $4)
-     returning *`,
-    [job.id, checksum, buffer.length, filename],
-  );
-  let deliverable = insertResult.rows[0];
+  // Metadatos primero (para tener deliverable_id antes de escribir bytes).
+  // La migracion 009 impone un unico PDF canonico por job; si una fila ya
+  // existe, se reutiliza solo si su blob verifica contra content_hash.
+  let deliverable;
+  try {
+    const insertResult = await query(
+      `insert into ${DELIVERABLES_TABLE} (delivery_job_id, file_type, content_hash, byte_size, file_name)
+       values ($1, 'pdf', $2, $3, $4)
+       returning *`,
+      [job.id, checksum, buffer.length, filename],
+    );
+    deliverable = insertResult.rows[0];
+  } catch (error) {
+    if (!isDuplicateConstraintError(error)) throw error;
+    const reusable = await findReusableDeliverable(job.id);
+    if (reusable) return reusable;
+    throw Object.assign(new Error('Ya existe un entregable PDF para este job, pero no hay un blob valido reutilizable.'), {
+      code: 'DELIVERABLE_ALREADY_EXISTS_UNAVAILABLE',
+    });
+  }
 
   const storage = resolveStorageAdapter();
-  const { storageKey } = await storage.put(deliverable.id, buffer, { contentType: 'application/pdf' });
+  let storageKey;
+  try {
+    ({ storageKey } = await storage.put(deliverable.id, buffer, { contentType: 'application/pdf' }));
+  } catch (error) {
+    await query(`delete from ${DELIVERABLES_TABLE} where id = $1 and storage_key is null`, [deliverable.id]);
+    throw error;
+  }
 
   const updateResult = await query(
     `update ${DELIVERABLES_TABLE} set storage_key = $2 where id = $1 returning *`,
@@ -257,19 +388,44 @@ async function generateAndStoreDeliverable({ job, order }) {
  * de un intento anterior.
  */
 export async function processDeliveryJob(jobId) {
-  const jobResult = await query(`select * from ${DELIVERY_JOBS_TABLE} where id = $1`, [jobId]);
-  const job = jobResult.rows[0];
-  if (!job) return null;
+  const claim = await claimDeliveryJob(jobId);
+  if (!claim.claimed) {
+    logDeliveryEvent('claim_skipped', {
+      delivery_job_id: jobId,
+      attempt_count: claim.job?.attempt_count,
+      status: claim.job?.status,
+      reason: claim.reason,
+    });
+    return claim.job;
+  }
 
+  const job = claim.job;
   const order = await paymentOrders.findOrderById(job.payment_order_id);
-  const attemptNumber = (job.attempt_count || 0) + 1;
-  const attempt = await startDeliveryAttempt({ deliveryJobId: jobId, attemptNumber });
+  const attemptNumber = job.attempt_count;
+  let attempt;
+  try {
+    attempt = await startDeliveryAttempt({ deliveryJobId: jobId, attemptNumber });
+  } catch (error) {
+    if (!isDuplicateConstraintError(error)) {
+      return markDeliveryJobFailed(jobId, error.code || 'DELIVERY_ATTEMPT_CREATE_FAILED', {
+        errorMessage: error.message,
+        stage: 'attempt_create',
+        order,
+      });
+    }
+    return markDeliveryJobFailed(jobId, 'DELIVERY_ATTEMPT_CONFLICT', {
+      errorMessage: `Ya existe un intento registrado con attempt_number=${attemptNumber} para este job.`,
+      stage: 'attempt_claim_conflict',
+      order,
+    });
+  }
 
   logDeliveryEvent('attempt_started', {
     order_id: order?.id,
     order_token: order?.order_token,
     delivery_job_id: jobId,
     attempt_count: attemptNumber,
+    recovered_from_stale: claim.recoveredFromStale || undefined,
   });
 
   // Requisito 8 del plan aprobado: nunca se envía el PDF antes de que la
@@ -299,13 +455,21 @@ export async function processDeliveryJob(jobId) {
     let pdfBytes = existing?.bytes || null;
 
     if (!deliverable) {
-      await query(`update ${DELIVERY_JOBS_TABLE} set status = 'GENERATING', started_at = now() where id = $1`, [jobId]);
       const generated = await generateAndStoreDeliverable({ job, order });
       deliverable = generated.deliverable;
       pdfBytes = generated.bytes;
     }
 
-    await query(`update ${DELIVERY_JOBS_TABLE} set status = 'READY', completed_at = now() where id = $1`, [jobId]);
+    const readyJob = await transitionDeliveryJobToReady({ jobId, attemptNumber });
+    if (!readyJob) {
+      return markDeliveryJobFailed(jobId, 'DELIVERY_STATE_TRANSITION_CONFLICT', {
+        attemptId: attempt.id,
+        errorMessage: 'No fue posible mover el job reclamado de GENERATING a READY.',
+        stage: 'ready_transition',
+        order,
+        deliverable,
+      });
+    }
 
     if (!pdfBytes) {
       // Solo alcanzable si el deliverable existía en la fila pero sus
@@ -339,7 +503,19 @@ export async function processDeliveryJob(jobId) {
     }
 
     // --- Envío por correo ---
-    await query(`update ${DELIVERY_JOBS_TABLE} set status = 'SENDING' where id = $1`, [jobId]);
+    const sendingJob = await claimEmailSending({ jobId, attemptNumber });
+    if (!sendingJob) {
+      const currentResult = await query(`select * from ${DELIVERY_JOBS_TABLE} where id = $1`, [jobId]);
+      const currentJob = currentResult.rows[0] || null;
+      if (currentJob?.status === 'SENT' || currentJob?.status === 'DELIVERED') return currentJob;
+      return markDeliveryJobFailed(jobId, 'EMAIL_SEND_CLAIM_CONFLICT', {
+        attemptId: attempt.id,
+        errorMessage: 'Otra transición cambió el estado antes de reclamar SENDING; no se envía correo.',
+        stage: 'email_send_claim',
+        order,
+        deliverable,
+      });
+    }
 
     const customerRow = job.customer_id ? await customers.findCustomerById(job.customer_id) : null;
     const decryptedCustomer = customers.decryptCustomerPii(customerRow);
@@ -376,28 +552,33 @@ export async function processDeliveryJob(jobId) {
       });
     }
 
-    const sentResult = await query(
-      `update ${DELIVERY_JOBS_TABLE}
-          set status = 'SENT',
-              delivered_at = now(),
-              attempt_count = attempt_count + 1,
-              last_attempt_at = now(),
-              -- CATX-DELIVERY-OBSERVABILITY-001 (requisito 4): el error del
-              -- intento anterior NUNCA se limpia en silencio -- su valor se
-              -- copia a last_resolved_error_code/last_resolved_error_at
-              -- ANTES de poner last_error_code en NULL (que sigue
-              -- reflejando "¿hay un error activo ahora mismo?"). El
-              -- historial completo, con más detalle, vive además en
-              -- catastrox_delivery_attempts.
-              last_resolved_error_code = case when last_error_code is not null then last_error_code else last_resolved_error_code end,
-              last_resolved_error_at = case when last_error_code is not null then now() else last_resolved_error_at end,
-              last_error_code = null,
-              provider_message_id = $2
-        where id = $1
-        returning *`,
-      [jobId, emailResult.providerMessageId],
-    );
-    const sentJob = sentResult.rows[0];
+    const sentJob = await markDeliveryJobSent({
+      jobId,
+      attemptNumber,
+      providerMessageId: emailResult.providerMessageId,
+    });
+    if (!sentJob) {
+      await completeDeliveryAttempt(attempt.id, {
+        status: 'FAILED',
+        errorCode: 'EMAIL_SENT_STATE_CONFLICT',
+        errorMessage: 'El proveedor aceptó el correo, pero no fue posible cerrar SENDING -> SENT de forma condicional.',
+        deliverableId: deliverable.id,
+        providerMessageId: emailResult.providerMessageId,
+        byteSize: deliverable.byte_size,
+        contentHash: deliverable.content_hash,
+      });
+      logDeliveryEvent('sent_transition', {
+        order_id: order.id,
+        order_token: order.order_token,
+        delivery_job_id: jobId,
+        deliverable_id: deliverable.id,
+        attempt_count: attemptNumber,
+        error_code: 'EMAIL_SENT_STATE_CONFLICT',
+        error_message: 'El proveedor aceptó el correo, pero no fue posible cerrar SENDING -> SENT de forma condicional.',
+      });
+      const currentResult = await query(`select * from ${DELIVERY_JOBS_TABLE} where id = $1`, [jobId]);
+      return currentResult.rows[0] || null;
+    }
 
     await completeDeliveryAttempt(attempt.id, {
       status: 'SENT',
@@ -437,17 +618,11 @@ export async function processDeliveryJob(jobId) {
  * reutilizable también desde pruebas sin pasar por HTTP.
  */
 export async function retryDeliveryJob(jobId) {
-  const jobResult = await query(`select * from ${DELIVERY_JOBS_TABLE} where id = $1`, [jobId]);
-  const job = jobResult.rows[0];
+  const job = await processDeliveryJob(jobId);
   if (!job) {
     throw Object.assign(new Error('Job de entrega no encontrado.'), { code: 'DELIVERY_JOB_NOT_FOUND' });
   }
-  if (job.status !== 'FAILED') {
-    throw Object.assign(new Error(`No se puede reintentar un job en estado ${job.status}.`), {
-      code: 'DELIVERY_NOT_RETRYABLE',
-    });
-  }
-  return processDeliveryJob(jobId);
+  return job;
 }
 
 export async function findDeliveryJobsForOrder(orderId) {

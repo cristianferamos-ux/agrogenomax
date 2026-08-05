@@ -14,9 +14,9 @@
 //   decisión/configuración separada todavía no implementada (pedido
 //   explícito de EMAIL_PROVIDER_002). Se responde de forma honesta con
 //   EMAIL_PROVIDER_NOT_CONFIGURED, nunca fingiendo un stub silencioso.
-// - Nunca se registra el correo completo, el código OTP, la API key ni el
-//   cuerpo completo de una respuesta del proveedor -- solo el dominio del
-//   destinatario, el proveedor y un errorCode del set cerrado de abajo.
+// - Nunca se registra el correo completo, derivados del correo, el código
+//   OTP, la API key ni el cuerpo completo de una respuesta del proveedor --
+//   solo el proveedor y un errorCode del set cerrado de abajo.
 // - Fail-closed: `delivered` nace `false` y solo pasa a `true` si Resend
 //   confirmó la aceptación (2xx + `id` presente en el cuerpo).
 
@@ -38,23 +38,15 @@ function isNonEmpty(value) {
   return typeof value === 'string' && value.trim() !== '';
 }
 
-function toEmailDomain(value) {
-  const raw = String(value || '');
-  const atIndex = raw.lastIndexOf('@');
-  return atIndex > 0 ? raw.slice(atIndex + 1) : null;
-}
-
-function logEmailEvent(type, { to, provider, errorCode } = {}) {
+function logEmailEvent(type, { provider, errorCode } = {}) {
   console.info(`[CatastroX Email] ${type}`, {
-    toDomain: toEmailDomain(to),
     provider,
     ...(errorCode ? { errorCode } : {}),
   });
 }
 
-function logEmailFailure(type, { to, provider, errorCode }) {
+function logEmailFailure(type, { provider, errorCode }) {
   console.error(`[CatastroX Email] ${type}`, {
-    toDomain: toEmailDomain(to),
     provider,
     errorCode,
   });
