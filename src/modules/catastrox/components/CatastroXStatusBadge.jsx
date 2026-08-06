@@ -1,10 +1,10 @@
-import { AlertTriangle, BadgeCheck, MapPinned } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, MapPinned } from 'lucide-react';
 import { CATASTROX_STATUS } from '../data/catastroxMockData.js';
 
 const statusConfig = {
   [CATASTROX_STATUS.IDENTIFICADO]: {
     className: 'is-success',
-    icon: BadgeCheck,
+    icon: CheckCircle2,
     label: 'Predio identificado',
   },
   [CATASTROX_STATUS.INCONSISTENCIA]: {
@@ -44,14 +44,28 @@ const statusConfig = {
   },
 };
 
-export default function CatastroXStatusBadge({ status }) {
+export default function CatastroXStatusBadge({ status, variant = 'default' }) {
   const config = statusConfig[status] || statusConfig[CATASTROX_STATUS.IDENTIFICADO];
   const Icon = config.icon;
+  const isProminent = variant === 'prominent';
 
   return (
-    <span className={`catastrox-status ${config.className}`}>
-      <Icon size={18} />
-      {config.label}
+    <span
+      className={[
+        'catastrox-status',
+        config.className,
+        isProminent ? 'is-prominent' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
+      <span className="catastrox-status-icon" aria-hidden="true">
+        <Icon size={isProminent ? 25 : 18} strokeWidth={2.5} />
+      </span>
+
+      {isProminent ? <span className="catastrox-status-divider" aria-hidden="true" /> : null}
+
+      <span className="catastrox-status-label">{config.label}</span>
     </span>
   );
 }
