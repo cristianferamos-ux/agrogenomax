@@ -552,6 +552,7 @@
   margin: 0;
 }
 
+/* Resultado gratuito: estado destacado y acceso visual a paquetes. */
 .catastrox-status {
   display: inline-flex;
   align-items: center;
