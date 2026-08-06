@@ -1,3 +1,4 @@
+import { ArrowRight, Package } from 'lucide-react';
 import CatastroXStatusBadge from './CatastroXStatusBadge.jsx';
 import { formatNumber } from '../utils/catastroxCalculations.js';
 import { getVeredaDisplay } from '../utils/veredaDisplay.js';
@@ -18,9 +19,15 @@ function isUrbanZona(predio) {
 
 function formatZonaDisplay(predio) {
   const rawValue = predio?.tipoZona || predio?.zona;
-  if (rawValue === null || rawValue === undefined || rawValue === '') return 'No registrada';
+
+  if (rawValue === null || rawValue === undefined || rawValue === '') {
+    return 'No registrada';
+  }
+
   const value = String(rawValue).trim();
+
   if (!value) return 'No registrada';
+
   return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
 }
 
@@ -49,6 +56,7 @@ export default function CatastroXResultSummary({ predio, mode = 'free' }) {
 
   function handlePackageScroll() {
     if (mode !== 'free') return;
+
     document.getElementById('catastrox-packages')?.scrollIntoView({
       behavior: 'smooth',
       block: 'start',
@@ -81,42 +89,77 @@ export default function CatastroXResultSummary({ predio, mode = 'free' }) {
     <section className="catastrox-card">
       <div className="catastrox-section-heading">
         <span>{mode === 'free' ? 'Resultado gratuito' : 'Paquete habilitado'}</span>
-        <h2>{mode === 'free' ? 'Resumen inicial de su consulta' : 'Información habilitada por su paquete'}</h2>
+        <h2>
+          {mode === 'free'
+            ? 'Resumen inicial de su consulta'
+            : 'Información habilitada por su paquete'}
+        </h2>
       </div>
-      <CatastroXStatusBadge status={predio.estado} />
+
+      <CatastroXStatusBadge
+        status={predio.estado}
+        variant={mode === 'free' ? 'prominent' : 'default'}
+      />
+
       <div className="catastrox-summary-grid">
         {rows.map(([label, value, type]) => (
           <div
             key={label}
             className={[
-              label.includes('Código') ? 'catastrox-summary-item is-code' : 'catastrox-summary-item',
+              label.includes('Código')
+                ? 'catastrox-summary-item is-code'
+                : 'catastrox-summary-item',
               type === 'cta' ? 'is-cta' : '',
-            ].filter(Boolean).join(' ')}
+            ]
+              .filter(Boolean)
+              .join(' ')}
             role={type === 'cta' ? 'button' : undefined}
             tabIndex={type === 'cta' ? 0 : undefined}
             onClick={type === 'cta' ? handlePackageScroll : undefined}
-            onKeyDown={type === 'cta'
-              ? (event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  handlePackageScroll();
-                }
-              }
-              : undefined}
+            onKeyDown={
+              type === 'cta'
+                ? (event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      handlePackageScroll();
+                    }
+                  }
+                : undefined
+            }
           >
             <span>{label}</span>
             <strong>{value}</strong>
           </div>
         ))}
       </div>
+
       {mode !== 'free' && !isUrbanZona(predio) && veredaDisplay.isCadastralCode ? (
         <p className="catastrox-summary-note">{veredaDisplay.note}</p>
       ) : null}
+
       {mode === 'free' ? (
-        <button type="button" className="catastrox-result-cta" onClick={handlePackageScroll}>
-          <span>Estado del predio</span>
-          <strong>¿Quieres conocer el área total, descargar el plano digital o abrir tu predio en Google Earth?</strong>
-          <small>Ver paquetes disponibles</small>
+        <button
+          type="button"
+          className="catastrox-result-cta"
+          onClick={handlePackageScroll}
+        >
+          <span className="catastrox-result-cta-kicker">Estado del predio</span>
+
+          <strong>
+            ¿Quieres conocer el área total, descargar el plano digital o abrir tu predio
+            en Google Earth?
+          </strong>
+
+          <span className="catastrox-result-cta-action">
+            <Package size={20} strokeWidth={2.3} aria-hidden="true" />
+            <span>Ver paquetes disponibles</span>
+            <ArrowRight
+              className="catastrox-result-cta-arrow"
+              size={21}
+              strokeWidth={2.4}
+              aria-hidden="true"
+            />
+          </span>
         </button>
       ) : null}
     </section>
