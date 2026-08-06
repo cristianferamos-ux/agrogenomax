@@ -619,7 +619,7 @@ export default function CatastroXPackagePage({ packageId }) {
         setPendingPackageId(null);
         setCheckoutState({
           status: 'error',
-          message: 'Wompi tardo demasiado en abrir. Revise bloqueadores, consola del navegador o intente nuevamente.',
+          message: 'Wompi tardó demasiado en abrir. Revise los bloqueadores del navegador e intente nuevamente.',
         });
       }
     }, 20000);
@@ -641,6 +641,7 @@ export default function CatastroXPackagePage({ packageId }) {
         predioSnapshot: lookup,
       });
       saveLastLookup(lookup);
+
       const checkoutResult = await startPackageCheckout({
         packageId,
         lookup,
@@ -652,10 +653,7 @@ export default function CatastroXPackagePage({ packageId }) {
           opened = true;
           window.clearTimeout(watchdog);
           setIsStartingCheckout(false);
-          // Único punto donde el resumen se abandona (Bloque 7, revisión
-          // de seguridad): Wompi ya está abierto de verdad -- de aquí en
-          // adelante el estado del pago lo refleja el panel estándar
-          // (sección "Pago" / null-step), nunca antes de este punto.
+          // Único punto donde el resumen se abandona: Wompi ya está abierto.
           setPurchaseFlowStep(null);
           setCheckoutState({
             status: 'wompi_started',
@@ -664,11 +662,10 @@ export default function CatastroXPackagePage({ packageId }) {
           });
         },
         onApproved: ({ transaction, checkout }) => {
+          window.clearTimeout(watchdog);
           setIsStartingCheckout(false);
           setPendingPackageId(null);
-          // Bloque 11: limpia PII del estado en cuanto la compra se
-          // completa -- customerId/buyerInput ya no se necesitan (el
-          // backend es la única fuente de verdad de aquí en adelante).
+          // El backend es la fuente de verdad después de completar la compra.
           resetPurchaseFlow();
 
           const resolvedReference = transaction?.reference || checkout.reference || null;
@@ -679,9 +676,7 @@ export default function CatastroXPackagePage({ packageId }) {
             reference: resolvedReference,
             mode: 'wompi-sandbox',
           });
-          // Se elimina el registro pendiente solo aqui, ya con markPackageAsPaid
-          // confirmado (LOTE 019-B2, Fase 4) -- no antes, en el wrapper de
-          // startPackageCheckout, para no perderlo si esta linea nunca se alcanza.
+
           if (resolvedReference) {
             clearPendingPaymentByReference(resolvedReference);
           }
@@ -690,18 +685,19 @@ export default function CatastroXPackagePage({ packageId }) {
             status: 'approved',
             message: 'Pago aprobado. Descargas habilitadas para este predio.',
             purchase: approvedPurchase,
-            reference: transaction?.reference || checkout.reference,
+            reference: resolvedReference,
           });
           setPurchaseVersion((value) => value + 1);
         },
         onRejected: ({ transaction, checkout, mappedResult }) => {
+          window.clearTimeout(watchdog);
           setIsStartingCheckout(false);
           setPendingPackageId(null);
 
           if (!transaction) {
             setCheckoutState({
               status: 'cancelled',
-              message: 'La ventana de Wompi fue cerrada o no retorno una transaccion aprobada.',
+              message: 'La ventana de Wompi fue cerrada o no retornó una transacción aprobada.',
               reference: checkout?.reference,
             });
             return;
@@ -724,22 +720,55 @@ export default function CatastroXPackagePage({ packageId }) {
         },
       });
 
+      // startPackageCheckout puede devolver un error controlado antes de abrir
+      // Wompi, por ejemplo LOOKUP_NOT_FOUND cuando la consulta predial expiró.
+      // Se cancela el watchdog para impedir que sobrescriba el mensaje real del
+      // backend con el mensaje genérico de espera de Wompi.
+      if (checkoutResult?.status === 'error') {
+        window.clearTimeout(watchdog);
+        setIsStartingCheckout(false);
+        setPendingPackageId(null);
+        setCheckoutState({
+          status: 'error',
+          code: checkoutResult.code || null,
+          message: checkoutResult.message || 'No fue posible iniciar el pago.',
+        });
+        return;
+      }
+
+      if (checkoutResult?.status === 'already_paid') {
+        window.clearTimeout(watchdog);
+        setIsStartingCheckout(false);
+        setPendingPackageId(null);
+        setPurchaseFlowStep(null);
+        setCheckoutState({
+          status: 'already_paid',
+          message: checkoutResult.message || 'Este paquete ya fue adquirido para este predio.',
+          purchase: checkoutResult.purchase || null,
+        });
+        return;
+      }
+
       setIsStartingCheckout(false);
 
-      waitForWompiIframe().then((found) => {
-        if (found) {
-          setIsStartingCheckout(false);
-          setCheckoutState((currentState) => ({
-            ...(currentState || {}),
-            status: 'wompi_started',
-            message: 'Wompi esta abierto. Complete el pago para habilitar sus descargas.',
-            reference: currentState?.reference || checkoutResult?.checkout?.reference || null,
-          }));
-        }
+      void waitForWompiIframe().then((found) => {
+        if (!found || opened) return;
+
+        opened = true;
+        window.clearTimeout(watchdog);
+        setIsStartingCheckout(false);
+        setPurchaseFlowStep(null);
+        setCheckoutState((currentState) => ({
+          ...(currentState || {}),
+          status: 'wompi_started',
+          message: 'Wompi está abierto. Complete el pago para habilitar sus descargas.',
+          reference: currentState?.reference || checkoutResult?.checkout?.reference || null,
+        }));
       });
     } catch (error) {
       window.clearTimeout(watchdog);
       console.error('[CatastroX Wompi] checkout failed', error);
+      setIsStartingCheckout(false);
       setPendingPackageId(null);
       setCheckoutState({
         status: 'error',
