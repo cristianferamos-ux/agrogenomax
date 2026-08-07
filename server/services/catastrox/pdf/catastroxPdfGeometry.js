@@ -455,6 +455,89 @@ export function computeMapState(ring, viewportWidth, viewportHeight, padding = 2
   };
 }
 
+// Fit-to-frame dinámico para el PLANO GEOMÉTRICO INFORMATIVO (páginas de
+// plano vectorial del PDF -- dibujo puro de contorno/vértices/cotas, SIN
+// teselas satelitales). Defecto corregido: catastroxPdfGenerator.js
+// reutilizaba computeMapState (arriba) también para esta página, heredando
+// una restricción que solo tiene sentido para teselas Web Mercator (zoom
+// ENTERO, porque las teselas de Esri únicamente existen en niveles de zoom
+// discretos, y un tope duro en 18 porque esas teselas dejan de existir de
+// forma confiable más allá -- ver comentario de zoom en
+// CatastroXMockMap.jsx). El dibujo vectorial no tiene ninguna de esas dos
+// limitaciones -- la escala puede ser cualquier número real -- pero al
+// heredar zoom = floor(log2(...)) truncado a 18, un predio urbano pequeño
+// (que necesitaría una escala mucho mayor para llenar el recuadro) queda
+// topado muy por debajo de lo que cabría, y además floor() siempre
+// descarta hasta casi una octava completa de escala respecto al ajuste
+// ideal continuo, aun sin tocar el tope.
+//
+// Requisito 1 (detectar ocupación): se llama a computeMapState con el
+// MISMO padding absoluto que ya usa hoy esta página (ver
+// catastroxPdfGenerator.js, planoMapState) para obtener exactamente la
+// escala que produce esa restricción heredada, y se compara contra el
+// ajuste continuo ideal (mismo padding, sin floor ni tope) -- el cociente
+// es qué fracción de lo que cabría realmente se estaba aprovechando.
+// Requisito 2 (umbral 45%): SMALL_OCCUPANCY_TRIGGER.
+// Requisitos 3/4 (60%-75% con padding 6%-10% para predios pequeños):
+// SMALL_GEOMETRY_PADDING_RATIO/TARGET_OCCUPANCY, aplicados SOLO cuando la
+// geometría se detecta pequeña.
+// Requisito 5 (escala gráfica recalculada): se resuelve solo por devolver
+// el mismo shape que computeMapState (scale/centerLat) --
+// computeDynamicScaleMeters/computeMetersPerPixel ya lo consumen sin
+// cambios.
+// Requisito 7 (predios medianos/grandes intactos): cuando NO se detecta
+// geometría pequeña, se devuelve el resultado de computeMapState SIN
+// NINGÚN cambio -- mismo padding, mismo floor, mismo tope, mismo valor
+// exacto que hoy. Ningún caso "no pequeño" cambia de tamaño.
+const VECTOR_PLAN_SMALL_OCCUPANCY_TRIGGER = 0.45;
+const VECTOR_PLAN_SMALL_PADDING_RATIO = 0.08; // rango pedido: 6%-10%
+const VECTOR_PLAN_TARGET_OCCUPANCY = 0.68; // punto medio del rango pedido: 60%-75%
+
+export function computeVectorPlanFitState(ring, viewportWidth, viewportHeight, {
+  legacyPadding = 20,
+  smallOccupancyTrigger = VECTOR_PLAN_SMALL_OCCUPANCY_TRIGGER,
+  smallPaddingRatio = VECTOR_PLAN_SMALL_PADDING_RATIO,
+  targetOccupancy = VECTOR_PLAN_TARGET_OCCUPANCY,
+} = {}) {
+  const bounds = getRingBounds(ring);
+  const minWorldX = lngToWorldX(bounds.minLng);
+  const maxWorldX = lngToWorldX(bounds.maxLng);
+  const minWorldY = latToWorldY(bounds.maxLat);
+  const maxWorldY = latToWorldY(bounds.minLat);
+  const spanX = Math.max(maxWorldX - minWorldX, 1e-6);
+  const spanY = Math.max(maxWorldY - minWorldY, 1e-6);
+
+  const legacyState = computeMapState(ring, viewportWidth, viewportHeight, legacyPadding);
+  const legacyUsableWidth = Math.max(64, viewportWidth - legacyPadding * 2);
+  const legacyUsableHeight = Math.max(64, viewportHeight - legacyPadding * 2);
+  const idealScaleAtLegacyPadding = Math.min(legacyUsableWidth / spanX, legacyUsableHeight / spanY);
+  const occupancyRatio = legacyState.scale / idealScaleAtLegacyPadding;
+  const isSmallGeometry = occupancyRatio < smallOccupancyTrigger;
+
+  if (!isSmallGeometry) {
+    return { ...legacyState, isSmallGeometry, occupancyRatio };
+  }
+
+  const usableWidth = Math.max(64, viewportWidth * (1 - 2 * smallPaddingRatio));
+  const usableHeight = Math.max(64, viewportHeight * (1 - 2 * smallPaddingRatio));
+  const naturalFitScale = Math.min(usableWidth / spanX, usableHeight / spanY);
+  const scale = naturalFitScale * targetOccupancy;
+  const centerLng = (bounds.minLng + bounds.maxLng) / 2;
+  const centerLat = (bounds.minLat + bounds.maxLat) / 2;
+
+  return {
+    scale,
+    centerLng,
+    centerLat,
+    centerWorldX: lngToWorldX(centerLng),
+    centerWorldY: latToWorldY(centerLat),
+    viewportWidth,
+    viewportHeight,
+    isSmallGeometry,
+    occupancyRatio,
+  };
+}
+
 export function projectPointToViewport(point, mapState, viewportWidth = mapState.viewportWidth, viewportHeight = mapState.viewportHeight) {
   const worldX = lngToWorldX(point[0]);
   const worldY = latToWorldY(point[1]);
