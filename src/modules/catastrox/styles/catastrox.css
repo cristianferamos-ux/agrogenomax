@@ -323,6 +323,26 @@
   font-size: clamp(1rem, 1.4vw, 1.15rem);
 }
 
+/* Encabezado compacto para "predio de gran extensión" (revisión
+   especializada): título corto + subtítulo + mensaje breve, menos espacio
+   vertical y el contenido principal (panel + mapa) más cerca del inicio. */
+.catastrox-result-hero.is-compact {
+  padding: 0.3rem 0 0.1rem;
+  gap: 0.35rem;
+}
+
+.catastrox-result-hero.is-compact h1 {
+  font-size: clamp(1.75rem, 3vw, 2.6rem);
+}
+
+.catastrox-result-hero-subtitle {
+  margin: 0;
+  color: #ff6262;
+  font-family: Space Grotesk, Inter, sans-serif;
+  font-size: clamp(1rem, 1.6vw, 1.3rem);
+  font-weight: 700;
+}
+
 .catastrox-result-layout {
   grid-template-columns: minmax(320px, 0.78fr) minmax(460px, 1.22fr);
   gap: clamp(1rem, 2vw, 1.4rem);
@@ -552,6 +572,7 @@
   margin: 0;
 }
 
+/* Resultado gratuito: estado destacado y acceso visual a paquetes. */
 .catastrox-status {
   display: inline-flex;
   align-items: center;
@@ -561,6 +582,24 @@
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 999px;
   font-weight: 950;
+}
+
+.catastrox-status-icon,
+.catastrox-status-label {
+  display: inline-flex;
+  align-items: center;
+}
+
+.catastrox-status-icon {
+  flex: 0 0 auto;
+}
+
+.catastrox-status-divider {
+  display: block;
+  width: 1px;
+  height: 2.15rem;
+  margin: 0 0.25rem;
+  background: rgba(156, 255, 26, 0.34);
 }
 
 .catastrox-status.is-success {
@@ -579,6 +618,29 @@
   background: rgba(255, 59, 59, 0.14);
   border-color: rgba(255, 59, 59, 0.58);
   color: #ff6262;
+}
+
+.catastrox-status.is-prominent {
+  gap: 0.85rem;
+  min-height: 4.75rem;
+  padding: 0.9rem 1.35rem;
+  border-color: rgba(156, 255, 26, 0.62);
+  background:
+    linear-gradient(135deg, rgba(156, 255, 26, 0.17), rgba(156, 255, 26, 0.07)),
+    rgba(8, 25, 15, 0.82);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.018),
+    0 0 24px rgba(156, 255, 26, 0.06);
+  font-size: clamp(1rem, 1.8vw, 1.15rem);
+}
+
+.catastrox-status.is-prominent .catastrox-status-icon {
+  justify-content: center;
+  width: 2.6rem;
+  height: 2.6rem;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  background: rgba(156, 255, 26, 0.06);
 }
 
 .catastrox-summary-grid,
@@ -666,50 +728,75 @@
 
 .catastrox-result-cta {
   display: grid;
-  gap: 0.55rem;
+  gap: 0.9rem;
   width: 100%;
-  padding: 1rem;
-  border: 1px solid rgba(0, 216, 255, 0.32);
-  border-radius: 1rem;
+  padding: 1.2rem;
+  border: 1px solid rgba(0, 216, 255, 0.38);
+  border-radius: 1.15rem;
   background:
-    linear-gradient(135deg, rgba(0, 216, 255, 0.13), rgba(156, 255, 26, 0.09)),
+    linear-gradient(135deg, rgba(0, 216, 255, 0.14), rgba(156, 255, 26, 0.1)),
     rgba(255, 255, 255, 0.04);
   color: inherit;
   cursor: pointer;
   text-align: left;
-  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease;
 }
 
 .catastrox-result-cta:hover,
 .catastrox-result-cta:focus-visible {
-  transform: translateY(-1px);
-  border-color: rgba(156, 255, 26, 0.58);
-  box-shadow: 0 0 30px rgba(0, 216, 255, 0.16);
+  transform: translateY(-2px);
+  border-color: rgba(156, 255, 26, 0.62);
+  box-shadow: 0 0 30px rgba(0, 216, 255, 0.17);
   outline: none;
 }
 
-.catastrox-result-cta span {
+.catastrox-result-cta-kicker {
   color: #00d8ff;
   font-size: 0.78rem;
   font-weight: 950;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
-.catastrox-result-cta strong {
+.catastrox-result-cta > strong {
+  max-width: 62rem;
   color: #f7fbff;
-  font-size: clamp(1rem, 1.45vw, 1.15rem);
+  font-size: clamp(1.05rem, 1.8vw, 1.35rem);
   line-height: 1.45;
 }
 
-.catastrox-result-cta small {
+.catastrox-result-cta-action {
+  display: inline-grid;
+  grid-template-columns: auto auto auto;
+  align-items: center;
   justify-self: start;
-  padding: 0.58rem 0.85rem;
+  gap: 0.65rem;
+  min-height: 3rem;
+  padding: 0.72rem 1rem;
+  border: 1px solid rgba(156, 255, 26, 0.8);
   border-radius: 999px;
   background: #9cff1a;
   color: #020508;
-  font-size: 0.88rem;
+  font-size: 0.92rem;
   font-weight: 950;
+  box-shadow: 0 8px 25px rgba(156, 255, 26, 0.11);
+}
+
+.catastrox-result-cta-action svg {
+  flex: 0 0 auto;
+}
+
+.catastrox-result-cta-arrow {
+  margin-left: 0.25rem;
+  transition: transform 180ms ease;
+}
+
+.catastrox-result-cta:hover .catastrox-result-cta-arrow,
+.catastrox-result-cta:focus-visible .catastrox-result-cta-arrow {
+  transform: translateX(3px);
 }
 
 .catastrox-locked-card {
@@ -1182,6 +1269,26 @@
   color: #ff6262;
 }
 
+/* Cobertura técnica especializada dentro del bloque de revisión
+   especializada: mismo contenido, menor protagonismo visual para no
+   competir con la alerta principal (título más pequeño, texto secundario). */
+.catastrox-inline-panel.is-muted {
+  padding: 0.75rem 0.9rem;
+  gap: 0.4rem;
+}
+
+.catastrox-inline-panel.is-muted strong {
+  font-size: 0.82rem;
+  color: #9db7d4;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.catastrox-inline-panel.is-muted p {
+  font-size: 0.88rem;
+  color: #93a4b8;
+}
+
 .catastrox-inline-panel {
   display: grid;
   gap: 0.7rem;
@@ -1341,5 +1448,22 @@ iframe[src*="wompi.co/p/"] {
   .catastrox-transparency-note,
   .catastrox-transparency-details {
     overflow-wrap: anywhere;
+  }
+
+  .catastrox-status.is-prominent {
+    width: 100%;
+    min-height: 4.25rem;
+    padding: 0.8rem 1rem;
+  }
+
+  .catastrox-status-divider {
+    height: 1.9rem;
+  }
+
+  .catastrox-result-cta-action {
+    width: 100%;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    justify-self: stretch;
+    box-sizing: border-box;
   }
 }

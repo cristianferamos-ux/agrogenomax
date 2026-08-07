@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import { GeoJSON, MapContainer, TileLayer, useMap } from 'react-leaflet';
 import CatastroXMap from './CatastroXMap.jsx';
 
+const FISCAL_REVIEW_STATUSES = new Set(['PREDIO_FISCAL', 'POSIBLE_PREDIO_FISCAL', 'REVISION_ESPECIAL']);
+
 function PreviewViewport({ geometry }) {
   const map = useMap();
 
@@ -149,7 +151,9 @@ export default function CatastroXMockMap({ predio }) {
           {predio?.previewMessage || 'Predio identificado sobre imagen satelital.'}
         </p>
         <p className="catastrox-note">
-          El área, perímetro, códigos y archivos técnicos se habilitan dentro del paquete seleccionado.
+          {FISCAL_REVIEW_STATUSES.has(predio?.estado)
+            ? 'La información técnica detallada se habilitará únicamente después de la validación especializada del caso.'
+            : 'El área, perímetro, códigos y archivos técnicos se habilitan dentro del paquete seleccionado.'}
         </p>
       </article>
     );

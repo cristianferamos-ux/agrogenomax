@@ -1,6 +1,11 @@
 import crypto from 'crypto';
 import { Router } from 'express';
-import { resolveCanonicalPredioId, resolveLookupPreview, validateCadastralCodeInput } from './catastrox.js';
+import {
+  resolveCanonicalPredioId,
+  resolveLookupPreview,
+  resolvePredioDataForDelivery,
+  validateCadastralCodeInput,
+} from './catastrox.js';
 import { resolveCorsAllowedOrigins } from '../config/env.js';
 import { isOriginAllowed } from '../security/corsPolicy.js';
 import {
@@ -280,6 +285,40 @@ function resolveCanonicalPredioIdFromRequestBody(body) {
 // Firma con inyección de dependencias (mismo patrón que
 // resolveFullResultAccess en catastrox.js) para pruebas unitarias sin base
 // de datos ni HTTP real.
+// Mismo umbral que CATASTROX_FISCAL_REVIEW_AREA_HA_THRESHOLD en
+// src/modules/catastrox/data/catastroxMockData.js -- el backend no puede
+// importar código de src/, así que el valor se replica aquí con comentario
+// cruzado en vez de inventar una regla nueva o distinta.
+const FISCAL_REVIEW_AREA_HA_THRESHOLD = 5000;
+
+// Control autoritativo (no bypasseable con una URL directa al paquete):
+// vuelve a resolver el área del predio server-side, por canonicalPredioId,
+// usando la MISMA fuente canónica que /full-result y el PDF oficial
+// (resolvePredioDataForDelivery -> resolveCanonicalAreaForRow). Si el área
+// geométrica real supera el umbral, el checkout se rechaza -- nunca se
+// confía en ningún estado/área que el cliente pudiera enviar.
+//
+// DEUDA TÉCNICA DOCUMENTADA -- CATX-LEGACY-SPECIAL-REVIEW-GUARD-001:
+// este control solo cubre predios de catastrox_clean (canonicalPredioId
+// numérico de 30 dígitos). Para predios legacy (gis.catastro_caqueta,
+// canonicalPredioId con formato `legacy:vN:terrenoId`, sin código predial
+// normalizado) resolvePredioDataForDelivery devuelve null porque solo
+// consulta catastrox_clean.* -- esta función entonces responde `false`
+// (fail-open) y el checkout NO se bloquea, aunque ese predio legacy tenga
+// un área real >= umbral. No se decidió bloquear indiscriminadamente todos
+// los registros legacy (bloquearía también predios ordinarios legítimos
+// sin ninguna señal de que requieren revisión) ni construir una solución
+// insegura ad-hoc (p. ej. confiar en un área enviada por el cliente). La
+// solución correcta -- una consulta equivalente de área contra
+// gis.catastro_caqueta reutilizando shape_area, o una migración del
+// dataset legacy hacia catastrox_clean -- queda pendiente y debe
+// diseñarse/priorizarse aparte bajo este identificador.
+export async function checkoutRequiresFiscalReview(canonicalPredioId, resolvePredioData = resolvePredioDataForDelivery) {
+  const predioData = await resolvePredioData(canonicalPredioId);
+  if (!predioData) return false;
+  return Number.isFinite(predioData.areaHa) && predioData.areaHa >= FISCAL_REVIEW_AREA_HA_THRESHOLD;
+}
+
 export function resolveCheckoutCanonicalPredioId({ routeId, body, getPreview = resolveLookupPreview }) {
   const normalizedRouteId = String(routeId || '').trim();
   if (!normalizedRouteId) {
@@ -720,6 +759,23 @@ router.post('/checkout', checkoutLimiter, async (req, res) => {
     });
   }
   const { canonicalPredioId } = predioResolution;
+
+  try {
+    if (await checkoutRequiresFiscalReview(canonicalPredioId)) {
+      return res.status(403).json({
+        ok: false,
+        code: 'FISCAL_REVIEW_REQUIRED',
+        message: 'Este predio requiere validación especializada antes de adquirir un paquete.',
+      });
+    }
+  } catch (error) {
+    console.error('[CatastroX Payments] Error validando área para revisión fiscal', { message: error.message });
+    return res.status(500).json({
+      ok: false,
+      code: 'FISCAL_REVIEW_CHECK_ERROR',
+      message: 'No fue posible validar este predio. Intenta nuevamente.',
+    });
+  }
 
   if (!customerId) {
     return res.status(400).json({

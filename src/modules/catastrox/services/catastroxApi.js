@@ -162,7 +162,12 @@ function buildRealPredio(predio = {}, coords, queryPoint, apiBase, payload = {})
     // que enviar y rechazaba con INVALID_CADASTRAL_CODE -- el usuario
     // nunca llegaba a ver Wompi.
     canonicalPredioId: cleanText(predio.canonicalPredioId) || cleanText(payload.canonicalPredioId) || null,
-    estado: CATASTROX_STATUS.IDENTIFICADO,
+    // El backend ya decide si el predio requiere revisión especial (área
+    // >= umbral, ver resolveLookupPointFiscalStatus en
+    // server/routes/catastrox.js) y lo envía en payload.status -- antes
+    // esta línea lo ignoraba y siempre forzaba "identificado", por lo que
+    // un predio de gran extensión podía seguir el flujo normal de compra.
+    estado: payload.status === 'REVISION_ESPECIAL' ? CATASTROX_STATUS.REVISION_ESPECIAL : CATASTROX_STATUS.IDENTIFICADO,
     estadoLabel: 'Predio identificado',
     municipio: cleanText(predio.municipio) || cleanText(payload.municipio) || null,
     departamento: cleanText(predio.departamento) || cleanText(payload.departamento) || null,

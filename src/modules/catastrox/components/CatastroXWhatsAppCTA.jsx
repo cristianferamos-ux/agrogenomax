@@ -1,5 +1,7 @@
-import { MessageCircleMore } from 'lucide-react';
+import { MessageCircle, MessageCircleMore } from 'lucide-react';
 import { buildCatastroXWhatsAppUrl, getCatastroXCommercialStatus } from '../config/catastroxContact.js';
+
+const FISCAL_REVIEW_STATUSES = new Set(['PREDIO_FISCAL', 'POSIBLE_PREDIO_FISCAL', 'REVISION_ESPECIAL']);
 
 function cleanText(value, fallback = 'Sin dato') {
   if (value === null || value === undefined || value === '') return fallback;
@@ -22,6 +24,7 @@ export default function CatastroXWhatsAppCTA({
   const lng = queryPoint?.lng ?? lookup?.queryPoint?.lng ?? lookup?.predio?.queryPoint?.lng ?? null;
   const commercialStatus = getCatastroXCommercialStatus(status);
   const specializedCoverage = hasSpecializedCoverage(departamento);
+  const isFiscalReview = FISCAL_REVIEW_STATUSES.has(status);
   const whatsappUrl = buildCatastroXWhatsAppUrl({
     status,
     municipio,
@@ -34,16 +37,22 @@ export default function CatastroXWhatsAppCTA({
   return (
     <article className="catastrox-card is-danger">
       <div className="catastrox-section-heading">
-        <span>Acompañamiento técnico</span>
-        <h2>Este caso requiere revisión técnica antes de emitir su diagnóstico predial</h2>
+        <span>{isFiscalReview ? 'Validación especializada' : 'Acompañamiento técnico'}</span>
+        <h2>
+          {isFiscalReview
+            ? 'Validación técnica, catastral y jurídica requerida'
+            : 'Este caso requiere revisión técnica antes de emitir su diagnóstico predial'}
+        </h2>
       </div>
       <p className="catastrox-copy">
-        Este caso requiere revisión técnica antes de emitir un diagnóstico predial. Un asesor puede validar la cobertura catastral, la ubicación y la ruta técnica más conveniente.
+        {isFiscalReview
+          ? 'La información consultada presenta características que requieren revisión especializada antes de generar entregables comerciales. Para continuar, comuníquese con el equipo de CatastroX y reciba asesoría personalizada.'
+          : 'Este caso requiere revisión técnica antes de emitir un diagnóstico predial. Un asesor puede validar la cobertura catastral, la ubicación y la ruta técnica más conveniente.'}
       </p>
       <p className="catastrox-copy">
         Estado: <strong>{cleanText(commercialStatus)}</strong> | Municipio: <strong>{cleanText(municipio)}</strong> | Departamento: <strong>{cleanText(departamento)}</strong>
       </p>
-      <section className="catastrox-inline-panel">
+      <section className={`catastrox-inline-panel${isFiscalReview ? ' is-muted' : ''}`}>
         <strong>Cobertura técnica especializada</strong>
         <p className="catastrox-copy">
           {specializedCoverage
@@ -53,8 +62,8 @@ export default function CatastroXWhatsAppCTA({
       </section>
       <div className="catastrox-action-row">
         <a className="catastrox-button is-danger" href={whatsappUrl} target="_blank" rel="noopener noreferrer">
-          <MessageCircleMore size={18} />
-          {specializedCoverage ? 'Hablar con un asesor' : 'Solicitar orientación'}
+          {isFiscalReview ? <MessageCircle size={18} /> : <MessageCircleMore size={18} />}
+          {isFiscalReview ? 'Solicitar asesoría personalizada' : specializedCoverage ? 'Hablar con un asesor' : 'Solicitar orientación'}
         </a>
       </div>
     </article>
