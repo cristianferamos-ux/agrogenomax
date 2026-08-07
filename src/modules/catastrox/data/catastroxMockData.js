@@ -5,7 +5,23 @@ export const CATASTROX_STATUS = {
   NO_PREDIO_INDIVIDUALIZADO: 'NO_PREDIO_INDIVIDUALIZADO',
   SIN_COBERTURA_CATASTRAL: 'SIN_COBERTURA_CATASTRAL',
   PENDIENTE_VALIDACION: 'PENDIENTE_VALIDACION',
+  // Ya usados como literales en catastroxContact.js/CatastroXResultPage.jsx/
+  // CatastroXPackagePage.jsx/CatastroXStatusBadge.jsx/CatastroXMap.jsx --
+  // faltaban aquí, por lo que CATASTROX_STATUS.REVISION_ESPECIAL y
+  // CATASTROX_STATUS.POSIBLE_PREDIO_FISCAL evaluaban a `undefined` en todos
+  // esos archivos (causa raíz de que un predio de gran extensión pudiera
+  // seguir hasta la compra automática).
+  REVISION_ESPECIAL: 'REVISION_ESPECIAL',
+  POSIBLE_PREDIO_FISCAL: 'POSIBLE_PREDIO_FISCAL',
 };
+
+// Regla de negocio existente (ya usada en CatastroXResultPage.jsx antes de
+// esta corrección): un predio con área >= este umbral requiere revisión
+// técnica especializada antes de continuar con la compra automática. Única
+// fuente de este número -- server/routes/catastroxPayments.js replica el
+// mismo valor (comentario cruzado) porque el backend no puede importar
+// código de src/.
+export const CATASTROX_FISCAL_REVIEW_AREA_HA_THRESHOLD = 5000;
 
 export const CATASTROX_CONTACT = {
   whatsappUrl: 'https://wa.me/573000000000',

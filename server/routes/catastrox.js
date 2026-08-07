@@ -78,6 +78,24 @@ export function resolveCanonicalPredioId({ codigoPredial, source, terrenoId }) {
   return `${source}:v${CATASTROX_DATASET_VERSION}:${terrenoId}`;
 }
 
+// Mismo umbral que CATASTROX_FISCAL_REVIEW_AREA_HA_THRESHOLD en
+// src/modules/catastrox/data/catastroxMockData.js y que
+// checkoutRequiresFiscalReview en catastroxPayments.js -- una sola regla,
+// replicada con comentario cruzado porque backend y frontend no comparten
+// módulo. Reutiliza resolveCanonicalAreaForRow (misma fuente de área que
+// /full-result y el PDF oficial) para que POST /lookup pueda anticipar,
+// con datos ya disponibles en la consulta por punto, si el predio requiere
+// revisión especial -- sin esto, el resultado gratuito nunca tenía área
+// disponible (se calcula recién tras la compra) y por tanto nunca podía
+// mostrar la alerta antes de que el usuario llegara al paquete.
+const LOOKUP_FISCAL_REVIEW_AREA_HA_THRESHOLD = 5000;
+
+export function resolveLookupPointFiscalStatus(row) {
+  const canonicalArea = resolveCanonicalAreaForRow(row);
+  if (!Number.isFinite(canonicalArea.canonicalAreaHa)) return null;
+  return canonicalArea.canonicalAreaHa >= LOOKUP_FISCAL_REVIEW_AREA_HA_THRESHOLD ? 'REVISION_ESPECIAL' : null;
+}
+
 /**
  * Bloque 4/5: decide si dos filas candidatas devueltas por una búsqueda por
  * punto (LIMIT 2, ver POST /lookup) representan un empate real -- misma
@@ -783,6 +801,7 @@ function buildCleanCandidatesSql(fromRelation) {
      select
        c.codigo_predial,
        c.zona,
+       ST_Area(c.lookup_geom) as area_m2_exact,
        c.municipio_nombre,
        c.departamento_nombre,
        c.fid,
@@ -1129,6 +1148,7 @@ router.post('/lookup', async (req, res, next) => {
         source: 'legacy',
         terrenoId: row.id,
       });
+      const fiscalStatus = resolveLookupPointFiscalStatus(row);
       rememberLookupPreview(lookupId, row.id, {
         canonicalPredioId,
         codigoPredial: row.codigo || row.codigo_predial || null,
@@ -1140,14 +1160,15 @@ router.post('/lookup', async (req, res, next) => {
         routeId: lookupId,
         canonicalPredioId,
         found: true,
-        status: 'FOUND',
+        status: fiscalStatus || 'FOUND',
         municipio: toNullableString(row.mpnombre),
         departamento: toNullableString(row.depto),
         tipoZona: toNullableString(row.zona),
         gestor: toNullableString(row.gestor),
-        canPurchase: true,
-        commercialMessage:
-          'Predio identificado. Para conocer área, perímetro, códigos prediales, plano y archivos descargables, seleccione un paquete.',
+        canPurchase: !fiscalStatus,
+        commercialMessage: fiscalStatus
+          ? 'Este predio requiere validación técnica, catastral y jurídica especializada antes de generar entregables comerciales.'
+          : 'Predio identificado. Para conocer área, perímetro, códigos prediales, plano y archivos descargables, seleccione un paquete.',
         legalNotice: CATASTROX_LEGAL_NOTICE,
         coverage: {
           municipio: coverage?.municipio || municipio?.municipio,
@@ -1159,6 +1180,7 @@ router.post('/lookup', async (req, res, next) => {
           lookup_id: lookupId,
           routeId: lookupId,
           canonicalPredioId,
+          estado: fiscalStatus || undefined,
           municipio: toNullableString(row.mpnombre),
           departamento: toNullableString(row.depto),
           tipoZona: toNullableString(row.zona),
@@ -1213,6 +1235,7 @@ router.post('/lookup', async (req, res, next) => {
         source: 'clean',
         terrenoId: cleanPredio.fid,
       });
+      const fiscalStatus = resolveLookupPointFiscalStatus(cleanPredio);
       rememberAdvancedLookupPreview(lookupId, cleanPredio.codigo_predial, {
         canonicalPredioId,
         queryPoint: buildQueryPoint(lat, lng),
@@ -1230,14 +1253,15 @@ router.post('/lookup', async (req, res, next) => {
         routeId: lookupId,
         canonicalPredioId,
         found: true,
-        status: 'FOUND',
+        status: fiscalStatus || 'FOUND',
         municipio: toNullableString(municipioNombre),
         departamento: toNullableString(departamentoNombre),
         tipoZona: toNullableString(cleanPredio.zona),
         gestor: toNullableString(municipio?.gestorCatastral),
-        canPurchase: true,
-        commercialMessage:
-          'Predio identificado. Para conocer área, perímetro, códigos prediales, plano y archivos descargables, seleccione un paquete.',
+        canPurchase: !fiscalStatus,
+        commercialMessage: fiscalStatus
+          ? 'Este predio requiere validación técnica, catastral y jurídica especializada antes de generar entregables comerciales.'
+          : 'Predio identificado. Para conocer área, perímetro, códigos prediales, plano y archivos descargables, seleccione un paquete.',
         legalNotice: CATASTROX_LEGAL_NOTICE,
         coverage: {
           municipio: coverage?.municipio || municipioNombre,
@@ -1249,6 +1273,7 @@ router.post('/lookup', async (req, res, next) => {
           lookup_id: lookupId,
           routeId: lookupId,
           canonicalPredioId,
+          estado: fiscalStatus || undefined,
           municipio: toNullableString(municipioNombre),
           departamento: toNullableString(departamentoNombre),
           tipoZona: toNullableString(cleanPredio.zona),

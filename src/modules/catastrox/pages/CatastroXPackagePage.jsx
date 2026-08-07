@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, Wallet } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Package } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import CatastroXBuyerForm from '../components/CatastroXBuyerForm.jsx';
 import CatastroXDisclaimer from '../components/CatastroXDisclaimer.jsx';
@@ -792,9 +792,16 @@ export default function CatastroXPackagePage({ packageId }) {
     return (
       <section className="catastrox-page">
         <div className="catastrox-page-title">
-          <span>{pkg.label}</span>
-          <h1>Este caso requiere revisión técnica antes de vender entregables</h1>
-          <p>La compra del paquete queda suspendida hasta que un asesor valide la situación predial y técnica de este caso.</p>
+          <span className="catastrox-status is-danger">
+            <AlertTriangle size={18} />
+            {pkg.label}
+          </span>
+          <h1>Predio de gran extensión — revisión especializada requerida</h1>
+          <p>
+            La información consultada presenta características que requieren validación técnica, catastral y
+            jurídica antes de generar entregables comerciales. Para continuar, comuníquese con el equipo de
+            CatastroX y reciba asesoría personalizada.
+          </p>
         </div>
         <CatastroXPageActions actions={navigationActions} />
         <CatastroXResultSummary predio={predio} mode="free" />
@@ -912,7 +919,7 @@ export default function CatastroXPackagePage({ packageId }) {
           </p>
           <div className="catastrox-action-row">
             <button type="button" className="catastrox-button" onClick={handleOpenBuyerForm} disabled={isStartingCheckout}>
-              <Wallet size={18} />
+              <Package size={18} />
               {isStartingCheckout ? 'Abriendo Wompi...' : `Comprar ${pkg.label}`}
             </button>
             <Link className="catastrox-button is-ghost" to="/catastrox/planes">

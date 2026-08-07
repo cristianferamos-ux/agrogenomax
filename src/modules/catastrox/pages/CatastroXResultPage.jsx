@@ -45,13 +45,21 @@ function isTechnicalReviewStatus(status) {
 
 function buildSpecialCopy({ status, municipio, departamento, found }) {
   if (found && status === CATASTROX_STATUS.REVISION_ESPECIAL) {
+    // Encabezado compacto (limpieza visual): título corto + subtítulo +
+    // mensaje breve aquí; el texto completo de asesoría (con CTA "Solicitar
+    // asesoría personalizada") vive únicamente en CatastroXWhatsAppCTA, más
+    // abajo -- antes se repetía el mismo texto largo 3 veces en la página
+    // (encabezado, tarjeta del panel izquierdo y bloque inferior).
+    // `detail: null` retira el párrafo redundante bajo los datos del predio
+    // en el panel izquierdo (la explicación completa ya está en el bloque
+    // inferior).
     return {
-      title: 'REVISIÓN ESPECIAL REQUERIDA',
+      title: 'Predio de gran extensión',
+      subtitle: 'Revisión especializada requerida',
       description:
-        'Se identificó un polígono predial de gran extensión. Por su tamaño, este caso requiere revisión técnica especializada antes de emitir un diagnóstico predial, plano o recomendación jurídica.',
+        'La información consultada requiere validación técnica, catastral y jurídica antes de generar entregables comerciales.',
       tag: 'Revisión especial requerida',
-      detail:
-        'Por su tamaño, este caso requiere revisión técnica especializada antes de continuar con un diagnóstico predial o una entrega cartográfica.',
+      detail: null,
     };
   }
 
@@ -128,13 +136,17 @@ export default function CatastroXResultPage() {
   const routeId = predio.routeId || predio.id;
   const isTechnicalReview =
     !found || isTechnicalReviewStatus(effectiveStatus) || isTechnicalReviewStatus(predio.estado);
+  const isRevisionEspecial = effectiveStatus === CATASTROX_STATUS.REVISION_ESPECIAL;
   const specialCopy = buildSpecialCopy({ status: effectiveStatus, municipio, departamento, found });
 
   return (
     <section className="catastrox-page catastrox-result-free-page">
-      <div className="catastrox-page-title catastrox-result-hero">
+      <div className={`catastrox-page-title catastrox-result-hero${isRevisionEspecial ? ' is-compact' : ''}`}>
         <span>Resultado gratuito</span>
         <h1>{found && !isTechnicalReview ? 'Predio identificado' : specialCopy.title}</h1>
+        {isRevisionEspecial && specialCopy.subtitle ? (
+          <p className="catastrox-result-hero-subtitle">{specialCopy.subtitle}</p>
+        ) : null}
         <p>
           {found && !isTechnicalReview
             ? 'CatastroX identificó su predio. Para conocer el área, descargar el plano digital o usar archivos en Google Earth, seleccione un paquete.'
@@ -169,13 +181,15 @@ export default function CatastroXResultPage() {
           </section>
         ) : (
           <section className="catastrox-card is-danger">
-            <div className="catastrox-section-heading">
-              <span>{specialCopy.tag}</span>
-              <h2>{specialCopy.title}</h2>
-            </div>
+            {!isRevisionEspecial ? (
+              <div className="catastrox-section-heading">
+                <span>{specialCopy.tag}</span>
+                <h2>{specialCopy.title}</h2>
+              </div>
+            ) : null}
             <CatastroXResultSummary predio={predio} mode="free" />
             {lookup.message ? <p className="catastrox-copy">{lookup.message}</p> : null}
-            <p className="catastrox-copy">{specialCopy.detail}</p>
+            {specialCopy.detail ? <p className="catastrox-copy">{specialCopy.detail}</p> : null}
             {predio.gestorCatastral || lookup?.gestor ? (
               <p className="catastrox-copy">
                 Gestor catastral estimado para validación: <strong>{predio.gestorCatastral || lookup.gestor}</strong>.

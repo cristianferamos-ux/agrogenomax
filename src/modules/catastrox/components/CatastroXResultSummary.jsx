@@ -3,6 +3,8 @@ import CatastroXStatusBadge from './CatastroXStatusBadge.jsx';
 import { formatNumber } from '../utils/catastroxCalculations.js';
 import { getVeredaDisplay } from '../utils/veredaDisplay.js';
 
+const FISCAL_REVIEW_STATUSES = new Set(['PREDIO_FISCAL', 'POSIBLE_PREDIO_FISCAL', 'REVISION_ESPECIAL']);
+
 function formatText(value, fallback = 'Sin dato') {
   if (value === null || value === undefined || value === '') return fallback;
   return value;
@@ -46,6 +48,7 @@ function buildAreaRows(predio) {
 }
 
 export default function CatastroXResultSummary({ predio, mode = 'free' }) {
+  const requiresFiscalReview = FISCAL_REVIEW_STATUSES.has(predio?.estado);
   const veredaDisplay = getVeredaDisplay(
     predio?.veredaNombre ||
       predio?.vereda_nombre ||
@@ -137,7 +140,7 @@ export default function CatastroXResultSummary({ predio, mode = 'free' }) {
         <p className="catastrox-summary-note">{veredaDisplay.note}</p>
       ) : null}
 
-      {mode === 'free' ? (
+      {mode === 'free' && !requiresFiscalReview ? (
         <button
           type="button"
           className="catastrox-result-cta"
