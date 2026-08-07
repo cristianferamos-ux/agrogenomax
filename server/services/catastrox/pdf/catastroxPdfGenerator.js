@@ -45,7 +45,7 @@ import {
   toDisplayToponymTitleCase,
   toSentenceCase,
 } from './catastroxPdfLayout.js';
-import { computeMapState, projectRingToViewport, projectPointToViewport, computeDynamicScaleMeters } from './catastroxPdfGeometry.js';
+import { computeMapState, computeVectorPlanFitState, projectRingToViewport, projectPointToViewport, computeDynamicScaleMeters } from './catastroxPdfGeometry.js';
 import { fetchSatelliteMosaic, TILE_SIZE, ESRI_IMAGERY_ATTRIBUTION, ESRI_LABELS_ATTRIBUTION, MapRenderError } from './catastroxPdfMap.js';
 import {
   buildVisiblePointPlacements,
@@ -871,7 +871,17 @@ export async function generateCatastroxPdfBuffer({ predioData, packageId, fetchT
   strokeRect(doc, planoMapRect.x, planoMapRect.y, planoMapRect.width, planoMapRect.height, BORDER_LIGHTER);
   baseText(doc, `${resolvePdfTechnicalPageTitle(contentMode)}${predio.partLabel ? ` • ${predio.partLabel.toUpperCase()}` : ''}`, HEADER_ZONE.x + 16, HEADER_ZONE.y + 76, { size: 10.5, bold: true, color: NAVY_TITLE });
 
-  const planoMapState = computeMapState(ring, planoMapRect.width, planoMapRect.height, 20);
+  // Fit-to-frame dinámico (defecto corregido: predios urbanos pequeños se
+  // dibujaban innecesariamente chicos). computeMapState (usada más arriba
+  // solo para las teselas satelitales de página 1) impone zoom ENTERO +
+  // tope 18 -- una restricción exclusiva de Web Mercator/teselas que no
+  // aplica a este dibujo vectorial puro. computeVectorPlanFitState detecta
+  // si la geometría ocupaba <45% del recuadro bajo esa restricción
+  // heredada y, solo en ese caso, recalcula con padding reducido (6%-10%)
+  // para que el polígono ocupe ~60%-75% del recuadro útil; predios
+  // medianos/grandes devuelven exactamente el mismo resultado que antes
+  // (ver catastroxPdfGeometry.js para la lógica completa).
+  const planoMapState = computeVectorPlanFitState(ring, planoMapRect.width, planoMapRect.height);
   const planoProjectedClosed = projectRingToViewport(ring, planoMapState, planoMapRect.width, planoMapRect.height).map(([px, py]) => [planoMapRect.x + px, planoMapRect.y + py]);
   const planoPoints = planoProjectedClosed.slice(0, -1);
   // CATX-POSTPAYMENT-UX-001 (defecto C -- causa raíz): hasta esta corrección,
