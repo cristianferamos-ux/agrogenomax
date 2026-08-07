@@ -93,6 +93,15 @@ const TECHNICAL_MAP_AREA = { x: 24, y: 108, width: 744, height: 450 };
 const TABLE_AREA = { x: 24, y: 116, width: 744, height: 416 };
 const TABLE_BOTTOM_PANEL = { x: 24, y: 536, width: 744, height: 32 };
 
+// Atribuciones obligatorias del mapa satelital (página 1) -- ver
+// drawStackedTextBlock más abajo, donde se usan para calcular la Y real del
+// panel "PAQUETE BÁSICO"/"PAQUETE PLUS"/"PAQUETE PROFESIONAL" en vez de una
+// coordenada fija.
+const MAP_ATTRIBUTION_FONT_SIZE = 5.5;
+const MAP_ATTRIBUTION_TOP_GAP = 12; // separación entre el mapa/escala y la primera línea
+const MAP_ATTRIBUTION_LINE_GAP = 1; // separación entre la primera y la segunda línea
+const MAP_ATTRIBUTION_SAFE_GAP = 10; // mínimo exigido entre el final de las atribuciones y el panel (rango pedido: 8-12pt)
+
 function withSilencedConsole(fn) {
   const originals = { log: console.log, table: console.table, warn: console.warn };
   console.log = () => {};
@@ -171,6 +180,28 @@ function wrappedText(doc, text, x, y, maxWidth, lineHeight, { size = 10, bold = 
     baseText(doc, line, x, y + index * lineHeight, { size, bold, color });
   });
   return { lines, height: lines.length * lineHeight };
+}
+
+// drawStackedTextBlock: dibuja `lines` una debajo de otra, midiendo el alto
+// REAL de cada línea con doc.heightOfString (la función de PDFKit para esto
+// -- nunca se asume una altura de línea fija) y devuelve el Y donde termina
+// el bloque completo (`bottom`). Corrige el defecto reportado en página 1:
+// las 2 líneas de atribución del mapa satelital ("Fuente: ..."/
+// "Referencias: ...") se dibujaban en offsets fijos (+12/+20 sobre el mapa)
+// sin relación con su alto real, y el panel "PAQUETE BÁSICO" se dibujaba en
+// una Y fija (456) que no dejaba margen suficiente -- a 5.5pt el alto real
+// de la segunda línea ya invadía el panel. Con lineBreak:false (como usa el
+// llamador) PDFKit nunca envuelve el texto -- heightOfString con las MISMAS
+// opciones siempre reporta la altura de esa única línea tal como se dibuja,
+// así que esto funciona igual si el texto ocupara 1 o varias líneas.
+function drawStackedTextBlock(doc, lines, x, y, options = {}, { lineGap = 1 } = {}) {
+  let cursorY = y;
+  lines.forEach((line, index) => {
+    doc.text(line, x, cursorY, options);
+    const lineHeight = doc.heightOfString(line, options);
+    cursorY += lineHeight + (index < lines.length - 1 ? lineGap : 0);
+  });
+  return { bottom: cursorY };
 }
 
 function fitSingleLineFontSize(doc, text, maxWidth, { maxSize = 11, minSize = 7, bold = true, step = 0.5 } = {}) {
@@ -540,12 +571,27 @@ export async function generateCatastroxPdfBuffer({ predioData, packageId, fetchT
   const summaryScaleAnchor = chooseScaleBarAnchor(mapRect, mapPolygon, [], [], true);
   drawScaleBar(doc, summaryScaleAnchor.x, summaryScaleAnchor.y, summaryScaleMeters, { compact: true });
 
-  doc.fillColor(MUTED_COLOR).font('Helvetica').fontSize(5.5);
-  doc.text(ESRI_IMAGERY_ATTRIBUTION, mapRect.x, mapRect.y + mapRect.height + 12, { width: mapRect.width, lineBreak: false });
-  doc.text(ESRI_LABELS_ATTRIBUTION, mapRect.x, mapRect.y + mapRect.height + 20, { width: mapRect.width, lineBreak: false });
+  // Defecto corregido: "PAQUETE BÁSICO" se dibujaba en una Y fija (456) que
+  // no dejaba margen real para las 2 líneas de atribución del mapa
+  // (offsets +12/+20 también fijos) -- a 5.5pt el alto real de la segunda
+  // línea ya invadía el panel azul. Ahora la Y del panel se calcula a
+  // partir del alto REAL medido de las atribuciones (drawStackedTextBlock,
+  // doc.heightOfString) más un margen de seguridad explícito, nunca de una
+  // coordenada fija que ignore ese alto.
+  doc.fillColor(MUTED_COLOR).font('Helvetica').fontSize(MAP_ATTRIBUTION_FONT_SIZE);
+  const attributionOptions = { width: mapRect.width, lineBreak: false };
+  const { bottom: attributionBottom } = drawStackedTextBlock(
+    doc,
+    [ESRI_IMAGERY_ATTRIBUTION, ESRI_LABELS_ATTRIBUTION],
+    mapRect.x,
+    mapRect.y + mapRect.height + MAP_ATTRIBUTION_TOP_GAP,
+    attributionOptions,
+    { lineGap: MAP_ATTRIBUTION_LINE_GAP },
+  );
+  const packageHeaderY = attributionBottom + MAP_ATTRIBUTION_SAFE_GAP;
 
-  drawPanel(doc, { x: 420, y: 456, width: 332, height: 68 }, summaryCard.title);
-  wrappedText(doc, summaryCard.body, 436, 494, 300, 13, { size: 10.5, color: BODY_GRAY });
+  drawPanel(doc, { x: 420, y: packageHeaderY, width: 332, height: 68 }, summaryCard.title);
+  wrappedText(doc, summaryCard.body, 436, packageHeaderY + 38, 300, 13, { size: 10.5, color: BODY_GRAY });
 
   drawLegalFooter(doc, UNIFIED_FOOTER_RECT);
 
@@ -978,3 +1024,15 @@ export async function generateCatastroxPdfBuffer({ predioData, packageId, fetchT
 }
 
 export { buildCatastroxDeliverableFilename };
+
+// Exportado exclusivamente para la prueba de regresión geométrica de
+// página 1 (mapa satelital + atribuciones + panel de paquete) --
+// server/services/catastrox/pdf/__tests__/catastroxPdfMapAttributionLayout.test.js.
+// No se usa desde ningún otro módulo de producción.
+export {
+  drawStackedTextBlock,
+  MAP_ATTRIBUTION_FONT_SIZE,
+  MAP_ATTRIBUTION_TOP_GAP,
+  MAP_ATTRIBUTION_LINE_GAP,
+  MAP_ATTRIBUTION_SAFE_GAP,
+};
