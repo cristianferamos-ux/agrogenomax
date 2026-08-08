@@ -48,10 +48,28 @@ test('isAmbiguousPointMatch: primera fila cubre (tier 0), segunda solo intersect
   assert.equal(isAmbiguousPointMatch(first, second), false);
 });
 
-test('isAmbiguousPointMatch: misma prioridad pero mismo código (filas físicas duplicadas del mismo predio) -> NO ambiguo', () => {
+test('isAmbiguousPointMatch: misma prioridad + mismo código + mismo geometry_fingerprint (duplicado físico real del mismo predio) -> NO ambiguo', () => {
+  const first = { priority_tier: 0, codigo_predial: 'A', geometry_fingerprint: 'abc123' };
+  const second = { priority_tier: 0, codigo_predial: 'A', geometry_fingerprint: 'abc123' };
+  assert.equal(isAmbiguousPointMatch(first, second), false);
+});
+
+test('isAmbiguousPointMatch: misma prioridad + mismo código + geometry_fingerprint distinto -> ambiguo (mismo código, geometría real distinta)', () => {
+  const first = { priority_tier: 0, codigo_predial: 'A', geometry_fingerprint: 'abc123' };
+  const second = { priority_tier: 0, codigo_predial: 'A', geometry_fingerprint: 'def456' };
+  assert.equal(isAmbiguousPointMatch(first, second), true);
+});
+
+test('isAmbiguousPointMatch: misma prioridad + mismo código + geometry_fingerprint ausente en ambas filas -> ambiguo (fail-closed, no comparable)', () => {
   const first = { priority_tier: 0, codigo_predial: 'A' };
   const second = { priority_tier: 0, codigo_predial: 'A' };
-  assert.equal(isAmbiguousPointMatch(first, second), false);
+  assert.equal(isAmbiguousPointMatch(first, second), true);
+});
+
+test('isAmbiguousPointMatch: misma prioridad + mismo código + geometry_fingerprint ausente solo en una fila -> ambiguo (fail-closed)', () => {
+  const first = { priority_tier: 0, codigo_predial: 'A', geometry_fingerprint: 'abc123' };
+  const second = { priority_tier: 0, codigo_predial: 'A' };
+  assert.equal(isAmbiguousPointMatch(first, second), true);
 });
 
 test('isAmbiguousPointMatch: sin segunda fila (predio único) -> nunca ambiguo', () => {

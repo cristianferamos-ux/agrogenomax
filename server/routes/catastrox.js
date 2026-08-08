@@ -98,18 +98,35 @@ export function resolveLookupPointFiscalStatus(row) {
 
 /**
  * Bloque 4/5: decide si dos filas candidatas devueltas por una búsqueda por
- * punto (LIMIT 2, ver POST /lookup) representan un empate real -- misma
- * prioridad de coincidencia (ambas ST_Covers, o ambas solo ST_Intersects;
- * nunca se compara covers contra intersects, eso ya lo desempata
- * correctamente el ORDER BY de la consulta) y códigos prediales distintos.
- * Pura -- sin SQL, testeable sin base de datos.
+ * punto (LIMIT 2, ver POST /lookup) representan un empate real. Pura -- sin
+ * SQL, testeable sin base de datos. Unifica el mismo criterio de conflicto
+ * geométrico ya usado en el lookup por código (ver
+ * resolveLookupByCodeCandidates/buildCandidateGeometrySignature):
  *
- * @param {{ priority_tier: number, codigo_predial: string|null }} first
- * @param {{ priority_tier: number, codigo_predial: string|null }|undefined|null} second
+ * A) distinto priority_tier -> NO ambiguo (ambas ST_Covers, o ambas solo
+ *    ST_Intersects; nunca se compara covers contra intersects, eso ya lo
+ *    desempata correctamente el ORDER BY de la consulta).
+ * B) mismo priority_tier + codigo_predial distinto -> ambiguo.
+ * C) mismo priority_tier + mismo codigo_predial + mismo geometry_fingerprint
+ *    -> NO ambiguo (filas físicamente duplicadas del mismo predio).
+ * D) mismo priority_tier + mismo codigo_predial + geometry_fingerprint
+ *    distinto -> ambiguo (mismo código, geometría real distinta).
+ * E) mismo priority_tier + mismo codigo_predial + geometry_fingerprint
+ *    ausente/no comparable en una o ambas filas -> ambiguo (fail-closed: no
+ *    se puede afirmar que sea un duplicado físico sin poder comparar la
+ *    geometría).
+ *
+ * @param {{ priority_tier: number, codigo_predial: string|null, geometry_fingerprint?: string|null }} first
+ * @param {{ priority_tier: number, codigo_predial: string|null, geometry_fingerprint?: string|null }|undefined|null} second
  */
 export function isAmbiguousPointMatch(first, second) {
   if (!first || !second) return false;
-  return second.priority_tier === first.priority_tier && second.codigo_predial !== first.codigo_predial;
+  if (second.priority_tier !== first.priority_tier) return false;
+  if (second.codigo_predial !== first.codigo_predial) return true;
+  const firstFingerprint = canonicalText(first.geometry_fingerprint);
+  const secondFingerprint = canonicalText(second.geometry_fingerprint);
+  if (!firstFingerprint || !secondFingerprint) return true;
+  return firstFingerprint !== secondFingerprint;
 }
 
 export function buildLookupId() {
@@ -805,7 +822,8 @@ function buildCleanCandidatesSql(fromRelation) {
        c.municipio_nombre,
        c.departamento_nombre,
        c.fid,
-       case when ST_Covers(c.lookup_geom, p.geom) then 0 else 1 end as priority_tier
+       case when ST_Covers(c.lookup_geom, p.geom) then 0 else 1 end as priority_tier,
+       md5(encode(ST_AsEWKB(ST_Force2D(c.lookup_geom)), 'hex')) as geometry_fingerprint
      from candidatos c, punto p
      where c.lookup_geom is not null
        and not ST_IsEmpty(c.lookup_geom)
@@ -1077,7 +1095,8 @@ router.post('/lookup', async (req, res, next) => {
             -- en JS (ver ambigüedad de búsqueda por punto) -- el
             -- desempate ST_Covers-antes-que-ST_Intersects sigue siendo
             -- el mismo de siempre y no cambia para el caso no ambiguo.
-            case when ST_Covers(c.lookup_geom, p.geom) then 0 else 1 end as priority_tier
+            case when ST_Covers(c.lookup_geom, p.geom) then 0 else 1 end as priority_tier,
+            md5(encode(ST_AsEWKB(ST_Force2D(c.lookup_geom)), 'hex')) as geometry_fingerprint
           from catastro c
           cross join punto p
           left join catastrox_clean.v_predios_enriquecidos clean
