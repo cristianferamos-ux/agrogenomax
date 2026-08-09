@@ -80,7 +80,7 @@ export function resolveCanonicalPredioId({ codigoPredial, source, terrenoId }) {
 
 // Mismo umbral que CATASTROX_FISCAL_REVIEW_AREA_HA_THRESHOLD en
 // src/modules/catastrox/data/catastroxMockData.js y que
-// checkoutRequiresFiscalReview en catastroxPayments.js -- una sola regla,
+// resolveCheckoutPredioEligibility en catastroxPayments.js -- una sola regla,
 // replicada con comentario cruzado porque backend y frontend no comparten
 // módulo. Reutiliza resolveCanonicalAreaForRow (misma fuente de área que
 // /full-result y el PDF oficial) para que POST /lookup pueda anticipar,

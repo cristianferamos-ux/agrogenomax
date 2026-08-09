@@ -22,12 +22,18 @@ import dotenv from 'dotenv';
 dotenv.config({ path: '.env', quiet: true });
 dotenv.config({ path: 'server/.env', quiet: true });
 
-// Predio real y resoluble por resolvePredioDataForDelivery (verificado en
-// vivo durante el sprint: MILAN/CAQUETA, ~437 ha) -- se usa a propósito en
-// vez de un código sintético (900...) porque estas pruebas necesitan que la
-// generación PDFKit realmente tenga éxito (para probar checksum/tamaño y el
-// camino hasta SENT), no solo que falle de forma honesta.
-const REAL_TEST_CODIGO = '184600002000000030015000000000';
+// P1-02/P1-03 (remediación post-auditoría): antes este predio era un código
+// predial REAL (184600002000000030015000000000, MILAN/CAQUETA) -- se
+// reemplaza por uno sintético de 30 dígitos, aceptado sin validaciones
+// territoriales/checksum adicionales por validateCadastralCodeInput/
+// normalizeCadastralCodeInput/resolveCanonicalPredioId (solo exigen 20 o 30
+// dígitos numéricos). Sigue siendo resoluble por resolvePredioDataForDelivery
+// porque scripts/catastrox/test/setup_integration_postgis.sql inserta una
+// fila sintética para exactamente este código en catastrox_clean.predios --
+// estas pruebas necesitan que la generación PDFKit realmente tenga éxito
+// (para probar checksum/tamaño y el camino hasta SENT), no solo que falle de
+// forma honesta, y ahora ese predio resoluble es 100% sintético/local.
+const INTEGRATION_TEST_CODIGO = '999999999999999999999999999901';
 const TEST_ROUTE_ID = 'cx-test-delivery-lifecycle-route';
 const EVENTS_SECRET = 'events_secret_de_prueba_treinta_dos_caracteres_o_mas_1234';
 
@@ -57,7 +63,7 @@ if (dbAvailable) {
   ({ default: catastroxPaymentsRouter } = await import('../catastroxPayments.js'));
   ({ computeWompiEventChecksum } = await import('../../services/catastrox/wompiEventVerification.js'));
   ({ __rememberLookupPreviewForTests } = await import('../catastrox.js'));
-  __rememberLookupPreviewForTests(TEST_ROUTE_ID, { canonicalPredioId: REAL_TEST_CODIGO, codigoPredial: REAL_TEST_CODIGO });
+  __rememberLookupPreviewForTests(TEST_ROUTE_ID, { canonicalPredioId: INTEGRATION_TEST_CODIGO, codigoPredial: INTEGRATION_TEST_CODIGO });
   deliveryJobService = await import('../../services/catastrox/deliveryJobService.js');
   const limiterModule = await import('../../middleware/rateLimit.js');
   // Los limitadores son singletons de módulo (mismo store en memoria durante
@@ -393,7 +399,7 @@ test('CATX-DELIVERY-001: ciclo de vida del delivery job (integración, requiere 
       assert.equal(deliverables.length, 1);
       const deliverable = deliverables[0];
       assert.ok(deliverable.byte_size > 0);
-      assert.equal(deliverable.file_name, `${REAL_TEST_CODIGO}_basico.pdf`);
+      assert.equal(deliverable.file_name, `${INTEGRATION_TEST_CODIGO}_basico.pdf`);
       assert.match(deliverable.content_hash, /^[0-9a-f]{64}$/);
 
       const verified = await deliveryJobService.fetchVerifiedDeliverableForOrder(created.order.id);

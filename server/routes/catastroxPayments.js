@@ -291,32 +291,56 @@ function resolveCanonicalPredioIdFromRequestBody(body) {
 // cruzado en vez de inventar una regla nueva o distinta.
 const FISCAL_REVIEW_AREA_HA_THRESHOLD = 5000;
 
-// Control autoritativo (no bypasseable con una URL directa al paquete):
-// vuelve a resolver el área del predio server-side, por canonicalPredioId,
-// usando la MISMA fuente canónica que /full-result y el PDF oficial
-// (resolvePredioDataForDelivery -> resolveCanonicalAreaForRow). Si el área
-// geométrica real supera el umbral, el checkout se rechaza -- nunca se
-// confía en ningún estado/área que el cliente pudiera enviar.
+// P1-02/P1-03 (remediación post-auditoría, cierra CATX-LEGACY-SPECIAL-REVIEW-GUARD-001):
+// control autoritativo único (no bypasseable con una URL directa al
+// paquete, nunca confía en ningún estado/área que el cliente pudiera
+// enviar) que decide, en una sola llamada a resolvePredioDataForDelivery
+// -- la MISMA fuente canónica que /full-result, el PDF oficial y el
+// propio pipeline de entrega (deliveryJobService.generateAndStoreDeliverable
+// usa exactamente esta función) -- si el checkout puede continuar. Antes,
+// "no pude resolver los datos del predio" (predio legacy sin
+// correspondencia en catastrox_clean, o cualquier canonicalPredioId que
+// esta fuente no reconozca) se interpretaba como `false` == "no requiere
+// revisión fiscal" y el checkout avanzaba igual (fail-open); ahora "no hay
+// datos" nunca se confunde con "no hay riesgo": bloquea directamente,
+// porque un predio que no se puede resolver ahora tampoco podrá resolverlo
+// después el pipeline de entrega/PDF -- vender un paquete no entregable ya
+// no es un resultado aceptable.
 //
-// DEUDA TÉCNICA DOCUMENTADA -- CATX-LEGACY-SPECIAL-REVIEW-GUARD-001:
-// este control solo cubre predios de catastrox_clean (canonicalPredioId
-// numérico de 30 dígitos). Para predios legacy (gis.catastro_caqueta,
-// canonicalPredioId con formato `legacy:vN:terrenoId`, sin código predial
-// normalizado) resolvePredioDataForDelivery devuelve null porque solo
-// consulta catastrox_clean.* -- esta función entonces responde `false`
-// (fail-open) y el checkout NO se bloquea, aunque ese predio legacy tenga
-// un área real >= umbral. No se decidió bloquear indiscriminadamente todos
-// los registros legacy (bloquearía también predios ordinarios legítimos
-// sin ninguna señal de que requieren revisión) ni construir una solución
-// insegura ad-hoc (p. ej. confiar en un área enviada por el cliente). La
-// solución correcta -- una consulta equivalente de área contra
-// gis.catastro_caqueta reutilizando shape_area, o una migración del
-// dataset legacy hacia catastrox_clean -- queda pendiente y debe
-// diseñarse/priorizarse aparte bajo este identificador.
-export async function checkoutRequiresFiscalReview(canonicalPredioId, resolvePredioData = resolvePredioDataForDelivery) {
+// Devuelve una decisión estructurada, nunca un boolean aislado:
+//   { resolvable, requiresFiscalReview, canonicalAreaHa, reason }
+//
+//   A. resolvePredioData devuelve null (no resoluble) ->
+//      { resolvable: false, requiresFiscalReview: false, canonicalAreaHa: null, reason: 'PREDIO_DATA_UNAVAILABLE' }
+//   B. predio resoluble y areaHa < 5000 ->
+//      { resolvable: true, requiresFiscalReview: false, canonicalAreaHa, reason: 'OK' }
+//   C. predio resoluble y areaHa >= 5000 ->
+//      { resolvable: true, requiresFiscalReview: true, canonicalAreaHa, reason: 'FISCAL_REVIEW_REQUIRED' }
+//
+// Nota sobre el contrato de areaHa: resolveCanonicalAreaForRow (usada por
+// resolvePredioDataForDelivery) solo devuelve canonicalAreaHa como `null`
+// o como un número finito positivo (ver isFinitePositive en
+// catastroxCanonicalArea.js), y resolvePredioDataForDelivery colapsa ese
+// `null` a `0` (`?? 0`). Por construcción, entonces, un predioData no nulo
+// SIEMPRE trae hoy un areaHa finito -- el estado "predio resoluble pero
+// área no decidible" no es alcanzable a través del resolvePredioData por
+// defecto en producción. La comprobación explícita de abajo existe solo
+// como red de seguridad fail-closed para el parámetro `resolvePredioData`
+// inyectado (usado en tests con dobles de prueba arbitrarios, donde SÍ es
+// alcanzable) -- nunca se interpreta un área no finita como "predio
+// ordinario".
+export async function resolveCheckoutPredioEligibility(canonicalPredioId, resolvePredioData = resolvePredioDataForDelivery) {
   const predioData = await resolvePredioData(canonicalPredioId);
-  if (!predioData) return false;
-  return Number.isFinite(predioData.areaHa) && predioData.areaHa >= FISCAL_REVIEW_AREA_HA_THRESHOLD;
+  if (!predioData || !Number.isFinite(predioData.areaHa)) {
+    return { resolvable: false, requiresFiscalReview: false, canonicalAreaHa: null, reason: 'PREDIO_DATA_UNAVAILABLE' };
+  }
+  const requiresFiscalReview = predioData.areaHa >= FISCAL_REVIEW_AREA_HA_THRESHOLD;
+  return {
+    resolvable: true,
+    requiresFiscalReview,
+    canonicalAreaHa: predioData.areaHa,
+    reason: requiresFiscalReview ? 'FISCAL_REVIEW_REQUIRED' : 'OK',
+  };
 }
 
 export function resolveCheckoutCanonicalPredioId({ routeId, body, getPreview = resolveLookupPreview }) {
@@ -760,20 +784,39 @@ router.post('/checkout', checkoutLimiter, async (req, res) => {
   }
   const { canonicalPredioId } = predioResolution;
 
+  let eligibility;
   try {
-    if (await checkoutRequiresFiscalReview(canonicalPredioId)) {
-      return res.status(403).json({
-        ok: false,
-        code: 'FISCAL_REVIEW_REQUIRED',
-        message: 'Este predio requiere validación especializada antes de adquirir un paquete.',
-      });
-    }
+    eligibility = await resolveCheckoutPredioEligibility(canonicalPredioId);
   } catch (error) {
-    console.error('[CatastroX Payments] Error validando área para revisión fiscal', { message: error.message });
+    console.error('[CatastroX Payments] Error validando elegibilidad del predio para checkout', { message: error.message });
     return res.status(500).json({
       ok: false,
       code: 'FISCAL_REVIEW_CHECK_ERROR',
       message: 'No fue posible validar este predio. Intenta nuevamente.',
+    });
+  }
+
+  // P1-02: bloquea ANTES de tocar customerId/Wompi/orden -- un predio que
+  // resolveCheckoutPredioEligibility no puede resolver tampoco podrá
+  // resolverlo después el pipeline de entrega (mismo guard, ver
+  // deliveryJobService.generateAndStoreDeliverable), así que no se crea
+  // ninguna orden de pago ni referencia Wompi para él. Código HTTP
+  // deliberadamente distinto del PREDIO_DATA_UNAVAILABLE que usa el job de
+  // entrega -- son dos momentos distintos (pre-compra vs. entrega
+  // post-pago) y no deben confundirse en logs/monitoreo.
+  if (!eligibility.resolvable) {
+    return res.status(403).json({
+      ok: false,
+      code: 'PREDIO_NOT_DELIVERABLE',
+      message: 'Este predio no puede procesarse actualmente. Vuelva a intentar la búsqueda o contacte soporte.',
+    });
+  }
+
+  if (eligibility.requiresFiscalReview) {
+    return res.status(403).json({
+      ok: false,
+      code: 'FISCAL_REVIEW_REQUIRED',
+      message: 'Este predio requiere validación especializada antes de adquirir un paquete.',
     });
   }
 

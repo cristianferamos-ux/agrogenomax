@@ -18,20 +18,71 @@ import dotenv from 'dotenv';
 dotenv.config({ path: '.env', quiet: true });
 dotenv.config({ path: 'server/.env', quiet: true });
 
-const TEST_CODIGO_A = '900000000000000000000000000001';
-const TEST_CODIGO_B = '900000000000000000000000000002';
+// P1-02/P1-03 (remediación post-auditoría): POST /checkout ahora exige que
+// el predio sea resoluble por resolveCheckoutPredioEligibility (misma
+// fuente que usa después el pipeline de entrega,
+// resolvePredioDataForDelivery) ANTES de crear ninguna orden -- un código
+// sintético que no existe en catastrox_clean ya NO puede usarse como
+// fixture de "cualquier predio" para un checkout exitoso (antes funcionaba
+// solo por accidente, gracias al fail-open que esta fase corrige). Los
+// tests que necesitan un checkout exitoso usan INTEGRATION_TEST_CODIGO --
+// un código predial SINTÉTICO de 30 dígitos, nunca uno real (verificado
+// contra validateCadastralCodeInput/normalizeCadastralCodeInput/
+// resolveCanonicalPredioId: ninguna exige checksum ni validación
+// territorial, solo 20 o 30 dígitos numéricos), resuelto localmente por
+// scripts/catastrox/test/setup_integration_postgis.sql, que inserta una
+// fila sintética con exactamente este código en catastrox_clean.predios --
+// mismo código que usan catastroxDeliveryLifecycle.test.js/
+// catastroxPaymentWebhook.test.js. La limpieza de este archivo se hace
+// exclusivamente por customer_id (ver createdCustomerIds/cleanupTestOrders
+// más abajo), nunca por canonical_predio_id, para no arriesgar borrar
+// filas creadas concurrentemente por otro archivo de test que use el mismo
+// código (node --test ejecuta archivos en paralelo por defecto).
+const INTEGRATION_TEST_CODIGO = '999999999999999999999999999901';
+
+// Predio sintético que deliberadamente NO existe en catastrox_clean --
+// antes se usaba (como TEST_CODIGO_A) por accidente como fixture de
+// "cualquier predio" para un checkout exitoso, lo cual solo funcionaba
+// porque el defecto P1-02/P1-03 (fail-open) dejaba pasar un predio no
+// resoluble. Ahora se usa para probar exactamente lo contrario: que ese
+// mismo caso bloquea el checkout.
+const UNRESOLVABLE_TEST_CODIGO = '900000000000000000000000000001';
+
+// Predio sintético "ajeno" -- nunca se compra en ningún test de este
+// archivo, solo se usa como código DISTINTO al realmente comprado para
+// confirmar que un predio no comprado responde isPaid:false. Nunca pasa
+// por resolveCheckoutPredioEligibility (no se usa como routeId/checkout),
+// así que no necesita ser resoluble.
+const UNPURCHASED_TEST_CODIGO = '900000000000000000000000000002';
 
 // Corrección de seguridad (checkout sin fallback inseguro): POST /checkout
 // ya no acepta canonicalPredioId/codigoPredial del body -- exige un
-// routeId que resuelva a un lookup vigente. Estos códigos son sintéticos
-// (no existen en la base geográfica real), así que no pueden pasar por un
-// POST /lookup real; en su lugar se registra un preview directamente en
-// el Map en memoria de catastrox.js vía __rememberLookupPreviewForTests
-// (mismo mecanismo que usaría un POST /lookup real, sin SQL). Un solo
-// routeId por código, reutilizado por todas las pruebas de este archivo
-// que compran ese predio -- un preview no se consume al usarse.
+// routeId que resuelva a un lookup vigente. En su lugar se registra un
+// preview directamente en el Map en memoria de catastrox.js vía
+// __rememberLookupPreviewForTests (mismo mecanismo que usaría un POST
+// /lookup real, sin SQL). Un solo routeId por slot, reutilizado por todas
+// las pruebas de este archivo que compran ese predio -- un preview no se
+// consume al usarse. TEST_ROUTE_ID_A y TEST_ROUTE_ID_B apuntan
+// deliberadamente al MISMO predio sintético (INTEGRATION_TEST_CODIGO) -- ningún test
+// de este archivo depende de que sean geometrías distintas, solo de que
+// sean slots de preview independientes.
 const TEST_ROUTE_ID_A = 'cx-test-route-a';
 const TEST_ROUTE_ID_B = 'cx-test-route-b';
+const TEST_ROUTE_ID_UNRESOLVABLE = 'cx-test-route-unresolvable';
+
+// Identificador único por ejecución del archivo -- wompi_transaction_id
+// tiene una UNIQUE global (catastrox_payment_orders_wompi_transaction_id_key);
+// un literal fijo reutilizado entre corridas puede colisionar con una fila
+// residual de una ejecución anterior (p. ej. una cuyo cleanup no llegó a
+// correr) y hacer que la orden nueva nunca transicione. Estable dentro de
+// la misma ejecución, para que un test que reutiliza su propio txnId (al
+// leer /verify después de mockearlo) siga refiriéndose a la misma
+// transacción.
+const TEST_RUN_ID = crypto.randomUUID();
+
+function testTransactionId(label) {
+  return `txn-${label}-${TEST_RUN_ID}`;
+}
 
 let dbAvailable = false;
 let getConfig;
@@ -57,8 +108,12 @@ let rateLimiters = [];
 if (dbAvailable) {
   ({ default: catastroxPaymentsRouter } = await import('../catastroxPayments.js'));
   ({ __rememberLookupPreviewForTests } = await import('../catastrox.js'));
-  __rememberLookupPreviewForTests(TEST_ROUTE_ID_A, { canonicalPredioId: TEST_CODIGO_A, codigoPredial: TEST_CODIGO_A });
-  __rememberLookupPreviewForTests(TEST_ROUTE_ID_B, { canonicalPredioId: TEST_CODIGO_B, codigoPredial: TEST_CODIGO_B });
+  __rememberLookupPreviewForTests(TEST_ROUTE_ID_A, { canonicalPredioId: INTEGRATION_TEST_CODIGO, codigoPredial: INTEGRATION_TEST_CODIGO });
+  __rememberLookupPreviewForTests(TEST_ROUTE_ID_B, { canonicalPredioId: INTEGRATION_TEST_CODIGO, codigoPredial: INTEGRATION_TEST_CODIGO });
+  __rememberLookupPreviewForTests(TEST_ROUTE_ID_UNRESOLVABLE, {
+    canonicalPredioId: UNRESOLVABLE_TEST_CODIGO,
+    codigoPredial: UNRESOLVABLE_TEST_CODIGO,
+  });
   const limiterModule = await import('../../middleware/rateLimit.js');
   // Los limitadores son singletons de módulo (mismo store en memoria en
   // todo el proceso de test, ver server/middleware/__tests__/rateLimit.test.js)
@@ -129,6 +184,12 @@ async function startTestApp() {
 }
 
 let customerCounter = 0;
+// Toda limpieza de este archivo se hace por customer_id, nunca por
+// canonical_predio_id (ver comentario de INTEGRATION_TEST_CODIGO arriba) -- cada
+// customerId creado aquí es un UUID fresco de este proceso de test, así
+// que este scope nunca puede colisionar con filas de otro archivo, incluso
+// si ambos comparten el mismo predio real.
+const createdCustomerIds = [];
 
 async function createVerifiedTestCustomer(baseUrl, overrides = {}) {
   customerCounter += 1;
@@ -161,31 +222,67 @@ async function createVerifiedTestCustomer(baseUrl, overrides = {}) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ code: payload.devOtpCode }),
   });
+  if (payload.customerId) createdCustomerIds.push(payload.customerId);
   return payload.customerId;
 }
 
+// El checkout/verify/webhook real nunca espera a processDeliveryJob() --
+// triggerPostApprovalWorkflows() lo dispara con `void processDeliveryJob(job.id)
+// .catch(...)` (server/routes/catastroxPayments.js), fire-and-forget por
+// diseño (CATX-DELIVERY-001 ajuste #8). Eso significa que cuando un test
+// recibe la respuesta HTTP de /verify o /wompi/events, el job de entrega
+// puede seguir activo (QUEUED/GENERATING/READY/SENDING) en segundo plano.
+// Si el teardown borra catastrox_delivery_jobs mientras ese job en curso
+// todavía intenta escribir en catastrox_deliverables, la escritura choca
+// con la FK catastrox_deliverables_delivery_job_id_fkey -- un error de
+// carrera de TEST, no del pipeline de entrega en sí (que sigue siendo
+// correcto: SENT/FAILED son sus únicos estados terminales, por diseño, ver
+// el comentario de máquina de estados en deliveryJobService.js). Este
+// helper solo consulta Postgres (nunca muta el job, nunca llama
+// processDeliveryJob) y actúa exclusivamente sobre los orderIds de esta
+// suite -- si el timeout vence, lanza para que la suite falle de forma
+// visible en vez de continuar borrando en silencio sobre un job todavía
+// activo.
+async function waitForDeliveryJobsToSettle(orderIds, { timeoutMs = 5000, intervalMs = 50 } = {}) {
+  if (!orderIds.length) return;
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const result = await query(
+      `select id, status from public.catastrox_delivery_jobs
+        where payment_order_id = any($1)
+          and status not in ('SENT', 'FAILED')`,
+      [orderIds],
+    );
+    if (result.rows.length === 0) return;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `waitForDeliveryJobsToSettle: timeout esperando estado terminal (SENT/FAILED) de ${result.rows.length} delivery job(s): ` +
+          result.rows.map((row) => `${row.id}=${row.status}`).join(', '),
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
 async function cleanupTestOrders() {
-  if (!dbAvailable) return;
-  const orders = await query('select id, customer_id from public.catastrox_payment_orders where canonical_predio_id = any($1)', [
-    [TEST_CODIGO_A, TEST_CODIGO_B],
-  ]);
+  if (!dbAvailable || !createdCustomerIds.length) return;
+  const orders = await query('select id from public.catastrox_payment_orders where customer_id = any($1)', [createdCustomerIds]);
   const orderIds = orders.rows.map((row) => row.id);
-  const customerIds = orders.rows.map((row) => row.customer_id).filter(Boolean);
 
   if (orderIds.length) {
+    await waitForDeliveryJobsToSettle(orderIds);
+    await query('delete from public.catastrox_deliverable_blobs where deliverable_id in (select id from public.catastrox_deliverables where delivery_job_id in (select id from public.catastrox_delivery_jobs where payment_order_id = any($1)))', [orderIds]);
     await query('delete from public.catastrox_delivery_attempts where delivery_job_id in (select id from public.catastrox_delivery_jobs where payment_order_id = any($1))', [orderIds]);
     await query('delete from public.catastrox_deliverables where delivery_job_id in (select id from public.catastrox_delivery_jobs where payment_order_id = any($1))', [orderIds]);
     await query('delete from public.catastrox_delivery_jobs where payment_order_id = any($1)', [orderIds]);
     await query('delete from public.catastrox_invoice_jobs where payment_order_id = any($1)', [orderIds]);
     await query('delete from public.catastrox_recovery_session_orders where payment_order_id = any($1)', [orderIds]);
     await query('delete from public.catastrox_billing_profiles where payment_order_id = any($1)', [orderIds]);
+    await query('delete from public.catastrox_payment_orders where id = any($1)', [orderIds]);
   }
-  await query('delete from public.catastrox_payment_orders where canonical_predio_id = any($1)', [[TEST_CODIGO_A, TEST_CODIGO_B]]);
-  if (customerIds.length) {
-    await query('delete from public.catastrox_email_verifications where customer_id = any($1)', [customerIds]);
-    await query('delete from public.catastrox_customer_otp_state where customer_id = any($1)', [customerIds]);
-    await query('delete from public.catastrox_customers where id = any($1)', [customerIds]);
-  }
+  await query('delete from public.catastrox_email_verifications where customer_id = any($1)', [createdCustomerIds]);
+  await query('delete from public.catastrox_customer_otp_state where customer_id = any($1)', [createdCustomerIds]);
+  await query('delete from public.catastrox_customers where id = any($1)', [createdCustomerIds]);
   await query(
     `delete from public.catastrox_recovery_sessions
       where id not in (select recovery_session_id from public.catastrox_recovery_session_orders)
@@ -205,7 +302,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const response = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'oro-platino', codigoPredial: TEST_CODIGO_A }),
+        body: JSON.stringify({ packageId: 'oro-platino', codigoPredial: INTEGRATION_TEST_CODIGO }),
       });
       assert.equal(response.status, 400);
       assert.equal((await response.json()).code, 'INVALID_PACKAGE');
@@ -275,6 +372,48 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
     }
   });
 
+  // P1-02 (nuevo, remediación post-auditoría): un predio que
+  // resolveCheckoutPredioEligibility no puede resolver (mismo criterio que
+  // usará después el pipeline de entrega) debe bloquear el checkout ANTES
+  // de tocar customerId/Wompi/orden -- nunca se crea una orden de pago ni
+  // una referencia Wompi para un predio no entregable. Antes de esta fase,
+  // este mismo escenario (UNRESOLVABLE_TEST_CODIGO) pasaba el checkout sin
+  // problema por el defecto fail-open que aquí se cierra.
+  await t.test('checkout con predio no resoluble por resolveCheckoutPredioEligibility -> 403 PREDIO_NOT_DELIVERABLE, nunca crea orden ni referencia Wompi', async () => {
+    resetRateLimiters();
+    const app = await startTestApp();
+    try {
+      const customerId = await createVerifiedTestCustomer(app.baseUrl);
+      const before = await query('select count(*)::int as n from public.catastrox_payment_orders where customer_id = $1', [customerId]);
+      assert.equal(before.rows[0].n, 0);
+
+      const response = await fetch(`${app.baseUrl}/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          packageId: 'basico',
+          routeId: TEST_ROUTE_ID_UNRESOLVABLE,
+          customerId,
+          purchaseAttemptId: crypto.randomUUID(),
+        }),
+      });
+      const payload = await response.json();
+
+      assert.equal(response.status, 403);
+      assert.equal(payload.code, 'PREDIO_NOT_DELIVERABLE');
+      assert.equal(payload.ok, false);
+      // Ni checkout.reference ni checkout.orderToken existen -- son
+      // exactamente los artefactos que produce la construcción de la
+      // referencia/integridad Wompi, y nunca se llega a construirlos.
+      assert.equal(payload.checkout, undefined);
+
+      const after = await query('select count(*)::int as n from public.catastrox_payment_orders where customer_id = $1', [customerId]);
+      assert.equal(after.rows[0].n, 0, 'no debe haberse creado ninguna orden para el comprador');
+    } finally {
+      await app.close();
+    }
+  });
+
   await t.test('checkout sin customerId -> 400 CUSTOMER_ID_REQUIRED', async () => {
     resetRateLimiters();
     const app = await startTestApp();
@@ -298,7 +437,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const missing = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', codigoPredial: TEST_CODIGO_A }),
+        body: JSON.stringify({ packageId: 'basico', codigoPredial: INTEGRATION_TEST_CODIGO }),
       });
       assert.equal(missing.status, 400);
       assert.equal((await missing.json()).code, 'INVALID_PURCHASE_ATTEMPT_ID');
@@ -306,7 +445,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const malformed = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', codigoPredial: TEST_CODIGO_A, purchaseAttemptId: 'no-es-un-uuid' }),
+        body: JSON.stringify({ packageId: 'basico', codigoPredial: INTEGRATION_TEST_CODIGO, purchaseAttemptId: 'no-es-un-uuid' }),
       });
       assert.equal(malformed.status, 400);
       assert.equal((await malformed.json()).code, 'INVALID_PURCHASE_ATTEMPT_ID');
@@ -343,6 +482,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
         }),
       });
       const { customerId } = await customerResponse.json();
+      if (customerId) createdCustomerIds.push(customerId);
 
       const response = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
@@ -530,7 +670,10 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
         assert.equal(payloadB.checkout.status, 'CREATED');
 
         // Aprueba ambas transacciones (Sandbox simulado independientemente).
-        for (const [ref, txnId] of [[payloadA.checkout.reference, 'txn-n-purchase-a'], [payloadB.checkout.reference, 'txn-n-purchase-b']]) {
+        for (const [ref, txnId] of [
+          [payloadA.checkout.reference, testTransactionId('n-purchase-a')],
+          [payloadB.checkout.reference, testTransactionId('n-purchase-b')],
+        ]) {
           withWompiFetchMock(() =>
             jsonResponse(200, {
               data: { id: txnId, status: 'APPROVED', reference: ref, amount_in_cents: 3990000, currency: 'COP' },
@@ -547,7 +690,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
         const entitlementA = await fetch(`${app.baseUrl}/entitlements/check`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Cookie: cookieA },
-          body: JSON.stringify({ codigoPredial: TEST_CODIGO_B, packageId: 'basico' }),
+          body: JSON.stringify({ codigoPredial: INTEGRATION_TEST_CODIGO, packageId: 'basico' }),
         });
         assert.equal((await entitlementA.json()).isPaid, true);
 
@@ -556,7 +699,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
         const entitlementB = await fetch(`${app.baseUrl}/entitlements/check`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Cookie: cookieB },
-          body: JSON.stringify({ codigoPredial: TEST_CODIGO_B, packageId: 'basico' }),
+          body: JSON.stringify({ codigoPredial: INTEGRATION_TEST_CODIGO, packageId: 'basico' }),
         });
         assert.equal((await entitlementB.json()).isPaid, true);
 
@@ -591,13 +734,14 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const cookie = extractSessionCookiePair(checkoutResponse);
       const { reference } = (await checkoutResponse.json()).checkout;
 
+      const txnId = testTransactionId('entitlement-1');
       withWompiFetchMock(() =>
         jsonResponse(200, {
-          data: { id: 'txn-entitlement-1', status: 'APPROVED', reference, amount_in_cents: 3990000, currency: 'COP' },
+          data: { id: txnId, status: 'APPROVED', reference, amount_in_cents: 3990000, currency: 'COP' },
         }),
       );
       try {
-        await fetch(`${app.baseUrl}/verify/txn-entitlement-1`);
+        await fetch(`${app.baseUrl}/verify/${txnId}`);
       } finally {
         restoreFetch();
       }
@@ -605,7 +749,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const noCookie = await fetch(`${app.baseUrl}/entitlements/check`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ codigoPredial: TEST_CODIGO_A, packageId: 'basico' }),
+        body: JSON.stringify({ codigoPredial: INTEGRATION_TEST_CODIGO, packageId: 'basico' }),
       });
       assert.equal(noCookie.status, 200);
       assert.equal((await noCookie.json()).isPaid, false);
@@ -613,7 +757,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const withCookie = await fetch(`${app.baseUrl}/entitlements/check`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
-        body: JSON.stringify({ codigoPredial: TEST_CODIGO_A, packageId: 'basico' }),
+        body: JSON.stringify({ codigoPredial: INTEGRATION_TEST_CODIGO, packageId: 'basico' }),
       });
       const withCookiePayload = await withCookie.json();
       assert.equal(withCookiePayload.isPaid, true);
@@ -622,14 +766,14 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const otherPredio = await fetch(`${app.baseUrl}/entitlements/check`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
-        body: JSON.stringify({ codigoPredial: TEST_CODIGO_B, packageId: 'basico' }),
+        body: JSON.stringify({ codigoPredial: UNPURCHASED_TEST_CODIGO, packageId: 'basico' }),
       });
       assert.equal((await otherPredio.json()).isPaid, false);
 
       const higherPackage = await fetch(`${app.baseUrl}/entitlements/check`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
-        body: JSON.stringify({ codigoPredial: TEST_CODIGO_A, packageId: 'profesional' }),
+        body: JSON.stringify({ codigoPredial: INTEGRATION_TEST_CODIGO, packageId: 'profesional' }),
       });
       assert.equal((await higherPackage.json()).isPaid, false);
 
@@ -637,7 +781,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const forged = await fetch(`${app.baseUrl}/entitlements/check`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: forgedCookie },
-        body: JSON.stringify({ codigoPredial: TEST_CODIGO_A, packageId: 'basico' }),
+        body: JSON.stringify({ codigoPredial: INTEGRATION_TEST_CODIGO, packageId: 'basico' }),
       });
       assert.equal(forged.status, 200);
       assert.equal((await forged.json()).isPaid, false);
@@ -684,15 +828,16 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       });
       const { reference } = (await checkoutResponse.json()).checkout;
 
+      const txnId = testTransactionId('monto-malo');
       withWompiFetchMock(() =>
         jsonResponse(200, {
-          data: { id: 'txn-monto-malo', status: 'APPROVED', reference, amount_in_cents: 1, currency: 'COP' },
+          data: { id: txnId, status: 'APPROVED', reference, amount_in_cents: 1, currency: 'COP' },
         }),
       );
 
       let verifyPayload;
       try {
-        const verifyResponse = await fetch(`${app.baseUrl}/verify/txn-monto-malo`);
+        const verifyResponse = await fetch(`${app.baseUrl}/verify/${txnId}`);
         verifyPayload = await verifyResponse.json();
       } finally {
         restoreFetch();
@@ -717,13 +862,14 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const cookie = extractSessionCookiePair(checkoutResponse);
       const { reference } = (await checkoutResponse.json()).checkout;
 
+      const txnId = testTransactionId('clear-1');
       withWompiFetchMock(() =>
         jsonResponse(200, {
-          data: { id: 'txn-clear-1', status: 'APPROVED', reference, amount_in_cents: 3990000, currency: 'COP' },
+          data: { id: txnId, status: 'APPROVED', reference, amount_in_cents: 3990000, currency: 'COP' },
         }),
       );
       try {
-        await fetch(`${app.baseUrl}/verify/txn-clear-1`);
+        await fetch(`${app.baseUrl}/verify/${txnId}`);
       } finally {
         restoreFetch();
       }
@@ -731,7 +877,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const beforeClear = await fetch(`${app.baseUrl}/entitlements/check`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
-        body: JSON.stringify({ codigoPredial: TEST_CODIGO_A, packageId: 'basico' }),
+        body: JSON.stringify({ codigoPredial: INTEGRATION_TEST_CODIGO, packageId: 'basico' }),
       });
       assert.equal((await beforeClear.json()).isPaid, true);
 
@@ -740,7 +886,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const afterClear = await fetch(`${app.baseUrl}/entitlements/check`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
-        body: JSON.stringify({ codigoPredial: TEST_CODIGO_A, packageId: 'basico' }),
+        body: JSON.stringify({ codigoPredial: INTEGRATION_TEST_CODIGO, packageId: 'basico' }),
       });
       assert.equal((await afterClear.json()).isPaid, false, 'la sesión revocada ya no debe reconocer el pago');
     } finally {

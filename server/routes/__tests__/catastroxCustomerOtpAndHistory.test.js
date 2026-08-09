@@ -13,11 +13,32 @@ import dotenv from 'dotenv';
 dotenv.config({ path: '.env', quiet: true });
 dotenv.config({ path: 'server/.env', quiet: true });
 
-const TEST_CODIGO = '900000000000000000000000000099';
+// P1-02/P1-03 (remediación post-auditoría): POST /checkout ahora exige un
+// predio resoluble por resolveCheckoutPredioEligibility antes de crear
+// cualquier orden -- un código sintético que no existe en catastrox_clean
+// ya no sirve como fixture de "cualquier predio" para un checkout exitoso.
+// INTEGRATION_TEST_CODIGO es el mismo código sintético de 30 dígitos,
+// resuelto localmente por scripts/catastrox/test/setup_integration_postgis.sql,
+// que ya usan catastroxPaymentOrders.test.js/catastroxPaymentWebhook.test.js/
+// catastroxDeliveryLifecycle.test.js -- este archivo no tiene ningún test
+// que necesite deliberadamente un predio distinto/no resoluble, así que se
+// adopta sin reservas.
+const INTEGRATION_TEST_CODIGO = '999999999999999999999999999901';
 // Corrección de seguridad (checkout sin fallback inseguro): POST /checkout
 // exige un routeId que resuelva a un lookup vigente -- ver la misma nota
 // en catastroxPaymentOrders.test.js.
 const TEST_ROUTE_ID = 'cx-test-history-route';
+
+// Identificador único por ejecución del archivo -- misma razón que en
+// catastroxPaymentOrders.test.js/catastroxPaymentWebhook.test.js:
+// wompi_transaction_id tiene una UNIQUE global, y un literal fijo
+// reutilizado entre corridas puede colisionar con una fila residual de una
+// ejecución anterior.
+const TEST_RUN_ID = crypto.randomUUID();
+
+function testTransactionId(label) {
+  return `txn-${label}-${TEST_RUN_ID}`;
+}
 
 let dbAvailable = false;
 let getDbPool;
@@ -44,7 +65,7 @@ let normalizeDocumentNumber;
 if (dbAvailable) {
   ({ default: catastroxPaymentsRouter } = await import('../catastroxPayments.js'));
   ({ __rememberLookupPreviewForTests } = await import('../catastrox.js'));
-  __rememberLookupPreviewForTests(TEST_ROUTE_ID, { canonicalPredioId: TEST_CODIGO, codigoPredial: TEST_CODIGO });
+  __rememberLookupPreviewForTests(TEST_ROUTE_ID, { canonicalPredioId: INTEGRATION_TEST_CODIGO, codigoPredial: INTEGRATION_TEST_CODIGO });
   const limiterModule = await import('../../middleware/rateLimit.js');
   rateLimiters = [
     limiterModule.checkoutLimiter,
@@ -138,6 +159,11 @@ async function startTestApp() {
 }
 
 let counter = 0;
+// INTEGRATION_TEST_CODIGO se comparte entre varios archivos de integración
+// que node --test puede ejecutar en paralelo -- cleanupTestData() combina
+// este filtro con customer_id = any(createdCustomerIds) para nunca tocar
+// órdenes creadas concurrentemente por otro archivo bajo el mismo predio.
+const createdCustomerIds = [];
 
 async function createCustomer(baseUrl, overrides = {}) {
   counter += 1;
@@ -164,7 +190,9 @@ async function createCustomer(baseUrl, overrides = {}) {
       ...overrides,
     }),
   });
-  return response.json();
+  const payload = await response.json();
+  if (payload.customerId) createdCustomerIds.push(payload.customerId);
+  return payload;
 }
 
 // CATX-DELIVERY-001 (ajuste obligatorio #8): triggerPostApprovalWorkflows ya
@@ -187,15 +215,59 @@ async function waitForOrderDeliveryStatus(app, cookie, orderToken, { timeoutMs =
   }
 }
 
+// A diferencia de waitForOrderDeliveryStatus (arriba, por-orderToken, usado
+// dentro del propio test para poder asertar contra un deliveryStatus
+// conocido), este helper es exclusivo del teardown: actúa sobre TODOS los
+// orderIds encontrados a la vez, y -- a propósito -- lanza si vence el
+// timeout, en vez de devolver silenciosamente lo que haya. El checkout/
+// verify real nunca espera a processDeliveryJob() (triggerPostApprovalWorkflows
+// lo dispara con `void processDeliveryJob(job.id).catch(...)`, fire-and-forget
+// por diseño, CATX-DELIVERY-001 ajuste #8), así que un job puede seguir
+// activo (QUEUED/GENERATING/READY/SENDING) en segundo plano incluso después
+// de que la petición HTTP ya respondió. Si el teardown borra
+// catastrox_delivery_jobs mientras esa escritura en curso todavía intenta
+// insertar en catastrox_deliverables, choca contra la FK
+// catastrox_deliverables_delivery_job_id_fkey -- una carrera de TEST, no un
+// defecto del pipeline de entrega. Solo consulta Postgres, nunca muta el
+// job ni llama processDeliveryJob.
+async function waitForDeliveryJobsToSettle(orderIds, { timeoutMs = 5000, intervalMs = 50 } = {}) {
+  if (!orderIds.length) return;
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const result = await query(
+      `select id, status from public.catastrox_delivery_jobs
+        where payment_order_id = any($1)
+          and status not in ('SENT', 'FAILED')`,
+      [orderIds],
+    );
+    if (result.rows.length === 0) return;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `waitForDeliveryJobsToSettle: timeout esperando estado terminal (SENT/FAILED) de ${result.rows.length} delivery job(s): ` +
+          result.rows.map((row) => `${row.id}=${row.status}`).join(', '),
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
 async function cleanupTestData() {
   if (!dbAvailable) return;
-  const orders = await query('select id, customer_id from public.catastrox_payment_orders where canonical_predio_id = $1', [
-    TEST_CODIGO,
-  ]);
+  // INTEGRATION_TEST_CODIGO es compartido entre varios archivos de
+  // integración -- se combina con customer_id = any(createdCustomerIds)
+  // (propios de este archivo) para nunca tocar órdenes creadas
+  // concurrentemente por otro archivo bajo el mismo predio (ver comentario
+  // de createdCustomerIds más arriba).
+  const orders = await query(
+    'select id, customer_id from public.catastrox_payment_orders where canonical_predio_id = $1 and customer_id = any($2)',
+    [INTEGRATION_TEST_CODIGO, createdCustomerIds],
+  );
   const orderIds = orders.rows.map((row) => row.id);
   const customerIds = orders.rows.map((row) => row.customer_id).filter(Boolean);
 
   if (orderIds.length) {
+    await waitForDeliveryJobsToSettle(orderIds);
+    await query('delete from public.catastrox_deliverable_blobs where deliverable_id in (select id from public.catastrox_deliverables where delivery_job_id in (select id from public.catastrox_delivery_jobs where payment_order_id = any($1)))', [orderIds]);
     await query('delete from public.catastrox_delivery_attempts where delivery_job_id in (select id from public.catastrox_delivery_jobs where payment_order_id = any($1))', [orderIds]);
     await query('delete from public.catastrox_deliverables where delivery_job_id in (select id from public.catastrox_delivery_jobs where payment_order_id = any($1))', [orderIds]);
     await query('delete from public.catastrox_delivery_jobs where payment_order_id = any($1)', [orderIds]);
@@ -203,7 +275,10 @@ async function cleanupTestData() {
     await query('delete from public.catastrox_recovery_session_orders where payment_order_id = any($1)', [orderIds]);
     await query('delete from public.catastrox_billing_profiles where payment_order_id = any($1)', [orderIds]);
   }
-  await query('delete from public.catastrox_payment_orders where canonical_predio_id = $1', [TEST_CODIGO]);
+  await query('delete from public.catastrox_payment_orders where canonical_predio_id = $1 and customer_id = any($2)', [
+    INTEGRATION_TEST_CODIGO,
+    createdCustomerIds,
+  ]);
   if (customerIds.length) {
     await query('delete from public.catastrox_email_verifications where customer_id = any($1)', [customerIds]);
     await query('delete from public.catastrox_customer_otp_state where customer_id = any($1)', [customerIds]);
@@ -1084,25 +1159,29 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
           assert.equal(forbiddenField in beforeApprovalPayload.orders[0], false, `no debe exponer "${forbiddenField}"`);
         }
 
+        const txnId = testTransactionId('history-1');
         withWompiFetchMock(() =>
           jsonResponse(200, {
-            data: { id: 'txn-history-1', status: 'APPROVED', reference, amount_in_cents: 3990000, currency: 'COP' },
+            data: { id: txnId, status: 'APPROVED', reference, amount_in_cents: 3990000, currency: 'COP' },
           }),
         );
         try {
-          await fetch(`${app.baseUrl}/verify/txn-history-1`);
+          await fetch(`${app.baseUrl}/verify/${txnId}`);
         } finally {
           restoreFetch();
         }
 
         // 25/26) Tras aprobar: pago APPROVED, pero entrega/factura siguen
-        // siendo honestos -- el predio de prueba (TEST_CODIGO) no existe en
-        // catastrox_clean, así que la generación real (PDFKit) falla con
-        // PREDIO_DATA_UNAVAILABLE -- el estado real tras la aprobación es
-        // FAILED/NOT_REQUESTED, JAMÁS "enviado"/"emitida". El procesamiento
-        // ahora es desacoplado (ajuste #8) -- se espera a que el job llegue
-        // a un estado terminal antes de aseverar, en vez de asumir que ya
-        // terminó cuando /verify respondió.
+        // siendo honestos -- INTEGRATION_TEST_CODIGO SÍ es resoluble
+        // (P1-02/P1-03), así que la generación real (PDFKit) tiene éxito,
+        // pero este entorno de test no configura EMAIL_PROVIDER=resend, así
+        // que el envío de correo real está deshabilitado
+        // (EMAIL_PROVIDER_DISABLED) -- el estado real tras la aprobación
+        // sigue siendo FAILED/NOT_REQUESTED, JAMÁS "enviado"/"emitida"
+        // simulado. El procesamiento ahora es desacoplado (ajuste #8) -- se
+        // espera a que el job llegue a un estado terminal antes de
+        // aseverar, en vez de asumir que ya terminó cuando /verify
+        // respondió.
         const approvedOrder = await waitForOrderDeliveryStatus(app, cookie, orderToken);
         assert.ok(approvedOrder, 'la orden aprobada debe seguir apareciendo en el historial de la sesión');
         assert.equal(approvedOrder.paymentStatus, 'APPROVED');
