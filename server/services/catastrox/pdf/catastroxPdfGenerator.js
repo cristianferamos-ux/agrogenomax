@@ -44,8 +44,16 @@ import {
   isUrbanZona,
   toDisplayToponymTitleCase,
   toSentenceCase,
+  partPredio,
 } from './catastroxPdfLayout.js';
-import { computeMapState, computeVectorPlanFitState, projectRingToViewport, projectPointToViewport, computeDynamicScaleMeters } from './catastroxPdfGeometry.js';
+import {
+  computeMapState,
+  computeVectorPlanFitState,
+  projectRingToViewport,
+  projectPointToViewport,
+  computeDynamicScaleMeters,
+  buildTechnicalPolygonSubpaths,
+} from './catastroxPdfGeometry.js';
 import { fetchSatelliteMosaic, TILE_SIZE, ESRI_IMAGERY_ATTRIBUTION, ESRI_LABELS_ATTRIBUTION, MapRenderError } from './catastroxPdfMap.js';
 import {
   buildVisiblePointPlacements,
@@ -468,36 +476,10 @@ export async function generateCatastroxPdfBuffer({ predioData, packageId, fetchT
   const summaryCard = resolvePdfSummaryCardContent(packageId);
   const usoAlcance = resolvePdfUsoAlcanceContent(packageId);
 
-  // buildLayoutData() registra reportes de depuración extensos vía
-  // console.log/console.table (pensados para la consola del navegador,
-  // ver catastroxDeliverables.js) -- se silencian solo durante esta
-  // llamada puntual para no inundar los logs de Railway en cada PDF
-  // generado; nunca se toca el comportamiento de la función en sí.
-  const layoutData = withSilencedConsole(() => buildLayoutData(predio, resolvePlanLayoutOptions(predio, {})));
   const fichaPageCount = estimateFichaTecnicaPageCount(predio);
   const tableHeaders = resolveExecutiveTableHeaders(contentMode);
-  const tableRows = buildUnifiedTableRows(layoutData.referenceRows, layoutData.referenceSegments, contentMode);
   const technicalTitle = resolvePdfTechnicalPageTitle(contentMode);
   const bottomNote = resolvePdfExecutiveBottomNote(contentMode, packageId);
-  const ring = predio.displayRing?.length ? predio.displayRing : predio.ring;
-
-  // CATX-PDF-PARITY-002 (cierre): linderos por fuente hídrica -- SOLO se
-  // agrupa cuando predio.boundaryAnnotations trae anotaciones explícitas
-  // con boundaryType='FUENTE_HIDRICA' (normalizePredioForDeliverables ya
-  // garantiza un array, vacío por defecto). Ningún predio real de
-  // catastrox_clean tiene hoy este campo, así que hydricGroups=[] para
-  // cualquier predio existente -- cero cambio de comportamiento salvo que
-  // alguien lo asigne explícitamente (ver catastroxPdfBoundaryAnnotations.js).
-  const hydricGroups = buildHydricGroups(layoutData.referenceSegments, predio.boundaryAnnotations);
-  const hydricHiddenVertexIndices = collectHiddenVertexIndices(hydricGroups);
-  const hydricHiddenSegmentIndices = collectHiddenSegmentIndices(hydricGroups);
-  const { rows: tableRowsWithHydric, hasHydricColumn } = applyHydricGroupsToTableRows(
-    tableRows,
-    hydricGroups,
-    (meters) => `${formatNumberEs(meters, 2)} m`,
-  );
-
-  const doc = new PDFDocument({ size: PAGE_SIZE, margins: { top: 0, bottom: 0, left: 0, right: 0 }, bufferPages: true, compress: false });
 
   // Filas de la tabla de vértices (24pt por fila, misma constante que
   // drawSimpleTable) -- prepaginado ANTES de dibujar para poder numerar
@@ -505,9 +487,53 @@ export async function generateCatastroxPdfBuffer({ predioData, packageId, fetchT
   const TABLE_ROW_HEIGHT = 20;
   const tableBodyTop = TABLE_AREA.y + 34;
   const availableTableRows = Math.max(1, Math.floor((TABLE_AREA.height - 54) / TABLE_ROW_HEIGHT));
-  const tablePages = Math.max(1, Math.ceil(tableRowsWithHydric.length / availableTableRows));
-  // 1 (resumen) + fichaPageCount + 1 (uso/alcance) + 1 (plano) + tablePages.
-  const totalPages = 1 + fichaPageCount + 1 + 1 + tablePages;
+
+  // R3.5 (root cause de la Fase 0 de auditoría de linaje): UNA página
+  // técnica + su(s) página(s) de tabla POR CADA parte de geometryParts --
+  // el generador anterior dibujaba únicamente geometryParts[0], sin
+  // importar cuántos componentes tuviera el MultiPolygon. Un Polygon
+  // simple (o una geometría degenerada sin geometryParts) sigue
+  // produciendo exactamente 1 parte -- mismo comportamiento de siempre,
+  // cero regresión. buildLayoutData() registra reportes de depuración
+  // extensos vía console.log/console.table (pensados para la consola del
+  // navegador, ver catastroxDeliverables.js) -- se silencian en cada
+  // llamada, nunca se toca el comportamiento de la función en sí. Linderos
+  // por fuente hídrica (CATX-PDF-PARITY-002, cierre) ahora se agrupan POR
+  // PARTE, porque referenceSegments ya es por parte -- comportamiento
+  // idéntico al de antes para cualquier predio de una sola parte.
+  const geometryPartsForPages = predio.geometryParts?.length
+    ? predio.geometryParts
+    : [{ outerRing: predio.ring, innerRings: [] }];
+  const partEntries = geometryPartsForPages.map((part) => {
+    const nextPredio = partPredio(predio, part, geometryPartsForPages.length);
+    const partLayoutData = withSilencedConsole(() => buildLayoutData(nextPredio, resolvePlanLayoutOptions(nextPredio, {})));
+    const partTableRows = buildUnifiedTableRows(partLayoutData.referenceRows, partLayoutData.referenceSegments, contentMode);
+    const partHydricGroups = buildHydricGroups(partLayoutData.referenceSegments, nextPredio.boundaryAnnotations);
+    const partHydricHiddenVertexIndices = collectHiddenVertexIndices(partHydricGroups);
+    const partHydricHiddenSegmentIndices = collectHiddenSegmentIndices(partHydricGroups);
+    const { rows: partTableRowsWithHydric, hasHydricColumn: partHasHydricColumn } = applyHydricGroupsToTableRows(
+      partTableRows,
+      partHydricGroups,
+      (meters) => `${formatNumberEs(meters, 2)} m`,
+    );
+    const partTablePages = Math.max(1, Math.ceil(partTableRowsWithHydric.length / availableTableRows));
+    return {
+      predio: nextPredio,
+      layoutData: partLayoutData,
+      hydricGroups: partHydricGroups,
+      hydricHiddenVertexIndices: partHydricHiddenVertexIndices,
+      hydricHiddenSegmentIndices: partHydricHiddenSegmentIndices,
+      tableRowsWithHydric: partTableRowsWithHydric,
+      hasHydricColumn: partHasHydricColumn,
+      tablePages: partTablePages,
+    };
+  });
+  const totalTechnicalPages = partEntries.reduce((sum, entry) => sum + 1 + entry.tablePages, 0);
+  // 1 (resumen) + fichaPageCount + 1 (uso/alcance) + totalTechnicalPages
+  // (1 página de plano + N páginas de tabla, por cada parte del predio).
+  const totalPages = 1 + fichaPageCount + 1 + totalTechnicalPages;
+
+  const doc = new PDFDocument({ size: PAGE_SIZE, margins: { top: 0, bottom: 0, left: 0, right: 0 }, bufferPages: true, compress: false });
 
   const chunks = [];
   doc.on('data', (chunk) => chunks.push(chunk));
@@ -553,12 +579,47 @@ export async function generateCatastroxPdfBuffer({ predioData, packageId, fetchT
   // Si el mapa falla, se lanza ANTES de terminar el documento (doc.end()
   // nunca se llama) -- el llamador debe tratar esto como generación
   // fallida, no como un PDF parcial válido.
-  const { mapState: summaryMapState, projected: mapPolygon } = await drawSatelliteTiles(doc, ring, mapRect, { fetchTile });
+  // R3.5 (root cause de la Fase 0 de auditoría de linaje): el bbox/fit
+  // de la página 1 se calcula sobre predio.mapRing -- nube de puntos
+  // AGREGADA de todos los componentes del MultiPolygon
+  // (normalizePredioForDeliverables/buildMapRingFromParts) -- nunca sobre
+  // un único componente, para que el mosaico satelital encuadre siempre la
+  // geometría completa, sin importar cuántas partes tenga.
+  const { mapState: summaryMapState } = await drawSatelliteTiles(doc, predio.mapRing, mapRect, { fetchTile });
+  // Cada parte se proyecta y traza como su propio subpath (exterior +
+  // huecos), usando SIEMPRE el mismo summaryMapState global -- nunca se
+  // concatenan las partes en un único anillo artificial (eso dibujaría una
+  // línea recta uniendo componentes que en la realidad están separados).
+  // Una sola llamada a fillAndStroke('even-odd') sobre el path acumulado de
+  // TODAS las partes rellena correctamente cada componente disjunto y
+  // revela el mosaico satelital de fondo dentro de cada hueco (regla
+  // even-odd de PDF/PDFKit, equivalente exacta a context.fill('evenodd')
+  // del motor de navegador, catastroxDeliverables.js drawPolygonPartOverlay)
+  // -- nunca se simula el hueco pintándolo de blanco encima de la imagen.
+  const projectPartRingForSummary = (ringPoints) =>
+    projectRingToViewport(ringPoints, summaryMapState, mapRect.width, mapRect.height).map(([px, py]) => [mapRect.x + px, mapRect.y + py]);
+  const summaryPartProjections = partEntries.map((entry) => {
+    const part = entry.predio.geometryParts[0];
+    const outer = projectPartRingForSummary(part.displayRing?.length ? part.displayRing : part.outerRing);
+    const inners = (part.innerRings || []).map((innerRing) => projectPartRingForSummary(innerRing));
+    return { outer, inners };
+  });
+  const mapPolygon = summaryPartProjections.flatMap((projection) => projection.outer);
   doc.save();
   doc.rect(mapRect.x, mapRect.y, mapRect.width, mapRect.height).clip();
-  doc.polygon(...mapPolygon).fillColor(CYAN).fillOpacity(0.18).fill();
+  doc.fillColor(CYAN).strokeColor('#ffea00').lineWidth(2.4).fillOpacity(0.18);
+  summaryPartProjections.forEach(({ outer, inners }) => {
+    doc.moveTo(outer[0][0], outer[0][1]);
+    outer.slice(1).forEach(([x, y]) => doc.lineTo(x, y));
+    doc.closePath();
+    inners.forEach((inner) => {
+      doc.moveTo(inner[0][0], inner[0][1]);
+      inner.slice(1).forEach(([x, y]) => doc.lineTo(x, y));
+      doc.closePath();
+    });
+  });
+  doc.fillAndStroke('even-odd');
   doc.fillOpacity(1);
-  doc.polygon(...mapPolygon).strokeColor('#ffea00').lineWidth(2.4).stroke();
   doc.restore();
   strokeRect(doc, mapRect.x, mapRect.y, mapRect.width, mapRect.height, BORDER_LIGHTER);
   drawCompassRose(doc, mapRect.x + 46, mapRect.y + 48, { dark: false });
@@ -844,189 +905,227 @@ export async function generateCatastroxPdfBuffer({ predioData, packageId, fetchT
 
   drawLegalFooter(doc, UNIFIED_FOOTER_RECT);
 
-  // ---------- Página siguiente: plano predial independiente ----------
-  // Layout literal de buildTechnicalPagesCanvases (catastroxDeliverables.js:3762-3854):
-  // recuadro expandido a todo el ancho, polígono técnico (solo contorno,
+  // ---------- Página(s) siguientes: plano predial + tabla, UNA VEZ POR
+  // CADA parte de geometryParts (R3.5) ----------
+  // Layout literal de buildTechnicalPagesCanvases (catastroxDeliverables.js:3762-3854),
+  // aplicado por separado a cada componente del MultiPolygon -- recuadro
+  // expandido a todo el ancho, polígono técnico (solo contorno + huecos,
   // sin relleno), rosa de los vientos, escala gráfica, círculos P1..Pn con
   // motor de colisiones (buildVisiblePointPlacements) y distancias rotadas
   // sobre cada tramo con el motor completo de búsqueda de candidatos +
   // evasión de colisiones (buildTechnicalSegmentDimensionPlacements,
   // catastroxPdfDimensions.js -- puerto literal, ver auditoría de paridad
-  // en el informe de entrega).
-  const planoPageNumber = usoAlcancePageNumber + 1;
-  doc.addPage({ size: PAGE_SIZE, margins: { top: 0, bottom: 0, left: 0, right: 0 } });
-  // Bug encontrado en esta revisión: el encabezado de la página 4 usaba
-  // `technicalTitle` (el subtítulo largo "PLANO INFORMATIVO • GEOMETRÍA
-  // CATASTRAL DEL PREDIO"), duplicando el mismo texto que ya se dibuja como
-  // subtítulo interno más abajo. El generador aprobado
-  // (buildTechnicalPagesCanvases, catastroxDeliverables.js:3774) usa el
-  // título corto fijo "PLANO PREDIAL CATASTROX" en el encabezado -- igual
-  // que ya hace correctamente la página de tabla (mismo título de
-  // encabezado en ambas, por diseño del navegador).
-  drawHeader(doc, { title: 'PLANO PREDIAL CATASTROX', pageLabel: `${planoPageNumber} de ${totalPages}`, codigoPredial: predio.codigoPredial });
-
-  fillRect(doc, TECHNICAL_MAP_AREA.x, TECHNICAL_MAP_AREA.y, TECHNICAL_MAP_AREA.width, TECHNICAL_MAP_AREA.height, '#ffffff');
-  strokeRect(doc, TECHNICAL_MAP_AREA.x, TECHNICAL_MAP_AREA.y, TECHNICAL_MAP_AREA.width, TECHNICAL_MAP_AREA.height, BORDER_LIGHT);
-  const planoMapRect = { x: TECHNICAL_MAP_AREA.x + 16, y: TECHNICAL_MAP_AREA.y + 16, width: TECHNICAL_MAP_AREA.width - 32, height: TECHNICAL_MAP_AREA.height - 32 };
-  strokeRect(doc, planoMapRect.x, planoMapRect.y, planoMapRect.width, planoMapRect.height, BORDER_LIGHTER);
-  baseText(doc, `${resolvePdfTechnicalPageTitle(contentMode)}${predio.partLabel ? ` • ${predio.partLabel.toUpperCase()}` : ''}`, HEADER_ZONE.x + 16, HEADER_ZONE.y + 76, { size: 10.5, bold: true, color: NAVY_TITLE });
-
-  // Fit-to-frame dinámico (defecto corregido: predios urbanos pequeños se
-  // dibujaban innecesariamente chicos). computeMapState (usada más arriba
-  // solo para las teselas satelitales de página 1) impone zoom ENTERO +
-  // tope 18 -- una restricción exclusiva de Web Mercator/teselas que no
-  // aplica a este dibujo vectorial puro. computeVectorPlanFitState detecta
-  // si la geometría ocupaba <45% del recuadro bajo esa restricción
-  // heredada y, solo en ese caso, recalcula con padding reducido (6%-10%)
-  // para que el polígono ocupe ~60%-75% del recuadro útil; predios
-  // medianos/grandes devuelven exactamente el mismo resultado que antes
-  // (ver catastroxPdfGeometry.js para la lógica completa).
-  const planoMapState = computeVectorPlanFitState(ring, planoMapRect.width, planoMapRect.height);
-  const planoProjectedClosed = projectRingToViewport(ring, planoMapState, planoMapRect.width, planoMapRect.height).map(([px, py]) => [planoMapRect.x + px, planoMapRect.y + py]);
-  const planoPoints = planoProjectedClosed.slice(0, -1);
-  // CATX-POSTPAYMENT-UX-001 (defecto C -- causa raíz): hasta esta corrección,
-  // los círculos/etiquetas Pn del plano y las cotas de distancia se
-  // construían sobre `planoPoints` (TODOS los vértices del anillo de
-  // presentación, ~92 para geometrías complejas), mientras que la tabla de
-  // vértices (páginas siguientes) se construye sobre
-  // `layoutData.referencePoints` (el subconjunto YA reducido por
-  // VisibleReferencePointEngine, ~70) -- dos colecciones distintas,
-  // numeradas cada una por su propio índice, así que el plano mostraba
-  // etiquetas hasta P92 mientras la tabla terminaba en P70. El generador de
-  // navegador (buildTechnicalPagesCanvases, catastroxDeliverables.js:3779-3780)
-  // SIEMPRE usó `referencePoints` (proyectados con esta misma
-  // projectPointToViewport) para los puntos/etiquetas/cotas -- `planoPoints`
-  // (el anillo denso) solo debe usarse para el CONTORNO del polígono y como
-  // referencia de colisión (`polygonPoints`), nunca para decidir cuántos
-  // puntos se numeran. `planoReferencePoints` es la única colección
-  // canónica de puntos representativos para esta página -- point circles,
-  // etiquetas de distancia y ancla de la escala gráfica usan exclusivamente
-  // este array (mismo orden/índices que layoutData.referenceRows/
-  // referenceSegments, que ya alimentan la tabla), garantizando
-  // visiblePointIds === tablePointIds.
-  const planoReferencePoints = layoutData.referencePoints.map((entry) => {
-    const [vx, vy] = projectPointToViewport(entry.point || entry, planoMapState, planoMapRect.width, planoMapRect.height);
-    return [planoMapRect.x + vx, planoMapRect.y + vy];
-  });
-  doc.save();
-  doc.rect(planoMapRect.x, planoMapRect.y, planoMapRect.width, planoMapRect.height).clip();
-  doc.polygon(...planoProjectedClosed).strokeColor('#1170cf').lineWidth(2).stroke();
-  doc.restore();
-
-  const compassCenter = { x: planoMapRect.x + 52, y: planoMapRect.y + 54 };
-  const compassRoseRect = getCompassRoseRect(compassCenter.x, compassCenter.y);
-  const footerRect = { x: UNIFIED_FOOTER_RECT.x + 8, y: UNIFIED_FOOTER_RECT.y - 2, width: UNIFIED_FOOTER_RECT.width - 16, height: 20 };
-
-  // buildVisiblePointPlacements (catastroxDeliverables.js:1623-1687): busca,
-  // para cada vértice, la posición de su círculo (ángulo+distancia
-  // crecientes) que no choque con otro círculo ni salga del recuadro.
-  const pointPlacements = buildVisiblePointPlacements(planoReferencePoints, planoMapRect, planoPoints, []);
-
-  // chooseScaleBarAnchor en 2 pasadas -- misma secuencia exacta que
-  // buildTechnicalPagesCanvases (catastroxDeliverables.js:3813-3840):
-  // 1) una posición PRELIMINAR (solo contra polígono/vértices) se reserva
-  //    como rect bloqueado para la búsqueda de etiquetas de distancia;
-  // 2) tras dibujar las etiquetas, se recalcula la posición FINAL
-  //    considerando las etiquetas ya colocadas -- nunca una esquina fija.
-  const preliminaryScaleAnchor = chooseScaleBarAnchor(planoMapRect, planoPoints, planoReferencePoints, pointPlacements, true);
-
-  // buildTechnicalSegmentDimensionPlacements (catastroxDeliverables.js:2792-2900):
-  // para cada tramo, evalúa la grilla completa de candidatos (2 normales
-  // interior/exterior × 3 desplazamientos normales × 5 a lo largo del
-  // tramo), descarta los que choquen con vértices, otras etiquetas, el
-  // borde del recuadro, la rosa de los vientos o la escala gráfica
-  // (posición preliminar), y se queda con el de menor puntaje -- nunca
-  // dibuja una etiqueta superpuesta; si ningún candidato es válido, omite
-  // esa etiqueta (nunca la fuerza).
-  const dimensionResult = buildTechnicalSegmentDimensionPlacements({
-    measureTextWidth: (text, size) => widthOf(doc, text, size, false),
-    formatDistanceLabel: (meters) => `${formatNumberEs(meters, 2)} m`,
-    projectedRefs: planoReferencePoints,
-    referenceSegments: layoutData.referenceSegments,
-    polygonPoints: planoPoints,
-    pointPlacements,
-    mapRect: planoMapRect,
-    reservedRects: [compassRoseRect, getScaleBarRect(preliminaryScaleAnchor.x, preliminaryScaleAnchor.y, true), footerRect],
-    // Los segmentos absorbidos por un grupo hídrico no reciben etiqueta
-    // individual -- se reemplazan por una única etiqueta agrupada (ver
-    // drawHydricGroupLabel más abajo). Vacío para cualquier predio sin
-    // anotaciones -- comportamiento idéntico al de antes de esta capacidad.
-    skipSegmentIndices: hydricHiddenSegmentIndices,
-  });
-  drawSegmentDimensions(doc, dimensionResult.placements);
-  // Círculos P1..Pn: los vértices intermedios de un lindero hídrico
-  // agrupado se omiten (geometría de la línea intacta, solo se omite el
-  // círculo+rótulo) -- el punto inicial y final del grupo siempre quedan
-  // visibles porque nunca están en `hydricHiddenVertexIndices`.
-  drawVertexCircles(doc, pointPlacements, { hiddenIndices: hydricHiddenVertexIndices });
-  // Una etiqueta agrupada por lindero hídrico, en el centroide de todos sus
-  // vértices (inicio + intermedios + fin) -- "Lindero por fuente hídrica —
-  // X m", X = longitud acumulada real de los subtramos (nunca la distancia
-  // recta entre extremos).
-  hydricGroups.forEach((group) => {
-    const groupVertexIndices = [group.startVertexIndex, ...group.intermediateVertexIndices, group.endVertexIndex];
-    const groupPoints = groupVertexIndices.map((index) => planoReferencePoints[index]).filter(Boolean);
-    if (!groupPoints.length) return;
-    const centerX = groupPoints.reduce((sum, p) => sum + p[0], 0) / groupPoints.length;
-    const centerY = groupPoints.reduce((sum, p) => sum + p[1], 0) / groupPoints.length;
-    drawHydricGroupLabel(doc, { centerX, centerY, label: group.label, distanceMeters: group.accumulatedDistance });
-  });
-  drawCompassRose(doc, compassCenter.x, compassCenter.y, { dark: true });
-
-  const planoScaleAnchor = chooseScaleBarAnchor(planoMapRect, planoPoints, planoReferencePoints, [...dimensionResult.placements, ...pointPlacements], true);
-  const planoScaleMeters = computeDynamicScaleMeters(planoMapState, planoMapRect.width);
-  drawScaleBar(doc, planoScaleAnchor.x, planoScaleAnchor.y, planoScaleMeters, { compact: true });
-
-  drawLegalFooter(doc, UNIFIED_FOOTER_RECT);
-
-  // ---------- Página(s) finales: tabla de vértices, independiente del plano ----------
-  // Layout literal de drawSimpleTable (catastroxDeliverables.js:2926-2961):
-  // panel con título navy, encabezado de columnas, franjas alternadas cada
-  // 2 filas, línea separadora bajo el encabezado.
+  // en el informe de entrega). Un Polygon simple sigue produciendo
+  // exactamente 1 iteración -- numeración de página y contenido idénticos
+  // a los de siempre.
   const isInformative = tableHeaders.length === 3;
-  // hasHydricColumn (catastroxPdfBoundaryAnnotations.js): SOLO añade "Tipo
-  // de lindero" cuando el predio trae al menos una anotación explícita de
-  // lindero hídrico -- una tabla sin anotaciones conserva exactamente las
-  // mismas 3 columnas de siempre (Punto/Siguiente/Distancia), sin ningún
-  // cambio visual respecto al diseño ya aprobado en esta sprint.
-  const finalTableHeaders = hasHydricColumn ? [...tableHeaders, 'Tipo de lindero'] : tableHeaders;
-  const columnXs = isInformative
-    ? hasHydricColumn
-      ? [TABLE_AREA.x + 16, TABLE_AREA.x + 170, TABLE_AREA.x + 330, TABLE_AREA.x + 470]
-      : [TABLE_AREA.x + 16, TABLE_AREA.x + 220, TABLE_AREA.x + 420]
-    : finalTableHeaders.map((_, index) => TABLE_AREA.x + 16 + index * (TABLE_AREA.width - 32) / finalTableHeaders.length);
-  const tableTitleBase = isInformative
-    ? 'TABLA DE VÉRTICES REPRESENTATIVOS Y DISTANCIAS'
-    : 'TABLA DE VÉRTICES REPRESENTATIVOS Y LONGITUDES';
+  let nextPageNumber = usoAlcancePageNumber + 1;
 
-  for (let tablePage = 0; tablePage < tablePages; tablePage += 1) {
+  partEntries.forEach((entry) => {
+    const partPredioObj = entry.predio;
+    const { layoutData, hydricGroups, hydricHiddenVertexIndices, hydricHiddenSegmentIndices, tableRowsWithHydric, hasHydricColumn, tablePages } = entry;
+    const planoPageNumber = nextPageNumber;
+    nextPageNumber += 1;
+
     doc.addPage({ size: PAGE_SIZE, margins: { top: 0, bottom: 0, left: 0, right: 0 } });
-    drawHeader(doc, { title: 'PLANO PREDIAL CATASTROX', pageLabel: `${planoPageNumber + 1 + tablePage} de ${totalPages}`, codigoPredial: predio.codigoPredial });
+    // Bug encontrado en esta revisión: el encabezado de la página de plano
+    // usaba `technicalTitle` (el subtítulo largo "PLANO INFORMATIVO •
+    // GEOMETRÍA CATASTRAL DEL PREDIO"), duplicando el mismo texto que ya se
+    // dibuja como subtítulo interno más abajo. El generador aprobado
+    // (buildTechnicalPagesCanvases, catastroxDeliverables.js:3774) usa el
+    // título corto fijo "PLANO PREDIAL CATASTROX" en el encabezado -- igual
+    // que ya hace correctamente la página de tabla (mismo título de
+    // encabezado en ambas, por diseño del navegador).
+    drawHeader(doc, { title: 'PLANO PREDIAL CATASTROX', pageLabel: `${planoPageNumber} de ${totalPages}`, codigoPredial: predio.codigoPredial });
 
-    const isContinuation = tablePage > 0;
-    drawPanel(doc, TABLE_AREA, isContinuation ? `${tableTitleBase} (CONTINUACIÓN)` : tableTitleBase);
-    doc.fillColor(INK).font('Helvetica-Bold').fontSize(8.5);
-    finalTableHeaders.forEach((header, index) => {
-      baseText(doc, header, columnXs[index], tableBodyTop, { size: 8.5, bold: true, color: INK });
+    fillRect(doc, TECHNICAL_MAP_AREA.x, TECHNICAL_MAP_AREA.y, TECHNICAL_MAP_AREA.width, TECHNICAL_MAP_AREA.height, '#ffffff');
+    strokeRect(doc, TECHNICAL_MAP_AREA.x, TECHNICAL_MAP_AREA.y, TECHNICAL_MAP_AREA.width, TECHNICAL_MAP_AREA.height, BORDER_LIGHT);
+    const planoMapRect = { x: TECHNICAL_MAP_AREA.x + 16, y: TECHNICAL_MAP_AREA.y + 16, width: TECHNICAL_MAP_AREA.width - 32, height: TECHNICAL_MAP_AREA.height - 32 };
+    strokeRect(doc, planoMapRect.x, planoMapRect.y, planoMapRect.width, planoMapRect.height, BORDER_LIGHTER);
+    baseText(doc, `${resolvePdfTechnicalPageTitle(contentMode)}${partPredioObj.partLabel ? ` • ${partPredioObj.partLabel.toUpperCase()}` : ''}`, HEADER_ZONE.x + 16, HEADER_ZONE.y + 76, { size: 10.5, bold: true, color: NAVY_TITLE });
+
+    // Fit-to-frame dinámico (defecto corregido: predios urbanos pequeños se
+    // dibujaban innecesariamente chicos). computeMapState (usada más arriba
+    // solo para las teselas satelitales de página 1) impone zoom ENTERO +
+    // tope 18 -- una restricción exclusiva de Web Mercator/teselas que no
+    // aplica a este dibujo vectorial puro. computeVectorPlanFitState detecta
+    // si la geometría ocupaba <45% del recuadro bajo esa restricción
+    // heredada y, solo en ese caso, recalcula con padding reducido (6%-10%)
+    // para que el polígono ocupe ~60%-75% del recuadro útil; predios
+    // medianos/grandes devuelven exactamente el mismo resultado que antes
+    // (ver catastroxPdfGeometry.js para la lógica completa). Se calcula POR
+    // PARTE -- cada componente de un MultiPolygon obtiene su propio ajuste
+    // de escala independiente, igual que el motor de navegador (nunca una
+    // sola escala global forzada sobre todas las partes a la vez).
+    const partRing = partPredioObj.displayRing?.length ? partPredioObj.displayRing : partPredioObj.ring;
+    const planoMapState = computeVectorPlanFitState(partRing, planoMapRect.width, planoMapRect.height);
+    const planoProjectedClosed = projectRingToViewport(partRing, planoMapState, planoMapRect.width, planoMapRect.height).map(([px, py]) => [planoMapRect.x + px, planoMapRect.y + py]);
+    const planoPoints = planoProjectedClosed.slice(0, -1);
+    // CATX-POSTPAYMENT-UX-001 (defecto C -- causa raíz): hasta esta corrección,
+    // los círculos/etiquetas Pn del plano y las cotas de distancia se
+    // construían sobre `planoPoints` (TODOS los vértices del anillo de
+    // presentación, ~92 para geometrías complejas), mientras que la tabla de
+    // vértices (páginas siguientes) se construye sobre
+    // `layoutData.referencePoints` (el subconjunto YA reducido por
+    // VisibleReferencePointEngine, ~70) -- dos colecciones distintas,
+    // numeradas cada una por su propio índice, así que el plano mostraba
+    // etiquetas hasta P92 mientras la tabla terminaba en P70. El generador de
+    // navegador (buildTechnicalPagesCanvases, catastroxDeliverables.js:3779-3780)
+    // SIEMPRE usó `referencePoints` (proyectados con esta misma
+    // projectPointToViewport) para los puntos/etiquetas/cotas -- `planoPoints`
+    // (el anillo denso) solo debe usarse para el CONTORNO del polígono y como
+    // referencia de colisión (`polygonPoints`), nunca para decidir cuántos
+    // puntos se numeran. `planoReferencePoints` es la única colección
+    // canónica de puntos representativos para esta página -- point circles,
+    // etiquetas de distancia y ancla de la escala gráfica usan exclusivamente
+    // este array (mismo orden/índices que layoutData.referenceRows/
+    // referenceSegments, que ya alimentan la tabla), garantizando
+    // visiblePointIds === tablePointIds.
+    const planoReferencePoints = layoutData.referencePoints.map((refEntry) => {
+      const [vx, vy] = projectPointToViewport(refEntry.point || refEntry, planoMapState, planoMapRect.width, planoMapRect.height);
+      return [planoMapRect.x + vx, planoMapRect.y + vy];
     });
-    doc.strokeColor(BORDER_LIGHT).lineWidth(1);
-    doc.moveTo(TABLE_AREA.x + 10, tableBodyTop + 6).lineTo(TABLE_AREA.x + TABLE_AREA.width - 10, tableBodyTop + 6).stroke();
 
-    const slice = tableRowsWithHydric.slice(tablePage * availableTableRows, (tablePage + 1) * availableTableRows);
-    let cursorY = tableBodyTop + 20;
-    slice.forEach((row, rowIndex) => {
-      if (rowIndex % 2 === 0) {
-        fillRect(doc, TABLE_AREA.x + 8, cursorY - 12, TABLE_AREA.width - 16, TABLE_ROW_HEIGHT, STRIPE_BG);
-      }
-      row.forEach((cell, colIndex) => {
-        baseText(doc, String(cell ?? ''), columnXs[colIndex], cursorY, { size: 8.4, color: TABLE_BODY });
-      });
-      cursorY += TABLE_ROW_HEIGHT;
+    // R3.5: exterior + cada anillo interior (hueco) como subpath
+    // cerrado independiente, solo contorno (nunca relleno en esta página --
+    // mismo comportamiento que drawTechnicalPolygonPartOverlay del motor de
+    // navegador) -- nunca traza una línea artificial entre el exterior y
+    // sus huecos.
+    const partGeometry = partPredioObj.geometryParts[0];
+    const planoInnerSubpaths = (partGeometry?.innerRings || []).map((innerRing) =>
+      projectRingToViewport(innerRing, planoMapState, planoMapRect.width, planoMapRect.height).map(([px, py]) => [planoMapRect.x + px, planoMapRect.y + py]),
+    );
+    const planoSubpaths = buildTechnicalPolygonSubpaths(planoProjectedClosed, planoInnerSubpaths);
+    doc.save();
+    doc.rect(planoMapRect.x, planoMapRect.y, planoMapRect.width, planoMapRect.height).clip();
+    doc.strokeColor('#1170cf').lineWidth(2);
+    planoSubpaths.forEach((subpath) => {
+      doc.moveTo(subpath[0][0], subpath[0][1]);
+      subpath.slice(1).forEach(([x, y]) => doc.lineTo(x, y));
+      doc.closePath();
     });
+    doc.stroke();
+    doc.restore();
 
-    wrappedText(doc, bottomNote, TABLE_BOTTOM_PANEL.x, TABLE_BOTTOM_PANEL.y + 6, TABLE_BOTTOM_PANEL.width, 10, { size: 9, color: TABLE_BODY });
+    const compassCenter = { x: planoMapRect.x + 52, y: planoMapRect.y + 54 };
+    const compassRoseRect = getCompassRoseRect(compassCenter.x, compassCenter.y);
+    const footerRect = { x: UNIFIED_FOOTER_RECT.x + 8, y: UNIFIED_FOOTER_RECT.y - 2, width: UNIFIED_FOOTER_RECT.width - 16, height: 20 };
+
+    // buildVisiblePointPlacements (catastroxDeliverables.js:1623-1687): busca,
+    // para cada vértice, la posición de su círculo (ángulo+distancia
+    // crecientes) que no choque con otro círculo ni salga del recuadro.
+    const pointPlacements = buildVisiblePointPlacements(planoReferencePoints, planoMapRect, planoPoints, []);
+
+    // chooseScaleBarAnchor en 2 pasadas -- misma secuencia exacta que
+    // buildTechnicalPagesCanvases (catastroxDeliverables.js:3813-3840):
+    // 1) una posición PRELIMINAR (solo contra polígono/vértices) se reserva
+    //    como rect bloqueado para la búsqueda de etiquetas de distancia;
+    // 2) tras dibujar las etiquetas, se recalcula la posición FINAL
+    //    considerando las etiquetas ya colocadas -- nunca una esquina fija.
+    const preliminaryScaleAnchor = chooseScaleBarAnchor(planoMapRect, planoPoints, planoReferencePoints, pointPlacements, true);
+
+    // buildTechnicalSegmentDimensionPlacements (catastroxDeliverables.js:2792-2900):
+    // para cada tramo, evalúa la grilla completa de candidatos (2 normales
+    // interior/exterior × 3 desplazamientos normales × 5 a lo largo del
+    // tramo), descarta los que choquen con vértices, otras etiquetas, el
+    // borde del recuadro, la rosa de los vientos o la escala gráfica
+    // (posición preliminar), y se queda con el de menor puntaje -- nunca
+    // dibuja una etiqueta superpuesta; si ningún candidato es válido, omite
+    // esa etiqueta (nunca la fuerza).
+    const dimensionResult = buildTechnicalSegmentDimensionPlacements({
+      measureTextWidth: (text, size) => widthOf(doc, text, size, false),
+      formatDistanceLabel: (meters) => `${formatNumberEs(meters, 2)} m`,
+      projectedRefs: planoReferencePoints,
+      referenceSegments: layoutData.referenceSegments,
+      polygonPoints: planoPoints,
+      pointPlacements,
+      mapRect: planoMapRect,
+      reservedRects: [compassRoseRect, getScaleBarRect(preliminaryScaleAnchor.x, preliminaryScaleAnchor.y, true), footerRect],
+      // Los segmentos absorbidos por un grupo hídrico no reciben etiqueta
+      // individual -- se reemplazan por una única etiqueta agrupada (ver
+      // drawHydricGroupLabel más abajo). Vacío para cualquier predio sin
+      // anotaciones -- comportamiento idéntico al de antes de esta capacidad.
+      skipSegmentIndices: hydricHiddenSegmentIndices,
+    });
+    drawSegmentDimensions(doc, dimensionResult.placements);
+    // Círculos P1..Pn: los vértices intermedios de un lindero hídrico
+    // agrupado se omiten (geometría de la línea intacta, solo se omite el
+    // círculo+rótulo) -- el punto inicial y final del grupo siempre quedan
+    // visibles porque nunca están en `hydricHiddenVertexIndices`.
+    drawVertexCircles(doc, pointPlacements, { hiddenIndices: hydricHiddenVertexIndices });
+    // Una etiqueta agrupada por lindero hídrico, en el centroide de todos sus
+    // vértices (inicio + intermedios + fin) -- "Lindero por fuente hídrica —
+    // X m", X = longitud acumulada real de los subtramos (nunca la distancia
+    // recta entre extremos).
+    hydricGroups.forEach((group) => {
+      const groupVertexIndices = [group.startVertexIndex, ...group.intermediateVertexIndices, group.endVertexIndex];
+      const groupPoints = groupVertexIndices.map((index) => planoReferencePoints[index]).filter(Boolean);
+      if (!groupPoints.length) return;
+      const centerX = groupPoints.reduce((sum, p) => sum + p[0], 0) / groupPoints.length;
+      const centerY = groupPoints.reduce((sum, p) => sum + p[1], 0) / groupPoints.length;
+      drawHydricGroupLabel(doc, { centerX, centerY, label: group.label, distanceMeters: group.accumulatedDistance });
+    });
+    drawCompassRose(doc, compassCenter.x, compassCenter.y, { dark: true });
+
+    const planoScaleAnchor = chooseScaleBarAnchor(planoMapRect, planoPoints, planoReferencePoints, [...dimensionResult.placements, ...pointPlacements], true);
+    const planoScaleMeters = computeDynamicScaleMeters(planoMapState, planoMapRect.width);
+    drawScaleBar(doc, planoScaleAnchor.x, planoScaleAnchor.y, planoScaleMeters, { compact: true });
+
     drawLegalFooter(doc, UNIFIED_FOOTER_RECT);
-  }
+
+    // ---------- Página(s) de tabla de esta parte, independiente del plano ----------
+    // Layout literal de drawSimpleTable (catastroxDeliverables.js:2926-2961):
+    // panel con título navy, encabezado de columnas, franjas alternadas cada
+    // 2 filas, línea separadora bajo el encabezado. hasHydricColumn
+    // (catastroxPdfBoundaryAnnotations.js): SOLO añade "Tipo de lindero"
+    // cuando ESTA parte trae al menos una anotación explícita de lindero
+    // hídrico -- una tabla sin anotaciones conserva exactamente las mismas
+    // 3 columnas de siempre (Punto/Siguiente/Distancia).
+    const finalTableHeaders = hasHydricColumn ? [...tableHeaders, 'Tipo de lindero'] : tableHeaders;
+    const columnXs = isInformative
+      ? hasHydricColumn
+        ? [TABLE_AREA.x + 16, TABLE_AREA.x + 170, TABLE_AREA.x + 330, TABLE_AREA.x + 470]
+        : [TABLE_AREA.x + 16, TABLE_AREA.x + 220, TABLE_AREA.x + 420]
+      : finalTableHeaders.map((_, index) => TABLE_AREA.x + 16 + index * (TABLE_AREA.width - 32) / finalTableHeaders.length);
+    const tableTitleBase = isInformative
+      ? 'TABLA DE VÉRTICES REPRESENTATIVOS Y DISTANCIAS'
+      : 'TABLA DE VÉRTICES REPRESENTATIVOS Y LONGITUDES';
+    // Identifica de qué componente es esta tabla cuando el predio tiene más
+    // de una parte -- nunca mezcla puntos P1 de componentes distintos en
+    // una sola tabla sin identificación.
+    const tablePanelTitle = partPredioObj.partLabel ? `${tableTitleBase} • ${partPredioObj.partLabel.toUpperCase()}` : tableTitleBase;
+
+    for (let tablePage = 0; tablePage < tablePages; tablePage += 1) {
+      const tablePageNumber = nextPageNumber;
+      nextPageNumber += 1;
+      doc.addPage({ size: PAGE_SIZE, margins: { top: 0, bottom: 0, left: 0, right: 0 } });
+      drawHeader(doc, { title: 'PLANO PREDIAL CATASTROX', pageLabel: `${tablePageNumber} de ${totalPages}`, codigoPredial: predio.codigoPredial });
+
+      const isContinuation = tablePage > 0;
+      drawPanel(doc, TABLE_AREA, isContinuation ? `${tablePanelTitle} (CONTINUACIÓN)` : tablePanelTitle);
+      doc.fillColor(INK).font('Helvetica-Bold').fontSize(8.5);
+      finalTableHeaders.forEach((header, index) => {
+        baseText(doc, header, columnXs[index], tableBodyTop, { size: 8.5, bold: true, color: INK });
+      });
+      doc.strokeColor(BORDER_LIGHT).lineWidth(1);
+      doc.moveTo(TABLE_AREA.x + 10, tableBodyTop + 6).lineTo(TABLE_AREA.x + TABLE_AREA.width - 10, tableBodyTop + 6).stroke();
+
+      const slice = tableRowsWithHydric.slice(tablePage * availableTableRows, (tablePage + 1) * availableTableRows);
+      let cursorY = tableBodyTop + 20;
+      slice.forEach((row, rowIndex) => {
+        if (rowIndex % 2 === 0) {
+          fillRect(doc, TABLE_AREA.x + 8, cursorY - 12, TABLE_AREA.width - 16, TABLE_ROW_HEIGHT, STRIPE_BG);
+        }
+        row.forEach((cell, colIndex) => {
+          baseText(doc, String(cell ?? ''), columnXs[colIndex], cursorY, { size: 8.4, color: TABLE_BODY });
+        });
+        cursorY += TABLE_ROW_HEIGHT;
+      });
+
+      wrappedText(doc, bottomNote, TABLE_BOTTOM_PANEL.x, TABLE_BOTTOM_PANEL.y + 6, TABLE_BOTTOM_PANEL.width, 10, { size: 9, color: TABLE_BODY });
+      drawLegalFooter(doc, UNIFIED_FOOTER_RECT);
+    }
+  });
 
   doc.end();
   await done;

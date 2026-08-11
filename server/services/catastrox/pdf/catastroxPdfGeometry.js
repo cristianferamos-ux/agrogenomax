@@ -550,6 +550,23 @@ export function projectRingToViewport(ring, mapState, viewportWidth, viewportHei
   return ring.map((point) => projectPointToViewport(point, mapState, viewportWidth, viewportHeight));
 }
 
+// R3.5: puerto literal de buildTechnicalPolygonSubpaths
+// (src/modules/catastrox/utils/catastroxDeliverables.js, sección "Corrección
+// controlada 1: plano técnico con anillos interiores"). Función pura (sin
+// PDFKit/canvas) que prepara los trazados del exterior y de cada anillo
+// interior como contornos independientes, en el mismo orden recibido, sin
+// concatenarlos entre sí. outerPoints se conserva como primer elemento sin
+// modificar; los anillos vacíos o sin puntos se descartan (entradas
+// inválidas no producen un trazado). El generador PDFKit dibuja cada
+// elemento del arreglo devuelto como un subpath cerrado independiente
+// (moveTo/lineTo/closePath por subpath) -- nunca traza una línea artificial
+// entre el exterior y sus huecos, ni entre huecos distintos.
+export function buildTechnicalPolygonSubpaths(outerPoints = [], innerPointRings = []) {
+  if (!outerPoints.length) return [];
+  const inners = innerPointRings.filter((ring) => ring && ring.length > 0);
+  return [outerPoints, ...inners];
+}
+
 // CATX-PDF-PARITY-002: escala gráfica dinámica del mapa satelital -- copiado
 // literal de src/modules/catastrox/utils/catastroxDeliverables.js
 // (computeMetersPerPixel/roundToNiceScaleMeters/computeDynamicScaleMeters,

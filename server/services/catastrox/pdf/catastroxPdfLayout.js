@@ -430,6 +430,28 @@ function buildMapRingFromParts(parts) {
   return normalizeRing(points);
 }
 
+// R3.5: puerto literal de partPredio
+// (src/modules/catastrox/utils/catastroxDeliverables.js:518-530). Construye
+// un predio "de una sola parte" a partir de una entrada de
+// predio.geometryParts -- el generador PDFKit lo usa para dibujar cada
+// componente de un MultiPolygon como su propia página técnica/tabla
+// independiente (mismo patrón que buildPlanPdfBytes en el motor de
+// navegador, nunca una copia con lógica distinta). partLabel solo se numera
+// cuando el MultiPolygon tiene más de una parte válida -- un Polygon simple
+// (totalParts === 1) nunca muestra "Polígono 1 de 1".
+export function partPredio(predio, part, totalParts = 1) {
+  return {
+    ...predio,
+    ring: part.outerRing,
+    displayRing: part.displayRing,
+    displayVertices: part.displayVertices,
+    displayRingReport: part.displayRingReport,
+    geometryParts: [part],
+    partIndex: part.partIndex,
+    partLabel: totalParts > 1 ? `Polígono ${part.partIndex + 1} de ${totalParts}` : '',
+  };
+}
+
 export function normalizePredioForDeliverables(source) {
   const predio = source?.predio || source || {};
   const geometry =
