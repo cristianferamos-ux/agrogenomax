@@ -32,12 +32,12 @@ async function run(client, text, params) {
 
 /**
  * Ejecuta `callback(client)` dentro de una transacción propia cuando el
- * llamador no ya está dentro de una (client === null) -- upsertCustomer
- * necesita leer el correo previo, escribir el comprador y, si el correo
- * cambió, invalidar códigos de verificación activos, todo de forma
- * atómica. Si el llamador ya pasó un `client` (p. ej. un futuro flujo que
- * envuelva esto en una transacción mayor), se reutiliza tal cual -- nunca
- * anida BEGIN dentro de BEGIN.
+ * llamador no ya está dentro de una (client === null) -- usado por
+ * reserveEmailVerificationSend() más abajo, que necesita un `select ...
+ * for update` y su `update` posterior atómicos entre sí. Si el llamador
+ * ya pasó un `client` (p. ej. un futuro flujo que envuelva esto en una
+ * transacción mayor), se reutiliza tal cual -- nunca anida BEGIN dentro
+ * de BEGIN.
  */
 async function withCustomerTransaction(externalClient, callback) {
   if (externalClient) return callback(externalClient);
@@ -58,147 +58,111 @@ async function withCustomerTransaction(externalClient, callback) {
 }
 
 /**
- * Crea o actualiza el comprador identificado por su documento (hash).
- * Un mismo comprador que vuelve a comprar actualiza sus datos de contacto
- * a los últimos declarados -- privacy_consent_at/terms_accepted_at
- * también se refrescan (el formulario exige aceptar de nuevo en cada
- * compra), nunca se aceptan como timestamp del cliente.
+ * R3/B6-26 (Modelo B, reemplaza al antiguo upsertCustomer()): una
+ * identidad existente (document_number_hash) es INMUTABLE desde este
+ * punto de entrada. Nunca hace `ON CONFLICT DO UPDATE` sobre una fila ya
+ * existente -- ni PII, ni email, ni consentimientos/términos se
+ * refrescan como efecto de una petición no autenticada, sin importar qué
+ * datos traiga el body. La única escritura posible es un INSERT genuino
+ * de un documento nunca visto.
  *
- * Cambio de correo (Bloque 2 de la revisión): si el email_hash difiere del
- * ya guardado para este documento, email_verified_at se resetea a NULL
- * (dentro del propio UPSERT, vía CASE sobre el valor previo de la fila) y
- * todos los códigos de verificación activos del comprador se invalidan
- * explícitamente -- un OTP emitido para el correo anterior nunca debe
- * verificar el nuevo. Si el correo no cambió, la verificación existente se
- * conserva intacta.
+ * Clasifica el resultado en tres estados explícitos:
+ *   - NEW: el documento no existía -- se crea la fila tal cual.
+ *   - EXISTING_SAME_EMAIL: el documento existe y el email_hash coincide
+ *     con el ya almacenado -- se reutiliza la fila EXISTENTE sin tocar
+ *     ninguna columna (el llamador solo debe iniciar un step-up de OTP
+ *     fresco contra el correo ya almacenado).
+ *   - EXISTING_DIFFERENT_EMAIL: el documento existe con un email_hash
+ *     distinto -- la fila se devuelve para que el llamador pueda
+ *     reconocer el caso, pero el llamador NUNCA debe escribir nada a
+ *     partir de ella (ver POST /customers en catastroxPayments.js, que
+ *     falla cerrado sin tocar la base en este estado).
+ *
+ * Concurrencia (dos POST /customers simultáneos con el mismo documento):
+ * `INSERT ... ON CONFLICT (document_number_hash) DO NOTHING RETURNING *`
+ * es una única sentencia atómica -- Postgres garantiza que, del conjunto
+ * de escrituras concurrentes para el MISMO document_number_hash, como
+ * mucho una inserta de verdad (según el constraint UNIQUE ya existente);
+ * el resto obtiene 0 filas del INSERT y cae al SELECT de solo lectura de
+ * abajo, que siempre observa la fila que "ganó" la carrera -- nunca hay
+ * una ventana en la que una escritura concurrente pueda sobrescribir la
+ * fila de otra como efecto de resolver el conflicto.
  *
  * @param {ReturnType<typeof import('./customerValidation.js').validateCustomerInput>} input
+ * @returns {Promise<{ customer: object, state: 'NEW'|'EXISTING_SAME_EMAIL'|'EXISTING_DIFFERENT_EMAIL' }>}
  */
-export async function upsertCustomer(input, client = null) {
-  return withCustomerTransaction(client, async (txClient) => {
-    const documentNumber = normalizeDocumentNumber(input.documentNumber);
-    // Separación de dominios (endurecimiento final): hashDocumentNumber()/
-    // hashEmail() hashean sobre "catastrox:document:v1:"/"catastrox:email:v1:"
-    // + el valor normalizado -- nunca el valor desnudo -- para que un
-    // documento y un correo que coincidieran textualmente nunca produzcan
-    // el mismo hash bajo el mismo secreto. hashPii() genérico queda
-    // reservado para el código OTP (más abajo), nunca para documento/correo.
-    const documentHash = hashDocumentNumber(documentNumber);
-    const documentEncrypted = encryptPii(documentNumber);
-    const emailNormalized = normalizeEmail(input.email);
-    const emailHash = hashEmail(emailNormalized);
-    const emailEncrypted = encryptPii(emailNormalized);
-    const firstNameEncrypted = encryptPii(input.firstName);
-    const lastNameEncrypted = encryptPii(input.lastName);
-    const legalNameEncrypted = encryptPii(input.legalName);
-    const departmentEncrypted = encryptPii(input.department);
-    const cityEncrypted = encryptPii(input.city);
-    const phoneEncrypted = encryptPii(input.phone);
-    const addressEncrypted = encryptPii(input.address);
+export async function resolveCustomerForVerification(input, client = null) {
+  const documentNumber = normalizeDocumentNumber(input.documentNumber);
+  // Separación de dominios (endurecimiento final): hashDocumentNumber()/
+  // hashEmail() hashean sobre "catastrox:document:v1:"/"catastrox:email:v1:"
+  // + el valor normalizado -- nunca el valor desnudo -- para que un
+  // documento y un correo que coincidieran textualmente nunca produzcan
+  // el mismo hash bajo el mismo secreto. hashPii() genérico queda
+  // reservado para el código OTP (más abajo), nunca para documento/correo.
+  const documentHash = hashDocumentNumber(documentNumber);
+  const documentEncrypted = encryptPii(documentNumber);
+  const emailNormalized = normalizeEmail(input.email);
+  const emailHash = hashEmail(emailNormalized);
+  const emailEncrypted = encryptPii(emailNormalized);
+  const firstNameEncrypted = encryptPii(input.firstName);
+  const lastNameEncrypted = encryptPii(input.lastName);
+  const legalNameEncrypted = encryptPii(input.legalName);
+  const departmentEncrypted = encryptPii(input.department);
+  const cityEncrypted = encryptPii(input.city);
+  const phoneEncrypted = encryptPii(input.phone);
+  const addressEncrypted = encryptPii(input.address);
 
-    // EMAIL_PROVIDER_002 (revisión de reenvío -- hallazgo real): se lee el
-    // email_hash YA guardado para este documento, ANTES del upsert, para
-    // poder distinguir más abajo "el correo cambió en esta escritura" de
-    // "el comprador simplemente no se ha verificado todavía" -- antes de
-    // esta corrección, la invalidación de OTPs activos usaba
-    // `customer.email_verified_at === null` como proxy de "el correo
-    // cambió", pero esa condición también es cierta en CADA reenvío previo
-    // a la primera verificación exitosa (email_verified_at no se vuelve
-    // NOT NULL hasta que el comprador verifica) -- un reenvío con el MISMO
-    // correo invalidaba, como efecto secundario, el código anterior
-    // todavía vigente y ya entregado, incluso si el reenvío en sí fallaba
-    // después en Resend. Concurrencia: si dos escrituras del mismo
-    // documento con correos distintos llegaran verdaderamente en
-    // simultáneo, existe una ventana teórica y estrecha en la que ambas
-    // lean el mismo valor "anterior" -- no es una vía de bypass de
-    // seguridad (el código OTP verificado sigue exigiendo el hash
-    // correcto), solo podría dejar un código viejo activo un instante de
-    // más en un escenario ya de por sí extremadamente inusual.
-    const existingCustomerResult = await txClient.query(
-      `select email_hash from ${CUSTOMERS_TABLE} where document_number_hash = $1`,
-      [documentHash],
-    );
-    const previousEmailHash = existingCustomerResult.rows[0]?.email_hash ?? null;
-    const emailChangedInThisWrite = previousEmailHash !== null && previousEmailHash !== emailHash;
+  const insertResult = await run(
+    client,
+    `insert into ${CUSTOMERS_TABLE}
+       (customer_type, first_name_encrypted, last_name_encrypted, legal_name_encrypted, document_type,
+        document_number_encrypted, document_number_hash, email_encrypted, email_hash,
+        phone_encrypted, country_code, department_encrypted, city_encrypted, address_encrypted,
+        privacy_consent_at, terms_accepted_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now(), now())
+     on conflict (document_number_hash) do nothing
+     returning *`,
+    [
+      input.customerType,
+      firstNameEncrypted,
+      lastNameEncrypted,
+      legalNameEncrypted,
+      input.documentType,
+      documentEncrypted,
+      documentHash,
+      emailEncrypted,
+      emailHash,
+      phoneEncrypted,
+      input.countryCode,
+      departmentEncrypted,
+      cityEncrypted,
+      addressEncrypted,
+    ],
+  );
 
-    const result = await txClient.query(
-      `insert into ${CUSTOMERS_TABLE}
-         (customer_type, first_name_encrypted, last_name_encrypted, legal_name_encrypted, document_type,
-          document_number_encrypted, document_number_hash, email_encrypted, email_hash,
-          phone_encrypted, country_code, department_encrypted, city_encrypted, address_encrypted,
-          privacy_consent_at, terms_accepted_at)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now(), now())
-       on conflict (document_number_hash) do update set
-         customer_type = excluded.customer_type,
-         first_name_encrypted = excluded.first_name_encrypted,
-         last_name_encrypted = excluded.last_name_encrypted,
-         legal_name_encrypted = excluded.legal_name_encrypted,
-         document_type = excluded.document_type,
-         document_number_encrypted = excluded.document_number_encrypted,
-         email_encrypted = excluded.email_encrypted,
-         email_hash = excluded.email_hash,
-         phone_encrypted = excluded.phone_encrypted,
-         country_code = excluded.country_code,
-         department_encrypted = excluded.department_encrypted,
-         city_encrypted = excluded.city_encrypted,
-         address_encrypted = excluded.address_encrypted,
-         privacy_consent_at = now(),
-         terms_accepted_at = now(),
-         -- Referencia sin calificar / calificada por nombre de tabla dentro de
-         -- ON CONFLICT DO UPDATE SET significa el valor de la fila YA
-         -- EXISTENTE (antes de este UPDATE) -- comparar contra excluded.email_hash
-         -- (el valor nuevo) es exactamente la detección de cambio de correo,
-         -- atómica, sin condición de carrera con una segunda escritura
-         -- concurrente del mismo comprador.
-         email_verified_at = case
-           when ${CUSTOMERS_TABLE}.email_hash = excluded.email_hash then ${CUSTOMERS_TABLE}.email_verified_at
-           else null
-         end
-       returning *`,
-      [
-        input.customerType,
-        firstNameEncrypted,
-        lastNameEncrypted,
-        legalNameEncrypted,
-        input.documentType,
-        documentEncrypted,
-        documentHash,
-        emailEncrypted,
-        emailHash,
-        phoneEncrypted,
-        input.countryCode,
-        departmentEncrypted,
-        cityEncrypted,
-        addressEncrypted,
-      ],
-    );
+  if (insertResult.rows[0]) {
+    return { customer: insertResult.rows[0], state: 'NEW' };
+  }
 
-    const customer = result.rows[0];
+  // Conflicto: ya existe una fila con este document_number_hash (creada
+  // antes, o por otra escritura concurrente que ganó la carrera del
+  // INSERT de arriba) -- se relee TAL CUAL está, nunca se escribe nada
+  // aquí. La clasificación compara el email_hash de ESTA petición contra
+  // el ya almacenado; el email del body nunca decide nada más allá de eso.
+  const existingResult = await run(client, `select * from ${CUSTOMERS_TABLE} where document_number_hash = $1`, [documentHash]);
+  const existingCustomer = existingResult.rows[0];
+  if (!existingCustomer) {
+    // Ventana teórica extrema: el INSERT perdió la carrera (0 filas) pero
+    // la fila que la ganó ya no existe para cuando corre este SELECT
+    // (borrada por un proceso externo entre ambas sentencias). Nunca es
+    // un problema de seguridad (no hay ninguna fila que proteger de una
+    // escritura indebida); se falla explícito en vez de reintentar en
+    // bucle o inventar un estado nuevo no solicitado.
+    throw new Error('resolveCustomerForVerification: conflicto de documento sin fila existente localizable.');
+  }
 
-    // Invalidación explícita de OTPs activos del correo anterior (defensa
-    // en profundidad -- verifyEmailCode() ya solo mira el código más
-    // reciente, así que esto nunca deja pasar un código viejo, pero deja
-    // constancia inequívoca en la tabla de que esos códigos quedaron
-    // muertos, sin depender únicamente del orden de creación). Condición
-    // corregida (EMAIL_PROVIDER_002, revisión de reenvío): solo cuando el
-    // correo REALMENTE cambió en esta escritura -- ver
-    // emailChangedInThisWrite arriba. Antes se usaba
-    // `customer.email_verified_at === null`, que también es cierto en cada
-    // reenvío previo a la primera verificación y consumía, por error, un
-    // código anterior todavía vigente y ya entregado.
-    if (emailChangedInThisWrite) {
-      await txClient.query(
-        `update ${EMAIL_VERIFICATIONS_TABLE}
-            set consumed_at = now()
-          where customer_id = $1
-            and consumed_at is null
-            and created_at < now()`,
-        [customer.id],
-      );
-    }
-
-    return customer;
-  });
+  const state = existingCustomer.email_hash === emailHash ? 'EXISTING_SAME_EMAIL' : 'EXISTING_DIFFERENT_EMAIL';
+  return { customer: existingCustomer, state };
 }
 
 export async function findCustomerById(customerId, client = null) {

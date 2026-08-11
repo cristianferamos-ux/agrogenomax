@@ -18,20 +18,71 @@ import dotenv from 'dotenv';
 dotenv.config({ path: '.env', quiet: true });
 dotenv.config({ path: 'server/.env', quiet: true });
 
-const TEST_CODIGO_A = '900000000000000000000000000001';
-const TEST_CODIGO_B = '900000000000000000000000000002';
+// P1-02/P1-03 (remediación post-auditoría): POST /checkout ahora exige que
+// el predio sea resoluble por resolveCheckoutPredioEligibility (misma
+// fuente que usa después el pipeline de entrega,
+// resolvePredioDataForDelivery) ANTES de crear ninguna orden -- un código
+// sintético que no existe en catastrox_clean ya NO puede usarse como
+// fixture de "cualquier predio" para un checkout exitoso (antes funcionaba
+// solo por accidente, gracias al fail-open que esta fase corrige). Los
+// tests que necesitan un checkout exitoso usan INTEGRATION_TEST_CODIGO --
+// un código predial SINTÉTICO de 30 dígitos, nunca uno real (verificado
+// contra validateCadastralCodeInput/normalizeCadastralCodeInput/
+// resolveCanonicalPredioId: ninguna exige checksum ni validación
+// territorial, solo 20 o 30 dígitos numéricos), resuelto localmente por
+// scripts/catastrox/test/setup_integration_postgis.sql, que inserta una
+// fila sintética con exactamente este código en catastrox_clean.predios --
+// mismo código que usan catastroxDeliveryLifecycle.test.js/
+// catastroxPaymentWebhook.test.js. La limpieza de este archivo se hace
+// exclusivamente por customer_id (ver createdCustomerIds/cleanupTestOrders
+// más abajo), nunca por canonical_predio_id, para no arriesgar borrar
+// filas creadas concurrentemente por otro archivo de test que use el mismo
+// código (node --test ejecuta archivos en paralelo por defecto).
+const INTEGRATION_TEST_CODIGO = '999999999999999999999999999901';
+
+// Predio sintético que deliberadamente NO existe en catastrox_clean --
+// antes se usaba (como TEST_CODIGO_A) por accidente como fixture de
+// "cualquier predio" para un checkout exitoso, lo cual solo funcionaba
+// porque el defecto P1-02/P1-03 (fail-open) dejaba pasar un predio no
+// resoluble. Ahora se usa para probar exactamente lo contrario: que ese
+// mismo caso bloquea el checkout.
+const UNRESOLVABLE_TEST_CODIGO = '900000000000000000000000000001';
+
+// Predio sintético "ajeno" -- nunca se compra en ningún test de este
+// archivo, solo se usa como código DISTINTO al realmente comprado para
+// confirmar que un predio no comprado responde isPaid:false. Nunca pasa
+// por resolveCheckoutPredioEligibility (no se usa como routeId/checkout),
+// así que no necesita ser resoluble.
+const UNPURCHASED_TEST_CODIGO = '900000000000000000000000000002';
 
 // Corrección de seguridad (checkout sin fallback inseguro): POST /checkout
 // ya no acepta canonicalPredioId/codigoPredial del body -- exige un
-// routeId que resuelva a un lookup vigente. Estos códigos son sintéticos
-// (no existen en la base geográfica real), así que no pueden pasar por un
-// POST /lookup real; en su lugar se registra un preview directamente en
-// el Map en memoria de catastrox.js vía __rememberLookupPreviewForTests
-// (mismo mecanismo que usaría un POST /lookup real, sin SQL). Un solo
-// routeId por código, reutilizado por todas las pruebas de este archivo
-// que compran ese predio -- un preview no se consume al usarse.
+// routeId que resuelva a un lookup vigente. En su lugar se registra un
+// preview directamente en el Map en memoria de catastrox.js vía
+// __rememberLookupPreviewForTests (mismo mecanismo que usaría un POST
+// /lookup real, sin SQL). Un solo routeId por slot, reutilizado por todas
+// las pruebas de este archivo que compran ese predio -- un preview no se
+// consume al usarse. TEST_ROUTE_ID_A y TEST_ROUTE_ID_B apuntan
+// deliberadamente al MISMO predio sintético (INTEGRATION_TEST_CODIGO) -- ningún test
+// de este archivo depende de que sean geometrías distintas, solo de que
+// sean slots de preview independientes.
 const TEST_ROUTE_ID_A = 'cx-test-route-a';
 const TEST_ROUTE_ID_B = 'cx-test-route-b';
+const TEST_ROUTE_ID_UNRESOLVABLE = 'cx-test-route-unresolvable';
+
+// Identificador único por ejecución del archivo -- wompi_transaction_id
+// tiene una UNIQUE global (catastrox_payment_orders_wompi_transaction_id_key);
+// un literal fijo reutilizado entre corridas puede colisionar con una fila
+// residual de una ejecución anterior (p. ej. una cuyo cleanup no llegó a
+// correr) y hacer que la orden nueva nunca transicione. Estable dentro de
+// la misma ejecución, para que un test que reutiliza su propio txnId (al
+// leer /verify después de mockearlo) siga refiriéndose a la misma
+// transacción.
+const TEST_RUN_ID = crypto.randomUUID();
+
+function testTransactionId(label) {
+  return `txn-${label}-${TEST_RUN_ID}`;
+}
 
 let dbAvailable = false;
 let getConfig;
@@ -53,12 +104,23 @@ try {
 }
 
 let rateLimiters = [];
+let hashDocumentNumber;
+let normalizeDocumentNumber;
+let hashEmail;
+let normalizeEmail;
+let createCheckoutIdentityCapability;
 
 if (dbAvailable) {
   ({ default: catastroxPaymentsRouter } = await import('../catastroxPayments.js'));
   ({ __rememberLookupPreviewForTests } = await import('../catastrox.js'));
-  __rememberLookupPreviewForTests(TEST_ROUTE_ID_A, { canonicalPredioId: TEST_CODIGO_A, codigoPredial: TEST_CODIGO_A });
-  __rememberLookupPreviewForTests(TEST_ROUTE_ID_B, { canonicalPredioId: TEST_CODIGO_B, codigoPredial: TEST_CODIGO_B });
+  __rememberLookupPreviewForTests(TEST_ROUTE_ID_A, { canonicalPredioId: INTEGRATION_TEST_CODIGO, codigoPredial: INTEGRATION_TEST_CODIGO });
+  __rememberLookupPreviewForTests(TEST_ROUTE_ID_B, { canonicalPredioId: INTEGRATION_TEST_CODIGO, codigoPredial: INTEGRATION_TEST_CODIGO });
+  __rememberLookupPreviewForTests(TEST_ROUTE_ID_UNRESOLVABLE, {
+    canonicalPredioId: UNRESOLVABLE_TEST_CODIGO,
+    codigoPredial: UNRESOLVABLE_TEST_CODIGO,
+  });
+  ({ hashDocumentNumber, normalizeDocumentNumber, hashEmail, normalizeEmail } = await import('../../services/catastrox/piiCrypto.js'));
+  ({ createCheckoutIdentityCapability } = await import('../../services/catastrox/identityCapability.js'));
   const limiterModule = await import('../../middleware/rateLimit.js');
   // Los limitadores son singletons de módulo (mismo store en memoria en
   // todo el proceso de test, ver server/middleware/__tests__/rateLimit.test.js)
@@ -129,10 +191,28 @@ async function startTestApp() {
 }
 
 let customerCounter = 0;
+// Toda limpieza de este archivo se hace por customer_id, nunca por
+// canonical_predio_id (ver comentario de INTEGRATION_TEST_CODIGO arriba) -- cada
+// customerId creado aquí es un UUID fresco de este proceso de test, así
+// que este scope nunca puede colisionar con filas de otro archivo, incluso
+// si ambos comparten el mismo predio real.
+const createdCustomerIds = [];
+
+// R3/B6-26-ADJ-01: POST /customers ya no devuelve customerId -- emite
+// verificationHandle, y POST /customers/verify-email emite identityCapability
+// tras un OTP válido. Esta suite necesita customerId SOLO internamente
+// (idempotency key server-side, teardown) -- se resuelve por consulta a
+// Postgres a partir del documentNumber usado, nunca de la respuesta HTTP.
+async function lookupCustomerIdByDocument(documentNumber) {
+  const documentHash = hashDocumentNumber(normalizeDocumentNumber(documentNumber));
+  const result = await query('select id from public.catastrox_customers where document_number_hash = $1', [documentHash]);
+  return result.rows[0]?.id ?? null;
+}
 
 async function createVerifiedTestCustomer(baseUrl, overrides = {}) {
   customerCounter += 1;
   const email = overrides.email || `orders-test-${Date.now()}-${customerCounter}@example.com`;
+  const documentNumber = overrides.documentNumber || `91${customerCounter}${Date.now()}`.slice(0, 15);
   const response = await fetch(`${baseUrl}/customers`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -141,7 +221,7 @@ async function createVerifiedTestCustomer(baseUrl, overrides = {}) {
       firstName: 'Orders',
       lastName: 'Test',
       documentType: 'CC',
-      documentNumber: `91${customerCounter}${Date.now()}`.slice(0, 15),
+      documentNumber,
       email,
       emailConfirmation: email,
       phone: '3000000000',
@@ -156,36 +236,74 @@ async function createVerifiedTestCustomer(baseUrl, overrides = {}) {
     }),
   });
   const payload = await response.json();
-  await fetch(`${baseUrl}/customers/${payload.customerId}/verify-email`, {
+  const verifyResponse = await fetch(`${baseUrl}/customers/verify-email`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code: payload.devOtpCode }),
+    body: JSON.stringify({ verificationHandle: payload.verificationHandle, code: payload.devOtpCode }),
   });
-  return payload.customerId;
+  const verifyPayload = await verifyResponse.json();
+  const customerId = await lookupCustomerIdByDocument(documentNumber);
+  if (customerId) createdCustomerIds.push(customerId);
+  return { identityCapability: verifyPayload.identityCapability, customerId, verificationHandle: payload.verificationHandle };
+}
+
+// El checkout/verify/webhook real nunca espera a processDeliveryJob() --
+// triggerPostApprovalWorkflows() lo dispara con `void processDeliveryJob(job.id)
+// .catch(...)` (server/routes/catastroxPayments.js), fire-and-forget por
+// diseño (CATX-DELIVERY-001 ajuste #8). Eso significa que cuando un test
+// recibe la respuesta HTTP de /verify o /wompi/events, el job de entrega
+// puede seguir activo (QUEUED/GENERATING/READY/SENDING) en segundo plano.
+// Si el teardown borra catastrox_delivery_jobs mientras ese job en curso
+// todavía intenta escribir en catastrox_deliverables, la escritura choca
+// con la FK catastrox_deliverables_delivery_job_id_fkey -- un error de
+// carrera de TEST, no del pipeline de entrega en sí (que sigue siendo
+// correcto: SENT/FAILED son sus únicos estados terminales, por diseño, ver
+// el comentario de máquina de estados en deliveryJobService.js). Este
+// helper solo consulta Postgres (nunca muta el job, nunca llama
+// processDeliveryJob) y actúa exclusivamente sobre los orderIds de esta
+// suite -- si el timeout vence, lanza para que la suite falle de forma
+// visible en vez de continuar borrando en silencio sobre un job todavía
+// activo.
+async function waitForDeliveryJobsToSettle(orderIds, { timeoutMs = 5000, intervalMs = 50 } = {}) {
+  if (!orderIds.length) return;
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const result = await query(
+      `select id, status from public.catastrox_delivery_jobs
+        where payment_order_id = any($1)
+          and status not in ('SENT', 'FAILED')`,
+      [orderIds],
+    );
+    if (result.rows.length === 0) return;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `waitForDeliveryJobsToSettle: timeout esperando estado terminal (SENT/FAILED) de ${result.rows.length} delivery job(s): ` +
+          result.rows.map((row) => `${row.id}=${row.status}`).join(', '),
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
 }
 
 async function cleanupTestOrders() {
-  if (!dbAvailable) return;
-  const orders = await query('select id, customer_id from public.catastrox_payment_orders where canonical_predio_id = any($1)', [
-    [TEST_CODIGO_A, TEST_CODIGO_B],
-  ]);
+  if (!dbAvailable || !createdCustomerIds.length) return;
+  const orders = await query('select id from public.catastrox_payment_orders where customer_id = any($1)', [createdCustomerIds]);
   const orderIds = orders.rows.map((row) => row.id);
-  const customerIds = orders.rows.map((row) => row.customer_id).filter(Boolean);
 
   if (orderIds.length) {
+    await waitForDeliveryJobsToSettle(orderIds);
+    await query('delete from public.catastrox_deliverable_blobs where deliverable_id in (select id from public.catastrox_deliverables where delivery_job_id in (select id from public.catastrox_delivery_jobs where payment_order_id = any($1)))', [orderIds]);
     await query('delete from public.catastrox_delivery_attempts where delivery_job_id in (select id from public.catastrox_delivery_jobs where payment_order_id = any($1))', [orderIds]);
     await query('delete from public.catastrox_deliverables where delivery_job_id in (select id from public.catastrox_delivery_jobs where payment_order_id = any($1))', [orderIds]);
     await query('delete from public.catastrox_delivery_jobs where payment_order_id = any($1)', [orderIds]);
     await query('delete from public.catastrox_invoice_jobs where payment_order_id = any($1)', [orderIds]);
     await query('delete from public.catastrox_recovery_session_orders where payment_order_id = any($1)', [orderIds]);
     await query('delete from public.catastrox_billing_profiles where payment_order_id = any($1)', [orderIds]);
+    await query('delete from public.catastrox_payment_orders where id = any($1)', [orderIds]);
   }
-  await query('delete from public.catastrox_payment_orders where canonical_predio_id = any($1)', [[TEST_CODIGO_A, TEST_CODIGO_B]]);
-  if (customerIds.length) {
-    await query('delete from public.catastrox_email_verifications where customer_id = any($1)', [customerIds]);
-    await query('delete from public.catastrox_customer_otp_state where customer_id = any($1)', [customerIds]);
-    await query('delete from public.catastrox_customers where id = any($1)', [customerIds]);
-  }
+  await query('delete from public.catastrox_email_verifications where customer_id = any($1)', [createdCustomerIds]);
+  await query('delete from public.catastrox_customer_otp_state where customer_id = any($1)', [createdCustomerIds]);
+  await query('delete from public.catastrox_customers where id = any($1)', [createdCustomerIds]);
   await query(
     `delete from public.catastrox_recovery_sessions
       where id not in (select recovery_session_id from public.catastrox_recovery_session_orders)
@@ -205,7 +323,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const response = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'oro-platino', codigoPredial: TEST_CODIGO_A }),
+        body: JSON.stringify({ packageId: 'oro-platino', codigoPredial: INTEGRATION_TEST_CODIGO }),
       });
       assert.equal(response.status, 400);
       assert.equal((await response.json()).code, 'INVALID_PACKAGE');
@@ -222,14 +340,20 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
   // incluso con un body por lo demás completo -- sin necesitar customerId,
   // exactamente el mismo espíritu de "defensa en profundidad" del caso
   // original.
-  await t.test('checkout sin routeId -> 400 LOOKUP_REQUIRED (defensa en profundidad, sin necesitar customerId)', async () => {
+  // R3/B6-26-ADJ-01 (reordenamiento de guards, §11): identityCapability se
+  // valida ANTES que routeId/predio -- una capability inválida no debe
+  // poder sondear ramas de checkout protegidas por predio. Por eso estos
+  // tres casos de predio ahora necesitan una identityCapability VÁLIDA para
+  // poder ejercitar de verdad la validación de routeId/lookup que prueban.
+  await t.test('checkout sin routeId -> 400 LOOKUP_REQUIRED (con identidad ya válida)', async () => {
     resetRateLimiters();
     const app = await startTestApp();
     try {
+      const { identityCapability } = await createVerifiedTestCustomer(app.baseUrl);
       const response = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', purchaseAttemptId: crypto.randomUUID() }),
+        body: JSON.stringify({ packageId: 'basico', identityCapability, purchaseAttemptId: crypto.randomUUID() }),
       });
       assert.equal(response.status, 400);
       assert.equal((await response.json()).code, 'LOOKUP_REQUIRED');
@@ -242,10 +366,11 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
     resetRateLimiters();
     const app = await startTestApp();
     try {
+      const { identityCapability } = await createVerifiedTestCustomer(app.baseUrl);
       const response = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', routeId: 'cx-jamas-existio', purchaseAttemptId: crypto.randomUUID() }),
+        body: JSON.stringify({ packageId: 'basico', identityCapability, routeId: 'cx-jamas-existio', purchaseAttemptId: crypto.randomUUID() }),
       });
       assert.equal(response.status, 404);
       assert.equal((await response.json()).code, 'LOOKUP_NOT_FOUND');
@@ -258,11 +383,13 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
     resetRateLimiters();
     const app = await startTestApp();
     try {
+      const { identityCapability } = await createVerifiedTestCustomer(app.baseUrl);
       const response = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           packageId: 'basico',
+          identityCapability,
           routeId: TEST_ROUTE_ID_A,
           canonicalPredioId: 'valor-inventado-por-el-cliente',
           purchaseAttemptId: crypto.randomUUID(),
@@ -275,7 +402,52 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
     }
   });
 
-  await t.test('checkout sin customerId -> 400 CUSTOMER_ID_REQUIRED', async () => {
+  // P1-02 (nuevo, remediación post-auditoría): un predio que
+  // resolveCheckoutPredioEligibility no puede resolver (mismo criterio que
+  // usará después el pipeline de entrega) debe bloquear el checkout ANTES
+  // de tocar customerId/Wompi/orden -- nunca se crea una orden de pago ni
+  // una referencia Wompi para un predio no entregable. Antes de esta fase,
+  // este mismo escenario (UNRESOLVABLE_TEST_CODIGO) pasaba el checkout sin
+  // problema por el defecto fail-open que aquí se cierra.
+  await t.test('checkout con predio no resoluble por resolveCheckoutPredioEligibility -> 403 PREDIO_NOT_DELIVERABLE, nunca crea orden ni referencia Wompi', async () => {
+    resetRateLimiters();
+    const app = await startTestApp();
+    try {
+      const { identityCapability, customerId } = await createVerifiedTestCustomer(app.baseUrl);
+      const before = await query('select count(*)::int as n from public.catastrox_payment_orders where customer_id = $1', [customerId]);
+      assert.equal(before.rows[0].n, 0);
+
+      const response = await fetch(`${app.baseUrl}/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          packageId: 'basico',
+          routeId: TEST_ROUTE_ID_UNRESOLVABLE,
+          identityCapability,
+          purchaseAttemptId: crypto.randomUUID(),
+        }),
+      });
+      const payload = await response.json();
+
+      assert.equal(response.status, 403);
+      assert.equal(payload.code, 'PREDIO_NOT_DELIVERABLE');
+      assert.equal(payload.ok, false);
+      // Ni checkout.reference ni checkout.orderToken existen -- son
+      // exactamente los artefactos que produce la construcción de la
+      // referencia/integridad Wompi, y nunca se llega a construirlos.
+      assert.equal(payload.checkout, undefined);
+
+      const after = await query('select count(*)::int as n from public.catastrox_payment_orders where customer_id = $1', [customerId]);
+      assert.equal(after.rows[0].n, 0, 'no debe haberse creado ninguna orden para el comprador');
+    } finally {
+      await app.close();
+    }
+  });
+
+  // --- R3/B6-26-ADJ-01: identityCapability como única autoridad de checkout,
+  // customerId legado explícitamente rechazado (§17 del encargo) ---------
+
+  await t.test('checkout sin identityCapability -> 400 IDENTITY_CAPABILITY_REQUIRED (caso C)', async () => {
     resetRateLimiters();
     const app = await startTestApp();
     try {
@@ -285,7 +457,181 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
         body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, purchaseAttemptId: crypto.randomUUID() }),
       });
       assert.equal(response.status, 400);
-      assert.equal((await response.json()).code, 'CUSTOMER_ID_REQUIRED');
+      assert.equal((await response.json()).code, 'IDENTITY_CAPABILITY_REQUIRED');
+    } finally {
+      await app.close();
+    }
+  });
+
+  await t.test('checkout con SOLO customerId verificado (sin identityCapability) -> 400 CUSTOMER_ID_NOT_ALLOWED (caso A)', async () => {
+    resetRateLimiters();
+    const app = await startTestApp();
+    try {
+      const { customerId } = await createVerifiedTestCustomer(app.baseUrl);
+      const response = await fetch(`${app.baseUrl}/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, customerId, purchaseAttemptId: crypto.randomUUID() }),
+      });
+      assert.equal(response.status, 400);
+      assert.equal((await response.json()).code, 'CUSTOMER_ID_NOT_ALLOWED');
+    } finally {
+      await app.close();
+    }
+  });
+
+  await t.test('checkout con customerId + identityCapability válida -> también 400 CUSTOMER_ID_NOT_ALLOWED, nunca prioriza la capability (caso B)', async () => {
+    resetRateLimiters();
+    const app = await startTestApp();
+    try {
+      const { customerId, identityCapability } = await createVerifiedTestCustomer(app.baseUrl);
+      const response = await fetch(`${app.baseUrl}/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, customerId, identityCapability, purchaseAttemptId: crypto.randomUUID() }),
+      });
+      assert.equal(response.status, 400);
+      assert.equal((await response.json()).code, 'CUSTOMER_ID_NOT_ALLOWED');
+    } finally {
+      await app.close();
+    }
+  });
+
+  await t.test('checkout con identityCapability corrupta -> 403 IDENTITY_CAPABILITY_INVALID (caso E)', async () => {
+    resetRateLimiters();
+    const app = await startTestApp();
+    try {
+      const response = await fetch(`${app.baseUrl}/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          packageId: 'basico',
+          routeId: TEST_ROUTE_ID_A,
+          identityCapability: 'esto-no-es-un-token-valido',
+          purchaseAttemptId: crypto.randomUUID(),
+        }),
+      });
+      assert.equal(response.status, 403);
+      assert.equal((await response.json()).code, 'IDENTITY_CAPABILITY_INVALID');
+    } finally {
+      await app.close();
+    }
+  });
+
+  await t.test('checkout usando el verificationHandle (propósito/llave equivocados) como identityCapability -> 403 IDENTITY_CAPABILITY_INVALID (caso F)', async () => {
+    resetRateLimiters();
+    const app = await startTestApp();
+    try {
+      const { verificationHandle } = await createVerifiedTestCustomer(app.baseUrl);
+      const response = await fetch(`${app.baseUrl}/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          packageId: 'basico',
+          routeId: TEST_ROUTE_ID_A,
+          identityCapability: verificationHandle,
+          purchaseAttemptId: crypto.randomUUID(),
+        }),
+      });
+      assert.equal(response.status, 403);
+      assert.equal((await response.json()).code, 'IDENTITY_CAPABILITY_INVALID');
+    } finally {
+      await app.close();
+    }
+  });
+
+  await t.test('checkout con identityCapability expirada -> 403 IDENTITY_CAPABILITY_INVALID (caso G)', async () => {
+    resetRateLimiters();
+    const app = await startTestApp();
+    try {
+      const { customerId } = await createVerifiedTestCustomer(app.baseUrl);
+      const customerRow = await query('select email_hash from public.catastrox_customers where id = $1', [customerId]);
+      // TTL real: 10 min -- se construye directamente con el módulo (no vía
+      // HTTP, que no permite inyectar un "now" artificial) con iat/exp ya
+      // vencidos hace rato, para no depender de esperar 10 minutos reales.
+      const longExpired = Math.floor(Date.now() / 1000) - 3600;
+      const expiredCapability = createCheckoutIdentityCapability({
+        customerId,
+        emailHash: customerRow.rows[0].email_hash,
+        now: longExpired,
+      });
+      const response = await fetch(`${app.baseUrl}/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, identityCapability: expiredCapability, purchaseAttemptId: crypto.randomUUID() }),
+      });
+      assert.equal(response.status, 403);
+      assert.equal((await response.json()).code, 'IDENTITY_CAPABILITY_INVALID');
+    } finally {
+      await app.close();
+    }
+  });
+
+  await t.test('checkout con identityCapability cuyo customer fue borrado -> 403 IDENTITY_CAPABILITY_INVALID, nunca 404 (caso H)', async () => {
+    resetRateLimiters();
+    const app = await startTestApp();
+    try {
+      const { identityCapability, customerId } = await createVerifiedTestCustomer(app.baseUrl);
+      // Borrado directo -- simula que el comprador dejó de existir después
+      // de emitida la capability (nunca ocurre por un flujo real hoy, pero
+      // el guard de checkout debe resistirlo igual, sin revelar la causa).
+      await query('delete from public.catastrox_email_verifications where customer_id = $1', [customerId]);
+      await query('delete from public.catastrox_customer_otp_state where customer_id = $1', [customerId]);
+      await query('delete from public.catastrox_customers where id = $1', [customerId]);
+
+      const response = await fetch(`${app.baseUrl}/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, identityCapability, purchaseAttemptId: crypto.randomUUID() }),
+      });
+      assert.equal(response.status, 403);
+      assert.equal((await response.json()).code, 'IDENTITY_CAPABILITY_INVALID');
+    } finally {
+      await app.close();
+    }
+  });
+
+  await t.test('checkout con identityCapability cuyo email_hash cambió en la fila desde su emisión -> 403 IDENTITY_CAPABILITY_INVALID, sin código específico (caso I)', async () => {
+    resetRateLimiters();
+    const app = await startTestApp();
+    try {
+      const { identityCapability, customerId } = await createVerifiedTestCustomer(app.baseUrl);
+      // Cambio directo por SQL -- únicamente para simular, en este test, un
+      // futuro flujo autorizado de cambio de correo; POST /customers
+      // (Modelo B) nunca permite esto por sí mismo.
+      const staleEmailHash = hashEmail(normalizeEmail(`otro-correo-${Date.now()}@example.com`));
+      await query('update public.catastrox_customers set email_hash = $2 where id = $1', [customerId, staleEmailHash]);
+
+      const response = await fetch(`${app.baseUrl}/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, identityCapability, purchaseAttemptId: crypto.randomUUID() }),
+      });
+      assert.equal(response.status, 403);
+      assert.equal((await response.json()).code, 'IDENTITY_CAPABILITY_INVALID');
+    } finally {
+      await app.close();
+    }
+  });
+
+  await t.test('checkout con identityCapability válida pero email_verified_at revocado después de emitida -> 403 IDENTITY_CAPABILITY_INVALID, ya no EMAIL_NOT_VERIFIED (caso J)', async () => {
+    resetRateLimiters();
+    const app = await startTestApp();
+    try {
+      const { identityCapability, customerId } = await createVerifiedTestCustomer(app.baseUrl);
+      // R3/B6-26-ADJ-01 (§8): email_verified_at ya no es un guard público
+      // independiente de checkout -- la capability + este binding
+      // constituyen juntos la única puerta. Se simula una revocación
+      // posterior (hoy sin flujo real que la produzca) directamente por SQL.
+      await query('update public.catastrox_customers set email_verified_at = null where id = $1', [customerId]);
+
+      const response = await fetch(`${app.baseUrl}/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, identityCapability, purchaseAttemptId: crypto.randomUUID() }),
+      });
+      assert.equal(response.status, 403);
+      assert.equal((await response.json()).code, 'IDENTITY_CAPABILITY_INVALID');
     } finally {
       await app.close();
     }
@@ -298,7 +644,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const missing = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', codigoPredial: TEST_CODIGO_A }),
+        body: JSON.stringify({ packageId: 'basico', codigoPredial: INTEGRATION_TEST_CODIGO }),
       });
       assert.equal(missing.status, 400);
       assert.equal((await missing.json()).code, 'INVALID_PURCHASE_ATTEMPT_ID');
@@ -306,7 +652,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const malformed = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', codigoPredial: TEST_CODIGO_A, purchaseAttemptId: 'no-es-un-uuid' }),
+        body: JSON.stringify({ packageId: 'basico', codigoPredial: INTEGRATION_TEST_CODIGO, purchaseAttemptId: 'no-es-un-uuid' }),
       });
       assert.equal(malformed.status, 400);
       assert.equal((await malformed.json()).code, 'INVALID_PURCHASE_ATTEMPT_ID');
@@ -315,58 +661,25 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
     }
   });
 
-  await t.test('checkout con comprador SIN correo verificado -> 403 EMAIL_NOT_VERIFIED', async () => {
-    resetRateLimiters();
-    const app = await startTestApp();
-    try {
-      customerCounter += 1;
-      const email = `unverified-${Date.now()}-${customerCounter}@example.com`;
-      const customerResponse = await fetch(`${app.baseUrl}/customers`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customerType: 'natural',
-          firstName: 'Sin',
-          lastName: 'Verificar',
-          documentType: 'CC',
-          documentNumber: `92${customerCounter}${Date.now()}`.slice(0, 15),
-          email,
-          emailConfirmation: email,
-          phone: '3000000000',
-          countryCode: 'CO',
-          department: 'Caqueta',
-          city: 'Florencia',
-          address: 'Direccion de prueba',
-          privacyConsentAccepted: true,
-          termsAccepted: true,
-          deliveryAuthorizationAccepted: true,
-        }),
-      });
-      const { customerId } = await customerResponse.json();
-
-      const response = await fetch(`${app.baseUrl}/checkout`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, customerId, purchaseAttemptId: crypto.randomUUID() }),
-      });
-      assert.equal(response.status, 403);
-      assert.equal((await response.json()).code, 'EMAIL_NOT_VERIFIED');
-    } finally {
-      await app.close();
-    }
-  });
+  // R3/B6-26-ADJ-01: "comprador sin correo verificado intenta checkout" ya
+  // no es un escenario construible -- identityCapability solo se emite
+  // DESPUÉS de un OTP válido (verifyEmailCode exitoso), así que nunca
+  // existe una capability real para un comprador no verificado. El
+  // equivalente correcto bajo el nuevo contrato es "verificado al emitir
+  // la capability, pero revocado después" -- ver el caso J más arriba
+  // ("email_verified_at revocado después de emitida").
 
   await t.test('checkout crea una orden CREATED con datos calculados en backend, y emite la cookie de sesión', async () => {
     resetRateLimiters();
     const app = await startTestApp();
     try {
-      const customerId = await createVerifiedTestCustomer(app.baseUrl);
+      const { identityCapability } = await createVerifiedTestCustomer(app.baseUrl);
       const response = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           packageId: 'basico',
-          customerId,
+          identityCapability,
           routeId: TEST_ROUTE_ID_A,
           purchaseAttemptId: crypto.randomUUID(),
         }),
@@ -391,15 +704,17 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
     resetRateLimiters();
     const app = await startTestApp();
     try {
-      const customerId = await createVerifiedTestCustomer(app.baseUrl);
+      const { identityCapability } = await createVerifiedTestCustomer(app.baseUrl);
       // Mismo purchaseAttemptId en ambas llamadas -- exactamente lo que el
       // frontend hace en un doble clic real (un solo purchaseAttemptId
       // generado al entrar al resumen, reutilizado mientras el intento
-      // sigue en curso).
+      // sigue en curso). También ejercita, de paso, que identityCapability
+      // es deliberadamente reutilizable dentro de su TTL (§18 del encargo)
+      // -- la misma capability se envía dos veces.
       const body = JSON.stringify({
         packageId: 'plus',
         routeId: TEST_ROUTE_ID_A,
-        customerId,
+        identityCapability,
         purchaseAttemptId: crypto.randomUUID(),
       });
 
@@ -426,12 +741,16 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
   });
 
   await t.test(
-    'la misma persona, mismo predio+paquete, con purchaseAttemptId DISTINTO (dos intentos explícitos, sin importar cuán seguidos) -> dos órdenes',
+    'la misma persona, mismo predio+paquete, con purchaseAttemptId DISTINTO (dos intentos explícitos, sin importar cuán seguidos) -> dos órdenes -- prueba explícita de que identityCapability NO es de un solo uso (§18)',
     async () => {
       resetRateLimiters();
       const app = await startTestApp();
       try {
-        const customerId = await createVerifiedTestCustomer(app.baseUrl);
+        // R3/B6-26-ADJ-01 (§18): identityCapability se resuelve UNA sola
+        // vez y se reutiliza en ambas llamadas -- demuestra explícitamente
+        // que la capability no consume ningún estado de un solo uso; lo
+        // único que distingue los dos intentos es purchaseAttemptId.
+        const { identityCapability } = await createVerifiedTestCustomer(app.baseUrl);
 
         const first = await fetch(`${app.baseUrl}/checkout`, {
           method: 'POST',
@@ -439,7 +758,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
           body: JSON.stringify({
             packageId: 'basico',
             routeId: TEST_ROUTE_ID_A,
-            customerId,
+            identityCapability,
             purchaseAttemptId: crypto.randomUUID(),
           }),
         });
@@ -448,14 +767,16 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
         // Segundo intento explícito, inmediatamente después (dentro de lo
         // que antes era la ventana de 2 minutos) -- con el diseño anterior
         // esto se habría fusionado con la primera orden; ahora, al tener
-        // su propio purchaseAttemptId, crea una orden nueva.
+        // su propio purchaseAttemptId, crea una orden nueva. La MISMA
+        // identityCapability del primer intento sigue siendo válida y
+        // suficiente -- no fue consumida por el primer checkout.
         const second = await fetch(`${app.baseUrl}/checkout`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             packageId: 'basico',
             routeId: TEST_ROUTE_ID_A,
-            customerId,
+            identityCapability,
             purchaseAttemptId: crypto.randomUUID(),
           }),
         });
@@ -471,23 +792,23 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
     },
   );
 
-  await t.test('un comprador DISTINTO con el mismo purchaseAttemptId nunca comparte orden (customerId participa en la llave)', async () => {
+  await t.test('un comprador DISTINTO con el mismo purchaseAttemptId nunca comparte orden (customerId interno, resuelto server-side desde la capability, participa en la llave)', async () => {
     resetRateLimiters();
     const app = await startTestApp();
     try {
       const sharedAttemptId = crypto.randomUUID();
-      const customerA = await createVerifiedTestCustomer(app.baseUrl);
-      const customerB = await createVerifiedTestCustomer(app.baseUrl);
+      const { identityCapability: capabilityA } = await createVerifiedTestCustomer(app.baseUrl);
+      const { identityCapability: capabilityB } = await createVerifiedTestCustomer(app.baseUrl);
 
       const checkoutA = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, customerId: customerA, purchaseAttemptId: sharedAttemptId }),
+        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, identityCapability: capabilityA, purchaseAttemptId: sharedAttemptId }),
       });
       const checkoutB = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, customerId: customerB, purchaseAttemptId: sharedAttemptId }),
+        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, identityCapability: capabilityB, purchaseAttemptId: sharedAttemptId }),
       });
 
       const payloadA = await checkoutA.json();
@@ -503,13 +824,13 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
     async () => {
       const app = await startTestApp();
       try {
-        const customerA = await createVerifiedTestCustomer(app.baseUrl);
-        const customerB = await createVerifiedTestCustomer(app.baseUrl);
+        const { identityCapability: capabilityA } = await createVerifiedTestCustomer(app.baseUrl);
+        const { identityCapability: capabilityB } = await createVerifiedTestCustomer(app.baseUrl);
 
         const checkoutA = await fetch(`${app.baseUrl}/checkout`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packageId: 'basico', customerId: customerA, routeId: TEST_ROUTE_ID_B, purchaseAttemptId: crypto.randomUUID() }),
+          body: JSON.stringify({ packageId: 'basico', identityCapability: capabilityA, routeId: TEST_ROUTE_ID_B, purchaseAttemptId: crypto.randomUUID() }),
         });
         const cookieA = extractSessionCookiePair(checkoutA);
         const payloadA = await checkoutA.json();
@@ -517,7 +838,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
         const checkoutB = await fetch(`${app.baseUrl}/checkout`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packageId: 'basico', customerId: customerB, routeId: TEST_ROUTE_ID_B, purchaseAttemptId: crypto.randomUUID() }),
+          body: JSON.stringify({ packageId: 'basico', identityCapability: capabilityB, routeId: TEST_ROUTE_ID_B, purchaseAttemptId: crypto.randomUUID() }),
         });
         const cookieB = extractSessionCookiePair(checkoutB);
         const payloadB = await checkoutB.json();
@@ -530,7 +851,10 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
         assert.equal(payloadB.checkout.status, 'CREATED');
 
         // Aprueba ambas transacciones (Sandbox simulado independientemente).
-        for (const [ref, txnId] of [[payloadA.checkout.reference, 'txn-n-purchase-a'], [payloadB.checkout.reference, 'txn-n-purchase-b']]) {
+        for (const [ref, txnId] of [
+          [payloadA.checkout.reference, testTransactionId('n-purchase-a')],
+          [payloadB.checkout.reference, testTransactionId('n-purchase-b')],
+        ]) {
           withWompiFetchMock(() =>
             jsonResponse(200, {
               data: { id: txnId, status: 'APPROVED', reference: ref, amount_in_cents: 3990000, currency: 'COP' },
@@ -547,7 +871,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
         const entitlementA = await fetch(`${app.baseUrl}/entitlements/check`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Cookie: cookieA },
-          body: JSON.stringify({ codigoPredial: TEST_CODIGO_B, packageId: 'basico' }),
+          body: JSON.stringify({ codigoPredial: INTEGRATION_TEST_CODIGO, packageId: 'basico' }),
         });
         assert.equal((await entitlementA.json()).isPaid, true);
 
@@ -556,17 +880,17 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
         const entitlementB = await fetch(`${app.baseUrl}/entitlements/check`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Cookie: cookieB },
-          body: JSON.stringify({ codigoPredial: TEST_CODIGO_B, packageId: 'basico' }),
+          body: JSON.stringify({ codigoPredial: INTEGRATION_TEST_CODIGO, packageId: 'basico' }),
         });
         assert.equal((await entitlementB.json()).isPaid, true);
 
         // Un comprador NUEVO, del mismo predio+paquete, sigue pudiendo
         // comprar -- nunca hay ALREADY_PAID global.
-        const customerC = await createVerifiedTestCustomer(app.baseUrl);
+        const { identityCapability: capabilityC } = await createVerifiedTestCustomer(app.baseUrl);
         const checkoutC = await fetch(`${app.baseUrl}/checkout`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packageId: 'basico', customerId: customerC, routeId: TEST_ROUTE_ID_B, purchaseAttemptId: crypto.randomUUID() }),
+          body: JSON.stringify({ packageId: 'basico', identityCapability: capabilityC, routeId: TEST_ROUTE_ID_B, purchaseAttemptId: crypto.randomUUID() }),
         });
         const payloadC = await checkoutC.json();
         assert.equal(payloadC.checkout.status, 'CREATED');
@@ -582,22 +906,23 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
     resetRateLimiters();
     const app = await startTestApp();
     try {
-      const customerId = await createVerifiedTestCustomer(app.baseUrl);
+      const { identityCapability } = await createVerifiedTestCustomer(app.baseUrl);
       const checkoutResponse = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, customerId, purchaseAttemptId: crypto.randomUUID() }),
+        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, identityCapability, purchaseAttemptId: crypto.randomUUID() }),
       });
       const cookie = extractSessionCookiePair(checkoutResponse);
       const { reference } = (await checkoutResponse.json()).checkout;
 
+      const txnId = testTransactionId('entitlement-1');
       withWompiFetchMock(() =>
         jsonResponse(200, {
-          data: { id: 'txn-entitlement-1', status: 'APPROVED', reference, amount_in_cents: 3990000, currency: 'COP' },
+          data: { id: txnId, status: 'APPROVED', reference, amount_in_cents: 3990000, currency: 'COP' },
         }),
       );
       try {
-        await fetch(`${app.baseUrl}/verify/txn-entitlement-1`);
+        await fetch(`${app.baseUrl}/verify/${txnId}`);
       } finally {
         restoreFetch();
       }
@@ -605,7 +930,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const noCookie = await fetch(`${app.baseUrl}/entitlements/check`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ codigoPredial: TEST_CODIGO_A, packageId: 'basico' }),
+        body: JSON.stringify({ codigoPredial: INTEGRATION_TEST_CODIGO, packageId: 'basico' }),
       });
       assert.equal(noCookie.status, 200);
       assert.equal((await noCookie.json()).isPaid, false);
@@ -613,7 +938,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const withCookie = await fetch(`${app.baseUrl}/entitlements/check`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
-        body: JSON.stringify({ codigoPredial: TEST_CODIGO_A, packageId: 'basico' }),
+        body: JSON.stringify({ codigoPredial: INTEGRATION_TEST_CODIGO, packageId: 'basico' }),
       });
       const withCookiePayload = await withCookie.json();
       assert.equal(withCookiePayload.isPaid, true);
@@ -622,14 +947,14 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const otherPredio = await fetch(`${app.baseUrl}/entitlements/check`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
-        body: JSON.stringify({ codigoPredial: TEST_CODIGO_B, packageId: 'basico' }),
+        body: JSON.stringify({ codigoPredial: UNPURCHASED_TEST_CODIGO, packageId: 'basico' }),
       });
       assert.equal((await otherPredio.json()).isPaid, false);
 
       const higherPackage = await fetch(`${app.baseUrl}/entitlements/check`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
-        body: JSON.stringify({ codigoPredial: TEST_CODIGO_A, packageId: 'profesional' }),
+        body: JSON.stringify({ codigoPredial: INTEGRATION_TEST_CODIGO, packageId: 'profesional' }),
       });
       assert.equal((await higherPackage.json()).isPaid, false);
 
@@ -637,7 +962,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const forged = await fetch(`${app.baseUrl}/entitlements/check`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: forgedCookie },
-        body: JSON.stringify({ codigoPredial: TEST_CODIGO_A, packageId: 'basico' }),
+        body: JSON.stringify({ codigoPredial: INTEGRATION_TEST_CODIGO, packageId: 'basico' }),
       });
       assert.equal(forged.status, 200);
       assert.equal((await forged.json()).isPaid, false);
@@ -650,11 +975,11 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
     resetRateLimiters();
     const app = await startTestApp();
     try {
-      const customerId = await createVerifiedTestCustomer(app.baseUrl);
+      const { identityCapability } = await createVerifiedTestCustomer(app.baseUrl);
       const checkoutResponse = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, customerId, purchaseAttemptId: crypto.randomUUID() }),
+        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, identityCapability, purchaseAttemptId: crypto.randomUUID() }),
       });
       const { orderToken } = (await checkoutResponse.json()).checkout;
 
@@ -676,23 +1001,24 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
     resetRateLimiters();
     const app = await startTestApp();
     try {
-      const customerId = await createVerifiedTestCustomer(app.baseUrl);
+      const { identityCapability } = await createVerifiedTestCustomer(app.baseUrl);
       const checkoutResponse = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, customerId, purchaseAttemptId: crypto.randomUUID() }),
+        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, identityCapability, purchaseAttemptId: crypto.randomUUID() }),
       });
       const { reference } = (await checkoutResponse.json()).checkout;
 
+      const txnId = testTransactionId('monto-malo');
       withWompiFetchMock(() =>
         jsonResponse(200, {
-          data: { id: 'txn-monto-malo', status: 'APPROVED', reference, amount_in_cents: 1, currency: 'COP' },
+          data: { id: txnId, status: 'APPROVED', reference, amount_in_cents: 1, currency: 'COP' },
         }),
       );
 
       let verifyPayload;
       try {
-        const verifyResponse = await fetch(`${app.baseUrl}/verify/txn-monto-malo`);
+        const verifyResponse = await fetch(`${app.baseUrl}/verify/${txnId}`);
         verifyPayload = await verifyResponse.json();
       } finally {
         restoreFetch();
@@ -708,22 +1034,23 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
     resetRateLimiters();
     const app = await startTestApp();
     try {
-      const customerId = await createVerifiedTestCustomer(app.baseUrl);
+      const { identityCapability } = await createVerifiedTestCustomer(app.baseUrl);
       const checkoutResponse = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, customerId, purchaseAttemptId: crypto.randomUUID() }),
+        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID_A, identityCapability, purchaseAttemptId: crypto.randomUUID() }),
       });
       const cookie = extractSessionCookiePair(checkoutResponse);
       const { reference } = (await checkoutResponse.json()).checkout;
 
+      const txnId = testTransactionId('clear-1');
       withWompiFetchMock(() =>
         jsonResponse(200, {
-          data: { id: 'txn-clear-1', status: 'APPROVED', reference, amount_in_cents: 3990000, currency: 'COP' },
+          data: { id: txnId, status: 'APPROVED', reference, amount_in_cents: 3990000, currency: 'COP' },
         }),
       );
       try {
-        await fetch(`${app.baseUrl}/verify/txn-clear-1`);
+        await fetch(`${app.baseUrl}/verify/${txnId}`);
       } finally {
         restoreFetch();
       }
@@ -731,7 +1058,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const beforeClear = await fetch(`${app.baseUrl}/entitlements/check`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
-        body: JSON.stringify({ codigoPredial: TEST_CODIGO_A, packageId: 'basico' }),
+        body: JSON.stringify({ codigoPredial: INTEGRATION_TEST_CODIGO, packageId: 'basico' }),
       });
       assert.equal((await beforeClear.json()).isPaid, true);
 
@@ -740,7 +1067,7 @@ test('sistema de órdenes de pago CatastroX (integración, requiere Postgres rea
       const afterClear = await fetch(`${app.baseUrl}/entitlements/check`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
-        body: JSON.stringify({ codigoPredial: TEST_CODIGO_A, packageId: 'basico' }),
+        body: JSON.stringify({ codigoPredial: INTEGRATION_TEST_CODIGO, packageId: 'basico' }),
       });
       assert.equal((await afterClear.json()).isPaid, false, 'la sesión revocada ya no debe reconocer el pago');
     } finally {

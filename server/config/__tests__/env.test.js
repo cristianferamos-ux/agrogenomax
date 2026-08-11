@@ -18,6 +18,14 @@ import {
 const TEST_PII_ENCRYPTION_KEY = '/7cHJDrllkKZ+qVKEMuaM+205+vEvpCTRKUArWkx+cc=';
 const TEST_PII_HASH_SECRET = 'b'.repeat(32);
 
+// R3/B6-26 + B6-26-ADJ-01: staging/production ahora también exigen
+// CATASTROX_VERIFY_HANDLE_KEY/CATASTROX_CHECKOUT_IDENTITY_KEY (32 bytes en
+// base64 cada una, independientes entre sí y de CATASTROX_PII_ENCRYPTION_KEY)
+// -- valores sintéticos fijos de prueba, nunca usados fuera de este archivo,
+// nunca reutilizados el uno para el otro.
+const TEST_VERIFY_HANDLE_KEY = 'gwslZ1bKInXjQ0TLmMqWeV6vRAL2hONB6bTBqpAjVFs=';
+const TEST_CHECKOUT_IDENTITY_KEY = 'OhWl0C0aTcvlS6gLqCfjLtV/bC3D8CxTGn4txiSCLIc=';
+
 // STAGING_READINESS_001 (Bloque 4): staging ahora también exige
 // WOMPI_PUBLIC_KEY_TEST/WOMPI_INTEGRITY_SECRET_TEST/WOMPI_EVENTS_SECRET_TEST/
 // CATASTROX_FRONTEND_URL -- valores sintéticos válidos, reutilizados como
@@ -42,6 +50,8 @@ function validStagingSource(overrides = {}) {
     HEALTH_MONITOR_TOKEN: 'a'.repeat(32),
     CATASTROX_PII_ENCRYPTION_KEY: TEST_PII_ENCRYPTION_KEY,
     CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
+    CATASTROX_VERIFY_HANDLE_KEY: TEST_VERIFY_HANDLE_KEY,
+    CATASTROX_CHECKOUT_IDENTITY_KEY: TEST_CHECKOUT_IDENTITY_KEY,
     WOMPI_PUBLIC_KEY_TEST: TEST_WOMPI_PUBLIC_KEY_TEST,
     WOMPI_INTEGRITY_SECRET_TEST: TEST_WOMPI_INTEGRITY_SECRET_TEST,
     WOMPI_EVENTS_SECRET_TEST: TEST_WOMPI_EVENTS_SECRET_TEST,
@@ -148,6 +158,8 @@ describe('LOTE-002 (corrección): server/config/env.js', () => {
             HEALTH_MONITOR_TOKEN: 'a'.repeat(32),
             CATASTROX_PII_ENCRYPTION_KEY: TEST_PII_ENCRYPTION_KEY,
             CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
+            CATASTROX_VERIFY_HANDLE_KEY: TEST_VERIFY_HANDLE_KEY,
+            CATASTROX_CHECKOUT_IDENTITY_KEY: TEST_CHECKOUT_IDENTITY_KEY,
           },
           {},
         ),
@@ -166,6 +178,8 @@ describe('LOTE-002 (corrección): server/config/env.js', () => {
             HEALTH_MONITOR_TOKEN: 'a'.repeat(32),
             CATASTROX_PII_ENCRYPTION_KEY: TEST_PII_ENCRYPTION_KEY,
             CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
+            CATASTROX_VERIFY_HANDLE_KEY: TEST_VERIFY_HANDLE_KEY,
+            CATASTROX_CHECKOUT_IDENTITY_KEY: TEST_CHECKOUT_IDENTITY_KEY,
             WOMPI_ENV: 'test',
           },
           {},
@@ -290,6 +304,8 @@ describe('LOTE-002 (corrección): server/config/env.js', () => {
             HEALTH_MONITOR_TOKEN: 'a'.repeat(32),
             CATASTROX_PII_ENCRYPTION_KEY: TEST_PII_ENCRYPTION_KEY,
             CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
+            CATASTROX_VERIFY_HANDLE_KEY: TEST_VERIFY_HANDLE_KEY,
+            CATASTROX_CHECKOUT_IDENTITY_KEY: TEST_CHECKOUT_IDENTITY_KEY,
           },
           {},
         ),
@@ -595,6 +611,8 @@ describe('STAGING_READINESS_001 (Bloque 4): validaciones nuevas de configuració
         HEALTH_MONITOR_TOKEN: 'a'.repeat(32),
         CATASTROX_PII_ENCRYPTION_KEY: TEST_PII_ENCRYPTION_KEY,
         CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
+        CATASTROX_VERIFY_HANDLE_KEY: TEST_VERIFY_HANDLE_KEY,
+        CATASTROX_CHECKOUT_IDENTITY_KEY: TEST_CHECKOUT_IDENTITY_KEY,
       },
       {},
     );
@@ -859,6 +877,109 @@ describe('STAGING_READINESS_001 (Bloque 4): validaciones nuevas de configuració
   });
 });
 
+describe('R3/B6-26 + B6-26-ADJ-01: CATASTROX_VERIFY_HANDLE_KEY/CATASTROX_CHECKOUT_IDENTITY_KEY', () => {
+  beforeEach(() => {
+    __resetValidationStateForTests();
+  });
+
+  // Table-driven: mismas reglas para ambas variables, sin duplicar cada
+  // caso -- solo se repite lo que realmente difiere (el nombre exacto de
+  // la variable en la aserción).
+  const IDENTITY_TOKEN_KEY_VARIABLES = Object.freeze(['CATASTROX_VERIFY_HANDLE_KEY', 'CATASTROX_CHECKOUT_IDENTITY_KEY']);
+
+  // validProductionSource() (definida más abajo, dentro del describe de
+  // EMAIL_PROVIDER_002) no es accesible aquí -- está en el scope de su
+  // propio callback, no a nivel de módulo. Fixture local mínima,
+  // equivalente en los campos que a este bloque le importan.
+  function minimalValidProductionSource(overrides = {}) {
+    return {
+      APP_ENV: 'production',
+      DATABASE_URL: 'postgres://real-prod-host/agx',
+      CATASTROX_DATABASE_URL: 'postgres://real-prod-host/gis',
+      HEALTH_MONITOR_TOKEN: 'a'.repeat(32),
+      CATASTROX_PII_ENCRYPTION_KEY: TEST_PII_ENCRYPTION_KEY,
+      CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
+      CATASTROX_VERIFY_HANDLE_KEY: TEST_VERIFY_HANDLE_KEY,
+      CATASTROX_CHECKOUT_IDENTITY_KEY: TEST_CHECKOUT_IDENTITY_KEY,
+      ...overrides,
+    };
+  }
+
+  for (const variable of IDENTITY_TOKEN_KEY_VARIABLES) {
+    test(`staging sin ${variable} falla (variable requerida)`, () => {
+      const source = validStagingSource();
+      delete source[variable];
+      assert.throws(
+        () => getConfig(source, {}),
+        (error) => error instanceof ConfigurationError && error.code === 'REQUIRED_VARIABLE_MISSING' && error.variable === variable,
+      );
+    });
+
+    test(`production sin ${variable} falla (variable requerida)`, () => {
+      const source = minimalValidProductionSource();
+      delete source[variable];
+      assert.throws(
+        () => getConfig(source, {}),
+        (error) => error instanceof ConfigurationError && error.code === 'REQUIRED_VARIABLE_MISSING' && error.variable === variable,
+      );
+    });
+
+    test(`${variable} con caracteres fuera del alfabeto base64 falla (INSECURE_VALUE), incluso si Buffer.from(...) los toleraría`, () => {
+      // Node decodifica base64 de forma permisiva: ignora caracteres fuera
+      // del alfabeto en vez de fallar. Esta clave insertó 4 caracteres '!'
+      // en medio de una clave por lo demás válida -- Buffer.from(...,
+      // 'base64') los descarta y, por pura coincidencia, decodifica igual
+      // a 32 bytes. El patrón canónico estricto debe rechazarla de todos
+      // modos, ANTES de llegar siquiera a decodificar.
+      const cleanKey = 'gwslZ1bKInXjQ0TLmMqWeV6vRAL2hONB6bTBqpAjVFs=';
+      const keyWithTolerableGarbage = `${cleanKey.slice(0, 10)}!!!!${cleanKey.slice(10)}`;
+      assert.equal(Buffer.from(keyWithTolerableGarbage, 'base64').length, 32, 'precondición: Buffer.from() sí lo tolera');
+
+      assert.throws(
+        () => getConfig(validStagingSource({ [variable]: keyWithTolerableGarbage }), {}),
+        (error) => error instanceof ConfigurationError && error.code === 'INSECURE_VALUE' && error.variable === variable,
+      );
+    });
+
+    test(`${variable} con espacios iniciales/finales falla (INSECURE_VALUE)`, () => {
+      const base = variable === 'CATASTROX_VERIFY_HANDLE_KEY' ? TEST_VERIFY_HANDLE_KEY : TEST_CHECKOUT_IDENTITY_KEY;
+      assert.throws(
+        () => getConfig(validStagingSource({ [variable]: ` ${base}` }), {}),
+        (error) => error instanceof ConfigurationError && error.code === 'INSECURE_VALUE' && error.variable === variable,
+      );
+      assert.throws(
+        () => getConfig(validStagingSource({ [variable]: `${base} ` }), {}),
+        (error) => error instanceof ConfigurationError && error.code === 'INSECURE_VALUE' && error.variable === variable,
+      );
+    });
+
+    test(`${variable} de longitud decodificada distinta de 32 bytes falla (INSECURE_VALUE)`, () => {
+      const shortKey = Buffer.alloc(16, 7).toString('base64'); // 16 bytes, no 32
+      assert.throws(
+        () => getConfig(validStagingSource({ [variable]: shortKey }), {}),
+        (error) => error instanceof ConfigurationError && error.code === 'INSECURE_VALUE' && error.variable === variable,
+      );
+    });
+  }
+
+  test('CATASTROX_VERIFY_HANDLE_KEY y CATASTROX_CHECKOUT_IDENTITY_KEY válidas (32 bytes en base64 canónico) no fallan en staging ni en producción', () => {
+    const stagingConfig = getConfig(validStagingSource(), {});
+    assert.equal(stagingConfig.appEnv, 'staging');
+
+    __resetValidationStateForTests();
+    const productionConfig = getConfig(minimalValidProductionSource(), {});
+    assert.equal(productionConfig.appEnv, 'production');
+  });
+
+  test('CATASTROX_VERIFY_HANDLE_KEY y CATASTROX_CHECKOUT_IDENTITY_KEY son independientes: usar la misma clave para ambas no falla la validación de formato (la separación de propósito es responsabilidad de identityCapability.js, no de env.js)', () => {
+    const config = getConfig(
+      validStagingSource({ CATASTROX_CHECKOUT_IDENTITY_KEY: TEST_VERIFY_HANDLE_KEY }),
+      {},
+    );
+    assert.equal(config.appEnv, 'staging');
+  });
+});
+
 describe('EMAIL_PROVIDER_002: EMAIL_PROVIDER/RESEND_API_KEY/EMAIL_FROM/EMAIL_SEND_TIMEOUT_MS', () => {
   beforeEach(() => {
     __resetValidationStateForTests();
@@ -935,6 +1056,8 @@ describe('EMAIL_PROVIDER_002: EMAIL_PROVIDER/RESEND_API_KEY/EMAIL_FROM/EMAIL_SEN
         HEALTH_MONITOR_TOKEN: 'a'.repeat(32),
         CATASTROX_PII_ENCRYPTION_KEY: TEST_PII_ENCRYPTION_KEY,
         CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
+        CATASTROX_VERIFY_HANDLE_KEY: TEST_VERIFY_HANDLE_KEY,
+        CATASTROX_CHECKOUT_IDENTITY_KEY: TEST_CHECKOUT_IDENTITY_KEY,
       },
       {},
     );
@@ -1031,6 +1154,8 @@ describe('EMAIL_PROVIDER_002: EMAIL_PROVIDER/RESEND_API_KEY/EMAIL_FROM/EMAIL_SEN
       HEALTH_MONITOR_TOKEN: 'a'.repeat(32),
       CATASTROX_PII_ENCRYPTION_KEY: TEST_PII_ENCRYPTION_KEY,
       CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
+      CATASTROX_VERIFY_HANDLE_KEY: TEST_VERIFY_HANDLE_KEY,
+      CATASTROX_CHECKOUT_IDENTITY_KEY: TEST_CHECKOUT_IDENTITY_KEY,
       ...overrides,
     };
   }

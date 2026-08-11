@@ -209,7 +209,14 @@ export default function CatastroXPackagePage({ packageId }) {
   // usuario confirma explícitamente (handleConfirmPurchase).
   const [purchaseFlowStep, setPurchaseFlowStep] = useState(null); // null | 'buyer_form' | 'otp' | 'summary'
   const [buyerInput, setBuyerInput] = useState(null);
-  const [customerId, setCustomerId] = useState(null);
+  // R3/B6-26 + B6-26-ADJ-01: customerId nunca llega a este cliente --
+  // verificationHandle (emitido por createCustomer) correlaciona el paso de
+  // OTP con el comprador correcto; identityCapability (emitido por
+  // verifyCustomerEmail tras un OTP válido) es la única credencial que
+  // startPackageCheckout puede enviar al backend. Ambos solo en memoria de
+  // React, igual que customerId antes -- nunca localStorage/sessionStorage.
+  const [verificationHandle, setVerificationHandle] = useState(null);
+  const [identityCapability, setIdentityCapability] = useState(null);
   const [devOtpCode, setDevOtpCode] = useState(null);
   const [isCreatingCustomer, setIsCreatingCustomer] = useState(false);
   const [buyerFormError, setBuyerFormError] = useState(null);
@@ -227,7 +234,8 @@ export default function CatastroXPackagePage({ packageId }) {
   function resetPurchaseFlow() {
     setPurchaseFlowStep(null);
     setBuyerInput(null);
-    setCustomerId(null);
+    setVerificationHandle(null);
+    setIdentityCapability(null);
     setDevOtpCode(null);
     setBuyerFormError(null);
     purchaseAttemptIdRef.current = null;
@@ -538,8 +546,10 @@ export default function CatastroXPackagePage({ packageId }) {
   };
 
   // Paso 7-8 del flujo: crea o recupera el comprador y dispara el envío del
-  // OTP. customerId/buyerInput quedan solo en memoria (useState de este
-  // componente) -- nunca en almacenamiento del navegador.
+  // OTP. verificationHandle/buyerInput quedan solo en memoria (useState de
+  // este componente) -- nunca en almacenamiento del navegador. Un envío
+  // nuevo (registro inicial) nunca debe arrastrar una identityCapability de
+  // un intento anterior distinto -- se limpia explícitamente.
   const handleBuyerFormSubmit = async (input) => {
     setIsCreatingCustomer(true);
     setBuyerFormError(null);
@@ -552,31 +562,43 @@ export default function CatastroXPackagePage({ packageId }) {
     }
 
     setBuyerInput(input);
-    setCustomerId(result.customerId);
+    setVerificationHandle(result.verificationHandle);
+    setIdentityCapability(null);
     setDevOtpCode(result.devOtpCode || null);
     setPurchaseFlowStep('otp');
   };
 
-  // Reenvío de código (Bloque 4): reutiliza el mismo POST /customers (upsert
-  // idempotente por documento) -- el backend genera y "envía" un código
-  // nuevo cada vez.
+  // Reenvío de código (Bloque 4): reutiliza el mismo POST /customers
+  // (resolveCustomerForVerification, Modelo B) -- el backend emite un
+  // verificationHandle nuevo y genera/"envía" un código nuevo cada vez. Un
+  // reenvío reinicia el paso de OTP -- cualquier identityCapability de un
+  // intento anterior queda descartada, nunca se conserva junto a un handle
+  // nuevo.
   const handleResendOtp = async () => {
     if (!buyerInput) return;
     const result = await createCustomer(buyerInput);
     if (result.ok) {
-      if (result.customerId) setCustomerId(result.customerId);
+      if (result.verificationHandle) setVerificationHandle(result.verificationHandle);
+      setIdentityCapability(null);
       setDevOtpCode(result.devOtpCode || null);
     }
   };
 
   // Paso 9-10: verifica el código. El código en sí nunca pasa por este
   // componente -- CatastroXOtpVerification lo mantiene en su propio estado
-  // y lo descarta inmediatamente después del intento.
+  // y lo descarta inmediatamente después del intento. Un OTP válido emite
+  // identityCapability (R3/B6-26-ADJ-01) -- única credencial que
+  // handleStartCheckout podrá enviar a /checkout; se guarda ANTES de que el
+  // usuario pueda avanzar al resumen (handleOtpVerified, más abajo).
   const handleVerifyOtp = async (code) => {
-    if (!customerId) {
+    if (!verificationHandle) {
       return { ok: false, code: 'INVALID_VERIFICATION_REQUEST', message: 'Solicitud inválida.' };
     }
-    return verifyCustomerEmail({ customerId, code });
+    const result = await verifyCustomerEmail({ verificationHandle, code });
+    if (result.ok && result.identityCapability) {
+      setIdentityCapability(result.identityCapability);
+    }
+    return result;
   };
 
   const handleOtpVerified = () => {
@@ -597,10 +619,10 @@ export default function CatastroXPackagePage({ packageId }) {
   // CORS rechazando el origen), el usuario caía en la pantalla inicial
   // "Comprar" -- y al pulsarla de nuevo, handleOpenBuyerForm() reabría un
   // CatastroXBuyerForm en blanco, perdiendo visualmente su progreso aunque
-  // customerId siguiera vivo en memoria (efecto percibido como "vuelve al
-  // formulario del comprador"). Ahora el resumen permanece visible durante
-  // todo el intento; solo onOpened() (más abajo, Wompi realmente abierto)
-  // saca al usuario del resumen.
+  // verificationHandle/identityCapability siguieran vivos en memoria (efecto
+  // percibido como "vuelve al formulario del comprador"). Ahora el resumen
+  // permanece visible durante todo el intento; solo onOpened() (más abajo,
+  // Wompi realmente abierto) saca al usuario del resumen.
   const handleConfirmPurchase = async () => {
     if (checkoutInFlightRef.current) return;
     checkoutInFlightRef.current = true;
@@ -645,7 +667,7 @@ export default function CatastroXPackagePage({ packageId }) {
       const checkoutResult = await startPackageCheckout({
         packageId,
         lookup,
-        customerId,
+        identityCapability,
         purchaseAttemptId: purchaseAttemptIdRef.current,
         targetRoute: `/catastrox/${pkg.routeSlug}/${routeId || predio.id}`,
         onCheckoutStart: (state) => setCheckoutState(state),

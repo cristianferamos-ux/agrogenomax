@@ -13,11 +13,32 @@ import dotenv from 'dotenv';
 dotenv.config({ path: '.env', quiet: true });
 dotenv.config({ path: 'server/.env', quiet: true });
 
-const TEST_CODIGO = '900000000000000000000000000099';
+// P1-02/P1-03 (remediación post-auditoría): POST /checkout ahora exige un
+// predio resoluble por resolveCheckoutPredioEligibility antes de crear
+// cualquier orden -- un código sintético que no existe en catastrox_clean
+// ya no sirve como fixture de "cualquier predio" para un checkout exitoso.
+// INTEGRATION_TEST_CODIGO es el mismo código sintético de 30 dígitos,
+// resuelto localmente por scripts/catastrox/test/setup_integration_postgis.sql,
+// que ya usan catastroxPaymentOrders.test.js/catastroxPaymentWebhook.test.js/
+// catastroxDeliveryLifecycle.test.js -- este archivo no tiene ningún test
+// que necesite deliberadamente un predio distinto/no resoluble, así que se
+// adopta sin reservas.
+const INTEGRATION_TEST_CODIGO = '999999999999999999999999999901';
 // Corrección de seguridad (checkout sin fallback inseguro): POST /checkout
 // exige un routeId que resuelva a un lookup vigente -- ver la misma nota
 // en catastroxPaymentOrders.test.js.
 const TEST_ROUTE_ID = 'cx-test-history-route';
+
+// Identificador único por ejecución del archivo -- misma razón que en
+// catastroxPaymentOrders.test.js/catastroxPaymentWebhook.test.js:
+// wompi_transaction_id tiene una UNIQUE global, y un literal fijo
+// reutilizado entre corridas puede colisionar con una fila residual de una
+// ejecución anterior.
+const TEST_RUN_ID = crypto.randomUUID();
+
+function testTransactionId(label) {
+  return `txn-${label}-${TEST_RUN_ID}`;
+}
 
 let dbAvailable = false;
 let getDbPool;
@@ -44,7 +65,7 @@ let normalizeDocumentNumber;
 if (dbAvailable) {
   ({ default: catastroxPaymentsRouter } = await import('../catastroxPayments.js'));
   ({ __rememberLookupPreviewForTests } = await import('../catastrox.js'));
-  __rememberLookupPreviewForTests(TEST_ROUTE_ID, { canonicalPredioId: TEST_CODIGO, codigoPredial: TEST_CODIGO });
+  __rememberLookupPreviewForTests(TEST_ROUTE_ID, { canonicalPredioId: INTEGRATION_TEST_CODIGO, codigoPredial: INTEGRATION_TEST_CODIGO });
   const limiterModule = await import('../../middleware/rateLimit.js');
   rateLimiters = [
     limiterModule.checkoutLimiter,
@@ -138,10 +159,29 @@ async function startTestApp() {
 }
 
 let counter = 0;
+// INTEGRATION_TEST_CODIGO se comparte entre varios archivos de integración
+// que node --test puede ejecutar en paralelo -- cleanupTestData() combina
+// este filtro con customer_id = any(createdCustomerIds) para nunca tocar
+// órdenes creadas concurrentemente por otro archivo bajo el mismo predio.
+const createdCustomerIds = [];
+
+// R3/B6-26 + B6-26-ADJ-01: POST /customers ya no devuelve customerId (nunca,
+// ni en éxito ni en fallo -- ver server/routes/catastroxPayments.js). Los
+// tests de este archivo que todavía necesitan un customerId real (para
+// checkout, que en Etapa 2 sigue aceptándolo, o para el teardown vía
+// createdCustomerIds) lo resuelven por consulta directa a Postgres a partir
+// del documentNumber usado, igual que ya hacían las pruebas de cooldown más
+// abajo -- nunca confiando en un valor que el HTTP ya no expone.
+async function lookupCustomerIdByDocument(documentNumber) {
+  const documentHash = hashDocumentNumber(normalizeDocumentNumber(documentNumber));
+  const result = await query('select id from public.catastrox_customers where document_number_hash = $1', [documentHash]);
+  return result.rows[0]?.id ?? null;
+}
 
 async function createCustomer(baseUrl, overrides = {}) {
   counter += 1;
   const email = overrides.email || `otp-history-${Date.now()}-${counter}@example.com`;
+  const documentNumber = overrides.documentNumber || `93${counter}${Date.now()}`.slice(0, 15);
   const response = await fetch(`${baseUrl}/customers`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -150,7 +190,7 @@ async function createCustomer(baseUrl, overrides = {}) {
       firstName: 'Historial',
       lastName: 'Test',
       documentType: 'CC',
-      documentNumber: `93${counter}${Date.now()}`.slice(0, 15),
+      documentNumber,
       email,
       emailConfirmation: email,
       phone: '3000000000',
@@ -164,7 +204,13 @@ async function createCustomer(baseUrl, overrides = {}) {
       ...overrides,
     }),
   });
-  return response.json();
+  const payload = await response.json();
+  if (payload.ok) {
+    const customerId = await lookupCustomerIdByDocument(documentNumber);
+    if (customerId) createdCustomerIds.push(customerId);
+    payload.customerId = customerId;
+  }
+  return payload;
 }
 
 // CATX-DELIVERY-001 (ajuste obligatorio #8): triggerPostApprovalWorkflows ya
@@ -187,15 +233,59 @@ async function waitForOrderDeliveryStatus(app, cookie, orderToken, { timeoutMs =
   }
 }
 
+// A diferencia de waitForOrderDeliveryStatus (arriba, por-orderToken, usado
+// dentro del propio test para poder asertar contra un deliveryStatus
+// conocido), este helper es exclusivo del teardown: actúa sobre TODOS los
+// orderIds encontrados a la vez, y -- a propósito -- lanza si vence el
+// timeout, en vez de devolver silenciosamente lo que haya. El checkout/
+// verify real nunca espera a processDeliveryJob() (triggerPostApprovalWorkflows
+// lo dispara con `void processDeliveryJob(job.id).catch(...)`, fire-and-forget
+// por diseño, CATX-DELIVERY-001 ajuste #8), así que un job puede seguir
+// activo (QUEUED/GENERATING/READY/SENDING) en segundo plano incluso después
+// de que la petición HTTP ya respondió. Si el teardown borra
+// catastrox_delivery_jobs mientras esa escritura en curso todavía intenta
+// insertar en catastrox_deliverables, choca contra la FK
+// catastrox_deliverables_delivery_job_id_fkey -- una carrera de TEST, no un
+// defecto del pipeline de entrega. Solo consulta Postgres, nunca muta el
+// job ni llama processDeliveryJob.
+async function waitForDeliveryJobsToSettle(orderIds, { timeoutMs = 5000, intervalMs = 50 } = {}) {
+  if (!orderIds.length) return;
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const result = await query(
+      `select id, status from public.catastrox_delivery_jobs
+        where payment_order_id = any($1)
+          and status not in ('SENT', 'FAILED')`,
+      [orderIds],
+    );
+    if (result.rows.length === 0) return;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `waitForDeliveryJobsToSettle: timeout esperando estado terminal (SENT/FAILED) de ${result.rows.length} delivery job(s): ` +
+          result.rows.map((row) => `${row.id}=${row.status}`).join(', '),
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
 async function cleanupTestData() {
   if (!dbAvailable) return;
-  const orders = await query('select id, customer_id from public.catastrox_payment_orders where canonical_predio_id = $1', [
-    TEST_CODIGO,
-  ]);
+  // INTEGRATION_TEST_CODIGO es compartido entre varios archivos de
+  // integración -- se combina con customer_id = any(createdCustomerIds)
+  // (propios de este archivo) para nunca tocar órdenes creadas
+  // concurrentemente por otro archivo bajo el mismo predio (ver comentario
+  // de createdCustomerIds más arriba).
+  const orders = await query(
+    'select id, customer_id from public.catastrox_payment_orders where canonical_predio_id = $1 and customer_id = any($2)',
+    [INTEGRATION_TEST_CODIGO, createdCustomerIds],
+  );
   const orderIds = orders.rows.map((row) => row.id);
   const customerIds = orders.rows.map((row) => row.customer_id).filter(Boolean);
 
   if (orderIds.length) {
+    await waitForDeliveryJobsToSettle(orderIds);
+    await query('delete from public.catastrox_deliverable_blobs where deliverable_id in (select id from public.catastrox_deliverables where delivery_job_id in (select id from public.catastrox_delivery_jobs where payment_order_id = any($1)))', [orderIds]);
     await query('delete from public.catastrox_delivery_attempts where delivery_job_id in (select id from public.catastrox_delivery_jobs where payment_order_id = any($1))', [orderIds]);
     await query('delete from public.catastrox_deliverables where delivery_job_id in (select id from public.catastrox_delivery_jobs where payment_order_id = any($1))', [orderIds]);
     await query('delete from public.catastrox_delivery_jobs where payment_order_id = any($1)', [orderIds]);
@@ -203,7 +293,10 @@ async function cleanupTestData() {
     await query('delete from public.catastrox_recovery_session_orders where payment_order_id = any($1)', [orderIds]);
     await query('delete from public.catastrox_billing_profiles where payment_order_id = any($1)', [orderIds]);
   }
-  await query('delete from public.catastrox_payment_orders where canonical_predio_id = $1', [TEST_CODIGO]);
+  await query('delete from public.catastrox_payment_orders where canonical_predio_id = $1 and customer_id = any($2)', [
+    INTEGRATION_TEST_CODIGO,
+    createdCustomerIds,
+  ]);
   if (customerIds.length) {
     await query('delete from public.catastrox_email_verifications where customer_id = any($1)', [customerIds]);
     await query('delete from public.catastrox_customer_otp_state where customer_id = any($1)', [customerIds]);
@@ -225,11 +318,11 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
     resetRateLimiters();
     const app = await startTestApp();
     try {
-      const { customerId } = await createCustomer(app.baseUrl);
-      const response = await fetch(`${app.baseUrl}/customers/${customerId}/verify-email`, {
+      const { verificationHandle } = await createCustomer(app.baseUrl);
+      const response = await fetch(`${app.baseUrl}/customers/verify-email`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: '000000' }),
+        body: JSON.stringify({ verificationHandle, code: '000000' }),
       });
       const payload = await response.json();
       assert.equal(response.status, 400);
@@ -245,13 +338,13 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
     const app = await startTestApp();
     try {
       const created = await createCustomer(app.baseUrl);
-      assert.ok(created.customerId, 'debe crear un customerId');
+      assert.ok(created.verificationHandle, 'debe emitir un verificationHandle');
       assert.equal(created.emailVerificationRequired, true);
 
-      const response = await fetch(`${app.baseUrl}/customers/${created.customerId}/verify-email`, {
+      const response = await fetch(`${app.baseUrl}/customers/verify-email`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: created.devOtpCode }),
+        body: JSON.stringify({ verificationHandle: created.verificationHandle, code: created.devOtpCode }),
       });
       const payload = await response.json();
       assert.equal(response.status, 200);
@@ -351,7 +444,7 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
       try {
         const created = await createCustomer(app.baseUrl);
         assert.equal(created.ok, true);
-        assert.ok(created.customerId);
+        assert.ok(created.verificationHandle);
         assert.equal(created.emailVerificationRequired, true);
         assert.equal('devOtpCode' in created, false, 'devOtpCode nunca debe aparecer en staging, ni siquiera con entrega exitosa');
       } finally {
@@ -365,9 +458,10 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
   // --- EMAIL_PROVIDER_002 (revisión de reenvío OTP) ------------------------
   // No existe un endpoint dedicado de reenvío: el frontend
   // (CatastroXPackagePage.jsx, handleResendOtp) reenvía llamando de nuevo a
-  // POST /customers con los mismos datos del comprador. upsertCustomer() es
-  // idempotente por hash de documento (actualiza la misma fila); cada
-  // llamada genera un candidato de verificación nuevo
+  // POST /customers con los mismos datos del comprador. Con Modelo B
+  // (R3/B6-26), resolveCustomerForVerification() resuelve la misma fila por
+  // hash de documento sin mutarla jamás; cada llamada emite un
+  // verificationHandle nuevo y genera un candidato de verificación nuevo
   // (generatePendingEmailVerification()) y, si el envío se confirma
   // entregado (o development/test), lo persiste
   // (persistEmailVerification()). Las pruebas de abajo ejercitan ese mismo
@@ -624,10 +718,10 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
 
         // El código original (realmente entregado) sigue siendo válido --
         // el fallo del reenvío no lo ensombreció ni lo invalidó.
-        const verifyOriginal = await fetch(`${app.baseUrl}/customers/${initial.customerId}/verify-email`, {
+        const verifyOriginal = await fetch(`${app.baseUrl}/customers/verify-email`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: originalCode }),
+          body: JSON.stringify({ verificationHandle: initial.verificationHandle, code: originalCode }),
         });
         const verifyPayload = await verifyOriginal.json();
         assert.equal(verifyOriginal.status, 200);
@@ -742,12 +836,6 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
   // (server/services/catastrox/customerRepository.js) a través del
   // endpoint real.
 
-  async function lookupCustomerIdByDocument(documentNumber) {
-    const documentHash = hashDocumentNumber(normalizeDocumentNumber(documentNumber));
-    const result = await query('select id from public.catastrox_customers where document_number_hash = $1', [documentHash]);
-    return result.rows[0]?.id ?? null;
-  }
-
   await t.test(
     'EMAIL_PROVIDER_002 (cooldown backend): segundo request antes de 30s devuelve 429 EMAIL_VERIFICATION_COOLDOWN, con retryAfterSeconds acotado, sin llamar a Resend, sin fila nueva, y el código anterior sigue siendo válido',
     async () => {
@@ -804,10 +892,10 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
         assert.equal(captured.length, 1, 'el cooldown debe bloquear antes de llamar a Resend -- ninguna llamada nueva');
         assert.equal(await countEmailVerifications(initial.customerId), 1, 'el cooldown no debe dejar una fila de verificación nueva');
 
-        const verifyOriginal = await fetch(`${app.baseUrl}/customers/${initial.customerId}/verify-email`, {
+        const verifyOriginal = await fetch(`${app.baseUrl}/customers/verify-email`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: originalCode }),
+          body: JSON.stringify({ verificationHandle: initial.verificationHandle, code: originalCode }),
         });
         const verifyPayload = await verifyOriginal.json();
         assert.equal(verifyOriginal.status, 200);
@@ -887,7 +975,7 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
         assert.equal(firstPayload.code, 'EMAIL_DELIVERY_UNAVAILABLE');
 
         const customerId = await lookupCustomerIdByDocument(documentNumber);
-        assert.ok(customerId, 'upsertCustomer debe haber creado el comprador aunque el envío fallara');
+        assert.ok(customerId, 'resolveCustomerForVerification debe haber creado el comprador aunque el envío fallara');
         assert.equal(await countEmailVerifications(customerId), 0, 'un fallo en el primer intento no debe dejar ningún OTP persistido');
 
         // Reintento inmediato -- sin bypass de cooldown: un intento fallido
@@ -1043,14 +1131,16 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
         assert.deepEqual(noCookiePayload.orders, []);
 
         const customer = await createCustomer(app.baseUrl);
-        await fetch(`${app.baseUrl}/customers/${customer.customerId}/verify-email`, {
+        const verifyResponse = await fetch(`${app.baseUrl}/customers/verify-email`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: customer.devOtpCode }),
+          body: JSON.stringify({ verificationHandle: customer.verificationHandle, code: customer.devOtpCode }),
         });
+        const { identityCapability } = await verifyResponse.json();
 
-        // 14) customerId (ya verificado) solo se envía al checkout después de
-        // la verificación -- este propio flujo de prueba respeta ese orden.
+        // R3/B6-26-ADJ-01: identityCapability (emitida recién arriba, tras
+        // OTP válido) es la única credencial que checkout acepta -- 14)
+        // sigue cumpliéndose: solo se puede obtener después de verificar.
         const checkoutResponse = await fetch(`${app.baseUrl}/checkout`, {
           method: 'POST',
           // 15) credentials:'include' es responsabilidad del navegador real;
@@ -1059,7 +1149,7 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             packageId: 'basico',
-            customerId: customer.customerId,
+            identityCapability,
             routeId: TEST_ROUTE_ID,
             purchaseAttemptId: crypto.randomUUID(),
           }),
@@ -1084,25 +1174,29 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
           assert.equal(forbiddenField in beforeApprovalPayload.orders[0], false, `no debe exponer "${forbiddenField}"`);
         }
 
+        const txnId = testTransactionId('history-1');
         withWompiFetchMock(() =>
           jsonResponse(200, {
-            data: { id: 'txn-history-1', status: 'APPROVED', reference, amount_in_cents: 3990000, currency: 'COP' },
+            data: { id: txnId, status: 'APPROVED', reference, amount_in_cents: 3990000, currency: 'COP' },
           }),
         );
         try {
-          await fetch(`${app.baseUrl}/verify/txn-history-1`);
+          await fetch(`${app.baseUrl}/verify/${txnId}`);
         } finally {
           restoreFetch();
         }
 
         // 25/26) Tras aprobar: pago APPROVED, pero entrega/factura siguen
-        // siendo honestos -- el predio de prueba (TEST_CODIGO) no existe en
-        // catastrox_clean, así que la generación real (PDFKit) falla con
-        // PREDIO_DATA_UNAVAILABLE -- el estado real tras la aprobación es
-        // FAILED/NOT_REQUESTED, JAMÁS "enviado"/"emitida". El procesamiento
-        // ahora es desacoplado (ajuste #8) -- se espera a que el job llegue
-        // a un estado terminal antes de aseverar, en vez de asumir que ya
-        // terminó cuando /verify respondió.
+        // siendo honestos -- INTEGRATION_TEST_CODIGO SÍ es resoluble
+        // (P1-02/P1-03), así que la generación real (PDFKit) tiene éxito,
+        // pero este entorno de test no configura EMAIL_PROVIDER=resend, así
+        // que el envío de correo real está deshabilitado
+        // (EMAIL_PROVIDER_DISABLED) -- el estado real tras la aprobación
+        // sigue siendo FAILED/NOT_REQUESTED, JAMÁS "enviado"/"emitida"
+        // simulado. El procesamiento ahora es desacoplado (ajuste #8) -- se
+        // espera a que el job llegue a un estado terminal antes de
+        // aseverar, en vez de asumir que ya terminó cuando /verify
+        // respondió.
         const approvedOrder = await waitForOrderDeliveryStatus(app, cookie, orderToken);
         assert.ok(approvedOrder, 'la orden aprobada debe seguir apareciendo en el historial de la sesión');
         assert.equal(approvedOrder.paymentStatus, 'APPROVED');
@@ -1121,7 +1215,7 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
           headers: { 'Content-Type': 'application/json', Cookie: cookie },
           body: JSON.stringify({
             packageId: 'plus',
-            customerId: customer.customerId,
+            identityCapability,
             routeId: TEST_ROUTE_ID,
             purchaseAttemptId: crypto.randomUUID(),
           }),
