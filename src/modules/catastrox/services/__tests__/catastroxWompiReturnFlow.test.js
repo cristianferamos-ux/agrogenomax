@@ -628,7 +628,7 @@ test('startPackageCheckout) backend responde ALREADY_PAID -> nunca abre Wompi, y
   const result = await paymentService.startPackageCheckout({
     packageId: 'basico',
     lookup,
-    customerId: 'cust-already-paid-2',
+    identityCapability: 'ic-already-paid-2',
     purchaseAttemptId: '44444444-4444-4444-8444-444444444444',
   });
   assert.equal(result.status, 'already_paid');

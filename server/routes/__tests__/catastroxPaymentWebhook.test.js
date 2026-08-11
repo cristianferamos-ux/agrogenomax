@@ -52,6 +52,8 @@ let __rememberLookupPreviewForTests;
 let paymentOrders;
 let createDeliveryJobForOrder;
 let processDeliveryJob;
+let hashDocumentNumber;
+let normalizeDocumentNumber;
 
 try {
   ({ getConfig } = await import('../../config/env.js'));
@@ -71,6 +73,7 @@ if (dbAvailable) {
   ({ __rememberLookupPreviewForTests } = await import('../catastrox.js'));
   paymentOrders = await import('../../services/catastrox/paymentOrderRepository.js');
   ({ createDeliveryJobForOrder, processDeliveryJob } = await import('../../services/catastrox/deliveryJobService.js'));
+  ({ hashDocumentNumber, normalizeDocumentNumber } = await import('../../services/catastrox/piiCrypto.js'));
   __rememberLookupPreviewForTests(TEST_ROUTE_ID, { canonicalPredioId: INTEGRATION_TEST_CODIGO, codigoPredial: INTEGRATION_TEST_CODIGO });
 }
 
@@ -111,12 +114,22 @@ let customerCounter = 0;
 // archivo aunque compartan el mismo predio real.
 const createdCustomerIds = [];
 
-// El checkout ahora exige un comprador con correo verificado (Bloque 2/5) --
-// este helper reproduce el flujo real (POST /customers -> POST
+// El checkout ahora exige identityCapability (R3/B6-26-ADJ-01) -- este
+// helper reproduce el flujo real (POST /customers -> POST
 // .../verify-email) usando el devOtpCode que development/test exponen.
+// customerId ya no llega en ninguna respuesta HTTP; se resuelve por
+// consulta a Postgres a partir del documentNumber usado, solo para el uso
+// interno de este archivo (repositorio directo/teardown, ver más abajo).
+async function lookupCustomerIdByDocument(documentNumber) {
+  const documentHash = hashDocumentNumber(normalizeDocumentNumber(documentNumber));
+  const result = await query('select id from public.catastrox_customers where document_number_hash = $1', [documentHash]);
+  return result.rows[0]?.id ?? null;
+}
+
 async function createVerifiedTestCustomer(baseUrl) {
   customerCounter += 1;
   const email = `webhook-test-${Date.now()}-${customerCounter}@example.com`;
+  const documentNumber = `90000${customerCounter}${Date.now()}`.slice(0, 15);
   const response = await fetch(`${baseUrl}/customers`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -125,7 +138,7 @@ async function createVerifiedTestCustomer(baseUrl) {
       firstName: 'Webhook',
       lastName: 'Test',
       documentType: 'CC',
-      documentNumber: `90000${customerCounter}${Date.now()}`.slice(0, 15),
+      documentNumber,
       email,
       emailConfirmation: email,
       phone: '3000000000',
@@ -139,13 +152,15 @@ async function createVerifiedTestCustomer(baseUrl) {
     }),
   });
   const payload = await response.json();
-  await fetch(`${baseUrl}/customers/${payload.customerId}/verify-email`, {
+  const verifyResponse = await fetch(`${baseUrl}/customers/verify-email`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code: payload.devOtpCode }),
+    body: JSON.stringify({ verificationHandle: payload.verificationHandle, code: payload.devOtpCode }),
   });
-  if (payload.customerId) createdCustomerIds.push(payload.customerId);
-  return payload.customerId;
+  const verifyPayload = await verifyResponse.json();
+  const customerId = await lookupCustomerIdByDocument(documentNumber);
+  if (customerId) createdCustomerIds.push(customerId);
+  return { identityCapability: verifyPayload.identityCapability, customerId };
 }
 
 function buildSignedEvent({ transactionId, reference, status = 'APPROVED', amountInCents = 3990000, timestamp = 1732550400, secret = EVENTS_SECRET }) {
@@ -316,11 +331,11 @@ test('webhook de eventos de Wompi (integración, requiere Postgres real)', { ski
   await t.test('webhook aprueba una orden creada por /checkout sin pasar por /verify, y el replay es idempotente', async () => {
     const app = await startTestApp();
     try {
-      const customerId = await createVerifiedTestCustomer(app.baseUrl);
+      const { identityCapability } = await createVerifiedTestCustomer(app.baseUrl);
       const checkoutResponse = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID, customerId, purchaseAttemptId: crypto.randomUUID() }),
+        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID, identityCapability, purchaseAttemptId: crypto.randomUUID() }),
       });
       const { reference, orderToken } = (await checkoutResponse.json()).checkout;
 
@@ -408,7 +423,7 @@ test('webhook de eventos de Wompi (integración, requiere Postgres real)', { ski
     async () => {
       const app = await startTestApp();
       try {
-        const customerId = await createVerifiedTestCustomer(app.baseUrl);
+        const { customerId } = await createVerifiedTestCustomer(app.baseUrl);
         const unresolvableCanonicalPredioId = '900000000000000000000000000003';
         const orderToken = paymentOrders.generateOrderToken();
         const order = await paymentOrders.insertPendingOrder({
@@ -458,13 +473,13 @@ test('webhook de eventos de Wompi (integración, requiere Postgres real)', { ski
     async () => {
       const app = await startTestApp();
       try {
-        const customerId = await createVerifiedTestCustomer(app.baseUrl);
+        const { identityCapability } = await createVerifiedTestCustomer(app.baseUrl);
         const checkoutResponse = await fetch(`${app.baseUrl}/checkout`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             packageId: 'plus',
-            customerId,
+            identityCapability,
             routeId: TEST_ROUTE_ID,
             purchaseAttemptId: crypto.randomUUID(),
           }),

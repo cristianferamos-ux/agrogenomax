@@ -1,7 +1,14 @@
 // Pruebas de integración (Postgres real, se auto-omiten si no hay base
-// alcanzable) para dos defectos corregidos en la revisión de seguridad:
-// 1) cambio de correo del comprador debe revocar la verificación previa e
-//    invalidar códigos OTP activos del correo anterior;
+// alcanzable) para dos áreas:
+// 1) R3/B6-26 (Modelo B): un documento existente es una identidad
+//    INMUTABLE desde resolveCustomerForVerification() -- mismo email
+//    reutiliza la fila existente sin tocar ninguna columna; email
+//    distinto falla cerrado (EXISTING_DIFFERENT_EMAIL), sin mutar la
+//    fila, sin invalidar la verificación/OTP del comprador legítimo y
+//    sin crear ningún estado nuevo para quien hizo el intento
+//    conflictivo. Reemplaza la suite anterior, que legitimaba
+//    exactamente el comportamiento contrario (cambio de correo silencioso
+//    ante solo conocer el documento) -- ver diagnóstico R3/B6-26.
 // 2) creación concurrente de delivery/invoice jobs para la misma orden
 //    nunca debe producir dos filas (UNIQUE + inserción idempotente,
 //    migración 005).
@@ -104,88 +111,142 @@ async function cleanupTestData() {
   }
 }
 
-test('cambio de correo del comprador (integración, requiere Postgres real)', { skip: !dbAvailable }, async (t) => {
+test('resolución de identidad del comprador -- Modelo B (integración, requiere Postgres real)', { skip: !dbAvailable }, async (t) => {
   t.after(async () => {
     await cleanupTestData();
   });
 
-  await t.test('1) mismo documento + mismo correo -> conserva la verificación existente', async () => {
+  await t.test('1) mismo documento + mismo correo -> state EXISTING_SAME_EMAIL, reutiliza la fila, conserva la verificación', async () => {
     const documentNumber = `96${counter}${Date.now()}`.slice(0, 15);
     const email = `same-email-${Date.now()}@example.com`;
     const input = buildCustomerInput({ documentNumber, email, emailConfirmation: email });
 
-    const first = await customers.upsertCustomer(input);
+    const { customer: first, state: firstState } = await customers.resolveCustomerForVerification(input);
+    assert.equal(firstState, 'NEW');
     await query('update public.catastrox_customers set email_verified_at = now() where id = $1', [first.id]);
 
-    const second = await customers.upsertCustomer(buildCustomerInput({ documentNumber, email, emailConfirmation: email }));
+    const { customer: second, state: secondState } = await customers.resolveCustomerForVerification(
+      buildCustomerInput({ documentNumber, email, emailConfirmation: email }),
+    );
+    assert.equal(secondState, 'EXISTING_SAME_EMAIL');
     assert.equal(second.id, first.id);
     assert.ok(second.email_verified_at, 'email_verified_at debe conservarse cuando el correo no cambió');
   });
 
-  await t.test('2) mismo documento + correo DIFERENTE -> revoca la verificación (email_verified_at vuelve a null)', async () => {
+  await t.test('2) mismo documento + correo DIFERENTE -> state EXISTING_DIFFERENT_EMAIL, NO muta absolutamente nada de la fila', async () => {
     const documentNumber = `97${counter}${Date.now()}`.slice(0, 15);
     const emailA = `email-a-${Date.now()}@example.com`;
     const emailB = `email-b-${Date.now()}@example.com`;
 
-    const first = await customers.upsertCustomer(buildCustomerInput({ documentNumber, email: emailA, emailConfirmation: emailA }));
+    const { customer: first } = await customers.resolveCustomerForVerification(
+      buildCustomerInput({ documentNumber, email: emailA, emailConfirmation: emailA }),
+    );
     await query('update public.catastrox_customers set email_verified_at = now() where id = $1', [first.id]);
+    const rowBefore = await customers.findCustomerById(first.id);
 
-    const second = await customers.upsertCustomer(buildCustomerInput({ documentNumber, email: emailB, emailConfirmation: emailB }));
+    const { customer: second, state } = await customers.resolveCustomerForVerification(
+      buildCustomerInput({ documentNumber, email: emailB, emailConfirmation: emailB, firstName: 'Distinto', phone: '3009999999' }),
+    );
+
+    assert.equal(state, 'EXISTING_DIFFERENT_EMAIL');
     assert.equal(second.id, first.id);
-    assert.equal(second.email_verified_at, null, 'email_verified_at debe resetearse cuando el correo cambia');
+    assert.equal(second.email_encrypted, rowBefore.email_encrypted, 'el email de la fila no debe reescribirse');
+    assert.equal(second.email_hash, rowBefore.email_hash);
+    assert.equal(second.first_name_encrypted, rowBefore.first_name_encrypted, 'ninguna otra columna de PII debe reescribirse');
+    assert.equal(second.phone_encrypted, rowBefore.phone_encrypted);
+    assert.ok(second.email_verified_at, 'email_verified_at NUNCA debe resetearse por un intento con otro correo');
+    assert.equal(second.email_verified_at.toISOString(), rowBefore.email_verified_at.toISOString());
   });
 
-  await t.test('3) OTP anterior no funciona después del cambio de correo', async () => {
+  await t.test('3) OTP del comprador legítimo SIGUE funcionando tras un intento conflictivo con otro correo (nunca se invalida)', async () => {
     const documentNumber = `98${counter}${Date.now()}`.slice(0, 15);
-    const emailA = `otp-old-${Date.now()}@example.com`;
-    const emailB = `otp-new-${Date.now()}@example.com`;
+    const emailA = `otp-legit-${Date.now()}@example.com`;
+    const emailAttacker = `otp-attacker-${Date.now()}@example.com`;
 
-    const first = await customers.upsertCustomer(buildCustomerInput({ documentNumber, email: emailA, emailConfirmation: emailA }));
-    const { code: oldCode } = await customers.createEmailVerification(first.id);
+    const { customer: first } = await customers.resolveCustomerForVerification(
+      buildCustomerInput({ documentNumber, email: emailA, emailConfirmation: emailA }),
+    );
+    const { code: legitCode } = await customers.createEmailVerification(first.id);
 
-    // Cambia de correo antes de verificar con el código anterior.
-    await customers.upsertCustomer(buildCustomerInput({ documentNumber, email: emailB, emailConfirmation: emailB }));
+    // Intento conflictivo con otro correo -- Modelo B falla cerrado, y en
+    // particular NUNCA debe tocar el OTP del comprador legítimo.
+    const { state } = await customers.resolveCustomerForVerification(
+      buildCustomerInput({ documentNumber, email: emailAttacker, emailConfirmation: emailAttacker }),
+    );
+    assert.equal(state, 'EXISTING_DIFFERENT_EMAIL');
 
-    const verifyOld = await customers.verifyEmailCode(first.id, oldCode);
-    assert.equal(verifyOld.ok, false, 'el código emitido para el correo anterior nunca debe verificar tras el cambio');
+    const verifyLegit = await customers.verifyEmailCode(first.id, legitCode);
+    assert.equal(verifyLegit.ok, true, 'el código emitido para el correo legítimo debe seguir siendo válido tras el intento conflictivo');
   });
 
-  await t.test('5) nuevo OTP verifica el nuevo correo correctamente', async () => {
-    const documentNumber = `99${counter}${Date.now()}`.slice(0, 15);
-    const emailA = `otp-new-flow-old-${Date.now()}@example.com`;
-    const emailB = `otp-new-flow-new-${Date.now()}@example.com`;
+  await t.test('4) el intento conflictivo no crea ninguna fila de verificación nueva (no OTP nuevo para quien no controla el correo real)', async () => {
+    const documentNumber = `102${counter}${Date.now()}`.slice(0, 15);
+    const emailA = `otp-count-legit-${Date.now()}@example.com`;
+    const emailAttacker = `otp-count-attacker-${Date.now()}@example.com`;
 
-    const first = await customers.upsertCustomer(buildCustomerInput({ documentNumber, email: emailA, emailConfirmation: emailA }));
-    await customers.createEmailVerification(first.id);
+    const { customer: first } = await customers.resolveCustomerForVerification(
+      buildCustomerInput({ documentNumber, email: emailA, emailConfirmation: emailA }),
+    );
+    const countBefore = await query(
+      'select count(*)::int as n from public.catastrox_email_verifications where customer_id = $1',
+      [first.id],
+    );
 
-    const changed = await customers.upsertCustomer(buildCustomerInput({ documentNumber, email: emailB, emailConfirmation: emailB }));
-    const { code: newCode } = await customers.createEmailVerification(changed.id);
+    const { state } = await customers.resolveCustomerForVerification(
+      buildCustomerInput({ documentNumber, email: emailAttacker, emailConfirmation: emailAttacker }),
+    );
+    assert.equal(state, 'EXISTING_DIFFERENT_EMAIL');
 
-    const verifyNew = await customers.verifyEmailCode(changed.id, newCode);
-    assert.equal(verifyNew.ok, true, 'el código del correo nuevo debe verificar correctamente');
+    const countAfter = await query(
+      'select count(*)::int as n from public.catastrox_email_verifications where customer_id = $1',
+      [first.id],
+    );
+    assert.equal(
+      countAfter.rows[0].n,
+      countBefore.rows[0].n,
+      'ningún intento conflictivo debe crear una fila de verificación nueva',
+    );
   });
 
-  await t.test('4) checkout con correo cambiado y no verificado se rechaza (EMAIL_NOT_VERIFIED)', async () => {
+  await t.test('5) un checkout posterior sigue viendo el email_verified_at ORIGINAL, intacto, tras un intento conflictivo con otro correo', async () => {
     const documentNumber = `100${counter}${Date.now()}`.slice(0, 15);
-    const emailA = `checkout-old-${Date.now()}@example.com`;
-    const emailB = `checkout-new-${Date.now()}@example.com`;
+    const emailA = `checkout-legit-${Date.now()}@example.com`;
+    const emailAttacker = `checkout-attacker-${Date.now()}@example.com`;
 
-    const first = await customers.upsertCustomer(buildCustomerInput({ documentNumber, email: emailA, emailConfirmation: emailA }));
+    const { customer: first } = await customers.resolveCustomerForVerification(
+      buildCustomerInput({ documentNumber, email: emailA, emailConfirmation: emailA }),
+    );
     await query('update public.catastrox_customers set email_verified_at = now() where id = $1', [first.id]);
+    const rowBefore = await customers.findCustomerById(first.id);
 
-    const changed = await customers.upsertCustomer(buildCustomerInput({ documentNumber, email: emailB, emailConfirmation: emailB }));
-    const reread = await customers.findCustomerById(changed.id);
-    assert.equal(reread.email_verified_at, null, 'la orden de checkout debe ver email_verified_at=null tras el cambio no verificado');
+    await customers.resolveCustomerForVerification(
+      buildCustomerInput({ documentNumber, email: emailAttacker, emailConfirmation: emailAttacker }),
+    );
+
+    const reread = await customers.findCustomerById(first.id);
+    assert.equal(
+      reread.email_verified_at.toISOString(),
+      rowBefore.email_verified_at.toISOString(),
+      'un checkout posterior debe ver exactamente el mismo estado de verificación que antes del intento conflictivo',
+    );
   });
 
-  await t.test('6) ningún endpoint revela si el documento ya existía -- upsertCustomer responde igual en forma para alta y actualización', async () => {
+  await t.test('6) el objeto customer tiene la misma forma para NEW y EXISTING_SAME_EMAIL -- state es un detalle interno, nunca se expone al cliente HTTP', async () => {
     const documentNumber = `101${counter}${Date.now()}`.slice(0, 15);
     const email = `existing-doc-${Date.now()}@example.com`;
-    const first = await customers.upsertCustomer(buildCustomerInput({ documentNumber, email, emailConfirmation: email }));
-    const second = await customers.upsertCustomer(buildCustomerInput({ documentNumber, email, emailConfirmation: email }));
-    // Misma forma de objeto en ambos casos (alta vs actualización) -- el
-    // llamador (la ruta HTTP) nunca podría distinguir uno de otro a partir
-    // de la forma de la respuesta.
+    const { customer: first, state: firstState } = await customers.resolveCustomerForVerification(
+      buildCustomerInput({ documentNumber, email, emailConfirmation: email }),
+    );
+    const { customer: second, state: secondState } = await customers.resolveCustomerForVerification(
+      buildCustomerInput({ documentNumber, email, emailConfirmation: email }),
+    );
+    assert.equal(firstState, 'NEW');
+    assert.equal(secondState, 'EXISTING_SAME_EMAIL');
+    // Misma forma de objeto en ambos casos -- catastroxPayments.js nunca
+    // serializa `customer` completo hacia el cliente HTTP en ninguno de
+    // los dos casos (solo lo usa para derivar verificationHandle/
+    // identityCapability), así que esta diferencia de `state` nunca es
+    // observable externamente.
     assert.deepEqual(Object.keys(first).sort(), Object.keys(second).sort());
   });
 });
@@ -196,7 +257,7 @@ test('unicidad de delivery/invoice jobs por orden (integración, requiere Postgr
   });
 
   await t.test('1/3) dos disparos CONCURRENTES de createDeliveryJobForOrder para la misma orden -> una sola fila', async () => {
-    const customer = await customers.upsertCustomer(buildCustomerInput());
+    const { customer } = await customers.resolveCustomerForVerification(buildCustomerInput());
     const order = await createOrderForConcurrencyTest(customer.id);
 
     const [jobA, jobB] = await Promise.all([
@@ -211,7 +272,7 @@ test('unicidad de delivery/invoice jobs por orden (integración, requiere Postgr
   });
 
   await t.test('2/3) dos disparos CONCURRENTES de createInvoiceJobForOrder para la misma orden -> una sola fila', async () => {
-    const customer = await customers.upsertCustomer(buildCustomerInput());
+    const { customer } = await customers.resolveCustomerForVerification(buildCustomerInput());
     const order = await createOrderForConcurrencyTest(customer.id);
 
     const [jobA, jobB] = await Promise.all([
@@ -226,7 +287,7 @@ test('unicidad de delivery/invoice jobs por orden (integración, requiere Postgr
   });
 
   await t.test('4) reintento de processDeliveryJob actualiza la MISMA fila (attempt_count aumenta, no se crea una nueva)', async () => {
-    const customer = await customers.upsertCustomer(buildCustomerInput());
+    const { customer } = await customers.resolveCustomerForVerification(buildCustomerInput());
     const order = await createOrderForConcurrencyTest(customer.id);
     const job = await deliveryJobService.createDeliveryJobForOrder({
       orderId: order.id,
@@ -244,7 +305,7 @@ test('unicidad de delivery/invoice jobs por orden (integración, requiere Postgr
   });
 
   await t.test('6) invoice ISSUED nunca vuelve a FAILED/PENDING por un reintento posterior', async () => {
-    const customer = await customers.upsertCustomer(buildCustomerInput());
+    const { customer } = await customers.resolveCustomerForVerification(buildCustomerInput());
     const order = await createOrderForConcurrencyTest(customer.id);
     // createElectronicInvoiceForOrder exige una orden APPROVED con perfil
     // de facturación -- se preparan ambos para poder probar la guarda de

@@ -823,24 +823,25 @@ async function openWompiWidget(checkoutData, {
   }
 }
 
-async function requestCheckoutSession({ packageId, lookup, customerId, purchaseAttemptId }) {
+async function requestCheckoutSession({ packageId, lookup, identityCapability, purchaseAttemptId }) {
   const checkoutIntent = buildCheckoutUrl({ packageId, lookup });
   if (!checkoutIntent) {
     throw new Error('No fue posible preparar el paquete solicitado.');
   }
 
-  const normalizedCustomerId = String(customerId || '').trim();
-  if (!normalizedCustomerId) {
+  const normalizedIdentityCapability = String(identityCapability || '').trim();
+  if (!normalizedIdentityCapability) {
     // Defensa en profundidad: el backend ya rechaza /checkout sin
-    // customerId (CUSTOMER_ID_REQUIRED), pero este cliente nunca debe
-    // siquiera intentar la llamada sin un comprador verificado -- evita un
-    // round-trip de red innecesario y dejar rastro en logs de un intento
-    // mal formado. Se devuelve un resultado (no se lanza) para mantener el
-    // mismo contrato de retorno que el resto de esta función.
+    // identityCapability (IDENTITY_CAPABILITY_REQUIRED) y rechaza
+    // explícitamente cualquier customerId aportado por el cliente
+    // (CUSTOMER_ID_NOT_ALLOWED, R3/B6-26-ADJ-01) -- este cliente nunca debe
+    // siquiera intentar la llamada sin una capability emitida tras un OTP
+    // válido. Se devuelve un resultado (no se lanza) para mantener el mismo
+    // contrato de retorno que el resto de esta función.
     return {
       ok: false,
       status: 'error',
-      message: 'Debe registrar y verificar sus datos de comprador antes de continuar.',
+      message: 'Debe verificar su correo electrónico antes de continuar.',
     };
   }
 
@@ -885,9 +886,12 @@ async function requestCheckoutSession({ packageId, lookup, customerId, purchaseA
   // los resuelve exclusivamente desde routeId, nunca desde el body.
   // Enviarlos solo arriesgaba un 403 PREDIO_MISMATCH espurio si quedara
   // algún valor residual de localStorage desalineado con el lookup actual.
+  // R3/B6-26-ADJ-01: identityCapability reemplaza a customerId como
+  // credencial de comprador -- customerId NUNCA viaja aquí, ni siquiera
+  // como campo adicional (el backend lo rechaza de plano si aparece).
   const body = {
     packageId,
-    customerId: normalizedCustomerId,
+    identityCapability: normalizedIdentityCapability,
     routeId: normalizedRouteId,
     purchaseKey: checkoutIntent.purchaseKey,
     // Protección de doble clic (revisión de seguridad): generado UNA sola
@@ -1109,11 +1113,13 @@ export async function getOrderStatus(orderToken) {
 //
 // Estas tres funciones nunca escriben nada en localStorage/sessionStorage --
 // el formulario (CatastroXBuyerForm/CatastroXOtpVerification) mantiene los
-// datos personales solo en estado de React (memoria), y customerId se
-// conserva únicamente en memoria durante el flujo (ver CatastroXPackagePage).
+// datos personales solo en estado de React (memoria), y verificationHandle/
+// identityCapability se conservan únicamente en memoria durante el flujo
+// (ver CatastroXPackagePage).
 
 /**
- * Crea o actualiza el comprador y dispara el envío del código de
+ * Registra el comprador (o resuelve una identidad ya existente, Modelo B
+ * -- R3/B6-26, nunca la sobrescribe) y dispara el envío del código de
  * verificación. `input` es exactamente lo que el formulario recogió --
  * este cliente no valida más que lo indispensable para no llamar a la red
  * con un objeto vacío; la validación real (única autoritativa) es la del
@@ -1144,7 +1150,11 @@ export async function createCustomer(input) {
 
       return {
         ok: true,
-        customerId: payload.customerId,
+        // R3/B6-26 + B6-26-ADJ-01: el backend ya NO devuelve customerId en
+        // ningún estado -- verificationHandle es el único identificador
+        // opaco que este cliente recibe, correlaciona el paso de OTP con el
+        // comprador correcto sin exponer su id real.
+        verificationHandle: payload.verificationHandle,
         emailVerificationRequired: Boolean(payload.emailVerificationRequired),
         // Solo presente si el backend corre en development/test (ver
         // server/routes/catastroxPayments.js) -- nunca en staging/producción.
@@ -1166,29 +1176,31 @@ export async function createCustomer(input) {
 }
 
 /**
- * Verifica el código OTP para un customerId ya creado. El código nunca se
- * guarda en ningún almacenamiento del navegador -- solo viaja en este
- * único POST.
+ * Verifica el código OTP para un verificationHandle ya emitido por
+ * createCustomer(). El código nunca se guarda en ningún almacenamiento del
+ * navegador -- solo viaja en este único POST. R3/B6-26-ADJ-01: no existe
+ * fallback a customerId -- verificationHandle es el único identificador que
+ * este cliente puede aportar.
  */
-export async function verifyCustomerEmail({ customerId, code }) {
-  const normalizedCustomerId = String(customerId || '').trim();
+export async function verifyCustomerEmail({ verificationHandle, code }) {
+  const normalizedVerificationHandle = String(verificationHandle || '').trim();
   const normalizedCode = String(code || '').trim();
 
-  if (!normalizedCustomerId || !normalizedCode) {
+  if (!normalizedVerificationHandle || !normalizedCode) {
     return { ok: false, code: 'INVALID_VERIFICATION_REQUEST', message: 'Solicitud inválida.' };
   }
 
   let lastError = null;
 
   for (const apiBase of getApiBaseCandidates()) {
-    const url = `${apiBase}/catastrox/payments/customers/${encodeURIComponent(normalizedCustomerId)}/verify-email`;
+    const url = `${apiBase}/catastrox/payments/customers/verify-email`;
 
     try {
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ code: normalizedCode }),
+        body: JSON.stringify({ verificationHandle: normalizedVerificationHandle, code: normalizedCode }),
       });
       const payload = await response.json().catch(() => null);
 
@@ -1200,7 +1212,10 @@ export async function verifyCustomerEmail({ customerId, code }) {
         };
       }
 
-      return { ok: true, verified: true };
+      // R3/B6-26-ADJ-01: identityCapability es la credencial que
+      // startPackageCheckout/requestCheckoutSession exigirán para
+      // autorizar checkout -- reemplaza a customerId desnudo.
+      return { ok: true, verified: true, identityCapability: payload.identityCapability };
     } catch (error) {
       lastError = error;
     }
@@ -1359,7 +1374,7 @@ export async function retryDeliveryForOrder(orderToken) {
 export async function startPackageCheckout({
   packageId,
   lookup,
-  customerId,
+  identityCapability,
   purchaseAttemptId,
   targetRoute = null,
   onCheckoutStart = null,
@@ -1383,7 +1398,7 @@ export async function startPackageCheckout({
   const checkoutResponse = await requestCheckoutSession({
     packageId: normalizedPackageId,
     lookup,
-    customerId,
+    identityCapability,
     purchaseAttemptId,
   });
 

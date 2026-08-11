@@ -30,6 +30,12 @@ import * as customers from '../services/catastrox/customerRepository.js';
 import { validateCustomerInput } from '../services/catastrox/customerValidation.js';
 import { sendVerificationEmail } from '../services/catastrox/emailSender.js';
 import {
+  createCheckoutIdentityCapability,
+  createVerificationHandle,
+  verifyCheckoutIdentityCapability,
+  verifyVerificationHandle,
+} from '../services/catastrox/identityCapability.js';
+import {
   createDeliveryJobForOrder,
   processDeliveryJob,
   retryDeliveryJob,
@@ -490,9 +496,39 @@ router.post('/customers', customerLimiter, async (req, res) => {
     });
   }
 
+  // R3/B6-26 (Modelo B): resolveCustomerForVerification() clasifica en
+  // NEW / EXISTING_SAME_EMAIL / EXISTING_DIFFERENT_EMAIL sin mutar nunca
+  // una identidad existente -- ver el JSDoc de la función para el detalle
+  // de concurrencia (INSERT ... ON CONFLICT DO NOTHING RETURNING).
+  let resolution;
   try {
-    const customer = await customers.upsertCustomer(validated);
+    resolution = await customers.resolveCustomerForVerification(validated);
+  } catch (error) {
+    console.error('[CatastroX Payments] Error resolviendo identidad de comprador', { message: error.message });
+    return res.status(500).json({ ok: false, code: 'CUSTOMER_PERSISTENCE_ERROR', message: 'No fue posible registrar sus datos.' });
+  }
 
+  // R3/B6-26: documento existente con un email_hash distinto al ya
+  // almacenado -- FAIL CLOSED. No se toca la base (ni la fila existente,
+  // ni email_verified_at, ni ningún OTP/estado de cooldown de la
+  // identidad real), no se emite verificationHandle, no se envía ningún
+  // correo. La respuesta es deliberadamente genérica: nunca confirma que
+  // el documento ya existía ni que el correo no coincide con el
+  // almacenado -- ver B6-26-ADJ-01/diagnóstico R3 para el razonamiento
+  // completo de por qué esta distinguibilidad HTTP puntual es el límite
+  // honesto aceptado (el canal de correo en sí ya es un límite que ningún
+  // diseño de respuesta puede cerrar).
+  if (resolution.state === 'EXISTING_DIFFERENT_EMAIL') {
+    return res.status(403).json({
+      ok: false,
+      code: 'IDENTITY_VERIFICATION_REQUIRED',
+      message: 'No fue posible validar la identidad con los datos suministrados. Revise la información o contacte soporte.',
+    });
+  }
+
+  const { customer } = resolution;
+
+  try {
     // Cooldown backend de emisión de OTP (cierre de protección backend): el
     // cooldown de 30s del frontend (CatastroXOtpVerification.jsx) no
     // protege el endpoint en sí -- esta es la contraparte de backend,
@@ -502,6 +538,10 @@ router.post('/customers', customerLimiter, async (req, res) => {
     // mismo comprador ya está en curso, o si el último envío REALMENTE
     // entregado fue hace menos de 30s, se responde 429 de inmediato: no se
     // genera código nuevo, no se llama al proveedor, no se persiste nada.
+    // R3/B6-26: se aplica igual para NEW y EXISTING_SAME_EMAIL -- un
+    // email_verified_at histórico nunca exime de este paso; cada intento
+    // de compra exige su propio OTP fresco antes de poder emitir una
+    // identityCapability (ver verify-email más abajo).
     const reservation = await customers.reserveEmailVerificationSend(customer.id);
     if (!reservation.allowed) {
       return res.status(429).json({
@@ -515,13 +555,16 @@ router.post('/customers', customerLimiter, async (req, res) => {
     const appEnv = String(process.env.APP_ENV || '').toLowerCase();
     const isDevOrTest = appEnv === 'development' || appEnv === 'test';
 
-    // El comprador se persiste siempre (upsert idempotente), pero el código
-    // de verificación NO se escribe todavía -- ver política transaccional
-    // más abajo (revisión de reenvío, EMAIL_PROVIDER_002 §12/§13).
+    // El comprador ya quedó persistido por resolveCustomerForVerification()
+    // (NEW) o ya existía intacto (EXISTING_SAME_EMAIL); el código de
+    // verificación NO se escribe todavía -- ver política transaccional más
+    // abajo (revisión de reenvío, EMAIL_PROVIDER_002 §12/§13).
     const pending = customers.generatePendingEmailVerification();
-    // El correo se descifra solo en memoria, en este instante, para poder
-    // transportarlo -- nunca se reintroduce en email_normalized (columna
-    // deprecada, ver migración 005).
+    // El correo se descifra de la fila EXISTENTE en base de datos, nunca
+    // del body de esta petición -- para NEW ambos coinciden por
+    // construcción; para EXISTING_SAME_EMAIL, esto garantiza que el OTP
+    // viaja siempre al correo YA almacenado, nunca a un valor que el
+    // llamador simplemente afirmó conocer.
     const decryptedCustomer = customers.decryptCustomerPii(customer);
 
     // La reserva se libera pase lo que pase -- éxito, fallo honesto de
@@ -573,10 +616,10 @@ router.post('/customers', customerLimiter, async (req, res) => {
     // comprador reciba el código -- si el envío real no se entregó, se
     // falla explícitamente en vez de responder como si el correo se
     // hubiera enviado ("código enviado" nunca se afirma sin
-    // delivered:true). El comprador ya quedó registrado (upsert
-    // idempotente); el código NUNCA quedó persistido (ver arriba) -- el
-    // comprador puede reintentar de inmediato, o seguir usando un código
-    // anterior todavía vigente si lo tiene.
+    // delivered:true). El comprador ya quedó registrado; el código NUNCA
+    // quedó persistido (ver arriba) -- el comprador puede reintentar de
+    // inmediato, o seguir usando un código anterior todavía vigente si lo
+    // tiene.
     if (!emailResult.delivered && !isDevOrTest) {
       console.error('[CatastroX Payments] No fue posible entregar el correo de verificación', {
         customerId: customer.id,
@@ -590,9 +633,18 @@ router.post('/customers', customerLimiter, async (req, res) => {
       });
     }
 
+    // R3/B6-26 + B6-26-ADJ-01: verificationHandle reemplaza a customerId
+    // como identificador devuelto al cliente -- opaco, autenticado, ligado
+    // internamente a customer.id + customer.email_hash (identityCapability.js),
+    // nunca visible ni reconstruible por el frontend.
+    const verificationHandle = createVerificationHandle({
+      customerId: customer.id,
+      emailHash: customer.email_hash,
+    });
+
     return res.json({
       ok: true,
-      customerId: customer.id,
+      verificationHandle,
       emailVerificationRequired: true,
       // Solo en development/test: sendVerificationEmail() siempre es el
       // stub ahí (ver server/services/catastrox/emailSender.js), así que
@@ -606,16 +658,44 @@ router.post('/customers', customerLimiter, async (req, res) => {
   }
 });
 
-router.post('/customers/:customerId/verify-email', emailVerificationLimiter, async (req, res) => {
-  const customerId = String(req.params?.customerId || '').trim();
+// R3/B6-26 + B6-26-ADJ-01: reemplaza a POST /customers/:customerId/verify-email
+// -- el cliente ya NO aporta customerId (ni por path ni por body); el único
+// identificador que aporta es el verificationHandle opaco emitido por
+// POST /customers. Sin fallback al contrato legado de customerId.
+router.post('/customers/verify-email', emailVerificationLimiter, async (req, res) => {
+  const verificationHandle = String(req.body?.verificationHandle || '').trim();
   const code = String(req.body?.code || '').trim();
 
-  if (!customerId || !code) {
+  if (!verificationHandle || !code) {
     return res.status(400).json({ ok: false, code: 'INVALID_VERIFICATION_REQUEST', message: 'Solicitud inválida.' });
   }
 
+  const handleResult = verifyVerificationHandle(verificationHandle);
+  if (!handleResult.ok) {
+    return res.status(400).json({
+      ok: false,
+      code: 'VERIFICATION_HANDLE_INVALID',
+      message: 'La solicitud de verificación no es válida o expiró. Inicie nuevamente la verificación.',
+    });
+  }
+
   try {
-    const result = await customers.verifyEmailCode(customerId, code);
+    const customer = await customers.findCustomerById(handleResult.customerId);
+    // Handle stale (R3/B6-26 §9): el emailHash del handle debe coincidir
+    // con el ACTUAL de la fila, comprobado ANTES de tocar el OTP -- si el
+    // comprador ya no existe, o si su email_hash cambió desde que se
+    // emitió el handle (futuro flujo autorizado de cambio de correo), el
+    // handle queda inválido sin distinguir públicamente cuál de los dos
+    // motivos ocurrió.
+    if (!customer || customer.email_hash !== handleResult.emailHash) {
+      return res.status(400).json({
+        ok: false,
+        code: 'VERIFICATION_HANDLE_INVALID',
+        message: 'La solicitud de verificación no es válida o expiró. Inicie nuevamente la verificación.',
+      });
+    }
+
+    const result = await customers.verifyEmailCode(customer.id, code);
     if (!result.ok) {
       const publicCodeByReason = {
         no_active_code: 'CODE_EXPIRED',
@@ -629,7 +709,16 @@ router.post('/customers/:customerId/verify-email', emailVerificationLimiter, asy
       });
     }
 
-    return res.json({ ok: true, verified: true });
+    // R3/B6-26 + B6-26-ADJ-01: identityCapability se emite SOLO después de
+    // un OTP recién verificado -- es la única prueba de posesión ACTUAL
+    // del correo que la Etapa 3 usará para autorizar checkout (reemplaza a
+    // customerId desnudo como credencial).
+    const identityCapability = createCheckoutIdentityCapability({
+      customerId: customer.id,
+      emailHash: customer.email_hash,
+    });
+
+    return res.json({ ok: true, verified: true, identityCapability });
   } catch (error) {
     console.error('[CatastroX Payments] Error verificando código de correo', { message: error.message });
     return res.status(500).json({ ok: false, code: 'EMAIL_VERIFICATION_ERROR', message: 'No fue posible verificar el código.' });
@@ -732,8 +821,17 @@ router.get('/verify/:transactionId', verifyLimiter, async (req, res) => {
 // predio y el mismo paquete pueden comprarse N veces, por el mismo
 // comprador o por compradores distintos. La única deduplicación es la de
 // doble clic (idempotency_key, ventana corta) -- nunca una prohibición
-// comercial. Exige un comprador con correo verificado (customerId) antes
-// de crear cualquier orden.
+// comercial.
+//
+// R3/B6-26-ADJ-01: customerId aportado por el cliente YA NO autoriza nada
+// -- era una capability implícita (cualquiera que conociera un customerId
+// real, devuelto por POST /customers hasta antes de esta etapa, podía
+// comprar "como" ese comprador). La única autoridad aceptada es
+// identityCapability, opaca, emitida por backend solo tras un OTP fresco
+// (ver server/services/catastrox/identityCapability.js). customerId sigue
+// existiendo como identificador interno server-side (customer.id,
+// resuelto aquí abajo a partir de la capability), nunca como algo que el
+// cliente aporta o que el servidor confía si lo aporta.
 router.post('/checkout', checkoutLimiter, async (req, res) => {
   if (!isRequestOriginTrusted(req)) {
     return res.status(403).json({ ok: false, code: 'ORIGIN_NOT_TRUSTED', message: 'Origen no permitido.' });
@@ -742,7 +840,6 @@ router.post('/checkout', checkoutLimiter, async (req, res) => {
   const packageId = normalizePackageId(req.body?.packageId);
   const purchaseKey = String(req.body?.purchaseKey || '').trim();
   const routeId = String(req.body?.routeId || '').trim();
-  const customerId = String(req.body?.customerId || '').trim();
   const purchaseAttemptId = String(req.body?.purchaseAttemptId || '').trim();
 
   if (!packageId || !CATASTROX_PAYMENT_PACKAGE_PRICES_COP_CENTS[packageId]) {
@@ -764,6 +861,68 @@ router.post('/checkout', checkoutLimiter, async (req, res) => {
       message: 'Solicitud de compra inválida. Vuelva a intentar desde el resumen de compra.',
     });
   }
+
+  // R3/B6-26-ADJ-01: la sola presencia de customerId es un error, incluso
+  // si la solicitud también trae una identityCapability válida -- nunca se
+  // ignora, nunca se acepta junto a la capability, nunca hay prioridad
+  // silenciosa ni compatibilidad temporal. El objetivo es hacer imposible
+  // reintroducir accidentalmente el contrato legado.
+  if ('customerId' in (req.body || {})) {
+    return res.status(400).json({
+      ok: false,
+      code: 'CUSTOMER_ID_NOT_ALLOWED',
+      message: 'La solicitud de compra utiliza un identificador de comprador obsoleto. Reinicie el proceso de verificación.',
+    });
+  }
+
+  const identityCapability = String(req.body?.identityCapability || '').trim();
+  if (!identityCapability) {
+    return res.status(400).json({
+      ok: false,
+      code: 'IDENTITY_CAPABILITY_REQUIRED',
+      message: 'Debe verificar su correo electrónico antes de continuar.',
+    });
+  }
+
+  // Una capability inválida (corrupta/expirada/llave o propósito
+  // equivocados/malformada) nunca revela la causa criptográfica concreta
+  // -- un único código público, uniforme, indistinguible desde afuera.
+  const capabilityResult = verifyCheckoutIdentityCapability(identityCapability);
+  if (!capabilityResult.ok) {
+    return res.status(403).json({
+      ok: false,
+      code: 'IDENTITY_CAPABILITY_INVALID',
+      message: 'La verificación de identidad no es válida o expiró. Verifique nuevamente su correo antes de continuar.',
+    });
+  }
+
+  let customer;
+  try {
+    customer = await customers.findCustomerById(capabilityResult.customerId);
+  } catch (error) {
+    console.error('[CatastroX Payments] Error consultando comprador', { message: error.message });
+    return res.status(500).json({ ok: false, code: 'CUSTOMER_LOOKUP_ERROR', message: 'No fue posible validar el comprador.' });
+  }
+
+  // Comprador inexistente, emailHash desalineado con la fila actual (la
+  // capability quedó obsoleta), o correo ya no verificado: los tres casos
+  // responden exactamente igual -- IDENTITY_CAPABILITY_INVALID, nunca
+  // CUSTOMER_NOT_FOUND ni un código específico de "correo cambió", para no
+  // revelar una diferencia interna innecesaria. La capability +
+  // el binding a emailHash + email_verified_at constituyen, juntos, la
+  // única puerta de entrada.
+  if (!customer || customer.email_hash !== capabilityResult.emailHash || !customer.email_verified_at) {
+    return res.status(403).json({
+      ok: false,
+      code: 'IDENTITY_CAPABILITY_INVALID',
+      message: 'La verificación de identidad no es válida o expiró. Verifique nuevamente su correo antes de continuar.',
+    });
+  }
+
+  // A partir de aquí, customerId es exclusivamente interno -- resuelto por
+  // el servidor a partir de una capability ya validada, nunca aportado por
+  // el cliente.
+  const customerId = customer.id;
 
   // CORRECCIÓN DE SEGURIDAD -- SIN FALLBACK: canonicalPredioId se resuelve
   // EXCLUSIVAMENTE desde el lookup vigente (routeId). Ver
@@ -796,7 +955,7 @@ router.post('/checkout', checkoutLimiter, async (req, res) => {
     });
   }
 
-  // P1-02: bloquea ANTES de tocar customerId/Wompi/orden -- un predio que
+  // P1-02: bloquea ANTES de tocar Wompi/orden -- un predio que
   // resolveCheckoutPredioEligibility no puede resolver tampoco podrá
   // resolverlo después el pipeline de entrega (mismo guard, ver
   // deliveryJobService.generateAndStoreDeliverable), así que no se crea
@@ -820,14 +979,6 @@ router.post('/checkout', checkoutLimiter, async (req, res) => {
     });
   }
 
-  if (!customerId) {
-    return res.status(400).json({
-      ok: false,
-      code: 'CUSTOMER_ID_REQUIRED',
-      message: 'Debe registrar sus datos de comprador antes de continuar (POST /customers).',
-    });
-  }
-
   // codigoPredial se conserva solo como metadato de referencia/legado (no
   // como llave de entitlement) -- SIEMPRE derivado del lookup resuelto
   // arriba, nunca del body (mismo motivo que canonicalPredioId: sin
@@ -840,26 +991,6 @@ router.post('/checkout', checkoutLimiter, async (req, res) => {
       : null;
   } catch {
     codigoPredialNormalized = null;
-  }
-
-  let customer;
-  try {
-    customer = await customers.findCustomerById(customerId);
-  } catch (error) {
-    console.error('[CatastroX Payments] Error consultando comprador', { message: error.message });
-    return res.status(500).json({ ok: false, code: 'CUSTOMER_LOOKUP_ERROR', message: 'No fue posible validar el comprador.' });
-  }
-
-  if (!customer) {
-    return res.status(404).json({ ok: false, code: 'CUSTOMER_NOT_FOUND', message: 'Comprador no encontrado.' });
-  }
-
-  if (!customer.email_verified_at) {
-    return res.status(403).json({
-      ok: false,
-      code: 'EMAIL_NOT_VERIFIED',
-      message: 'Debe confirmar su correo electrónico antes de completar la compra.',
-    });
   }
 
   const WOMPI_PUBLIC_KEY_TEST = process.env.WOMPI_PUBLIC_KEY_TEST || '';

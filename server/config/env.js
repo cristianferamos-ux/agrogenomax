@@ -52,6 +52,13 @@ const REQUIRED_VARIABLES_BY_ENV = Object.freeze({
     'HEALTH_MONITOR_TOKEN',
     'CATASTROX_PII_ENCRYPTION_KEY',
     'CATASTROX_PII_HASH_SECRET',
+    // R3/B6-26 + B6-26-ADJ-01 (identityCapability.js): sin estas dos, el
+    // flujo de comprador no puede emitir/validar verificationHandle ni
+    // identityCapability -- el mismo criterio ya aplicado a
+    // CATASTROX_PII_ENCRYPTION_KEY/CATASTROX_PII_HASH_SECRET (obligatorias
+    // donde haya compradores reales).
+    'CATASTROX_VERIFY_HANDLE_KEY',
+    'CATASTROX_CHECKOUT_IDENTITY_KEY',
     'WOMPI_PUBLIC_KEY_TEST',
     'WOMPI_INTEGRITY_SECRET_TEST',
     'WOMPI_EVENTS_SECRET_TEST',
@@ -70,6 +77,9 @@ const REQUIRED_VARIABLES_BY_ENV = Object.freeze({
     'HEALTH_MONITOR_TOKEN',
     'CATASTROX_PII_ENCRYPTION_KEY',
     'CATASTROX_PII_HASH_SECRET',
+    // R3/B6-26 + B6-26-ADJ-01: ver comentario equivalente en staging arriba.
+    'CATASTROX_VERIFY_HANDLE_KEY',
+    'CATASTROX_CHECKOUT_IDENTITY_KEY',
   ]),
 });
 
@@ -117,6 +127,17 @@ const LOCALHOST_HINTS = Object.freeze(['localhost', '127.0.0.1']);
 // server/routes/catastroxPayments.js -- detecta valores de marcador de
 // posición evidentes en llaves/secretos de Wompi copiados sin reemplazar.
 const WOMPI_PLACEHOLDER_PATTERN = /TU_|REEMPLAZAR|PLACEHOLDER|XXX|DEMO/i;
+
+// R3/B6-26 + B6-26-ADJ-01 (identityCapability.js): base64 canónico y
+// estricto de una clave AES-256 (32 bytes) -- 43 caracteres del alfabeto
+// más un único '=' de padding, sin variantes. A diferencia del check de
+// CATASTROX_PII_ENCRYPTION_KEY más abajo (que solo valida
+// Buffer.from(...).length === 32 -- Buffer.from de Node decodifica base64
+// de forma permisiva, ignorando caracteres fuera del alfabeto en vez de
+// fallar, así que un string "basura" podría por accidente decodificar a
+// exactamente 32 bytes), este patrón rechaza cualquier valor que no sea
+// EXACTAMENTE la forma canónica antes de intentar decodificarlo.
+const STRICT_BASE64_32_BYTES_PATTERN = /^[A-Za-z0-9+/]{43}=$/;
 
 // Variables que, de estar presentes, delatan razonablemente un contexto de
 // CI/despliegue -- descartan por completo el fallback local aunque se
@@ -422,6 +443,42 @@ export function validateEnv(appEnv, source = process.env) {
         'CATASTROX_PII_ENCRYPTION_KEY debe decodificar a exactamente 32 bytes (AES-256) en base64.',
         { code: 'INSECURE_VALUE', environment: appEnv, variable: 'CATASTROX_PII_ENCRYPTION_KEY' },
       );
+    }
+  }
+
+  // R3/B6-26 + B6-26-ADJ-01 (identityCapability.js): CATASTROX_VERIFY_HANDLE_KEY/
+  // CATASTROX_CHECKOUT_IDENTITY_KEY son claves AES-256-GCM independientes
+  // entre sí y de CATASTROX_PII_ENCRYPTION_KEY (que protege PII de un ciclo
+  // de vida distinto) -- sin ellas, el flujo de comprador no puede emitir/
+  // validar verificationHandle ni identityCapability. Formato más estricto
+  // que CATASTROX_PII_ENCRYPTION_KEY a propósito (ver
+  // STRICT_BASE64_32_BYTES_PATTERN arriba): se exige la forma canónica
+  // exacta ANTES de decodificar, no solo la longitud resultante.
+  for (const identityKeyVariable of ['CATASTROX_VERIFY_HANDLE_KEY', 'CATASTROX_CHECKOUT_IDENTITY_KEY']) {
+    if (!isNonEmpty(source[identityKeyVariable])) continue;
+    const rawKey = source[identityKeyVariable];
+
+    if (rawKey !== rawKey.trim()) {
+      throw new ConfigurationError(`${identityKeyVariable} no puede tener espacios iniciales o finales.`, {
+        code: 'INSECURE_VALUE',
+        environment: appEnv,
+        variable: identityKeyVariable,
+      });
+    }
+
+    if (!STRICT_BASE64_32_BYTES_PATTERN.test(rawKey)) {
+      throw new ConfigurationError(
+        `${identityKeyVariable} debe ser base64 estándar canónico de exactamente 32 bytes (AES-256) -- 43 caracteres válidos más un '=' de padding.`,
+        { code: 'INSECURE_VALUE', environment: appEnv, variable: identityKeyVariable },
+      );
+    }
+
+    if (Buffer.from(rawKey, 'base64').length !== 32) {
+      throw new ConfigurationError(`${identityKeyVariable} debe decodificar a exactamente 32 bytes (AES-256) en base64.`, {
+        code: 'INSECURE_VALUE',
+        environment: appEnv,
+        variable: identityKeyVariable,
+      });
     }
   }
 

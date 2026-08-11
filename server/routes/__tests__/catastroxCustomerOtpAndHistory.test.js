@@ -165,9 +165,23 @@ let counter = 0;
 // órdenes creadas concurrentemente por otro archivo bajo el mismo predio.
 const createdCustomerIds = [];
 
+// R3/B6-26 + B6-26-ADJ-01: POST /customers ya no devuelve customerId (nunca,
+// ni en éxito ni en fallo -- ver server/routes/catastroxPayments.js). Los
+// tests de este archivo que todavía necesitan un customerId real (para
+// checkout, que en Etapa 2 sigue aceptándolo, o para el teardown vía
+// createdCustomerIds) lo resuelven por consulta directa a Postgres a partir
+// del documentNumber usado, igual que ya hacían las pruebas de cooldown más
+// abajo -- nunca confiando en un valor que el HTTP ya no expone.
+async function lookupCustomerIdByDocument(documentNumber) {
+  const documentHash = hashDocumentNumber(normalizeDocumentNumber(documentNumber));
+  const result = await query('select id from public.catastrox_customers where document_number_hash = $1', [documentHash]);
+  return result.rows[0]?.id ?? null;
+}
+
 async function createCustomer(baseUrl, overrides = {}) {
   counter += 1;
   const email = overrides.email || `otp-history-${Date.now()}-${counter}@example.com`;
+  const documentNumber = overrides.documentNumber || `93${counter}${Date.now()}`.slice(0, 15);
   const response = await fetch(`${baseUrl}/customers`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -176,7 +190,7 @@ async function createCustomer(baseUrl, overrides = {}) {
       firstName: 'Historial',
       lastName: 'Test',
       documentType: 'CC',
-      documentNumber: `93${counter}${Date.now()}`.slice(0, 15),
+      documentNumber,
       email,
       emailConfirmation: email,
       phone: '3000000000',
@@ -191,7 +205,11 @@ async function createCustomer(baseUrl, overrides = {}) {
     }),
   });
   const payload = await response.json();
-  if (payload.customerId) createdCustomerIds.push(payload.customerId);
+  if (payload.ok) {
+    const customerId = await lookupCustomerIdByDocument(documentNumber);
+    if (customerId) createdCustomerIds.push(customerId);
+    payload.customerId = customerId;
+  }
   return payload;
 }
 
@@ -300,11 +318,11 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
     resetRateLimiters();
     const app = await startTestApp();
     try {
-      const { customerId } = await createCustomer(app.baseUrl);
-      const response = await fetch(`${app.baseUrl}/customers/${customerId}/verify-email`, {
+      const { verificationHandle } = await createCustomer(app.baseUrl);
+      const response = await fetch(`${app.baseUrl}/customers/verify-email`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: '000000' }),
+        body: JSON.stringify({ verificationHandle, code: '000000' }),
       });
       const payload = await response.json();
       assert.equal(response.status, 400);
@@ -320,13 +338,13 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
     const app = await startTestApp();
     try {
       const created = await createCustomer(app.baseUrl);
-      assert.ok(created.customerId, 'debe crear un customerId');
+      assert.ok(created.verificationHandle, 'debe emitir un verificationHandle');
       assert.equal(created.emailVerificationRequired, true);
 
-      const response = await fetch(`${app.baseUrl}/customers/${created.customerId}/verify-email`, {
+      const response = await fetch(`${app.baseUrl}/customers/verify-email`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: created.devOtpCode }),
+        body: JSON.stringify({ verificationHandle: created.verificationHandle, code: created.devOtpCode }),
       });
       const payload = await response.json();
       assert.equal(response.status, 200);
@@ -426,7 +444,7 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
       try {
         const created = await createCustomer(app.baseUrl);
         assert.equal(created.ok, true);
-        assert.ok(created.customerId);
+        assert.ok(created.verificationHandle);
         assert.equal(created.emailVerificationRequired, true);
         assert.equal('devOtpCode' in created, false, 'devOtpCode nunca debe aparecer en staging, ni siquiera con entrega exitosa');
       } finally {
@@ -440,9 +458,10 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
   // --- EMAIL_PROVIDER_002 (revisión de reenvío OTP) ------------------------
   // No existe un endpoint dedicado de reenvío: el frontend
   // (CatastroXPackagePage.jsx, handleResendOtp) reenvía llamando de nuevo a
-  // POST /customers con los mismos datos del comprador. upsertCustomer() es
-  // idempotente por hash de documento (actualiza la misma fila); cada
-  // llamada genera un candidato de verificación nuevo
+  // POST /customers con los mismos datos del comprador. Con Modelo B
+  // (R3/B6-26), resolveCustomerForVerification() resuelve la misma fila por
+  // hash de documento sin mutarla jamás; cada llamada emite un
+  // verificationHandle nuevo y genera un candidato de verificación nuevo
   // (generatePendingEmailVerification()) y, si el envío se confirma
   // entregado (o development/test), lo persiste
   // (persistEmailVerification()). Las pruebas de abajo ejercitan ese mismo
@@ -699,10 +718,10 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
 
         // El código original (realmente entregado) sigue siendo válido --
         // el fallo del reenvío no lo ensombreció ni lo invalidó.
-        const verifyOriginal = await fetch(`${app.baseUrl}/customers/${initial.customerId}/verify-email`, {
+        const verifyOriginal = await fetch(`${app.baseUrl}/customers/verify-email`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: originalCode }),
+          body: JSON.stringify({ verificationHandle: initial.verificationHandle, code: originalCode }),
         });
         const verifyPayload = await verifyOriginal.json();
         assert.equal(verifyOriginal.status, 200);
@@ -817,12 +836,6 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
   // (server/services/catastrox/customerRepository.js) a través del
   // endpoint real.
 
-  async function lookupCustomerIdByDocument(documentNumber) {
-    const documentHash = hashDocumentNumber(normalizeDocumentNumber(documentNumber));
-    const result = await query('select id from public.catastrox_customers where document_number_hash = $1', [documentHash]);
-    return result.rows[0]?.id ?? null;
-  }
-
   await t.test(
     'EMAIL_PROVIDER_002 (cooldown backend): segundo request antes de 30s devuelve 429 EMAIL_VERIFICATION_COOLDOWN, con retryAfterSeconds acotado, sin llamar a Resend, sin fila nueva, y el código anterior sigue siendo válido',
     async () => {
@@ -879,10 +892,10 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
         assert.equal(captured.length, 1, 'el cooldown debe bloquear antes de llamar a Resend -- ninguna llamada nueva');
         assert.equal(await countEmailVerifications(initial.customerId), 1, 'el cooldown no debe dejar una fila de verificación nueva');
 
-        const verifyOriginal = await fetch(`${app.baseUrl}/customers/${initial.customerId}/verify-email`, {
+        const verifyOriginal = await fetch(`${app.baseUrl}/customers/verify-email`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: originalCode }),
+          body: JSON.stringify({ verificationHandle: initial.verificationHandle, code: originalCode }),
         });
         const verifyPayload = await verifyOriginal.json();
         assert.equal(verifyOriginal.status, 200);
@@ -962,7 +975,7 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
         assert.equal(firstPayload.code, 'EMAIL_DELIVERY_UNAVAILABLE');
 
         const customerId = await lookupCustomerIdByDocument(documentNumber);
-        assert.ok(customerId, 'upsertCustomer debe haber creado el comprador aunque el envío fallara');
+        assert.ok(customerId, 'resolveCustomerForVerification debe haber creado el comprador aunque el envío fallara');
         assert.equal(await countEmailVerifications(customerId), 0, 'un fallo en el primer intento no debe dejar ningún OTP persistido');
 
         // Reintento inmediato -- sin bypass de cooldown: un intento fallido
@@ -1118,14 +1131,16 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
         assert.deepEqual(noCookiePayload.orders, []);
 
         const customer = await createCustomer(app.baseUrl);
-        await fetch(`${app.baseUrl}/customers/${customer.customerId}/verify-email`, {
+        const verifyResponse = await fetch(`${app.baseUrl}/customers/verify-email`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: customer.devOtpCode }),
+          body: JSON.stringify({ verificationHandle: customer.verificationHandle, code: customer.devOtpCode }),
         });
+        const { identityCapability } = await verifyResponse.json();
 
-        // 14) customerId (ya verificado) solo se envía al checkout después de
-        // la verificación -- este propio flujo de prueba respeta ese orden.
+        // R3/B6-26-ADJ-01: identityCapability (emitida recién arriba, tras
+        // OTP válido) es la única credencial que checkout acepta -- 14)
+        // sigue cumpliéndose: solo se puede obtener después de verificar.
         const checkoutResponse = await fetch(`${app.baseUrl}/checkout`, {
           method: 'POST',
           // 15) credentials:'include' es responsabilidad del navegador real;
@@ -1134,7 +1149,7 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             packageId: 'basico',
-            customerId: customer.customerId,
+            identityCapability,
             routeId: TEST_ROUTE_ID,
             purchaseAttemptId: crypto.randomUUID(),
           }),
@@ -1200,7 +1215,7 @@ test('comprador/OTP/historial de órdenes (integración, requiere Postgres real)
           headers: { 'Content-Type': 'application/json', Cookie: cookie },
           body: JSON.stringify({
             packageId: 'plus',
-            customerId: customer.customerId,
+            identityCapability,
             routeId: TEST_ROUTE_ID,
             purchaseAttemptId: crypto.randomUUID(),
           }),

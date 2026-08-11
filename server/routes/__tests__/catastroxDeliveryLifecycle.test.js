@@ -43,6 +43,8 @@ let catastroxPaymentsRouter;
 let computeWompiEventChecksum;
 let __rememberLookupPreviewForTests;
 let deliveryJobService;
+let hashDocumentNumber;
+let normalizeDocumentNumber;
 
 try {
   const { getConfig } = await import('../../config/env.js');
@@ -65,6 +67,7 @@ if (dbAvailable) {
   ({ __rememberLookupPreviewForTests } = await import('../catastrox.js'));
   __rememberLookupPreviewForTests(TEST_ROUTE_ID, { canonicalPredioId: INTEGRATION_TEST_CODIGO, codigoPredial: INTEGRATION_TEST_CODIGO });
   deliveryJobService = await import('../../services/catastrox/deliveryJobService.js');
+  ({ hashDocumentNumber, normalizeDocumentNumber } = await import('../../services/catastrox/piiCrypto.js'));
   const limiterModule = await import('../../middleware/rateLimit.js');
   // Los limitadores son singletons de módulo (mismo store en memoria durante
   // todo este proceso de test, ver catastroxPaymentOrders.test.js) -- este
@@ -172,6 +175,7 @@ let customerCounter = 0;
 async function createVerifiedTestCustomer(baseUrl) {
   customerCounter += 1;
   const email = `delivery-lifecycle-${Date.now()}-${customerCounter}@example.com`;
+  const documentNumber = `91000${customerCounter}${Date.now()}`.slice(0, 15);
   const response = await fetch(`${baseUrl}/customers`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -180,7 +184,7 @@ async function createVerifiedTestCustomer(baseUrl) {
       firstName: 'Entrega',
       lastName: 'Test',
       documentType: 'CC',
-      documentNumber: `91000${customerCounter}${Date.now()}`.slice(0, 15),
+      documentNumber,
       email,
       emailConfirmation: email,
       phone: '3000000000',
@@ -194,12 +198,15 @@ async function createVerifiedTestCustomer(baseUrl) {
     }),
   });
   const payload = await response.json();
-  await fetch(`${baseUrl}/customers/${payload.customerId}/verify-email`, {
+  const verifyResponse = await fetch(`${baseUrl}/customers/verify-email`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code: payload.devOtpCode }),
+    body: JSON.stringify({ verificationHandle: payload.verificationHandle, code: payload.devOtpCode }),
   });
-  return { customerId: payload.customerId, email };
+  const verifyPayload = await verifyResponse.json();
+  const documentHash = hashDocumentNumber(normalizeDocumentNumber(documentNumber));
+  const customerRow = await query('select id from public.catastrox_customers where document_number_hash = $1', [documentHash]);
+  return { customerId: customerRow.rows[0]?.id ?? null, identityCapability: verifyPayload.identityCapability, email };
 }
 
 function buildSignedEvent({ transactionId, reference, status = 'APPROVED', amountInCents = 3990000, timestamp = 1732550400 }) {
@@ -221,11 +228,11 @@ function buildSignedEvent({ transactionId, reference, status = 'APPROVED', amoun
 // manipular directamente su delivery job. `waitForTerminal` espera a que
 // el procesamiento desacoplado (ajuste #8) termine antes de devolver.
 async function createApprovedOrder(app, { packageId = 'basico', transactionId } = {}) {
-  const { customerId, email } = await createVerifiedTestCustomer(app.baseUrl);
+  const { customerId, identityCapability, email } = await createVerifiedTestCustomer(app.baseUrl);
   const checkoutResponse = await fetch(`${app.baseUrl}/checkout`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ packageId, routeId: TEST_ROUTE_ID, customerId, purchaseAttemptId: crypto.randomUUID() }),
+    body: JSON.stringify({ packageId, routeId: TEST_ROUTE_ID, identityCapability, purchaseAttemptId: crypto.randomUUID() }),
   });
   const cookie = extractSessionCookiePair(checkoutResponse);
   const { reference, orderToken } = (await checkoutResponse.json()).checkout;
@@ -304,11 +311,11 @@ async function countBlobsForJob(jobId) {
 }
 
 async function createApprovedDeliveryJobForDirectProcessing(app, { email = 'delivery-concurrency@example.com' } = {}) {
-  const { customerId } = await createVerifiedTestCustomer(app.baseUrl);
+  const { customerId, identityCapability } = await createVerifiedTestCustomer(app.baseUrl);
   const checkoutResponse = await fetch(`${app.baseUrl}/checkout`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID, customerId, purchaseAttemptId: crypto.randomUUID() }),
+    body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID, identityCapability, purchaseAttemptId: crypto.randomUUID() }),
   });
   const { reference } = (await checkoutResponse.json()).checkout;
   const orderRow = await query('select * from public.catastrox_payment_orders where wompi_reference = $1', [reference]);
@@ -346,12 +353,12 @@ test('CATX-DELIVERY-001: ciclo de vida del delivery job (integración, requiere 
     let order = null;
     let customerId = null;
     try {
-      const { customerId: cid } = await createVerifiedTestCustomer(app.baseUrl);
+      const { customerId: cid, identityCapability } = await createVerifiedTestCustomer(app.baseUrl);
       customerId = cid;
       const checkoutResponse = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID, customerId, purchaseAttemptId: crypto.randomUUID() }),
+        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID, identityCapability, purchaseAttemptId: crypto.randomUUID() }),
       });
       const { reference } = (await checkoutResponse.json()).checkout;
       const orderRow = await query('select * from public.catastrox_payment_orders where wompi_reference = $1', [reference]);
@@ -655,12 +662,12 @@ test('CATX-DELIVERY-001: ciclo de vida del delivery job (integración, requiere 
     let order = null;
     let customerId = null;
     try {
-      const { customerId: cid } = await createVerifiedTestCustomer(app.baseUrl);
+      const { customerId: cid, identityCapability } = await createVerifiedTestCustomer(app.baseUrl);
       customerId = cid;
       const checkoutResponse = await fetch(`${app.baseUrl}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID, customerId, purchaseAttemptId: crypto.randomUUID() }),
+        body: JSON.stringify({ packageId: 'basico', routeId: TEST_ROUTE_ID, identityCapability, purchaseAttemptId: crypto.randomUUID() }),
       });
       const { reference } = (await checkoutResponse.json()).checkout;
       const orderRow = await query('select * from public.catastrox_payment_orders where wompi_reference = $1', [reference]);
