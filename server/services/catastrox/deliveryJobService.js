@@ -107,6 +107,58 @@ function resolveUnclaimedReason(job) {
   return 'not_claimable';
 }
 
+const MAX_AUTONOMOUS_BATCH_LIMIT = 100;
+
+/**
+ * R4/B5-03: descubre IDs de catastrox_delivery_jobs procesables de forma
+ * AUTÓNOMA (sin ninguna request HTTP) -- QUEUED de inmediato, FAILED cuyo
+ * next_retry_at ya venció (o nunca se fijó), y GENERATING/READY vencidos
+ * (>30min sin actividad, sin provider_message_id).
+ *
+ * POLÍTICA DE SEGURIDAD OBLIGATORIA (R4/B5-03 Fase 0.5, no cambiar sin
+ * volver a auditar la ventana de envío de correo): SENDING NUNCA se incluye
+ * aquí. provider_message_id se escribe EXCLUSIVAMENTE dentro de
+ * markDeliveryJobSent() -- si el proceso muere después de que el proveedor
+ * de correo aceptó el envío pero antes de que esa función corra,
+ * provider_message_id sigue NULL en la fila. Un SENDING vencido es, por
+ * tanto, indistinguible entre "nunca se intentó el envío" (seguro
+ * reintentar) y "el correo probablemente ya salió" (reintentar autónomo
+ * reenviaría un correo real -- la garantía de idempotencia del proveedor
+ * vía el header Idempotency-Key NO está probada contra este backend). Por
+ * eso SENDING queda reservado exclusivamente al camino request-bound ya
+ * existente (retry manual/webhook/verify, vía claimDeliveryJob() sin
+ * cambios en esta función). SENT tampoco se incluye nunca.
+ *
+ * R4-ADJ-01 (deuda registrada, no resuelta aquí): reconciliación explícita
+ * de SENDING ambiguo requeriría persistencia adicional (una columna nueva,
+ * distinta de provider_message_id) o una garantía de idempotencia del
+ * proveedor demostrada -- ninguna disponible hoy.
+ *
+ * Esta función SOLO selecciona -- nunca actualiza ningún estado. La
+ * exclusión real entre llamadores concurrentes (incluyendo múltiples
+ * réplicas ejecutando su propio worker) sigue siendo el UPDATE condicional
+ * (CAS) ya existente dentro de claimDeliveryJob(), invocado por
+ * processDeliveryJob() para cada id que esta función devuelve.
+ */
+export async function findAutonomousDeliveryJobIds({ limit = 5 } = {}) {
+  const parsedLimit = Number.isInteger(limit) ? limit : parseInt(limit, 10);
+  const safeLimit = Math.min(MAX_AUTONOMOUS_BATCH_LIMIT, Math.max(1, Number.isFinite(parsedLimit) ? parsedLimit : 5));
+  const result = await query(
+    `select id
+       from ${DELIVERY_JOBS_TABLE}
+      where status = 'QUEUED'
+         or (status = 'FAILED'
+             and (next_retry_at is null or next_retry_at <= now()))
+         or (status in ('GENERATING', 'READY')
+             and provider_message_id is null
+             and last_attempt_at < now() - $2::interval)
+      order by created_at asc, id asc
+      limit $1`,
+    [safeLimit, STALE_ACTIVE_INTERVAL],
+  );
+  return result.rows.map((row) => row.id);
+}
+
 /**
  * Reclamo atomico y corto: solo una ejecucion puede mover QUEUED/FAILED (o
  * un estado activo claramente vencido) a GENERATING e incrementar

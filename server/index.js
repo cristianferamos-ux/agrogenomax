@@ -11,6 +11,8 @@ import { createGracefulShutdown, resolveShutdownTimeoutMs } from './lifecycle/gr
 import { createRequestLogging } from './observability/requestLogging.js';
 import { closeMainDbPool } from './db.js';
 import { closeCatastroxDbPool } from './catastroxDb.js';
+import { createDeliveryWorker } from './services/catastrox/deliveryWorker.js';
+import { findAutonomousDeliveryJobIds, processDeliveryJob } from './services/catastrox/deliveryJobService.js';
 import animalesRouter from './routes/animales.js';
 import catastroxRouter from './routes/catastrox.js';
 import catastroxPaymentsRouter from './routes/catastroxPayments.js';
@@ -120,15 +122,33 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`AgroGenomaX API running on port ${PORT} [APP_ENV=${appConfig.appEnv}]`);
 });
 
+// R4/B5-03 (durable autonomous delivery worker): arranca solo después de
+// que la configuración ya fue validada y la app está lista para aceptar
+// tráfico. Procesa QUEUED/FAILED-vencido/GENERATING-READY-stale sin
+// depender de ninguna request HTTP -- NUNCA reclama SENDING de forma
+// autónoma (política de seguridad obligatoria, ver
+// server/services/catastrox/deliveryWorker.js y
+// deliveryJobService.js#findAutonomousDeliveryJobIds).
+const deliveryWorker = createDeliveryWorker({
+  findJobIds: findAutonomousDeliveryJobIds,
+  processJob: processDeliveryJob,
+});
+deliveryWorker.start();
+
 // Graceful shutdown (LOTE-007, ADR-012 §21): señales registradas
 // exclusivamente aquí, en el entrypoint real -- server/lifecycle/
 // gracefulShutdown.js nunca las registra por sí mismo. Cierra el
 // servidor HTTP antes que los pools (nunca al revés), respeta la
 // inicialización perezosa (un pool nunca creado no se crea solo para
 // cerrarlo) y nunca ejecuta process.exit() fuera de este único punto.
+// El delivery worker se registra ANTES que los pools: su close() detiene
+// el scheduling de inmediato y drena el batch en curso con un presupuesto
+// acotado (deliveryWorker.js, drainBudgetMs) -- debe terminar (o ceder)
+// antes de que los pools de Postgres se cierren debajo de él.
 const gracefulShutdown = createGracefulShutdown({
   server,
   resources: [
+    { name: 'catastrox_delivery_worker', close: deliveryWorker.stop },
     { name: 'agx_pg_pool', close: closeMainDbPool },
     { name: 'catastrox_pg_pool', close: closeCatastroxDbPool },
   ],
