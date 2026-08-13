@@ -45,6 +45,7 @@ create schema if not exists catastrox_clean;
 create table if not exists catastrox_clean.predios (
   codigo_predial              text primary key,
   codigo_anterior              text,
+  municipio_dane                text,
   departamento_nombre          text,
   municipio_nombre              text,
   zona                            text,
@@ -68,9 +69,25 @@ create table if not exists catastrox_clean.predios (
   geom                                              geometry(Polygon, 0)
 );
 
-create or replace view catastrox_clean.v_predios_enriquecidos as
+-- CATX-FREEZE-01 (P2-04): municipio_dane se agregó después de la primera
+-- versión de este fixture (necesario para CLEAN_FULL_RESULT_QUERY, usada
+-- por buildLookupFullResultPayload -- antes solo se ejercitaba
+-- resolvePredioDataForDelivery, que nunca la lee). `add column if not
+-- exists` para que un container ya levantado con la tabla vieja se
+-- actualice al re-ejecutar este script sin recrearlo.
+alter table catastrox_clean.predios add column if not exists municipio_dane text;
+
+-- DROP + CREATE en vez de CREATE OR REPLACE: Postgres no permite que
+-- CREATE OR REPLACE VIEW reordene/inserte una columna en medio de la lista
+-- existente (solo permite agregar al final) -- al insertar municipio_dane
+-- después de codigo_anterior, un container con la vista vieja ya creada
+-- necesita recrearla desde cero. La vista no tiene estado propio (es una
+-- proyección de la tabla), así que un DROP+CREATE es seguro y sigue siendo
+-- idempotente.
+drop view if exists catastrox_clean.v_predios_enriquecidos;
+create view catastrox_clean.v_predios_enriquecidos as
 select
-  codigo_predial, codigo_anterior, departamento_nombre, municipio_nombre, zona,
+  codigo_predial, codigo_anterior, municipio_dane, departamento_nombre, municipio_nombre, zona,
   nombre_predio, direccion_real, vereda_nombre, barrio_nombre, sector_codigo,
   manzana_codigo, area_terreno_m2, area_terreno_ha, destino_economico_nombre,
   uso_1_nombre, uso_2_nombre, uso_3_nombre, numero_construcciones,
@@ -89,13 +106,16 @@ from catastrox_clean.predios;
 -- pública en el propio código de la app (CATASTROX_ORIGEN_NACIONAL_PROJ,
 -- server/routes/catastrox.js), no de coordenadas de ningún predio real.
 insert into catastrox_clean.predios (
-  codigo_predial, codigo_anterior, departamento_nombre, municipio_nombre, zona,
+  codigo_predial, codigo_anterior, municipio_dane, departamento_nombre, municipio_nombre, zona,
   nombre_predio, direccion_real, vereda_nombre, barrio_nombre, sector_codigo,
   manzana_codigo, area_terreno_m2, area_terreno_ha, destino_economico_nombre,
   uso_1_nombre, uso_2_nombre, uso_3_nombre, numero_construcciones,
   area_construida_m2, tipos_construccion_resumen, fuente, fecha_proceso, geom
 ) values (
-  '999999999999999999999999999901', null, 'CAQUETA', 'MILAN', 'RURAL',
+  -- municipio_dane: código DANE real de Milán, Caquetá (dato público
+  -- administrativo, no PII, consistente con departamento/municipio_nombre
+  -- 'CAQUETA'/'MILAN' ya usados arriba).
+  '999999999999999999999999999901', null, '18410', 'CAQUETA', 'MILAN', 'RURAL',
   'Predio de prueba', 'Vereda de prueba', 'Vereda de prueba', null, null,
   null, 4371500, 437.15, 'AGROPECUARIO',
   null, null, null, null,
@@ -107,6 +127,7 @@ insert into catastrox_clean.predios (
 )
 on conflict (codigo_predial) do update set
   codigo_anterior = excluded.codigo_anterior,
+  municipio_dane = excluded.municipio_dane,
   departamento_nombre = excluded.departamento_nombre,
   municipio_nombre = excluded.municipio_nombre,
   zona = excluded.zona,

@@ -40,6 +40,7 @@ function buildLimiter({ windowMs, max, publicCode, publicMessage }) {
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
 const ONE_MINUTE_MS = 60 * 1000;
+const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
 
 // Creación de orden: la operación con mayor costo (abre un checkout real de
 // Wompi) -- el límite más estricto de los cinco.
@@ -114,4 +115,30 @@ export const webhookLimiter = buildLimiter({
   max: 300,
   publicCode: 'RATE_LIMITED_WEBHOOK',
   publicMessage: 'Too many requests.',
+});
+
+// CATX-FREEZE-01: verificación de la contraseña temporal compartida --
+// deliberadamente el más estricto de todos (una contraseña única y
+// compartida es un objetivo de fuerza bruta más simple que un OTP de un
+// solo uso). 5 intentos por ventana de 5 minutos, mismo patrón buildLimiter
+// que el resto de este archivo -- sin Redis, sin infraestructura nueva.
+export const temporaryAccessLimiter = buildLimiter({
+  windowMs: FIVE_MINUTES_MS,
+  max: 5,
+  publicCode: 'RATE_LIMITED_TEMPORARY_ACCESS',
+  publicMessage: 'Demasiados intentos. Intenta nuevamente en unos minutos.',
+});
+
+// CATX-FREEZE-01 (P2-02): generación de PDF con un capability YA válido --
+// distinto y más laxo que temporaryAccessLimiter (ese protege la contraseña
+// contra fuerza bruta; este solo acota el costo de CPU de regenerar el PDF
+// repetidamente dentro del TTL de 15 min del capability). Ventana alineada
+// al propio TTL del capability para que un uso normal (reintentos tras un
+// error de red, o descargar el mismo PDF más de una vez) nunca choque con
+// el límite.
+export const temporaryPdfLimiter = buildLimiter({
+  windowMs: FIFTEEN_MINUTES_MS,
+  max: 10,
+  publicCode: 'RATE_LIMITED_TEMPORARY_PDF',
+  publicMessage: 'Demasiadas generaciones de PDF. Intenta nuevamente en unos minutos.',
 });

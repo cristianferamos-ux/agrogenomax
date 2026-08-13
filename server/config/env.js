@@ -705,6 +705,59 @@ export function validateEnv(appEnv, source = process.env) {
   }
 }
 
+// CATX-FREEZE-01: valores exactos permitidos para CATASTROX_COMMERCE_MODE.
+// 'password' desactiva el flujo comercial (Wompi/PII/customer/checkout) a
+// favor del acceso temporal por contraseña compartida; 'wompi_test'/
+// 'wompi_live' reflejan el comportamiento comercial actual, ligados a los
+// dos únicos valores reales que WOMPI_ENV ya acepta hoy ('test'/
+// 'production' -- ver validateEnv() arriba, no se inventan enums nuevos).
+const CATASTROX_COMMERCE_MODES = Object.freeze(['password', 'wompi_test', 'wompi_live']);
+
+/**
+ * CATX-FREEZE-01: fuente de verdad backend-only de si el flujo comercial
+ * está activo. La AUSENCIA de CATASTROX_COMMERCE_MODE preserva el
+ * comportamiento legacy exacto -- devuelve `null`, y todo el código de
+ * negocio (guardas COMMERCE_DISABLED, descubrimiento de modo) solo actúa
+ * cuando el valor es EXACTAMENTE 'password'; `null` nunca se interpreta
+ * como autorización implícita de ningún modo Wompi. Cualquier valor fuera
+ * de CATASTROX_COMMERCE_MODES falla cerrado (ConfigurationError, el
+ * servidor no arranca) -- nunca se asume un valor por defecto silencioso
+ * ante un typo. Cuando el modo es 'wompi_test'/'wompi_live', se exige que
+ * WOMPI_ENV (si está presente) sea coherente ('test'/'production'
+ * respectivamente) -- una combinación contradictoria también falla
+ * cerrado, nunca se prioriza una variable sobre la otra en silencio.
+ */
+export function resolveCommerceMode(appEnv, source = process.env) {
+  const raw = source.CATASTROX_COMMERCE_MODE;
+  if (!isNonEmpty(raw)) return null;
+
+  const trimmed = raw.trim();
+  if (!CATASTROX_COMMERCE_MODES.includes(trimmed)) {
+    throw new ConfigurationError(
+      `CATASTROX_COMMERCE_MODE debe ser uno de: ${CATASTROX_COMMERCE_MODES.join(', ')}.`,
+      { code: 'INVALID_COMMERCE_MODE', environment: appEnv, variable: 'CATASTROX_COMMERCE_MODE' },
+    );
+  }
+
+  if (trimmed === 'wompi_test' && isNonEmpty(source.WOMPI_ENV) && source.WOMPI_ENV.trim() !== 'test') {
+    throw new ConfigurationError('CATASTROX_COMMERCE_MODE=wompi_test requiere WOMPI_ENV=test.', {
+      code: 'INCOMPATIBLE_COMBINATION',
+      environment: appEnv,
+      variable: 'CATASTROX_COMMERCE_MODE',
+    });
+  }
+
+  if (trimmed === 'wompi_live' && isNonEmpty(source.WOMPI_ENV) && source.WOMPI_ENV.trim() !== 'production') {
+    throw new ConfigurationError('CATASTROX_COMMERCE_MODE=wompi_live requiere WOMPI_ENV=production.', {
+      code: 'INCOMPATIBLE_COMBINATION',
+      environment: appEnv,
+      variable: 'CATASTROX_COMMERCE_MODE',
+    });
+  }
+
+  return trimmed;
+}
+
 function parseCommaSeparatedList(rawValue) {
   if (!isNonEmpty(rawValue)) return [];
   return rawValue
@@ -793,6 +846,10 @@ export function getConfig(source = process.env, options = {}) {
   // Ya validado arriba (entero 0-5 si está presente); default 0 = no
   // confiar en ningún proxy (Express usa el socket real).
   const trustProxyHops = isNonEmpty(source.TRUST_PROXY_HOPS) ? Number(source.TRUST_PROXY_HOPS.trim()) : 0;
+  // CATX-FREEZE-01: null preserva el comportamiento legacy exacto (ver
+  // resolveCommerceMode() arriba) -- nunca se sustituye por un valor
+  // inventado aquí.
+  const commerceMode = resolveCommerceMode(appEnv, source);
 
   const config = Object.freeze({
     appEnv,
@@ -804,6 +861,10 @@ export function getConfig(source = process.env, options = {}) {
     // dependen de APP_ENV, y se declaran en ese módulo).
     cors: Object.freeze({ allowedOrigins: corsAllowedOrigins }),
     trustProxyHops,
+    // CATX-FREEZE-01: 'password' | 'wompi_test' | 'wompi_live' | null
+    // (ausente -- comportamiento legacy). Única fuente de verdad de si el
+    // flujo comercial está activo.
+    commerceMode,
     // Informativo únicamente -- nunca usado para tomar decisiones.
     nodeEnv: source.NODE_ENV ?? null,
   });
