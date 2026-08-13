@@ -9,6 +9,7 @@ import CatastroXOtpVerification from '../components/CatastroXOtpVerification.jsx
 import CatastroXPageActions from '../components/CatastroXPageActions.jsx';
 import CatastroXPurchaseSummary from '../components/CatastroXPurchaseSummary.jsx';
 import CatastroXResultSummary from '../components/CatastroXResultSummary.jsx';
+import CatastroXTemporaryAccessModal from '../components/CatastroXTemporaryAccessModal.jsx';
 import CatastroXWhatsAppCTA from '../components/CatastroXWhatsAppCTA.jsx';
 import {
   CATASTROX_PACKAGE_IDS,
@@ -28,7 +29,9 @@ import {
   clearPendingPaymentByReference,
   createCustomer,
   downloadDeliverablePdf,
+  downloadTemporaryPdf,
   getApprovedPurchaseRecordByKeys,
+  getCommerceMode,
   getMyOrders,
   getPackageRank,
   getLookupPurchaseKey,
@@ -40,6 +43,7 @@ import {
   markPackageAsPaidByPurchaseKey,
   startPackageCheckout,
   verifyCustomerEmail,
+  verifyTemporaryAccess,
 } from '../services/catastroxPaymentService.js';
 import {
   downloadCoordinatesZip,
@@ -220,6 +224,22 @@ export default function CatastroXPackagePage({ packageId }) {
   const [devOtpCode, setDevOtpCode] = useState(null);
   const [isCreatingCustomer, setIsCreatingCustomer] = useState(false);
   const [buyerFormError, setBuyerFormError] = useState(null);
+
+  // CATX-FREEZE-01: el backend es la única autoridad sobre el modo -- este
+  // estado es solo un reflejo de lo que /access/mode respondió, nunca una
+  // decisión propia del frontend. null mientras no se conoce todavía
+  // (UX: no se muestra ningún flujo comercial hasta tener una respuesta
+  // real, para no montar/desmontar el formulario de compra si el modo
+  // resulta ser 'password'). El capability temporal vive SOLO en memoria
+  // de React (nunca localStorage/sessionStorage/URL) y queda ligado al
+  // packageId con el que se emitió -- cambiar de paquete exige verificar
+  // la contraseña de nuevo (temporaryAccessPackageId !== packageId invalida
+  // la sesión visualmente, aunque el backend ya lo habría rechazado igual).
+  const [commerceMode, setCommerceMode] = useState(null);
+  const [showTemporaryAccessModal, setShowTemporaryAccessModal] = useState(false);
+  const [temporaryAccessCapability, setTemporaryAccessCapability] = useState(null);
+  const [temporaryAccessPackageId, setTemporaryAccessPackageId] = useState(null);
+  const [temporaryDownloadState, setTemporaryDownloadState] = useState({});
   // Protección contra doble clic (Bloque 7): guard síncrono, no depende de
   // que el re-render de setState ya haya ocurrido antes del segundo clic.
   const checkoutInFlightRef = useRef(false);
@@ -305,7 +325,14 @@ export default function CatastroXPackagePage({ packageId }) {
   // se muestra el valor local como adelanto de UX; en cuanto responde, su
   // valor manda siempre, sea true o false.
   const isPaid = entitlementState.isPaid === null ? localIsPaid : entitlementState.isPaid;
-  const visibleDownloads = isAuditUnlocked
+  // CATX-FREEZE-01: el acceso temporal NO es pago -- deliberadamente
+  // separado de isPaid/isAuditUnlocked, nunca escribe en el localStorage de
+  // compras. Ligado al packageId con el que se emitió el capability:
+  // cambiar de paquete (incluso con la misma contraseña) exige verificar de
+  // nuevo.
+  const isPasswordMode = commerceMode === 'password';
+  const hasTemporaryAccess = isPasswordMode && Boolean(temporaryAccessCapability) && temporaryAccessPackageId === packageId;
+  const visibleDownloads = isAuditUnlocked || hasTemporaryAccess
     ? buildDownloadsForPackage(packageId)
     : buildDownloadsForPackage(packageId).filter((download) =>
         getUnlockedDownloadsForPackage({ lookup: effectiveLookup, packageId }).includes(download.id),
@@ -337,11 +364,32 @@ export default function CatastroXPackagePage({ packageId }) {
       return baseLookup;
     }
 
-    const hydratedLookup = await hydrateLookupForDeliverables(baseLookup, { useAuditEndpoint });
+    // CATX-FREEZE-01: en modo password, el capability temporal reemplaza
+    // por completo la sesión/orden comercial de resolveFullResultAccess --
+    // nunca se combina con useAuditEndpoint.
+    const hydratedLookup = await hydrateLookupForDeliverables(baseLookup, {
+      useAuditEndpoint,
+      temporaryCapability: hasTemporaryAccess ? temporaryAccessCapability : null,
+    });
     setDeliverableLookup(hydratedLookup);
     saveLastLookup(hydratedLookup);
     return hydratedLookup;
   };
+
+  // CATX-FREEZE-01: única fuente de verdad del modo -- consultada una vez
+  // por carga de página, nunca inferida de VITE_*/localStorage/query
+  // params. Mientras no responde (commerceMode === null), no se muestra
+  // ningún flujo (ni comercial ni temporal) para evitar un parpadeo de UI
+  // incorrecta.
+  useEffect(() => {
+    let cancelled = false;
+    getCommerceMode().then((result) => {
+      if (!cancelled) setCommerceMode(result.mode);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const codigoPredial = predio.codigoPredial || predio.codigo || '';
@@ -480,7 +528,57 @@ export default function CatastroXPackagePage({ packageId }) {
     });
   };
 
+  // CATX-FREEZE-01: PDF va directo al motor oficial R3.5 vía el capability
+  // temporal (cero customer/order/delivery-job/Wompi/email); KML/KMZ/SHP/
+  // DXF/coords9377 siguen generándose 100% en el navegador exactamente
+  // como hoy (catastroxDeliverables.js, sin cambios) -- solo cambia de
+  // dónde sale la geometría hidratada (ensureDeliverableLookup ya pasa
+  // temporaryCapability cuando hasTemporaryAccess es true).
+  const handleTemporaryDownload = async (action, fileType) => {
+    if (fileType === 'pdf') {
+      setTemporaryDownloadState({ downloading: true, message: null, tone: null });
+      const result = await downloadTemporaryPdf({ capability: temporaryAccessCapability });
+      setTemporaryDownloadState({
+        downloading: false,
+        message: result.ok ? null : result.message,
+        tone: result.ok ? null : 'danger',
+      });
+      return;
+    }
+
+    try {
+      setIsHydratingDeliverables(true);
+      const source = await ensureDeliverableLookup({ useAuditEndpoint: false });
+      const sourceWithPackage = {
+        ...source,
+        deliverablePackageId: packageId,
+        predio: { ...(source?.predio || {}), deliverablePackageId: packageId },
+      };
+      await action(sourceWithPackage);
+    } catch (error) {
+      console.error('[CatastroX temporary download failure]', {
+        packageId,
+        fileType,
+        lookupId: routeId,
+        status: error?.status || null,
+        error,
+      });
+      setTemporaryDownloadState({
+        downloading: false,
+        message: 'No fue posible preparar este archivo. Intenta nuevamente.',
+        tone: 'danger',
+      });
+    } finally {
+      setIsHydratingDeliverables(false);
+    }
+  };
+
   const handleDownload = async (action, fileType) => {
+    if (hasTemporaryAccess) {
+      await handleTemporaryDownload(action, fileType);
+      return;
+    }
+
     const useAuditEndpoint = fileType === 'coords9377' ? false : isAuditUnlocked;
 
     // El botón "Descargar PDF" de una compra real (no auditoría) nunca debe
@@ -543,6 +641,26 @@ export default function CatastroXPackagePage({ packageId }) {
     setCheckoutState(null);
     setBuyerFormError(null);
     setPurchaseFlowStep('buyer_form');
+  };
+
+  // CATX-FREEZE-01: única puerta de entrada al modal de contraseña -- nunca
+  // monta CatastroXBuyerForm/CatastroXOtpVerification/CatastroXPurchaseSummary,
+  // nunca llama createCustomer/verifyCustomerEmail/startPackageCheckout.
+  const handleOpenTemporaryAccess = () => {
+    setShowTemporaryAccessModal(true);
+  };
+
+  const handleCancelTemporaryAccess = () => {
+    setShowTemporaryAccessModal(false);
+  };
+
+  const handleVerifyTemporaryAccess = async (password) => {
+    const result = await verifyTemporaryAccess({ password, packageId, lookupId: routeId });
+    if (result.ok) {
+      setTemporaryAccessCapability(result.capability);
+      setTemporaryAccessPackageId(result.packageId);
+    }
+    return result;
   };
 
   // Paso 7-8 del flujo: crea o recupera el comprador y dispara el envío del
@@ -849,7 +967,7 @@ export default function CatastroXPackagePage({ packageId }) {
       </div>
       <CatastroXPageActions actions={navigationActions} />
       <div className="catastrox-two-col">
-        <CatastroXResultSummary predio={predio} mode={isPaid || isAuditUnlocked ? 'paid' : 'free'} />
+        <CatastroXResultSummary predio={predio} mode={isPaid || isAuditUnlocked || hasTemporaryAccess ? 'paid' : 'free'} />
         <CatastroXMockMap predio={predio} />
       </div>
 
@@ -866,7 +984,9 @@ export default function CatastroXPackagePage({ packageId }) {
         </ul>
       </section>
 
-      {!isPaid && !isAuditUnlocked && purchaseFlowStep === 'buyer_form' ? (
+      {/* CATX-FREEZE-01: en modo password, el flujo comercial (formulario de
+          datos/OTP/resumen) nunca se monta -- ni siquiera condicionalmente. */}
+      {!isPasswordMode && !isPaid && !isAuditUnlocked && purchaseFlowStep === 'buyer_form' ? (
         <CatastroXBuyerForm
           onSubmit={handleBuyerFormSubmit}
           onCancel={resetPurchaseFlow}
@@ -875,7 +995,7 @@ export default function CatastroXPackagePage({ packageId }) {
         />
       ) : null}
 
-      {!isPaid && !isAuditUnlocked && purchaseFlowStep === 'otp' ? (
+      {!isPasswordMode && !isPaid && !isAuditUnlocked && purchaseFlowStep === 'otp' ? (
         <CatastroXOtpVerification
           maskedEmail={maskEmail(buyerInput?.email)}
           devOtpCode={devOtpCode}
@@ -886,7 +1006,7 @@ export default function CatastroXPackagePage({ packageId }) {
         />
       ) : null}
 
-      {!isPaid && !isAuditUnlocked && purchaseFlowStep === 'summary' ? (
+      {!isPasswordMode && !isPaid && !isAuditUnlocked && purchaseFlowStep === 'summary' ? (
         <CatastroXPurchaseSummary
           buyerInput={buyerInput}
           packageLabel={pkg.label}
@@ -899,18 +1019,40 @@ export default function CatastroXPackagePage({ packageId }) {
         />
       ) : null}
 
-      {isPaid || isAuditUnlocked ? (
+      {isPasswordMode && showTemporaryAccessModal && !hasTemporaryAccess ? (
+        <CatastroXTemporaryAccessModal
+          packageLabel={pkg.label}
+          onVerify={handleVerifyTemporaryAccess}
+          onCancel={handleCancelTemporaryAccess}
+        />
+      ) : null}
+
+      {isPaid || isAuditUnlocked || hasTemporaryAccess ? (
         <section className="catastrox-card">
           <div className="catastrox-section-heading">
-            <span>{isAuditUnlocked ? 'Modo auditoría local — no disponible en producción' : 'Descargas habilitadas'}</span>
-            <h2>{isAuditUnlocked ? `${pkg.label} habilitado para auditoría` : `${pkg.label} habilitado`}</h2>
+            <span>
+              {isAuditUnlocked
+                ? 'Modo auditoría local — no disponible en producción'
+                : hasTemporaryAccess
+                  ? 'Acceso temporal autorizado'
+                  : 'Descargas habilitadas'}
+            </span>
+            <h2>
+              {isAuditUnlocked
+                ? `${pkg.label} habilitado para auditoría`
+                : hasTemporaryAccess
+                  ? `${pkg.label} habilitado (acceso temporal)`
+                  : `${pkg.label} habilitado`}
+            </h2>
           </div>
           <div className="catastrox-success">
-            <strong>{isAuditUnlocked ? 'Auditoría local activa' : 'Pago aprobado'}</strong>
+            <strong>{isAuditUnlocked ? 'Auditoría local activa' : hasTemporaryAccess ? 'Acceso temporal autorizado' : 'Pago aprobado'}</strong>
             <span>
               {isAuditUnlocked
                 ? 'Estas descargas son temporales para revisión local y no representan una compra real.'
-                : includedMessage || `Se habilitaron las descargas de ${pkg.label.toLowerCase()} para este predio.`}
+                : hasTemporaryAccess
+                  ? 'Acceso temporal autorizado -- no representa una compra real.'
+                  : includedMessage || `Se habilitaron las descargas de ${pkg.label.toLowerCase()} para este predio.`}
             </span>
           </div>
           <div className="catastrox-action-row">
@@ -926,9 +1068,31 @@ export default function CatastroXPackagePage({ packageId }) {
               />
             ))}
           </div>
-          {!isAuditUnlocked && pdfDownloadState.message ? (
+          {!isAuditUnlocked && !hasTemporaryAccess && pdfDownloadState.message ? (
             <p className={`catastrox-copy is-${pdfDownloadState.tone || 'warning'}`}>{pdfDownloadState.message}</p>
           ) : null}
+          {hasTemporaryAccess && temporaryDownloadState.message ? (
+            <p className={`catastrox-copy is-${temporaryDownloadState.tone || 'warning'}`}>{temporaryDownloadState.message}</p>
+          ) : null}
+        </section>
+      ) : isPasswordMode ? (
+        <section className="catastrox-card">
+          <div className="catastrox-section-heading">
+            <span>Acceso temporal</span>
+            <h2>Acceda a {pkg.label.toLowerCase()} con la contraseña temporal</h2>
+          </div>
+          <p className="catastrox-copy">
+            CatastroX está en modo de demostración temporal. Ingrese la contraseña autorizada para generar y descargar los archivos de este paquete.
+          </p>
+          <div className="catastrox-action-row">
+            <button type="button" className="catastrox-button" onClick={handleOpenTemporaryAccess}>
+              <Package size={18} />
+              Acceder
+            </button>
+            <Link className="catastrox-button is-ghost" to="/catastrox/planes">
+              Ver otros paquetes <ArrowRight size={18} />
+            </Link>
+          </div>
         </section>
       ) : purchaseFlowStep === null ? (
         <section className="catastrox-card">

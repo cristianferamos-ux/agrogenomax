@@ -1371,6 +1371,156 @@ export async function retryDeliveryForOrder(orderToken) {
   };
 }
 
+// --------------------------------------------------------------------
+// CATX-FREEZE-01: acceso temporal por contraseña compartida. El backend es
+// la única autoridad sobre el modo -- estas funciones nunca deciden nada
+// por sí solas, solo traducen la respuesta del backend.
+// --------------------------------------------------------------------
+
+/**
+ * Consulta el modo de comercio real al backend -- nunca se infiere de
+ * variables VITE_, localStorage ni query params. Ante cualquier fallo de red, devuelve
+ * 'wompi_test' como valor de UX optimista (el backend seguirá rechazando
+ * cualquier operación real si el modo verdadero es distinto -- este valor
+ * nunca autoriza nada por sí mismo, solo decide qué UI mostrar mientras se
+ * reintenta).
+ */
+export async function getCommerceMode() {
+  for (const apiBase of getApiBaseCandidates()) {
+    const url = `${apiBase}/catastrox/access/mode`;
+    try {
+      const response = await fetch(url, { credentials: 'include' });
+      const payload = await response.json().catch(() => null);
+      if (response.ok && payload?.mode) {
+        return { ok: true, mode: payload.mode };
+      }
+    } catch {
+      // Se intenta el siguiente candidato.
+    }
+  }
+  return { ok: false, mode: 'wompi_test' };
+}
+
+function resolveTemporaryAccessErrorMessage(code) {
+  switch (code) {
+    case 'INVALID_PASSWORD':
+      return 'Contraseña incorrecta.';
+    case 'RATE_LIMITED_TEMPORARY_ACCESS':
+      return 'Demasiados intentos. Intenta nuevamente en unos minutos.';
+    case 'LOOKUP_NOT_FOUND':
+      return 'La consulta del predio expiró. Vuelve a buscar el predio.';
+    case 'TEMPORARY_ACCESS_DISABLED':
+      return 'El acceso temporal no está disponible.';
+    default:
+      return 'No fue posible verificar el acceso temporal.';
+  }
+}
+
+export async function verifyTemporaryAccess({ password, packageId, lookupId }) {
+  const normalizedPackageId = normalizePackageId(packageId);
+  const normalizedLookupId = String(lookupId || '').trim();
+
+  let lastError = null;
+
+  for (const apiBase of getApiBaseCandidates()) {
+    const url = `${apiBase}/catastrox/access/verify`;
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password, packageId: normalizedPackageId, lookupId: normalizedLookupId }),
+      });
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok || payload?.ok !== true) {
+        return {
+          ok: false,
+          code: payload?.code || 'TEMPORARY_ACCESS_ERROR',
+          message: resolveTemporaryAccessErrorMessage(payload?.code),
+        };
+      }
+
+      return { ok: true, capability: payload.capability, packageId: payload.packageId };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  return {
+    ok: false,
+    code: 'NETWORK_ERROR',
+    message:
+      lastError instanceof Error
+        ? lastError.message
+        : 'No fue posible conectar con el backend de acceso temporal.',
+  };
+}
+
+/**
+ * Descarga el PDF oficial (mismo motor R3.5) generado directamente a
+ * partir del capability temporal -- nunca pasa por customer/order/delivery
+ * job/Wompi/email.
+ */
+export async function downloadTemporaryPdf({ capability }) {
+  const token = String(capability || '').trim();
+  if (!token) {
+    return { ok: false, code: 'CAPABILITY_INVALID', message: 'La autorización temporal expiró.' };
+  }
+
+  let lastError = null;
+
+  for (const apiBase of getApiBaseCandidates()) {
+    const url = `${apiBase}/catastrox/access/generate/pdf`;
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ capability: token }),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        return {
+          ok: false,
+          code: payload?.code || 'TEMP_PDF_GENERATION_FAILED',
+          message: 'No fue posible generar el archivo.',
+        };
+      }
+
+      const disposition = response.headers.get('Content-Disposition') || '';
+      const filenameMatch = disposition.match(/filename="?([^"]+)"?/);
+      const filename = filenameMatch?.[1] || 'catastrox-acceso-temporal.pdf';
+      const blob = await response.blob();
+
+      if (isBrowser()) {
+        const objectUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 1000);
+      }
+
+      return { ok: true, filename };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  return {
+    ok: false,
+    code: 'NETWORK_ERROR',
+    message:
+      lastError instanceof Error
+        ? lastError.message
+        : 'No fue posible conectar con el backend de acceso temporal.',
+  };
+}
+
 export async function startPackageCheckout({
   packageId,
   lookup,

@@ -8,6 +8,7 @@ import {
   validateEnv,
   getConfig,
   resolveCorsAllowedOrigins,
+  resolveCommerceMode,
   __resetValidationStateForTests,
 } from '../env.js';
 
@@ -1213,5 +1214,86 @@ describe('EMAIL_PROVIDER_002: EMAIL_PROVIDER/RESEND_API_KEY/EMAIL_FROM/EMAIL_SEN
   test('CATASTROX_DELIVERABLE_MAX_BYTES dentro de rango (1..10485760) no falla', () => {
     const config = getConfig({ APP_ENV: 'development', CATASTROX_DELIVERABLE_MAX_BYTES: '5242880' }, {});
     assert.equal(config.appEnv, 'development');
+  });
+});
+
+// CATX-FREEZE-01: matriz CATASTROX_COMMERCE_MODE / WOMPI_ENV. Todas las
+// pruebas operan sobre objetos `source` planos inyectados -- nunca sobre
+// process.env real, sin red, sin DB (mismo aislamiento que el resto de este
+// archivo).
+describe('CATX-FREEZE-01: resolveCommerceMode()', () => {
+  test('1) mode=password se resuelve sin exigir WOMPI_ENV', () => {
+    assert.equal(resolveCommerceMode('development', { CATASTROX_COMMERCE_MODE: 'password' }), 'password');
+  });
+
+  test('2) mode=wompi_test se resuelve', () => {
+    assert.equal(
+      resolveCommerceMode('development', { CATASTROX_COMMERCE_MODE: 'wompi_test', WOMPI_ENV: 'test' }),
+      'wompi_test',
+    );
+  });
+
+  test('3) mode=wompi_live se resuelve', () => {
+    assert.equal(
+      resolveCommerceMode('production', { CATASTROX_COMMERCE_MODE: 'wompi_live', WOMPI_ENV: 'production' }),
+      'wompi_live',
+    );
+  });
+
+  test('4) variable ausente preserva compatibilidad legacy -- devuelve null, nunca "password"', () => {
+    assert.equal(resolveCommerceMode('development', {}), null);
+    assert.equal(resolveCommerceMode('production', { WOMPI_ENV: 'production' }), null);
+  });
+
+  test('5) valor inválido falla cerrado (ConfigurationError, nunca un valor por defecto silencioso)', () => {
+    assert.throws(
+      () => resolveCommerceMode('development', { CATASTROX_COMMERCE_MODE: 'wompi_sandbox' }),
+      (error) => error instanceof ConfigurationError && error.code === 'INVALID_COMMERCE_MODE',
+    );
+  });
+
+  test('6) wompi_test + WOMPI_ENV=test es válido', () => {
+    assert.equal(
+      resolveCommerceMode('development', { CATASTROX_COMMERCE_MODE: 'wompi_test', WOMPI_ENV: 'test' }),
+      'wompi_test',
+    );
+  });
+
+  test('7) wompi_test + WOMPI_ENV=production es inválido', () => {
+    assert.throws(
+      () => resolveCommerceMode('development', { CATASTROX_COMMERCE_MODE: 'wompi_test', WOMPI_ENV: 'production' }),
+      (error) => error instanceof ConfigurationError && error.code === 'INCOMPATIBLE_COMBINATION',
+    );
+  });
+
+  test('8) wompi_live + WOMPI_ENV=test es inválido', () => {
+    assert.throws(
+      () => resolveCommerceMode('production', { CATASTROX_COMMERCE_MODE: 'wompi_live', WOMPI_ENV: 'test' }),
+      (error) => error instanceof ConfigurationError && error.code === 'INCOMPATIBLE_COMBINATION',
+    );
+  });
+
+  test('9) wompi_live + WOMPI_ENV=production es válido', () => {
+    assert.equal(
+      resolveCommerceMode('production', { CATASTROX_COMMERCE_MODE: 'wompi_live', WOMPI_ENV: 'production' }),
+      'wompi_live',
+    );
+  });
+
+  test('10) password + cualquier WOMPI_ENV no exige coherencia (password no usa Wompi)', () => {
+    assert.equal(
+      resolveCommerceMode('development', { CATASTROX_COMMERCE_MODE: 'password', WOMPI_ENV: 'production' }),
+      'password',
+    );
+  });
+
+  test('11) getConfig() expone commerceMode en la configuración devuelta', () => {
+    const config = getConfig({ APP_ENV: 'development', CATASTROX_COMMERCE_MODE: 'password' }, {});
+    assert.equal(config.commerceMode, 'password');
+  });
+
+  test('12) getConfig() sin CATASTROX_COMMERCE_MODE expone commerceMode: null', () => {
+    const config = getConfig({ APP_ENV: 'development' }, {});
+    assert.equal(config.commerceMode, null);
   });
 });

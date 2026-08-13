@@ -65,6 +65,20 @@ const PACKAGE_CODES = {
 const WOMPI_PLACEHOLDER_PATTERN = /TU_|REEMPLAZAR|PLACEHOLDER|XXX|DEMO/i;
 const WOMPI_API_DEFAULT_URL = 'https://sandbox.wompi.co/v1';
 
+// CATX-FREEZE-01: mismo helper que server/routes/catastrox.js (no
+// compartido en un módulo común -- sigue el mismo patrón ya establecido de
+// que cada router deriva sus propias banderas de process.env, ver
+// AUDIT_DOWNLOADS_ENABLED en catastrox.js). Se relee por request para que
+// las pruebas puedan alternar el valor sin recargar el módulo. Nunca
+// re-valida la combinación con WOMPI_ENV -- eso ya lo garantiza
+// resolveCommerceMode() al arrancar (server/config/env.js); aquí solo se
+// lee el valor ya validado.
+const CATASTROX_COMMERCE_MODES = new Set(['password', 'wompi_test', 'wompi_live']);
+function resolveCurrentCommerceMode() {
+  const raw = String(process.env.CATASTROX_COMMERCE_MODE || '').trim();
+  return CATASTROX_COMMERCE_MODES.has(raw) ? raw : null;
+}
+
 function sanitizeReferenceSegment(value) {
   return String(value || '')
     .replace(/[^a-zA-Z0-9_-]/g, '-')
@@ -481,6 +495,13 @@ async function triggerPostApprovalWorkflows(order) {
 // --- Comprador (Bloque 2/5) ---------------------------------------------
 
 router.post('/customers', customerLimiter, async (req, res) => {
+  // CATX-FREEZE-01: bloquea ANTES de validar/cifrar PII o disparar
+  // cualquier envío de correo -- esta operación INICIA una identidad
+  // comercial nueva, nunca reconcilia una existente.
+  if (resolveCurrentCommerceMode() === 'password') {
+    return res.status(403).json({ ok: false, code: 'COMMERCE_DISABLED' });
+  }
+
   if (!isRequestOriginTrusted(req)) {
     return res.status(403).json({ ok: false, code: 'ORIGIN_NOT_TRUSTED', message: 'Origen no permitido.' });
   }
@@ -833,6 +854,15 @@ router.get('/verify/:transactionId', verifyLimiter, async (req, res) => {
 // resuelto aquí abajo a partir de la capability), nunca como algo que el
 // cliente aporta o que el servidor confía si lo aporta.
 router.post('/checkout', checkoutLimiter, async (req, res) => {
+  // CATX-FREEZE-01: bloquea ANTES de insertar la orden o llamar a Wompi --
+  // esta operación INICIA una operación comercial nueva. Órdenes ya
+  // existentes (webhook, verify, status, mine, deliverable/download,
+  // delivery/retry) permanecen intactas: son reconciliación/consulta de
+  // histórico, nunca una operación nueva.
+  if (resolveCurrentCommerceMode() === 'password') {
+    return res.status(403).json({ ok: false, code: 'COMMERCE_DISABLED' });
+  }
+
   if (!isRequestOriginTrusted(req)) {
     return res.status(403).json({ ok: false, code: 'ORIGIN_NOT_TRUSTED', message: 'Origen no permitido.' });
   }

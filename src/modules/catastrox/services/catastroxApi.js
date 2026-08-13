@@ -739,6 +739,68 @@ export async function fetchCatastroxAuditFullResult(routeId) {
   );
 }
 
+// CATX-FREEZE-01: mismo payload que /lookups/:lookupId/full-result (motor
+// de geometría sin duplicar), pero gateado por el capability temporal en
+// vez de la sesión de recuperación comercial -- nunca envía el capability
+// por query string (evita que quede en logs de acceso/historial del
+// navegador), siempre por header Authorization: Bearer.
+export async function fetchCatastroxTemporaryFullResult(routeId, capability) {
+  const lookupId = String(routeId || '').trim();
+  const token = String(capability || '').trim();
+  if (!lookupId) {
+    throw new CatastroxApiError('No hay identificador de consulta para generar entregables.', {
+      code: 'MISSING_LOOKUP_ID',
+      status: 400,
+    });
+  }
+  if (!token) {
+    throw new CatastroxApiError('No hay una autorización temporal activa.', {
+      code: 'TEMP_ACCESS_CAPABILITY_MISSING',
+      status: 401,
+    });
+  }
+
+  let lastError = null;
+
+  for (const apiBase of getApiBaseCandidates()) {
+    const url = `${apiBase}/catastrox/access/lookups/${encodeURIComponent(lookupId)}/full-result`;
+    let response;
+
+    try {
+      response = await fetch(url, {
+        method: 'GET',
+        headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+      });
+    } catch (error) {
+      lastError = new CatastroxApiError('No fue posible conectar con el endpoint de acceso temporal.', {
+        code: 'FULL_RESULT_API_UNAVAILABLE',
+        url,
+        payload: error,
+      });
+      continue;
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    const payload = contentType.includes('application/json') ? await response.json() : null;
+
+    if (!response.ok) {
+      lastError = new CatastroxApiError(payload?.status || 'No fue posible cargar el detalle del predio.', {
+        code: payload?.status || 'FULL_RESULT_API_ERROR',
+        status: response.status,
+        url,
+        payload,
+      });
+      continue;
+    }
+
+    return buildAuditLookup(payload, lookupId);
+  }
+
+  throw lastError || new CatastroxApiError('No fue posible cargar el detalle completo del predio.', {
+    code: 'FULL_RESULT_API_UNAVAILABLE',
+  });
+}
+
 function resolveLookupCoordinates(...candidates) {
   for (const candidate of candidates) {
     if (!candidate) continue;
@@ -759,13 +821,19 @@ function resolveLookupCoordinates(...candidates) {
   return null;
 }
 
-export async function hydrateLookupForDeliverables(lookup, { useAuditEndpoint = false } = {}) {
+export async function hydrateLookupForDeliverables(lookup, { useAuditEndpoint = false, temporaryCapability = null } = {}) {
   const originalLookupId = cleanText(lookup?.routeId || lookup?.lookup_id || lookup?.predio?.routeId || lookup?.predio?.lookup_id || lookup?.predio?.id);
   if (!originalLookupId) {
     throw new CatastroxApiError('No hay identificador de consulta para preparar los entregables.', {
       code: 'MISSING_LOOKUP_ID',
       status: 400,
     });
+  }
+
+  // CATX-FREEZE-01: capability temporal tiene prioridad exclusiva sobre
+  // audit/pagado -- son modos mutuamente distintos, nunca se combinan.
+  if (temporaryCapability) {
+    return fetchCatastroxTemporaryFullResult(originalLookupId, temporaryCapability);
   }
 
   let fullLookup;

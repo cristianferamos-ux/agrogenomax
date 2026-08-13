@@ -11,6 +11,14 @@ import { getRecoverySessionTokenFromCookieHeader } from '../security/recoveryCoo
 import * as recoverySessions from '../services/catastrox/recoverySessionRepository.js';
 import { packageSatisfies } from '../services/catastrox/paymentOrderTransitions.js';
 import { resolveCanonicalAreaForRow } from '../services/catastrox/catastroxCanonicalArea.js';
+import { generateCatastroxPdfBuffer } from '../services/catastrox/pdf/catastroxPdfGenerator.js';
+import {
+  createTemporaryAccessCapability,
+  verifyTemporaryAccessCapability,
+  verifyTemporaryAccessPassword,
+  isValidTemporaryAccessPackageId,
+} from '../services/catastrox/temporaryAccessCapability.js';
+import { temporaryAccessLimiter, temporaryPdfLimiter } from '../middleware/rateLimit.js';
 
 const router = Router();
 
@@ -21,6 +29,38 @@ const LOOKUP_BY_CODE_RATE_WINDOW_MS = 10 * 60 * 1000;
 const LOOKUP_BY_CODE_RATE_MAX_REQUESTS = 30;
 const lookupPreviewStore = new Map();
 const lookupByCodeRateStore = new Map();
+// CATX-FREEZE-01: mismos tres valores validados en el arranque por
+// resolveCommerceMode() (server/config/env.js) -- si getConfig() ya validó
+// con éxito, process.env.CATASTROX_COMMERCE_MODE es, por construcción, o
+// bien ausente o bien uno de estos tres valores durante toda la vida del
+// proceso (nunca cambia en caliente). Se relee por request (no como
+// constante de módulo) para que las pruebas puedan alternar el valor entre
+// casos sin recargar el módulo -- nunca vuelve a ejecutar la validación
+// cruzada contra WOMPI_ENV (ya garantizada al arrancar).
+const CATASTROX_COMMERCE_MODES = new Set(['password', 'wompi_test', 'wompi_live']);
+function resolveCurrentCommerceMode() {
+  const raw = String(process.env.CATASTROX_COMMERCE_MODE || '').trim();
+  return CATASTROX_COMMERCE_MODES.has(raw) ? raw : null;
+}
+
+// CATX-FREEZE-01 (P2-01 / FASE 1.4 hardening): 'basico' solo incluye PDF
+// (catastroxPackages.js, downloads:['pdf']) -- nunca debe poder obtener el
+// full-result temporal (que expone la geometría completa usada para
+// KML/KMZ/SHP/DXF). ALLOWLIST explícita (fail-closed), no denylist: un
+// packageId nuevo/desconocido queda DENEGADO por defecto, nunca permitido
+// por olvido de actualizar esta lista. No se duplica la lista de formatos
+// por paquete (eso vive únicamente en catastroxPackages.js, inalcanzable
+// aquí por noSrcImports) -- esta allowlist es solo de nivel de servicio
+// (¿tiene acceso al full-result o no?), no una copia del catálogo de
+// archivos por paquete.
+//
+// CATX-FREEZE-ADJ-02 (deuda futura, no resolver ahora): cuando se rediseñe
+// el catálogo de paquetes, centralizar esta autorización junto con
+// catastroxPackages.js en una fuente compartida server-safe -- hoy server/
+// no puede importar de src/ (noSrcImports), así que esta duplicación
+// mínima (solo el nombre de los paquetes con acceso, no sus formatos) es
+// el costo aceptado del freeze.
+const PACKAGES_WITH_TEMPORARY_FULL_RESULT = new Set(['plus', 'profesional']);
 const AUDIT_DOWNLOADS_ENABLED = String(process.env.CATASTROX_AUDIT_DOWNLOADS || '').toLowerCase() === 'true';
 const ADVANCED_LOOKUP_ENABLED = String(process.env.CATASTROX_ADVANCED_LOOKUP_ENABLED || '').toLowerCase() === 'true';
 // Modo sombra del resolver de duplicados: desactivado por defecto. Solo observa;
@@ -2341,6 +2381,159 @@ router.delete('/audit/resolver-shadow', (req, res) => {
   resolverShadow.clearShadowEvaluations();
   res.setHeader('Cache-Control', 'no-store');
   res.json({ cleared: true });
+});
+
+// --------------------------------------------------------------------
+// CATX-FREEZE-01: acceso temporal por contraseña compartida. Activo
+// EXCLUSIVAMENTE cuando CATASTROX_COMMERCE_MODE=password (backend es la
+// única autoridad -- nunca VITE_*/localStorage/query params). Cero
+// customer/order/delivery-job/Wompi/email: solo verifica la contraseña,
+// emite un capability ligado a predio+lookup+package, y genera el PDF
+// oficial (mismo motor R3.5) o hidrata la geometría para que el navegador
+// siga generando KML/KMZ/SHP/DXF/coords exactamente como hoy
+// (catastroxDeliverables.js, sin cambios).
+// --------------------------------------------------------------------
+
+router.get('/access/mode', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const commerceMode = resolveCurrentCommerceMode();
+  // Ausencia de CATASTROX_COMMERCE_MODE preserva el comportamiento legacy
+  // exacto -- nunca se reporta 'password' por defecto. WOMPI_ENV=production
+  // es la única señal que distingue wompi_live de wompi_test en ese caso.
+  const effectiveMode = commerceMode || (String(process.env.WOMPI_ENV || '').trim() === 'production' ? 'wompi_live' : 'wompi_test');
+  res.json({ mode: effectiveMode });
+});
+
+router.post('/access/verify', temporaryAccessLimiter, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+
+  if (resolveCurrentCommerceMode() !== 'password') {
+    return res.status(404).json({ ok: false, code: 'TEMPORARY_ACCESS_DISABLED' });
+  }
+
+  const packageId = String(req.body?.packageId || '').trim();
+  const lookupId = String(req.body?.lookupId || '').trim();
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+
+  if (!isValidTemporaryAccessPackageId(packageId)) {
+    return res.status(400).json({ ok: false, code: 'INVALID_PACKAGE' });
+  }
+  if (!lookupId) {
+    return res.status(400).json({ ok: false, code: 'INVALID_LOOKUP' });
+  }
+
+  const preview = resolveLookupPreview(lookupId);
+  if (!preview || !preview.canonicalPredioId) {
+    return res.status(404).json({ ok: false, code: 'LOOKUP_NOT_FOUND' });
+  }
+
+  if (!verifyTemporaryAccessPassword(password)) {
+    console.info('[CatastroX TempAccess]', { event: 'temporary_access_denied', packageId, timestamp: new Date().toISOString() });
+    return res.status(401).json({ ok: false, code: 'INVALID_PASSWORD' });
+  }
+
+  let capability;
+  try {
+    capability = createTemporaryAccessCapability({
+      canonicalPredioId: preview.canonicalPredioId,
+      lookupId,
+      packageId,
+    });
+  } catch (error) {
+    console.error('[CatastroX TempAccess] Error emitiendo capability', { message: error.message });
+    return res.status(503).json({ ok: false, code: 'TEMPORARY_ACCESS_UNAVAILABLE' });
+  }
+
+  console.info('[CatastroX TempAccess]', { event: 'temporary_access_verified', packageId, timestamp: new Date().toISOString() });
+  return res.json({ ok: true, capability, packageId, lookupId, expiresInSeconds: 900 });
+});
+
+function extractTemporaryAccessBearerToken(req) {
+  const header = String(req.headers?.authorization || '');
+  const match = header.match(/^Bearer (.+)$/);
+  return match ? match[1].trim() : '';
+}
+
+router.post('/access/generate/pdf', temporaryPdfLimiter, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+
+  if (resolveCurrentCommerceMode() !== 'password') {
+    return res.status(404).json({ ok: false, code: 'TEMPORARY_ACCESS_DISABLED' });
+  }
+
+  const token = typeof req.body?.capability === 'string' ? req.body.capability : '';
+  const verification = verifyTemporaryAccessCapability(token);
+  if (!verification.ok) {
+    return res.status(401).json({ ok: false, code: 'CAPABILITY_INVALID' });
+  }
+
+  try {
+    const predioData = await resolvePredioDataForDelivery(verification.canonicalPredioId);
+    if (!predioData) {
+      return res.status(404).json({ ok: false, code: 'PREDIO_DATA_UNAVAILABLE' });
+    }
+
+    const buffer = await generateCatastroxPdfBuffer({ predioData, packageId: verification.packageId });
+
+    console.info('[CatastroX TempAccess]', {
+      event: 'temporary_deliverable_generated',
+      packageId: verification.packageId,
+      fileType: 'pdf',
+      timestamp: new Date().toISOString(),
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="catastrox-acceso-temporal.pdf"');
+    return res.status(200).send(buffer);
+  } catch (error) {
+    console.error('[CatastroX TempAccess] Error generando PDF temporal', { message: error.message });
+    return res.status(500).json({ ok: false, code: 'TEMP_PDF_GENERATION_FAILED' });
+  }
+});
+
+// Camino temporal separado de /lookups/:lookupId/full-result -- ese
+// endpoint NO se debilita ni pierde su gate actual (resolveFullResultAccess,
+// sesión+orden aprobada). Este reutiliza el mismo
+// buildLookupFullResultPayload(lookupId) (sin duplicar geometría), pero su
+// gate de acceso es el capability temporal, nunca la sesión de recuperación
+// comercial.
+router.get('/access/lookups/:lookupId/full-result', async (req, res, next) => {
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+
+    if (resolveCurrentCommerceMode() !== 'password') {
+      return res.status(404).json({ found: false, status: 'TEMPORARY_ACCESS_DISABLED' });
+    }
+
+    const lookupId = String(req.params?.lookupId || '').trim();
+    const token = extractTemporaryAccessBearerToken(req);
+    const verification = verifyTemporaryAccessCapability(token);
+    if (!verification.ok || verification.lookupId !== lookupId) {
+      return res.status(401).json({ found: false, status: 'CAPABILITY_INVALID' });
+    }
+
+    const preview = resolveLookupPreview(lookupId);
+    if (!preview || preview.canonicalPredioId !== verification.canonicalPredioId) {
+      return res.status(404).json({ found: false, status: 'LOOKUP_NOT_FOUND' });
+    }
+
+    if (!PACKAGES_WITH_TEMPORARY_FULL_RESULT.has(verification.packageId)) {
+      return res.status(403).json({ found: false, status: 'PACKAGE_ACCESS_DENIED' });
+    }
+
+    const result = await buildLookupFullResultPayload(lookupId);
+    if (result.errorStatus) {
+      return res.status(result.errorStatus).json(result.payload);
+    }
+
+    return res.json({
+      ...result.payload,
+      status: 'TEMPORARY_ACCESS_FULL_RESULT',
+      lookupId,
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 export default router;
