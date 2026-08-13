@@ -129,10 +129,40 @@ describe('CATX-FREEZE-01: createTemporaryAccessCapability() / verifyTemporaryAcc
     assert.notEqual(result.packageId, 'profesional');
   });
 
-  test('12) token alterado (un carácter distinto) se rechaza', () => {
+  // FASE 2.1A (hotfix): la versión anterior de esta prueba mutaba el ÚLTIMO
+  // carácter base64url del ciphertext alternando exactamente entre 'A' y
+  // 'B'. Cuando la longitud en bytes del ciphertext no es múltiplo de 3, el
+  // último carácter base64 codifica bits de relleno no significativos
+  // (padding implícito de base64url sin '='), y 'A' (000000) / 'B' (000001)
+  // difieren únicamente en el bit menos significativo de esa zona de
+  // relleno -- decodificando así, en una fracción de las ejecuciones (según
+  // el IV aleatorio de cada token), a la MISMA secuencia de bytes. Eso
+  // producía un test intermitente: no detectaba una alteración porque, en
+  // esos casos, no había alteración real de bytes que detectar (el defecto
+  // era del arnés de pruebas, nunca de AES-256-GCM). La corrección muta un
+  // BYTE interno del ciphertext ya decodificado (nunca el último carácter
+  // de texto), y prueba explícitamente que los bytes cambiaron antes de
+  // verificar el rechazo -- determinista en cada corrida, sin importar el
+  // IV aleatorio.
+  test('12) token alterado (un byte interno del ciphertext) se rechaza', () => {
     const token = createTemporaryAccessCapability({ canonicalPredioId: 'predio-A', lookupId: 'lookup-A', packageId: 'plus' });
     const [iv, ciphertext, authTag] = token.split('.');
-    const tampered = [iv, ciphertext.slice(0, -1) + (ciphertext.slice(-1) === 'A' ? 'B' : 'A'), authTag].join('.');
+
+    const originalBytes = Buffer.from(ciphertext, 'base64url');
+    assert.ok(originalBytes.length >= 3, 'el ciphertext de prueba debe tener al menos unos pocos bytes para mutar uno interno con seguridad');
+
+    const tamperedBytes = Buffer.from(originalBytes);
+    const targetIndex = Math.floor(tamperedBytes.length / 2);
+    tamperedBytes[targetIndex] = tamperedBytes[targetIndex] ^ 0xff; // invierte todos los bits del byte -- cambio real garantizado, cualquiera sea su valor original.
+
+    // Prueba previa obligatoria: la mutación debe ser un cambio real de
+    // bytes autenticados, nunca solo una diferencia de texto base64url.
+    assert.notEqual(Buffer.compare(originalBytes, tamperedBytes), 0);
+
+    const tamperedCiphertext = tamperedBytes.toString('base64url');
+    assert.notEqual(tamperedCiphertext, ciphertext, 'la re-codificación también debe diferir como texto');
+
+    const tampered = [iv, tamperedCiphertext, authTag].join('.');
     const result = verifyTemporaryAccessCapability(tampered);
     assert.equal(result.ok, false);
     assert.equal(result.reason, 'invalid');
