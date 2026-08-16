@@ -1,0 +1,118 @@
+/* AGX-ADMIN-001: layout administrativo PROPIO -- nunca gan-dash-shell
+   (sidebar operativo de cliente). Mismo branding/paleta que
+   ganaderia-login.css. */
+
+.gan-admin-shell {
+  min-height: 100vh;
+  background: #020807;
+  color: #e7f5ec;
+  font-family: Inter, sans-serif;
+}
+
+.gan-admin-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.4rem 2rem;
+  border-bottom: 1px solid rgba(57, 255, 20, 0.18);
+  flex-wrap: wrap;
+}
+
+.gan-admin-eyebrow {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: rgba(231, 245, 236, 0.6);
+}
+
+.gan-admin-topbar h1 {
+  margin: 0.2rem 0 0;
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.gan-admin-account {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-size: 0.85rem;
+  color: rgba(231, 245, 236, 0.75);
+}
+
+.gan-admin-logout {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid rgba(231, 245, 236, 0.18);
+  background: #06110c;
+  color: #e7f5ec;
+  border-radius: 999px;
+  padding: 0.55rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gan-admin-logout:hover {
+  border-color: rgba(57, 255, 20, 0.55);
+}
+
+.gan-admin-logout:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.gan-admin-error {
+  margin: 1rem 2rem 0;
+  color: #ff8a8a;
+  font-size: 0.86rem;
+}
+
+.gan-admin-main {
+  padding: 2rem;
+}
+
+.gan-admin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 1rem;
+}
+
+.gan-admin-card {
+  position: relative;
+  border: 1px solid rgba(231, 245, 236, 0.14);
+  border-radius: 1rem;
+  background: #06110c;
+  padding: 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  color: rgba(231, 245, 236, 0.6);
+}
+
+.gan-admin-card strong {
+  font-size: 1rem;
+  color: #e7f5ec;
+}
+
+.gan-admin-card p {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.gan-admin-card-badge {
+  align-self: flex-start;
+  margin-top: 0.4rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #39ff14;
+  border: 1px solid rgba(57, 255, 20, 0.35);
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+}
