@@ -13,7 +13,7 @@ import {
 // mismo patrón que server/services/catastrox/__tests__/emailSender.test.js.
 
 const originalFetch = globalThis.fetch;
-const ENV_KEYS = ['APP_ENV', 'EMAIL_PROVIDER', 'RESEND_API_KEY', 'EMAIL_FROM', 'EMAIL_SEND_TIMEOUT_MS'];
+const ENV_KEYS = ['APP_ENV', 'EMAIL_PROVIDER', 'RESEND_API_KEY', 'EMAIL_FROM', 'EMAIL_SEND_TIMEOUT_MS', 'PUBLIC_APP_ORIGIN'];
 let savedEnv;
 
 beforeEach(() => {
@@ -66,30 +66,61 @@ function captureConsole() {
   };
 }
 
-describe('AUTH-RECOVERY-002: resolveGanaderiaPublicOrigin / buildRestablecerContrasenaUrl -- origen canónico sin hardcodear', () => {
-  test('development -> primer origin de CORS_MANDATORY_ORIGINS_BY_ENV.development (localhost:5173)', () => {
+describe('AGX-SUPERADMIN-AUTH-006: resolveGanaderiaPublicOrigin / buildRestablecerContrasenaUrl -- PUBLIC_APP_ORIGIN es la única autoridad en staging/production', () => {
+  test('development sin PUBLIC_APP_ORIGIN -> fallback a CORS_MANDATORY_ORIGINS_BY_ENV.development (localhost:5173)', () => {
+    delete process.env.PUBLIC_APP_ORIGIN;
     assert.equal(resolveGanaderiaPublicOrigin('development'), 'http://localhost:5173');
   });
 
-  test('staging -> https://staging.agrogenomax.com', () => {
-    assert.equal(resolveGanaderiaPublicOrigin('staging'), 'https://staging.agrogenomax.com');
-  });
-
-  test('production -> https://agrogenomax.com (nunca agrogenomax.co ni ningún otro hardcode)', () => {
-    assert.equal(resolveGanaderiaPublicOrigin('production'), 'https://agrogenomax.com');
-  });
-
-  test('test -> null (CORS_MANDATORY_ORIGINS_BY_ENV.test está vacío) -- nunca inventa localhost', () => {
+  test('test sin PUBLIC_APP_ORIGIN -> null (CORS_MANDATORY_ORIGINS_BY_ENV.test está vacío) -- nunca inventa localhost', () => {
+    delete process.env.PUBLIC_APP_ORIGIN;
     assert.equal(resolveGanaderiaPublicOrigin('test'), null);
   });
 
-  test('buildRestablecerContrasenaUrl: construye la URL absoluta con el token URL-encoded', () => {
+  test('staging sin PUBLIC_APP_ORIGIN -> null (regresión: JAMÁS construye staging.agrogenomax.com derivándolo de APP_ENV)', () => {
+    delete process.env.PUBLIC_APP_ORIGIN;
+    assert.equal(resolveGanaderiaPublicOrigin('staging'), null);
+  });
+
+  test('production sin PUBLIC_APP_ORIGIN -> null (fail-closed, nunca inventa un origin)', () => {
+    delete process.env.PUBLIC_APP_ORIGIN;
+    assert.equal(resolveGanaderiaPublicOrigin('production'), null);
+  });
+
+  test('staging con PUBLIC_APP_ORIGIN=https://agrogenomax.com -> usa exactamente ese valor (AGX-SUPERADMIN-AUTH-006: el servicio Railway "production" corre con APP_ENV=staging)', () => {
+    process.env.PUBLIC_APP_ORIGIN = 'https://agrogenomax.com';
+    assert.equal(resolveGanaderiaPublicOrigin('staging'), 'https://agrogenomax.com');
+  });
+
+  test('production con PUBLIC_APP_ORIGIN=https://agrogenomax.com -> usa exactamente ese valor', () => {
+    process.env.PUBLIC_APP_ORIGIN = 'https://agrogenomax.com';
+    assert.equal(resolveGanaderiaPublicOrigin('production'), 'https://agrogenomax.com');
+  });
+
+  test('staging con PUBLIC_APP_ORIGIN inválida (http://, sin TLS) -> null, nunca la usa igual', () => {
+    process.env.PUBLIC_APP_ORIGIN = 'http://agrogenomax.com';
+    assert.equal(resolveGanaderiaPublicOrigin('staging'), null);
+  });
+
+  test('production con PUBLIC_APP_ORIGIN apuntando a localhost -> null, nunca la usa igual', () => {
+    process.env.PUBLIC_APP_ORIGIN = 'https://localhost:5173';
+    assert.equal(resolveGanaderiaPublicOrigin('production'), null);
+  });
+
+  test('buildRestablecerContrasenaUrl: construye la URL absoluta con el token URL-encoded usando PUBLIC_APP_ORIGIN', () => {
+    process.env.PUBLIC_APP_ORIGIN = 'https://agrogenomax.com';
     const url = buildRestablecerContrasenaUrl('token-crudo-con-caracteres/+especiales', 'staging');
-    assert.equal(url, 'https://staging.agrogenomax.com/ganaderia/restablecer-contrasena?token=token-crudo-con-caracteres%2F%2Bespeciales');
+    assert.equal(url, 'https://agrogenomax.com/ganaderia/restablecer-contrasena?token=token-crudo-con-caracteres%2F%2Bespeciales');
   });
 
   test('buildRestablecerContrasenaUrl: null cuando no hay origin canónico para el ambiente', () => {
+    delete process.env.PUBLIC_APP_ORIGIN;
     assert.equal(buildRestablecerContrasenaUrl('cualquier-token', 'test'), null);
+  });
+
+  test('buildRestablecerContrasenaUrl: null en staging sin PUBLIC_APP_ORIGIN (fail-closed, nunca envía un enlace roto)', () => {
+    delete process.env.PUBLIC_APP_ORIGIN;
+    assert.equal(buildRestablecerContrasenaUrl('cualquier-token', 'staging'), null);
   });
 });
 

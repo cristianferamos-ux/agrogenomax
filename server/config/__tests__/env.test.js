@@ -43,6 +43,12 @@ const TEST_CATASTROX_FRONTEND_URL = 'https://staging.agrogenomax.com';
 const TEST_RESEND_API_KEY = 're_synthetic_key_1234567890';
 const TEST_EMAIL_FROM = 'CatastroX <no-reply@mail.staging.agrogenomax.com>';
 
+// AGX-SUPERADMIN-AUTH-006: PUBLIC_APP_ORIGIN pasa a ser obligatoria en
+// staging (el servicio Railway "production" corre con APP_ENV=staging,
+// ver server/services/ganaderia/emailSender.js) -- valor sintético válido,
+// reutilizado como base por los casos de este archivo.
+const TEST_PUBLIC_APP_ORIGIN = 'https://agrogenomax.com';
+
 function validStagingSource(overrides = {}) {
   return {
     APP_ENV: 'staging',
@@ -60,6 +66,7 @@ function validStagingSource(overrides = {}) {
     EMAIL_PROVIDER: 'resend',
     RESEND_API_KEY: TEST_RESEND_API_KEY,
     EMAIL_FROM: TEST_EMAIL_FROM,
+    PUBLIC_APP_ORIGIN: TEST_PUBLIC_APP_ORIGIN,
     ...overrides,
   };
 }
@@ -161,6 +168,7 @@ describe('LOTE-002 (corrección): server/config/env.js', () => {
             CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
             CATASTROX_VERIFY_HANDLE_KEY: TEST_VERIFY_HANDLE_KEY,
             CATASTROX_CHECKOUT_IDENTITY_KEY: TEST_CHECKOUT_IDENTITY_KEY,
+            PUBLIC_APP_ORIGIN: TEST_PUBLIC_APP_ORIGIN,
           },
           {},
         ),
@@ -181,6 +189,7 @@ describe('LOTE-002 (corrección): server/config/env.js', () => {
             CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
             CATASTROX_VERIFY_HANDLE_KEY: TEST_VERIFY_HANDLE_KEY,
             CATASTROX_CHECKOUT_IDENTITY_KEY: TEST_CHECKOUT_IDENTITY_KEY,
+            PUBLIC_APP_ORIGIN: TEST_PUBLIC_APP_ORIGIN,
             WOMPI_ENV: 'test',
           },
           {},
@@ -307,6 +316,7 @@ describe('LOTE-002 (corrección): server/config/env.js', () => {
             CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
             CATASTROX_VERIFY_HANDLE_KEY: TEST_VERIFY_HANDLE_KEY,
             CATASTROX_CHECKOUT_IDENTITY_KEY: TEST_CHECKOUT_IDENTITY_KEY,
+            PUBLIC_APP_ORIGIN: TEST_PUBLIC_APP_ORIGIN,
           },
           {},
         ),
@@ -614,6 +624,10 @@ describe('STAGING_READINESS_001 (Bloque 4): validaciones nuevas de configuració
         CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
         CATASTROX_VERIFY_HANDLE_KEY: TEST_VERIFY_HANDLE_KEY,
         CATASTROX_CHECKOUT_IDENTITY_KEY: TEST_CHECKOUT_IDENTITY_KEY,
+        // AGX-SUPERADMIN-AUTH-006: a diferencia de los vars de Wompi/
+        // CatastroX de arriba, PUBLIC_APP_ORIGIN sí es obligatoria en
+        // production (ver describe() dedicado más abajo).
+        PUBLIC_APP_ORIGIN: TEST_PUBLIC_APP_ORIGIN,
       },
       {},
     );
@@ -902,6 +916,8 @@ describe('R3/B6-26 + B6-26-ADJ-01: CATASTROX_VERIFY_HANDLE_KEY/CATASTROX_CHECKOU
       CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
       CATASTROX_VERIFY_HANDLE_KEY: TEST_VERIFY_HANDLE_KEY,
       CATASTROX_CHECKOUT_IDENTITY_KEY: TEST_CHECKOUT_IDENTITY_KEY,
+      // AGX-SUPERADMIN-AUTH-006: obligatoria en production desde este fix.
+      PUBLIC_APP_ORIGIN: TEST_PUBLIC_APP_ORIGIN,
       ...overrides,
     };
   }
@@ -1059,6 +1075,7 @@ describe('EMAIL_PROVIDER_002: EMAIL_PROVIDER/RESEND_API_KEY/EMAIL_FROM/EMAIL_SEN
         CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
         CATASTROX_VERIFY_HANDLE_KEY: TEST_VERIFY_HANDLE_KEY,
         CATASTROX_CHECKOUT_IDENTITY_KEY: TEST_CHECKOUT_IDENTITY_KEY,
+        PUBLIC_APP_ORIGIN: TEST_PUBLIC_APP_ORIGIN,
       },
       {},
     );
@@ -1157,6 +1174,7 @@ describe('EMAIL_PROVIDER_002: EMAIL_PROVIDER/RESEND_API_KEY/EMAIL_FROM/EMAIL_SEN
       CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
       CATASTROX_VERIFY_HANDLE_KEY: TEST_VERIFY_HANDLE_KEY,
       CATASTROX_CHECKOUT_IDENTITY_KEY: TEST_CHECKOUT_IDENTITY_KEY,
+      PUBLIC_APP_ORIGIN: TEST_PUBLIC_APP_ORIGIN,
       ...overrides,
     };
   }
