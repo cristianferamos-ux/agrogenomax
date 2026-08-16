@@ -1,0 +1,186 @@
+/* AUTH-FRONT-001: layout público y aislado de /ganaderia/login -- nunca
+   comparte el shell/sidebar operativo privado (gan-dash-shell). */
+
+.gan-login-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #020807;
+  color: #e7f5ec;
+  font-family: Inter, sans-serif;
+  padding: 1.5rem;
+}
+
+.gan-login-card {
+  width: 100%;
+  max-width: 26rem;
+  border: 1px solid rgba(57, 255, 20, 0.18);
+  border-radius: 1.1rem;
+  background: #06110c;
+  padding: 2.4rem 2rem;
+}
+
+.gan-login-title {
+  font-size: 1.35rem;
+  font-weight: 700;
+  margin: 0 0 0.4rem;
+}
+
+.gan-login-subtitle {
+  margin: 0 0 1.6rem;
+  font-size: 0.92rem;
+  color: rgba(231, 245, 236, 0.72);
+}
+
+.gan-login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.gan-login-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.86rem;
+}
+
+.gan-login-field input {
+  border: 1px solid rgba(231, 245, 236, 0.18);
+  background: #020807;
+  color: #e7f5ec;
+  border-radius: 0.6rem;
+  padding: 0.7rem 0.85rem;
+  font-size: 0.94rem;
+  outline: none;
+}
+
+.gan-login-field input:focus {
+  border-color: rgba(57, 255, 20, 0.55);
+}
+
+.gan-login-error {
+  margin: 0;
+  font-size: 0.86rem;
+  color: #ff8a8a;
+}
+
+/* AUTH-RECOVERY-002: mensaje genérico tras solicitar/completar la
+   recuperación de acceso -- nunca revela si la cuenta existía. */
+.gan-login-success {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #39ff14;
+  line-height: 1.5;
+}
+
+.gan-login-submit {
+  margin-top: 0.4rem;
+  border: none;
+  border-radius: 999px;
+  padding: 0.75rem 1rem;
+  font-weight: 700;
+  font-size: 0.95rem;
+  background: #39ff14;
+  color: #04140b;
+  cursor: pointer;
+}
+
+.gan-login-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.gan-login-links {
+  margin-top: 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.gan-login-links a {
+  color: rgba(231, 245, 236, 0.75);
+  text-decoration: none;
+}
+
+.gan-login-links a:hover {
+  color: #39ff14;
+}
+
+/* Estado de carga del guard (RequireGanaderiaAuth) -- evita el flash de
+   contenido privado mientras se resuelve GET /api/ganaderia/auth/session. */
+.gan-auth-loading {
+  min-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.8rem;
+  color: rgba(231, 245, 236, 0.75);
+  font-size: 0.92rem;
+}
+
+.gan-auth-loading-spinner {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  border: 3px solid rgba(57, 255, 20, 0.2);
+  border-top-color: #39ff14;
+  animation: gan-auth-spin 0.8s linear infinite;
+}
+
+@keyframes gan-auth-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Selección de organización (§10) -- lista mínima, sin flujo complejo. */
+.gan-org-required {
+  min-height: 60vh;
+  max-width: 26rem;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.8rem;
+  color: #e7f5ec;
+  padding: 1.5rem;
+}
+
+.gan-org-required-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.gan-org-required-list button {
+  width: 100%;
+  border: 1px solid rgba(57, 255, 20, 0.3);
+  background: #06110c;
+  color: #e7f5ec;
+  border-radius: 0.6rem;
+  padding: 0.7rem 0.9rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gan-org-required-list button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.gan-org-required-error {
+  color: #ff8a8a;
+  font-size: 0.85rem;
+}
+
+.gan-org-required-empty {
+  color: rgba(231, 245, 236, 0.72);
+  font-size: 0.9rem;
+}

@@ -37,7 +37,14 @@ import GanaderiaLandingComercial from './modules/ganaderia/GanaderiaLandingComer
 import GanaderiaDashboard from './modules/ganaderia/pages/GanaderiaDashboard.jsx';
 import GanaderiaAccess from './modules/ganaderia/pages/GanaderiaAccess.jsx';
 import GanaderiaDemo from './modules/ganaderia/pages/GanaderiaDemo.jsx';
+import GanaderiaLogin from './modules/ganaderia/pages/GanaderiaLogin.jsx';
+import GanaderiaRecuperarAcceso from './modules/ganaderia/pages/GanaderiaRecuperarAcceso.jsx';
+import GanaderiaRestablecerContrasena from './modules/ganaderia/pages/GanaderiaRestablecerContrasena.jsx';
 import GanaderiaPlans from './modules/ganaderia/pages/GanaderiaPlans.jsx';
+import { GanaderiaAuthProvider } from './modules/ganaderia/auth/GanaderiaAuthContext.jsx';
+import RequireGanaderiaAuth from './modules/ganaderia/auth/RequireGanaderiaAuth.jsx';
+import RequireGanaderiaSuperAdmin from './modules/ganaderia/auth/RequireGanaderiaSuperAdmin.jsx';
+import GanaderiaAdminShell from './modules/ganaderia/admin/GanaderiaAdminShell.jsx';
 import CatastroXApp from './modules/catastrox/CatastroXApp.jsx';
 import AgroGenomaXHome from './components/home/AgroGenomaXHome.jsx';
 
@@ -266,8 +273,60 @@ function App() {
         <Route path="/ganaderia/acceso" element={<GanaderiaAccess />} />
         <Route path="/ganaderia/demo" element={<GanaderiaDemo />} />
         <Route path="/ganaderia/planes" element={<GanaderiaPlans />} />
-        <Route path="/ganaderia/dashboard" element={<GanaderiaDashboard />} />
-        <Route path="/ganaderia/*" element={<GanaderiaApp />} />
+        <Route path="/ganaderia/recuperar-acceso" element={<GanaderiaRecuperarAcceso />} />
+        {/* AUTH-RECOVERY-002 §11: público, sin GanaderiaAuthProvider -- el
+            token de la URL es la única credencial de esta pantalla, no una
+            sesión. */}
+        <Route path="/ganaderia/restablecer-contrasena" element={<GanaderiaRestablecerContrasena />} />
+        {/* AUTH-FRONT-001: /ganaderia/login (público) + /ganaderia/dashboard y
+            /ganaderia/* (privados, RequireGanaderiaAuth) comparten un mismo
+            GanaderiaAuthProvider por ruta -- cada montaje consulta la sesión
+            real (GET /api/ganaderia/auth/session), nunca estado viejo del
+            navegador (§8/§11). /qr/:codigo permanece público y AJENO a este
+            provider/guard -- QrEntryPage vía GanaderiaApp no debe exigir
+            sesión (uso público por QR físico). */}
+        <Route
+          path="/ganaderia/login"
+          element={
+            <GanaderiaAuthProvider>
+              <GanaderiaLogin />
+            </GanaderiaAuthProvider>
+          }
+        />
+        <Route
+          path="/ganaderia/dashboard"
+          element={
+            <GanaderiaAuthProvider>
+              <RequireGanaderiaAuth>
+                <GanaderiaDashboard />
+              </RequireGanaderiaAuth>
+            </GanaderiaAuthProvider>
+          }
+        />
+        {/* AGX-ADMIN-001: /ganaderia/admin -- PRIVATE + INTERNAL ONLY,
+            guard dedicado (RequireGanaderiaSuperAdmin), nunca comparte
+            RequireGanaderiaAuth (ese guard es exclusivo del flujo
+            cliente/tenant). */}
+        <Route
+          path="/ganaderia/admin"
+          element={
+            <GanaderiaAuthProvider>
+              <RequireGanaderiaSuperAdmin>
+                <GanaderiaAdminShell />
+              </RequireGanaderiaSuperAdmin>
+            </GanaderiaAuthProvider>
+          }
+        />
+        <Route
+          path="/ganaderia/*"
+          element={
+            <GanaderiaAuthProvider>
+              <RequireGanaderiaAuth>
+                <GanaderiaApp />
+              </RequireGanaderiaAuth>
+            </GanaderiaAuthProvider>
+          }
+        />
         <Route path="/catastrox/*" element={<CatastroXApp />} />
         <Route path="/qr/:codigo" element={<GanaderiaApp />} />
       </Routes>

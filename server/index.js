@@ -11,11 +11,13 @@ import { createGracefulShutdown, resolveShutdownTimeoutMs } from './lifecycle/gr
 import { createRequestLogging } from './observability/requestLogging.js';
 import { closeMainDbPool } from './db.js';
 import { closeCatastroxDbPool } from './catastroxDb.js';
+import { closeAgxAuthPool } from './db/agxAuthPool.js';
 import { createDeliveryWorker } from './services/catastrox/deliveryWorker.js';
 import { findAutonomousDeliveryJobIds, processDeliveryJob } from './services/catastrox/deliveryJobService.js';
 import animalesRouter from './routes/animales.js';
 import catastroxRouter from './routes/catastrox.js';
 import catastroxPaymentsRouter from './routes/catastroxPayments.js';
+import createGanaderiaAuthRouter from './routes/ganaderiaAuth.js';
 import createHealthRouter from './routes/health.js';
 import pesajesRouter from './routes/pesajes.js';
 import potrerosRouter from './routes/potreros.js';
@@ -102,6 +104,19 @@ app.get('/', (_req, res) => {
 // guarda en appConfig (server/config/env.js jamás expone secretos) -- se
 // lee directamente de process.env, igual que DATABASE_URL en server/db.js.
 app.use('/api/health', createHealthRouter({ healthMonitorToken: process.env.HEALTH_MONITOR_TOKEN }));
+// BFF-001 (ADR-009, aprobado v3): sesión segura de Ganadería -- aislado
+// de cualquier router de negocio, pool propio (agx_auth, ver
+// server/db/agxAuthPool.js), nunca responde en demo. AGX-SUPERADMIN-AUTH-005:
+// deploy mínimo -- solo auth/admin/recovery, sin AGX_BUSINESS_DATABASE_URL.
+app.use(
+  '/api/ganaderia/auth',
+  createGanaderiaAuthRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    fingerprintSecret: process.env.AGX_AUTH_FINGERPRINT_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
 app.use('/api/catastrox', catastroxRouter);
 app.use('/api/catastrox/payments', catastroxPaymentsRouter);
 app.use('/api/predios', prediosRouter);
@@ -151,6 +166,7 @@ const gracefulShutdown = createGracefulShutdown({
     { name: 'catastrox_delivery_worker', close: deliveryWorker.stop },
     { name: 'agx_pg_pool', close: closeMainDbPool },
     { name: 'catastrox_pg_pool', close: closeCatastroxDbPool },
+    { name: 'agx_auth_pg_pool', close: closeAgxAuthPool },
   ],
   timeoutMs: resolveShutdownTimeoutMs(),
 });

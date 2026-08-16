@@ -88,6 +88,14 @@ const REQUIRED_VARIABLES_BY_ENV = Object.freeze({
 const DEMO_PROHIBITED_EXACT_VARIABLES = Object.freeze([
   'DATABASE_URL',
   'CATASTROX_DATABASE_URL',
+  // BFF-001: demo no tiene backend real ni sesión de Ganadería que
+  // proteger -- mismo criterio que DATABASE_URL/CATASTROX_DATABASE_URL de
+  // arriba. server/routes/ganaderiaAuth.js responde 404 en demo sin leer
+  // ninguna de estas tres.
+  'AGX_AUTH_DATABASE_URL',
+  'AGX_BUSINESS_DATABASE_URL',
+  'AGX_CSRF_SERVER_SECRET',
+  'AGX_AUTH_FINGERPRINT_SECRET',
   'API_BACKEND_URL',
   'VITE_API_URL',
   'VITE_AGX_API_URL',
@@ -509,6 +517,102 @@ export function validateEnv(appEnv, source = process.env) {
     }
   }
 
+  // BFF-001 (ADR-009 §11.2, decisión de diseño de este lote): mismo
+  // formato estricto que CATASTROX_VERIFY_HANDLE_KEY/
+  // CATASTROX_CHECKOUT_IDENTITY_KEY -- clave de 32 bytes (HMAC-SHA256) en
+  // base64 estándar canónico. Opcional en todos los ambientes (Ganadería
+  // todavía no está en producción real, ver AGX_AUTH_DATABASE_URL/
+  // AGX_BUSINESS_DATABASE_URL más abajo) -- pero dondequiera que esté
+  // presente debe cumplir este formato, nunca un placeholder.
+  if (isNonEmpty(source.AGX_CSRF_SERVER_SECRET)) {
+    const rawKey = source.AGX_CSRF_SERVER_SECRET;
+
+    if (rawKey !== rawKey.trim()) {
+      throw new ConfigurationError('AGX_CSRF_SERVER_SECRET no puede tener espacios iniciales o finales.', {
+        code: 'INSECURE_VALUE',
+        environment: appEnv,
+        variable: 'AGX_CSRF_SERVER_SECRET',
+      });
+    }
+
+    if (!STRICT_BASE64_32_BYTES_PATTERN.test(rawKey)) {
+      throw new ConfigurationError(
+        'AGX_CSRF_SERVER_SECRET debe ser base64 estándar canónico de exactamente 32 bytes -- 43 caracteres válidos más un \'=\' de padding.',
+        { code: 'INSECURE_VALUE', environment: appEnv, variable: 'AGX_CSRF_SERVER_SECRET' },
+      );
+    }
+
+    if (Buffer.from(rawKey, 'base64').length !== 32) {
+      throw new ConfigurationError('AGX_CSRF_SERVER_SECRET debe decodificar a exactamente 32 bytes en base64.', {
+        code: 'INSECURE_VALUE',
+        environment: appEnv,
+        variable: 'AGX_CSRF_SERVER_SECRET',
+      });
+    }
+  }
+
+  // AUTH-001 (aprobado v2.2, §5): mismo formato estricto que
+  // AGX_CSRF_SERVER_SECRET -- clave HMAC-SHA256 de 32 bytes, base64
+  // canónico. Opcional en todos los ambientes por ahora (mismo criterio
+  // que las demás variables de Ganadería con sesión real -- todavía no en
+  // producción real).
+  if (isNonEmpty(source.AGX_AUTH_FINGERPRINT_SECRET)) {
+    const rawKey = source.AGX_AUTH_FINGERPRINT_SECRET;
+
+    if (rawKey !== rawKey.trim()) {
+      throw new ConfigurationError('AGX_AUTH_FINGERPRINT_SECRET no puede tener espacios iniciales o finales.', {
+        code: 'INSECURE_VALUE',
+        environment: appEnv,
+        variable: 'AGX_AUTH_FINGERPRINT_SECRET',
+      });
+    }
+
+    if (!STRICT_BASE64_32_BYTES_PATTERN.test(rawKey)) {
+      throw new ConfigurationError(
+        'AGX_AUTH_FINGERPRINT_SECRET debe ser base64 estándar canónico de exactamente 32 bytes -- 43 caracteres válidos más un \'=\' de padding.',
+        { code: 'INSECURE_VALUE', environment: appEnv, variable: 'AGX_AUTH_FINGERPRINT_SECRET' },
+      );
+    }
+
+    if (Buffer.from(rawKey, 'base64').length !== 32) {
+      throw new ConfigurationError('AGX_AUTH_FINGERPRINT_SECRET debe decodificar a exactamente 32 bytes en base64.', {
+        code: 'INSECURE_VALUE',
+        environment: appEnv,
+        variable: 'AGX_AUTH_FINGERPRINT_SECRET',
+      });
+    }
+  }
+
+  // AUTH-001 (aprobado v2.2, §5): independencia obligatoria entre el
+  // secreto de fingerprint y el de CSRF -- fail-closed. Un secreto de
+  // fingerprint filtrado no debe poder falsificar tokens CSRF, y
+  // viceversa; un error de copia-pega en el despliegue no debe pasar
+  // desapercibido. Solo se compara cuando AMBAS están presentes (cada una
+  // ya se validó por separado arriba, así que en este punto ambas -- si
+  // existen -- tienen formato válido).
+  if (
+    isNonEmpty(source.AGX_CSRF_SERVER_SECRET) &&
+    isNonEmpty(source.AGX_AUTH_FINGERPRINT_SECRET) &&
+    source.AGX_CSRF_SERVER_SECRET === source.AGX_AUTH_FINGERPRINT_SECRET
+  ) {
+    throw new ConfigurationError(
+      'AGX_CSRF_SERVER_SECRET y AGX_AUTH_FINGERPRINT_SECRET deben ser secretos independientes -- nunca el mismo valor.',
+      { code: 'INSECURE_VALUE', environment: appEnv, variable: 'AGX_AUTH_FINGERPRINT_SECRET' },
+    );
+  }
+
+  // BFF-001 (ACCESO-001, ADR-009 §9.2): AGX_AUTH_DATABASE_URL (rol
+  // agx_auth, plano seguridad) y AGX_BUSINESS_DATABASE_URL (rol agx_app,
+  // plano negocio) -- dos conexiones físicamente separadas, nunca
+  // compartidas, nunca la superusuario `postgres`. Opcionales en todos
+  // los ambientes por ahora (Ganadería con sesión real todavía no está en
+  // producción -- 0001/0002 solo aplicados en staging, nunca en
+  // production, ver ACCESO-001) -- server/db/agxAuthPool.js y
+  // server/db/agxBusinessPool.js fallan-cerrado igual que server/db.js si
+  // faltan cuando algo las necesita. Formato mínimo (no localhost/no
+  // cruce de ambiente) solo se exige en producción, mismo criterio que
+  // DATABASE_URL/CATASTROX_DATABASE_URL más abajo.
+
   // STAGING_READINESS_001 (Bloque 4): CATASTROX_FRONTEND_URL es la URL
   // pública que el backend usa para construir los enlaces de retorno de
   // Wompi y los correos de verificación -- en staging/production debe ser
@@ -668,6 +772,11 @@ export function validateEnv(appEnv, source = process.env) {
     const connectionValues = {
       DATABASE_URL: source.DATABASE_URL,
       CATASTROX_DATABASE_URL: source.CATASTROX_DATABASE_URL,
+      // BFF-001: mismas reglas de producción que las dos conexiones ya
+      // existentes -- si están presentes, nunca localhost, nunca un
+      // dominio de staging/demo.
+      AGX_AUTH_DATABASE_URL: source.AGX_AUTH_DATABASE_URL,
+      AGX_BUSINESS_DATABASE_URL: source.AGX_BUSINESS_DATABASE_URL,
     };
 
     for (const [variable, value] of Object.entries(connectionValues)) {

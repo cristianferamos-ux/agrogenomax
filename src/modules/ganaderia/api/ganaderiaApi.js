@@ -39,6 +39,10 @@ async function request(path, options = {}) {
       logApiAttempt(url);
       response = await fetch(url, {
         ...options,
+        // AUTH-FRONT-001: la sesión de Ganadería es una cookie HttpOnly
+        // server-side (AUTH-001/BFF-001) -- sin esto, ninguna llamada de
+        // este cliente llevaría la cookie de sesión al backend real.
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
           ...options.headers,

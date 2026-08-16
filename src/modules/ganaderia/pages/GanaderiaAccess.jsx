@@ -67,11 +67,11 @@ export default function GanaderiaAccess() {
           note="Tus datos reales permanecen separados de la Cuenta Demo y protegidos dentro de tu cuenta."
           primary={{
             label: 'Ingresar a mi cuenta',
-            to: '/ganaderia/dashboard'
+            to: '/ganaderia/login'
           }}
           secondary={{
             label: 'Recuperar acceso',
-            to: '/ganaderia/proximamente/recuperar-acceso'
+            to: '/ganaderia/recuperar-acceso'
           }}
         />
 
