@@ -23,7 +23,7 @@
 // CORS_MANDATORY_ORIGINS_BY_ENV (idéntica a shared/security/corsPolicy.js,
 // consumida también por server/security/ganaderiaSession.js vía
 // isOriginAllowed) -- se reusa esa, nunca shared/.
-import { CORS_MANDATORY_ORIGINS_BY_ENV } from '../../security/corsPolicyCore.js';
+import { CORS_MANDATORY_ORIGINS_BY_ENV, resolvePublicOriginForEnvironment } from '../../security/corsPolicyCore.js';
 
 const RESEND_API_URL = 'https://api.resend.com/emails';
 const DEFAULT_TIMEOUT_MS = 5000;
@@ -99,18 +99,32 @@ function buildGanaderiaFromHeader(rawEnvValue) {
   return `${GANADERIA_DISPLAY_NAME} <${parsed.email}>`;
 }
 
-// --- Origen público para construir el enlace absoluto (§9: auditado antes
-// de codificar -- reutiliza CORS_MANDATORY_ORIGINS_BY_ENV, la única
-// "configuración canónica del origin" que ya existe en el repo para cada
-// ambiente. Nunca localhost hardcodeado, nunca agrogenomax.com
-// hardcodeado -- se deriva del mismo catálogo cerrado que ya gobierna
-// CORS (ADR-014 §7 Barrera 4). No existe un CATASTROX_FRONTEND_URL
-// equivalente para Ganadería -- reusar ese patrón crearía acoplamiento
-// con configuración de CatastroX, prohibido en este lote. ---
-
+// --- Origen público para construir el enlace absoluto ---
+//
+// AGX-SUPERADMIN-AUTH-006: la versión anterior derivaba el origin de
+// APP_ENV vía CORS_MANDATORY_ORIGINS_BY_ENV. Eso rompió en producción real:
+// el servicio Railway "production" corre con APP_ENV=staging (anomalía ya
+// documentada en otras fases), así que el enlace de recuperación apuntaba
+// a https://staging.agrogenomax.com -- un dominio que no existe (DNS
+// NXDOMAIN). Regla aprobada: PUBLIC_APP_ORIGIN es ahora la ÚNICA autoridad
+// para el origin público en staging/production (validado en
+// server/config/env.js -- https, nunca localhost/127.0.0.1, obligatoria en
+// ambos ambientes). NUNCA se deriva de APP_ENV en esos dos ambientes. El
+// fallback a CORS_MANDATORY_ORIGINS_BY_ENV se conserva SOLO para
+// development/test, donde no hay Resend real ni PUBLIC_APP_ORIGIN
+// configurada.
 export function resolveGanaderiaPublicOrigin(appEnv) {
-  const origins = CORS_MANDATORY_ORIGINS_BY_ENV[appEnv];
-  return origins && origins.length > 0 ? origins[0] : null;
+  const explicitOrigin = process.env.PUBLIC_APP_ORIGIN;
+  if (isNonEmpty(explicitOrigin)) {
+    return resolvePublicOriginForEnvironment(explicitOrigin, appEnv);
+  }
+
+  if (appEnv === 'development' || appEnv === 'test') {
+    const origins = CORS_MANDATORY_ORIGINS_BY_ENV[appEnv];
+    return origins && origins.length > 0 ? origins[0] : null;
+  }
+
+  return null;
 }
 
 export function buildRestablecerContrasenaUrl(rawToken, appEnv) {

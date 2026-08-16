@@ -25,6 +25,8 @@ function validProductionSource(overrides = {}) {
     CATASTROX_PII_HASH_SECRET: 'b'.repeat(32),
     CATASTROX_VERIFY_HANDLE_KEY: 'gwslZ1bKInXjQ0TLmMqWeV6vRAL2hONB6bTBqpAjVFs=',
     CATASTROX_CHECKOUT_IDENTITY_KEY: 'OhWl0C0aTcvlS6gLqCfjLtV/bC3D8CxTGn4txiSCLIc=',
+    // AGX-SUPERADMIN-AUTH-006: obligatoria en production desde este fix.
+    PUBLIC_APP_ORIGIN: 'https://agrogenomax.com',
     ...overrides,
   };
 }

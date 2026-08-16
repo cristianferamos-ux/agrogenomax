@@ -70,6 +70,12 @@ const REQUIRED_VARIABLES_BY_ENV = Object.freeze({
     'EMAIL_PROVIDER',
     'RESEND_API_KEY',
     'EMAIL_FROM',
+    // AGX-SUPERADMIN-AUTH-006: el servicio Railway "production" corre hoy
+    // con APP_ENV=staging (anomalía documentada, no corregida aquí) -- por
+    // eso PUBLIC_APP_ORIGIN debe ser obligatoria también en este bucket
+    // para que el enlace real de /ganaderia/restablecer-contrasena nunca
+    // se construya sin autoridad explícita.
+    'PUBLIC_APP_ORIGIN',
   ]),
   production: Object.freeze([
     'DATABASE_URL',
@@ -80,6 +86,9 @@ const REQUIRED_VARIABLES_BY_ENV = Object.freeze({
     // R3/B6-26 + B6-26-ADJ-01: ver comentario equivalente en staging arriba.
     'CATASTROX_VERIFY_HANDLE_KEY',
     'CATASTROX_CHECKOUT_IDENTITY_KEY',
+    // AGX-SUPERADMIN-AUTH-006: origen público canónico para el enlace de
+    // recuperación de Ganadería -- ver justificación en el bucket staging.
+    'PUBLIC_APP_ORIGIN',
   ]),
 });
 
@@ -625,6 +634,25 @@ export function validateEnv(appEnv, source = process.env) {
       throw new ConfigurationError(
         'CATASTROX_FRONTEND_URL debe ser una URL https pública, nunca localhost/127.0.0.1, en este ambiente.',
         { code: 'INSECURE_VALUE', environment: appEnv, variable: 'CATASTROX_FRONTEND_URL' },
+      );
+    }
+  }
+
+  // AGX-SUPERADMIN-AUTH-006: PUBLIC_APP_ORIGIN es la única autoridad para
+  // construir enlaces públicos absolutos de Ganadería (hoy: el enlace de
+  // /ganaderia/restablecer-contrasena en el correo de recuperación, ver
+  // server/services/ganaderia/emailSender.js). Antes de este fix el origen
+  // se derivaba de APP_ENV -- como el servicio Railway "production" corre
+  // con APP_ENV=staging (anomalía ya documentada), el enlace real apuntaba
+  // a https://staging.agrogenomax.com, un dominio inexistente. Mismo
+  // criterio de formato que CATASTROX_FRONTEND_URL arriba: https pública,
+  // nunca localhost/127.0.0.1, en staging/production.
+  if (isNonEmpty(source.PUBLIC_APP_ORIGIN) && (appEnv === 'staging' || appEnv === 'production')) {
+    const resolved = resolvePublicOriginForEnvironment(source.PUBLIC_APP_ORIGIN, appEnv);
+    if (!resolved) {
+      throw new ConfigurationError(
+        'PUBLIC_APP_ORIGIN debe ser una URL https pública, nunca localhost/127.0.0.1, en este ambiente.',
+        { code: 'INSECURE_VALUE', environment: appEnv, variable: 'PUBLIC_APP_ORIGIN' },
       );
     }
   }
