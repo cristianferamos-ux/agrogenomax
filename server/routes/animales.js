@@ -11,9 +11,9 @@ import {
   updateDynamic,
 } from '../db.js';
 import { findAnimalForQr, findQrByCode } from './qr.js';
+import { createRequireGanaderiaCsrf, createRequireGanaderiaIdentity } from '../security/ganaderiaSession.js';
 
-const router = Router();
-
+// FIX/GANADERIA-SPRINT-0-BUSINESS-AUTH: ver comentario equivalente en predios.js.
 const animalAliases = {
   predio_id: ['predio_id', 'id_predio', 'farm_id'],
   potrero_id: ['potrero_id', 'id_potrero', 'paddock_id'],
@@ -107,9 +107,14 @@ async function hydrateBreedSummary(client, animalColumns, payload, razas, tipoRa
   });
 }
 
-router.get('/', async (_req, res, next) => {
-  try {
-    const result = await query(`select * from ${tableName('animales')} order by 1 desc`);
+export default function createAnimalesRouter({ appEnv, csrfServerSecret, allowedOrigins } = {}) {
+  const router = Router();
+  router.use(createRequireGanaderiaIdentity({ appEnv }));
+  router.use(createRequireGanaderiaCsrf({ csrfServerSecret, allowedOrigins }));
+
+  router.get('/', async (_req, res, next) => {
+    try {
+      const result = await query(`select * from ${tableName('animales')} order by 1 desc`);
     res.json(result.rows);
   } catch (error) {
     next(error);
@@ -285,6 +290,7 @@ router.put('/:id', async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-});
+  });
 
-export default router;
+  return router;
+}

@@ -14,19 +14,19 @@ import { closeCatastroxDbPool } from './catastroxDb.js';
 import { closeAgxAuthPool } from './db/agxAuthPool.js';
 import { createDeliveryWorker } from './services/catastrox/deliveryWorker.js';
 import { findAutonomousDeliveryJobIds, processDeliveryJob } from './services/catastrox/deliveryJobService.js';
-import animalesRouter from './routes/animales.js';
+import createAnimalesRouter from './routes/animales.js';
 import catastroxRouter from './routes/catastrox.js';
 import catastroxPaymentsRouter from './routes/catastroxPayments.js';
 import createGanaderiaAuthRouter from './routes/ganaderiaAuth.js';
 import createHealthRouter from './routes/health.js';
-import pesajesRouter from './routes/pesajes.js';
-import potrerosRouter from './routes/potreros.js';
-import prediosRouter from './routes/predios.js';
-import qrRouter from './routes/qr.js';
-import razasRouter from './routes/razas.js';
-import reproduccionRouter from './routes/reproduccion.js';
-import tratamientosRouter from './routes/tratamientos.js';
-import vacunacionesRouter from './routes/vacunaciones.js';
+import createPesajesRouter from './routes/pesajes.js';
+import createPotrerosRouter from './routes/potreros.js';
+import createPrediosRouter from './routes/predios.js';
+import createQrRouter from './routes/qr.js';
+import createRazasRouter from './routes/razas.js';
+import createReproduccionRouter from './routes/reproduccion.js';
+import createTratamientosRouter from './routes/tratamientos.js';
+import createVacunacionesRouter from './routes/vacunaciones.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -119,16 +119,36 @@ app.use(
 );
 app.use('/api/catastrox', catastroxRouter);
 app.use('/api/catastrox/payments', catastroxPaymentsRouter);
-app.use('/api/predios', prediosRouter);
-app.use('/api/potreros', potrerosRouter);
-app.use('/api/qr', qrRouter);
-app.use('/api/animales', animalesRouter);
-app.use('/api/razas', razasRouter);
-app.use('/api', razasRouter);
-app.use('/api', pesajesRouter);
-app.use('/api', vacunacionesRouter);
-app.use('/api', tratamientosRouter);
-app.use('/api', reproduccionRouter);
+
+// FIX/GANADERIA-SPRINT-0-BUSINESS-AUTH: hallazgo crítico de la auditoría
+// "Organizaciones y QR" -- estas rutas de negocio legacy estaban montadas
+// sin ningún middleware de autenticación (predios/potreros/qr/animales/
+// pesajes/vacunaciones/tratamientos/reproduccion/razas, en especial
+// POST /api/qr/asociar, que permitía reasignar cualquier QR a cualquier
+// animal sin sesión). Cada router ahora es una fábrica que exige sesión
+// Ganadería real (createRequireGanaderiaIdentity -- SOLO agx.sesiones/
+// agx.cuentas, nunca agx.organizaciones/membresias: esas tablas todavía
+// no existen en producción) + CSRF (createRequireGanaderiaCsrf, se
+// auto-omite en GET/HEAD/OPTIONS) en mutaciones. GET /api/qr/:codigo es
+// la única excepción deliberada, gateada dentro de qr.js -- ver su
+// comentario de cabecera. NO se agrega scoping por organización todavía
+// (Sprint 1+, cuando esas tablas existan en producción).
+const ganaderiaBusinessRouterConfig = {
+  appEnv: appConfig.appEnv,
+  csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+  allowedOrigins: appConfig.cors.allowedOrigins,
+};
+const razasRouterInstance = createRazasRouter(ganaderiaBusinessRouterConfig);
+app.use('/api/predios', createPrediosRouter(ganaderiaBusinessRouterConfig));
+app.use('/api/potreros', createPotrerosRouter(ganaderiaBusinessRouterConfig));
+app.use('/api/qr', createQrRouter(ganaderiaBusinessRouterConfig));
+app.use('/api/animales', createAnimalesRouter(ganaderiaBusinessRouterConfig));
+app.use('/api/razas', razasRouterInstance);
+app.use('/api', razasRouterInstance);
+app.use('/api', createPesajesRouter(ganaderiaBusinessRouterConfig));
+app.use('/api', createVacunacionesRouter(ganaderiaBusinessRouterConfig));
+app.use('/api', createTratamientosRouter(ganaderiaBusinessRouterConfig));
+app.use('/api', createReproduccionRouter(ganaderiaBusinessRouterConfig));
 
 app.use(notFound);
 app.use(errorHandler);

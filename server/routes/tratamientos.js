@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { getColumns, idColumnFor, insertDynamic, pickColumn, pickPayload, query, schema, tableName } from '../db.js';
+import { createRequireGanaderiaCsrf, createRequireGanaderiaIdentity } from '../security/ganaderiaSession.js';
 
-const router = Router();
+// FIX/GANADERIA-SPRINT-0-BUSINESS-AUTH: ver comentario equivalente en predios.js.
 const table = 'tratamientos';
 
 const tratamientoAliases = {
@@ -58,7 +59,12 @@ async function listByAnimal(animalId) {
   return result.rows;
 }
 
-router.get('/tratamientos', async (req, res, next) => {
+export default function createTratamientosRouter({ appEnv, csrfServerSecret, allowedOrigins } = {}) {
+  const router = Router();
+  router.use(createRequireGanaderiaIdentity({ appEnv }));
+  router.use(createRequireGanaderiaCsrf({ csrfServerSecret, allowedOrigins }));
+
+  router.get('/tratamientos', async (req, res, next) => {
   try {
     if (!req.query.animal_id) {
       res.json([]);
@@ -110,6 +116,7 @@ router.post('/tratamientos', async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-});
+  });
 
-export default router;
+  return router;
+}
