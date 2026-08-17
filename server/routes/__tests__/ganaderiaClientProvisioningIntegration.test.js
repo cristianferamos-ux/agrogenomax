@@ -177,4 +177,52 @@ describe('FIX/GANADERIA-SPRINT-2: aprovisionamiento de cliente contra Postgres r
       await new Promise((resolve) => authApp.server.close(resolve));
     }
   });
+
+  // HOTFIX E2E-001: regresión específica del bug de producción --
+  // agx.cuentas.email_normalizado es GENERATED ALWAYS AS
+  // (lower(TRIM(BOTH FROM email))) STORED; createCuentaProvisionada
+  // insertaba explícitamente un valor Node-computado en esa columna, lo
+  // cual Postgres rechaza siempre (independiente de grants). Este test
+  // habría fallado contra el fixture ANTERIOR (columna normal, sin
+  // GENERATED) porque ese fixture nunca ejercitaba el rechazo real de
+  // Postgres -- solo detecta el bug si la columna generada es real.
+  test('HOTFIX E2E-001: email_normalizado es GENERATED ALWAYS y createCuentaProvisionada nunca la escribe explícitamente', async () => {
+    const columnCheck = await adminPool.query(
+      `select is_generated, generation_expression
+         from information_schema.columns
+        where table_schema = 'agx' and table_name = 'cuentas' and column_name = 'email_normalizado'`,
+    );
+    assert.equal(columnCheck.rows.length, 1);
+    assert.equal(columnCheck.rows[0].is_generated, 'ALWAYS');
+    assert.equal(columnCheck.rows[0].generation_expression, 'lower(TRIM(BOTH FROM email))');
+
+    const email = `  Cliente.Hotfix-${randomSuffix()}@sprint2-test.local`;
+    const client = await pool.connect();
+    let cuentaId;
+    try {
+      await client.query('BEGIN');
+      cuentaId = await ganaderiaSession.createCuentaProvisionada(client, {
+        email,
+        nombre: 'Cliente Hotfix E2E-001',
+      });
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    assert.ok(cuentaId);
+
+    const row = await adminPool.query(
+      `select email, email_normalizado, estado, password_hash from agx.cuentas where cuenta_id = $1`,
+      [cuentaId],
+    );
+    assert.equal(row.rows.length, 1);
+    assert.equal(row.rows[0].email, email);
+    assert.equal(row.rows[0].email_normalizado, email.toLowerCase().trim());
+    assert.equal(row.rows[0].estado, 'activa');
+    assert.equal(row.rows[0].password_hash, null);
+  });
 });

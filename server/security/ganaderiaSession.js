@@ -260,11 +260,13 @@ export async function createOrganizacion(client, { nombre, identificadorFiscal =
  * (activada) -- exactamente el mismo criterio que motivoRechazo='sin_password'
  * ya usa en POST /login. No se introduce un estado nuevo.
  */
-export async function createCuentaProvisionada(client, { email, emailNormalizado, nombre }) {
+export async function createCuentaProvisionada(client, { email, nombre }) {
+  // email_normalizado es GENERATED ALWAYS AS (lower(TRIM(BOTH FROM email)))
+  // STORED en producción -- Postgres la calcula, nunca se escribe aquí.
   const result = await client.query(
-    `insert into agx.cuentas (email, email_normalizado, nombre, estado, password_hash)
-     values ($1, $2, $3, 'activa', null) returning cuenta_id`,
-    [email, emailNormalizado, nombre],
+    `insert into agx.cuentas (email, nombre, estado, password_hash)
+     values ($1, $2, 'activa', null) returning cuenta_id`,
+    [email, nombre],
   );
   return result.rows[0].cuenta_id;
 }
