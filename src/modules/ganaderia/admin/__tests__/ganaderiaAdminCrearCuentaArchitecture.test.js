@@ -129,3 +129,45 @@ test('GanaderiaAdminCrearCuenta.jsx: usa fetchCsrfToken + credentials include, m
   assert.match(crearCuentaSource, /credentials:\s*'include'/);
   assert.match(crearCuentaSource, /'X-CSRF-Token':\s*csrfToken/);
 });
+
+// ---------------------------------------------------------------------
+// HOTFIX E2E-001 (ajuste UX): 5xx real vs. excepción de red/fetch
+// ---------------------------------------------------------------------
+
+test('HOTFIX E2E-001 UX 1: response.status >= 500 muestra el mensaje de error de servidor exacto pedido, no el genérico de red', () => {
+  assert.match(
+    crearCuentaSource,
+    /const SERVER_ERROR_MESSAGE =\s*\n?\s*'Ocurrió un error al crear la cuenta\. No vuelvas a intentarlo hasta verificar el estado\.'/,
+  );
+  const resolveErrorMessageBody = crearCuentaSource.match(/function resolveErrorMessage[\s\S]*?\n\}/)?.[0] ?? '';
+  assert.match(resolveErrorMessageBody, /if \(status >= 500\) return SERVER_ERROR_MESSAGE;/);
+  // La rama 5xx debe evaluarse ANTES del fallback genérico -- si no, un 500
+  // real nunca alcanzaría SERVER_ERROR_MESSAGE.
+  const serverErrorIndex = resolveErrorMessageBody.indexOf('status >= 500');
+  const fallbackIndex = resolveErrorMessageBody.indexOf('return GENERIC_NETWORK_MESSAGE;');
+  assert.ok(serverErrorIndex >= 0 && fallbackIndex >= 0 && serverErrorIndex < fallbackIndex);
+});
+
+test('HOTFIX E2E-001 UX 2: una excepción real de fetch/red (catch) sigue mostrando GENERIC_NETWORK_MESSAGE, nunca SERVER_ERROR_MESSAGE', () => {
+  const codeOnly = stripComments(crearCuentaSource);
+  const catchBlock = codeOnly.match(/\} catch \{[\s\S]{0,150}?\n {4}\}/)?.[0] ?? '';
+  assert.ok(catchBlock, 'debe existir el bloque catch de handleSubmit');
+  assert.match(catchBlock, /setErrorMessage\(GENERIC_NETWORK_MESSAGE\)/);
+  assert.doesNotMatch(catchBlock, /SERVER_ERROR_MESSAGE/);
+});
+
+test('HOTFIX E2E-001 UX 3: 409 no fue tocado por este ajuste -- sigue mostrando el mensaje funcional exacto previo', () => {
+  const resolveErrorMessageBody = crearCuentaSource.match(/function resolveErrorMessage[\s\S]*?\n\}/)?.[0] ?? '';
+  assert.match(
+    resolveErrorMessageBody,
+    /status === 409[\s\S]{0,40}return 'Ya existe una cuenta asociada a este correo\.'/,
+  );
+});
+
+test('HOTFIX E2E-001 UX 4: el flujo de éxito (SUCCESS_MESSAGE/SUCCESS_EMAIL_FAILED_MESSAGE) queda intacto -- este ajuste solo toca resolveErrorMessage', () => {
+  assert.match(
+    crearCuentaSource,
+    /const SUCCESS_MESSAGE = 'Cuenta provisionada\. Se envió el enlace de activación al correo del cliente\.'/,
+  );
+  assert.match(crearCuentaSource, /emailDelivered \? SUCCESS_MESSAGE : SUCCESS_EMAIL_FAILED_MESSAGE/);
+});

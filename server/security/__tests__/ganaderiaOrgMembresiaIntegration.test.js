@@ -67,9 +67,11 @@ function randomEmail(prefix) {
 }
 
 async function insertCuenta(email, { activa = true } = {}) {
+  // email_normalizado es GENERATED ALWAYS -- no se escribe explícitamente,
+  // igual que en createCuentaProvisionada.
   const result = await adminPool.query(
-    `insert into agx.cuentas (email, email_normalizado, nombre, estado, password_hash)
-     values ($1, $1, 'Test', $2, 'x') returning cuenta_id`,
+    `insert into agx.cuentas (email, nombre, estado, password_hash)
+     values ($1, 'Test', $2, 'x') returning cuenta_id`,
     [email, activa ? 'activa' : 'inactiva'],
   );
   return result.rows[0].cuenta_id;

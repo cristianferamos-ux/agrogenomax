@@ -11,6 +11,12 @@ import '../styles/ganaderia-admin.css';
 import '../styles/ganaderia-login.css';
 
 const GENERIC_NETWORK_MESSAGE = 'No fue posible conectar con el servicio. Intenta nuevamente.';
+// HOTFIX E2E-001 (ajuste UX): un 5xx significa que SÍ hubo comunicación con
+// el servidor -- a diferencia de GENERIC_NETWORK_MESSAGE, este mensaje no
+// invita a reintentar de inmediato (el resultado de la operación puede
+// requerir verificación antes de repetir).
+const SERVER_ERROR_MESSAGE =
+  'Ocurrió un error al crear la cuenta. No vuelvas a intentarlo hasta verificar el estado.';
 const SUCCESS_MESSAGE = 'Cuenta provisionada. Se envió el enlace de activación al correo del cliente.';
 // MICROAUDITORÍA (caso B, DB OK + EMAIL FAIL): ambos casos son éxito de
 // provisionamiento -- nunca se trata como si hubiera fallado la creación,
@@ -28,6 +34,7 @@ function resolveErrorMessage(status, body) {
     return 'Revisa los datos ingresados.';
   }
   if (status === 401 || status === 403) return 'Tu sesión no tiene permisos para esta acción. Vuelve a iniciar sesión.';
+  if (status >= 500) return SERVER_ERROR_MESSAGE;
   return GENERIC_NETWORK_MESSAGE;
 }
 

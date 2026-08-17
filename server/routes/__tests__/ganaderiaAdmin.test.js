@@ -128,7 +128,11 @@ function makeFakeDb() {
         failNextInsertTable = null;
         throw new Error('SIMULATED_CUENTAS_FAILURE');
       }
-      const [email, emailNormalizado, nombre] = params;
+      const [email, nombre] = params;
+      // email_normalizado es GENERATED ALWAYS AS (lower(TRIM(BOTH FROM email)))
+      // STORED en Postgres real -- el mock la simula igual, nunca la recibe
+      // como parámetro del INSERT (HOTFIX E2E-001).
+      const emailNormalizado = email.trim().toLowerCase();
       if (db.cuentas.some((c) => c.email_normalizado === emailNormalizado)) {
         const conflictError = new Error('duplicate key value violates unique constraint "cuentas_email_normalizado_key"');
         conflictError.code = '23505';
