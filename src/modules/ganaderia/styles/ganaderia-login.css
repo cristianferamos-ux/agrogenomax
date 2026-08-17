@@ -184,3 +184,11 @@
   color: rgba(231, 245, 236, 0.72);
   font-size: 0.9rem;
 }
+
+/* UX-TENANT-AUTOSELECT-001: reemplaza al selector durante el único intento
+   de auto-selección con 1 organización disponible. */
+.gan-org-required-autoselecting {
+  text-align: center;
+  color: rgba(231, 245, 236, 0.72);
+  font-size: 0.95rem;
+}
