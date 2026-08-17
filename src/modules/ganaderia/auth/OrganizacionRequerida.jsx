@@ -6,13 +6,25 @@
 // inventa aquí una UI compleja (multi-paso, búsqueda, etc.) -- solo la
 // lista mínima ya devuelta por GET /session (organizacionesDisponibles),
 // cada una con una acción para fijarla.
-import { useState } from 'react';
+//
+// UX-TENANT-AUTOSELECT-001: con exactamente 1 organización disponible, este
+// componente dispara automáticamente esa misma acción (seleccionarOrganizacion)
+// una sola vez al montar -- reutiliza el mismo POST /organizacion, el mismo
+// CSRF y el mismo refresh() del flujo manual, sin backend nuevo. Con 0 o 2+
+// organizaciones el comportamiento no cambia.
+import { useEffect, useRef, useState } from 'react';
 import { fetchCsrfToken, useGanaderiaAuth } from './GanaderiaAuthContext.jsx';
 
 export default function OrganizacionRequerida() {
   const { organizacionesDisponibles, refresh } = useGanaderiaAuth();
   const [selectingId, setSelectingId] = useState(null);
   const [error, setError] = useState('');
+  // Guarda contra loop: el auto-select solo puede dispararse UNA vez por
+  // montaje, sin importar cuántas veces se re-renderice el componente
+  // mientras tanto (p. ej. por el propio setSelectingId/setError del intento
+  // en curso). Si falla, cae al selector manual de abajo -- nunca reintenta
+  // solo.
+  const autoSelectAttemptedRef = useRef(false);
 
   async function seleccionarOrganizacion(organizacionId) {
     setSelectingId(organizacionId);
@@ -38,6 +50,30 @@ export default function OrganizacionRequerida() {
       setError('No fue posible conectar con el servicio. Intenta nuevamente.');
       setSelectingId(null);
     }
+  }
+
+  const isSingleOrg = organizacionesDisponibles.length === 1;
+
+  useEffect(() => {
+    if (!isSingleOrg) return;
+    if (autoSelectAttemptedRef.current) return;
+    autoSelectAttemptedRef.current = true;
+    seleccionarOrganizacion(organizacionesDisponibles[0].organizacionId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSingleOrg]);
+
+  // Mientras dura el único intento de auto-selección, se oculta el selector
+  // (que con 1 sola opción se vería como un parpadeo de UI innecesario) --
+  // si falla, `error` queda fijado y este bloque deja de renderizarse,
+  // cayendo al selector manual normal (con el mismo error visible ahí).
+  if (isSingleOrg && !error) {
+    return (
+      <div className="gan-org-required">
+        <p className="gan-org-required-autoselecting" role="status" aria-live="polite">
+          Preparando tu cuenta...
+        </p>
+      </div>
+    );
   }
 
   return (

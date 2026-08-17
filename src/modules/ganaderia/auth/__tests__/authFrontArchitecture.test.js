@@ -353,3 +353,82 @@ test('ganaderiaApi.js: request() envía credentials: "include" en cada fetch', (
 test('GanaderiaApp.jsx conserva la ruta proximamente/:modulo para módulos privados futuros (no se retiró)', () => {
   assert.match(ganaderiaAppSource, /path="proximamente\/:modulo"/);
 });
+
+// ---------------------------------------------------------------------
+// UX-TENANT-AUTOSELECT-001: OrganizacionRequerida.jsx auto-selecciona con
+// exactamente 1 organización disponible, reutilizando el flujo manual ya
+// auditado (mismo endpoint, mismo CSRF, mismo refresh).
+// ---------------------------------------------------------------------
+
+test('UX-TENANT-AUTOSELECT-001 1: con 0 organizaciones, el useEffect de auto-select no dispara nada (isSingleOrg=false)', () => {
+  assert.match(orgRequiredSource, /const isSingleOrg = organizacionesDisponibles\.length === 1;/);
+  const effectBlock = orgRequiredSource.match(/useEffect\(\(\) => \{[\s\S]*?\}, \[isSingleOrg\]\);/)?.[0] ?? '';
+  assert.ok(effectBlock, 'debe existir el useEffect de auto-select');
+  assert.match(effectBlock, /if \(!isSingleOrg\) return;/);
+});
+
+test('UX-TENANT-AUTOSELECT-001 2: con 1 organización, el useEffect llama seleccionarOrganizacion con esa única organizacionId', () => {
+  const effectBlock = orgRequiredSource.match(/useEffect\(\(\) => \{[\s\S]*?\}, \[isSingleOrg\]\);/)?.[0] ?? '';
+  assert.match(effectBlock, /seleccionarOrganizacion\(organizacionesDisponibles\[0\]\.organizacionId\)/);
+});
+
+test('UX-TENANT-AUTOSELECT-001 3: el auto-select reutiliza la MISMA función seleccionarOrganizacion que el selector manual -- no hay una segunda implementación', () => {
+  const codeOnly = stripComments(orgRequiredSource);
+  const matches = codeOnly.match(/async function seleccionarOrganizacion/g) ?? [];
+  assert.equal(matches.length, 1, 'solo debe existir una definición de seleccionarOrganizacion');
+  assert.match(codeOnly, /onClick=\{\(\) => seleccionarOrganizacion\(org\.organizacionId\)\}/);
+});
+
+test('UX-TENANT-AUTOSELECT-001 4-5: la misma función (auto-select y manual) usa CSRF y credentials include -- contrato sin cambios', () => {
+  assert.match(orgRequiredSource, /fetchCsrfToken/);
+  const postBlock = orgRequiredSource.match(/fetch\('\/api\/ganaderia\/auth\/organizacion'[\s\S]*?\}\);/)?.[0] ?? '';
+  assert.match(postBlock, /'X-CSRF-Token':\s*csrfToken/);
+  assert.match(postBlock, /credentials:\s*'include'/);
+});
+
+test('UX-TENANT-AUTOSELECT-001 6: refresh() se llama tras un POST /organizacion exitoso, tanto en auto-select como en selección manual', () => {
+  const codeOnly = stripComments(orgRequiredSource);
+  const seleccionarBody = codeOnly.match(/async function seleccionarOrganizacion[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.ok(seleccionarBody, 'debe existir el cuerpo de seleccionarOrganizacion');
+  const notOkIndex = seleccionarBody.indexOf('if (!response.ok)');
+  const refreshIndex = seleccionarBody.indexOf('await refresh();');
+  assert.ok(notOkIndex >= 0 && refreshIndex >= 0 && notOkIndex < refreshIndex, 'refresh() debe aparecer después de la rama de fallo (que retorna temprano)');
+});
+
+test('UX-TENANT-AUTOSELECT-001 7: durante el auto-select no se muestra el selector -- se reemplaza por un mensaje mínimo, sin la lista de organizaciones', () => {
+  const codeOnly = stripComments(orgRequiredSource);
+  const autoSelectRenderBlock = codeOnly.match(/if \(isSingleOrg && !error\) \{[\s\S]*?\n {2}\}/)?.[0] ?? '';
+  assert.ok(autoSelectRenderBlock, 'debe existir el bloque de render exclusivo del auto-select');
+  assert.match(autoSelectRenderBlock, /Preparando tu cuenta\.\.\./);
+  assert.doesNotMatch(autoSelectRenderBlock, /gan-org-required-list/);
+  // Ese bloque debe evaluarse ANTES del selector manual (return temprano).
+  const selectorIndex = codeOnly.indexOf('gan-org-required-list');
+  const autoSelectIndex = codeOnly.indexOf('isSingleOrg && !error');
+  assert.ok(autoSelectIndex >= 0 && selectorIndex >= 0 && autoSelectIndex < selectorIndex);
+});
+
+test('UX-TENANT-AUTOSELECT-001 8: con 2+ organizaciones (isSingleOrg=false), se sigue renderizando el selector manual normal', () => {
+  assert.match(orgRequiredSource, /organizacionesDisponibles\.length === 0 \? \(/);
+  assert.match(orgRequiredSource, /organizacionesDisponibles\.map\(\(org\) => \(/);
+});
+
+test('UX-TENANT-AUTOSELECT-001 9: un fallo de auto-select nunca reintenta solo -- guarda por ref (una sola vez por montaje) y el useEffect solo depende de isSingleOrg (no de error/selectingId, que cambian en cada intento)', () => {
+  const codeOnly = stripComments(orgRequiredSource);
+  assert.match(codeOnly, /const autoSelectAttemptedRef = useRef\(false\);/);
+  const effectBlock = codeOnly.match(/useEffect\(\(\) => \{[\s\S]*?\}, \[isSingleOrg\]\);/)?.[0] ?? '';
+  assert.match(effectBlock, /if \(autoSelectAttemptedRef\.current\) return;/);
+  assert.match(effectBlock, /autoSelectAttemptedRef\.current = true;/);
+  // La dependencia del efecto es SOLO isSingleOrg -- setError/setSelectingId
+  // (que sí cambian durante el intento) no están en el arreglo de
+  // dependencias, así que no pueden re-disparar el efecto.
+  assert.doesNotMatch(orgRequiredSource, /\}, \[isSingleOrg, error/);
+  assert.doesNotMatch(orgRequiredSource, /\}, \[isSingleOrg, selectingId/);
+});
+
+test('UX-TENANT-AUTOSELECT-001 10: un super_admin nunca llega a OrganizacionRequerida -- GanaderiaAuthContext.jsx resuelve su status directo a "authenticated" ANTES de evaluar organizacionActiva', () => {
+  const deriveStatusBody = authContextSource.match(/function deriveStatus\(sessionPayload\) \{[\s\S]*?\n\}/)?.[0] ?? '';
+  assert.ok(deriveStatusBody, 'debe existir deriveStatus()');
+  const superAdminIndex = deriveStatusBody.indexOf("rolInterno === 'super_admin'");
+  const orgCheckIndex = deriveStatusBody.indexOf('!sessionPayload.organizacionActiva');
+  assert.ok(superAdminIndex >= 0 && orgCheckIndex >= 0 && superAdminIndex < orgCheckIndex, 'el chequeo de super_admin debe evaluarse antes que organizacionActiva, así nunca resuelve a authenticated_without_org');
+});
