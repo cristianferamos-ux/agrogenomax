@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { getColumns, insertDynamic, pickPayload, query, tableName } from '../db.js';
+import { createRequireGanaderiaCsrf, createRequireGanaderiaIdentity } from '../security/ganaderiaSession.js';
 
-const router = Router();
-
+// FIX/GANADERIA-SPRINT-0-BUSINESS-AUTH: ver comentario equivalente en predios.js.
 const aliases = {
   predio_id: ['predio_id', 'id_predio', 'farm_id'],
   nombre: ['nombre', 'name'],
@@ -13,43 +13,49 @@ const aliases = {
   observaciones: ['observaciones', 'notes'],
 };
 
-router.get('/', async (req, res, next) => {
-  try {
-    const columns = await getColumns('potreros');
-    const predioColumn = ['predio_id', 'id_predio', 'farm_id'].find((column) => columns.has(column));
+export default function createPotrerosRouter({ appEnv, csrfServerSecret, allowedOrigins } = {}) {
+  const router = Router();
+  router.use(createRequireGanaderiaIdentity({ appEnv }));
+  router.use(createRequireGanaderiaCsrf({ csrfServerSecret, allowedOrigins }));
 
-    if (req.query.predio_id && predioColumn) {
-      const result = await query(
-        `select * from ${tableName('potreros')} where "${predioColumn}" = $1 order by 1 desc`,
-        [req.query.predio_id],
-      );
+  router.get('/', async (req, res, next) => {
+    try {
+      const columns = await getColumns('potreros');
+      const predioColumn = ['predio_id', 'id_predio', 'farm_id'].find((column) => columns.has(column));
+
+      if (req.query.predio_id && predioColumn) {
+        const result = await query(
+          `select * from ${tableName('potreros')} where "${predioColumn}" = $1 order by 1 desc`,
+          [req.query.predio_id],
+        );
+        res.json(result.rows);
+        return;
+      }
+
+      const result = await query(`select * from ${tableName('potreros')} order by 1 desc`);
       res.json(result.rows);
-      return;
+    } catch (error) {
+      next(error);
     }
+  });
 
-    const result = await query(`select * from ${tableName('potreros')} order by 1 desc`);
-    res.json(result.rows);
-  } catch (error) {
-    next(error);
-  }
-});
+  router.post('/', async (req, res, next) => {
+    try {
+      if (!req.body.predio_id) {
+        throw Object.assign(new Error('El predio es obligatorio para crear un potrero.'), { status: 400 });
+      }
+      if (!req.body.nombre) {
+        throw Object.assign(new Error('El nombre del potrero es obligatorio.'), { status: 400 });
+      }
 
-router.post('/', async (req, res, next) => {
-  try {
-    if (!req.body.predio_id) {
-      throw Object.assign(new Error('El predio es obligatorio para crear un potrero.'), { status: 400 });
+      const columns = await getColumns('potreros');
+      const payload = pickPayload(columns, req.body, aliases);
+      const row = await insertDynamic('potreros', payload);
+      res.status(201).json(row);
+    } catch (error) {
+      next(error);
     }
-    if (!req.body.nombre) {
-      throw Object.assign(new Error('El nombre del potrero es obligatorio.'), { status: 400 });
-    }
+  });
 
-    const columns = await getColumns('potreros');
-    const payload = pickPayload(columns, req.body, aliases);
-    const row = await insertDynamic('potreros', payload);
-    res.status(201).json(row);
-  } catch (error) {
-    next(error);
-  }
-});
-
-export default router;
+  return router;
+}

@@ -1,8 +1,20 @@
 import { Router } from 'express';
 import { getColumns, idColumnFor, pickColumn, pool, query, tableName } from '../db.js';
+import { createRequireGanaderiaCsrf, createRequireGanaderiaIdentity } from '../security/ganaderiaSession.js';
 
-const router = Router();
-
+// FIX/GANADERIA-SPRINT-0-BUSINESS-AUTH: server/index.js ya no monta este
+// router directamente -- ahora importa el default export como fábrica
+// (createQrRouter) y le pasa la config de sesión/CSRF ya validada por
+// getConfig() en el arranque. GET /:codigo se deja deliberadamente
+// PÚBLICO (sin exigir sesión): la auditoría previa (AGX-SUPERADMIN
+// Organizaciones y QR) confirmó que /qr/:codigo es una ruta PÚBLICA real
+// en el frontend hoy (App.jsx, "uso público por QR físico" -- alguien
+// escanea una chapeta física sin haber iniciado sesión) y que no existe
+// ningún relay de Cloudflare que sirva /api/qr con datos reales, por lo
+// que exigir sesión aquí rompería ese flujo ya diseñado para ser público
+// sin sustituir nada. POST /importar y POST /asociar sí exigen sesión +
+// CSRF -- son los dos que la auditoría marcó como hallazgo crítico
+// (reasignación de QR sin autenticación).
 const qrAnimalCandidates = ['animal_id', 'id_animal'];
 const qrStatusCandidates = ['estado', 'status'];
 const qrCodeColumn = 'codigo_qr';
@@ -52,38 +64,44 @@ async function findAnimalForQr(qr, qrColumns, client = null) {
   return null;
 }
 
-router.get('/:codigo', async (req, res, next) => {
-  try {
-    const codigo = String(req.params.codigo || '').trim().toUpperCase();
-    const { qr, columns } = await findQrByCode(codigo);
+export default function createQrRouter({ appEnv, csrfServerSecret, allowedOrigins } = {}) {
+  const router = Router();
+  const requireIdentity = createRequireGanaderiaIdentity({ appEnv });
+  const requireCsrf = createRequireGanaderiaCsrf({ csrfServerSecret, allowedOrigins });
 
-    if (!qr) {
-      res.status(404).json({ exists: false, codigo });
-      return;
+  // Deliberadamente PÚBLICO -- ver comentario de cabecera del archivo.
+  router.get('/:codigo', async (req, res, next) => {
+    try {
+      const codigo = String(req.params.codigo || '').trim().toUpperCase();
+      const { qr, columns } = await findQrByCode(codigo);
+
+      if (!qr) {
+        res.status(404).json({ exists: false, codigo });
+        return;
+      }
+
+      const animal = await findAnimalForQr(qr, columns);
+      const statusColumn = pickColumn(columns, qrStatusCandidates);
+      const assignedByStatus = statusColumn && String(qr[statusColumn] || '').toLowerCase() === 'asignado';
+
+      res.json({
+        exists: true,
+        assigned: Boolean(animal || assignedByStatus),
+        qr,
+        animal,
+      });
+    } catch (error) {
+      console.error('QR route error', {
+        codigo: String(req.params.codigo || '').trim().toUpperCase(),
+        message: error?.message,
+        status: error?.status,
+        stack: error?.stack,
+      });
+      next(error);
     }
+  });
 
-    const animal = await findAnimalForQr(qr, columns);
-    const statusColumn = pickColumn(columns, qrStatusCandidates);
-    const assignedByStatus = statusColumn && String(qr[statusColumn] || '').toLowerCase() === 'asignado';
-
-    res.json({
-      exists: true,
-      assigned: Boolean(animal || assignedByStatus),
-      qr,
-      animal,
-    });
-  } catch (error) {
-    console.error('QR route error', {
-      codigo: String(req.params.codigo || '').trim().toUpperCase(),
-      message: error?.message,
-      status: error?.status,
-      stack: error?.stack,
-    });
-    next(error);
-  }
-});
-
-router.post('/importar', async (req, res, next) => {
+  router.post('/importar', requireIdentity, requireCsrf, async (req, res, next) => {
   try {
     const items = Array.isArray(req.body.codigos) ? req.body.codigos : [];
     if (!items.length) {
@@ -116,9 +134,9 @@ router.post('/importar', async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-});
+  });
 
-router.post('/asociar', async (req, res, next) => {
+  router.post('/asociar', requireIdentity, requireCsrf, async (req, res, next) => {
   const client = await pool.connect();
 
   try {
@@ -168,7 +186,9 @@ router.post('/asociar', async (req, res, next) => {
   } finally {
     client.release();
   }
-});
+  });
+
+  return router;
+}
 
 export { findAnimalForQr, findQrByCode };
-export default router;

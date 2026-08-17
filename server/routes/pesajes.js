@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { getColumns, idColumnFor, insertDynamic, pickColumn, pickPayload, query, tableName } from '../db.js';
+import { createRequireGanaderiaCsrf, createRequireGanaderiaIdentity } from '../security/ganaderiaSession.js';
 
-const router = Router();
-
+// FIX/GANADERIA-SPRINT-0-BUSINESS-AUTH: ver comentario equivalente en predios.js.
 const pesajeAliases = {
   animal_id: ['animal_id', 'id_animal'],
   fecha_pesaje: ['fecha_pesaje', 'fecha', 'weighing_date'],
@@ -44,7 +44,12 @@ function validatePesajePayload(payload) {
   }
 }
 
-router.get('/animales/:id/pesajes', async (req, res, next) => {
+export default function createPesajesRouter({ appEnv, csrfServerSecret, allowedOrigins } = {}) {
+  const router = Router();
+  router.use(createRequireGanaderiaIdentity({ appEnv }));
+  router.use(createRequireGanaderiaCsrf({ csrfServerSecret, allowedOrigins }));
+
+  router.get('/animales/:id/pesajes', async (req, res, next) => {
   try {
     const columns = await getColumns('pesajes');
     const animalColumn = pickColumn(columns, pesajeAliases.animal_id);
@@ -119,6 +124,7 @@ router.post('/pesajes', async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-});
+  });
 
-export default router;
+  return router;
+}
