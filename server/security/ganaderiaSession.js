@@ -236,6 +236,47 @@ export async function resolveInternalRole(cuentaId) {
   return row.rol_interno === 'administrador_plataforma' ? 'super_admin' : row.rol_interno;
 }
 
+// SPRINT-2-CLIENT-PROVISIONING: escritura server-side de la cadena
+// organización->cuenta->membresía. Los 3 INSERT siguientes se invocan
+// SIEMPRE dentro de la misma withAuthTransaction (server/routes/
+// ganaderiaAdmin.js) -- un fallo en cualquiera de los tres revierte los
+// anteriores automáticamente (ROLLBACK de agxAuthPool.js). Ninguno acepta
+// un id -- organizacion_id/cuenta_id/membresia_id son siempre
+// gen_random_uuid() server-side, nunca provistos por el llamador.
+export async function createOrganizacion(client, { nombre, identificadorFiscal = null }) {
+  const result = await client.query(
+    `insert into agx.organizaciones (nombre, identificador_fiscal) values ($1, $2) returning organizacion_id`,
+    [nombre, identificadorFiscal],
+  );
+  return result.rows[0].organizacion_id;
+}
+
+/**
+ * Cuenta PROVISIONADA (no auto-registrada): password_hash NULL,
+ * estado='activa' -- el modelo actual de agx.cuentas (CHECK
+ * estado in ('activa','inactiva')) no distingue "provisionada" de
+ * "activada" como estados separados; la distinción funcional real es
+ * password_hash IS NULL (pendiente de activación) vs IS NOT NULL
+ * (activada) -- exactamente el mismo criterio que motivoRechazo='sin_password'
+ * ya usa en POST /login. No se introduce un estado nuevo.
+ */
+export async function createCuentaProvisionada(client, { email, emailNormalizado, nombre }) {
+  const result = await client.query(
+    `insert into agx.cuentas (email, email_normalizado, nombre, estado, password_hash)
+     values ($1, $2, $3, 'activa', null) returning cuenta_id`,
+    [email, emailNormalizado, nombre],
+  );
+  return result.rows[0].cuenta_id;
+}
+
+/** Primera membresía de una organización nueva: siempre rol='owner', estado='activa', fijado server-side. */
+export async function createMembresiaOwner(client, { cuentaId, organizacionId }) {
+  await client.query(
+    `insert into agx.membresias (cuenta_id, organizacion_id, rol, estado) values ($1, $2, 'owner', 'activa')`,
+    [cuentaId, organizacionId],
+  );
+}
+
 export async function isMembresiaActivaParaOrganizacion(cuentaId, organizacionId) {
   const pool = getAgxAuthPool();
   const result = await pool.query(
@@ -444,17 +485,21 @@ export const PASSWORD_RESET_TOKEN_TTL_SECONDS = 60 * 60; // 60 minutos, §6 apro
  * @param {import('pg').PoolClient} client
  * @param {string} cuentaId
  * @param {'establecer_inicial'|'reset'} proposito
+ * @param {string|null} [creadoPorCuentaId] - SPRINT-2-CLIENT-PROVISIONING:
+ *   cuenta_id del superadmin que provisionó el token (columna ya existente
+ *   agx.credenciales_reset_tokens.creado_por_cuenta_id, sin uso hasta
+ *   ahora). null para el flujo de auto-recuperación (§6, sin cambios).
  * @returns {Promise<string>} rawToken
  */
-export async function createResetToken(client, cuentaId, proposito) {
+export async function createResetToken(client, cuentaId, proposito, creadoPorCuentaId = null) {
   const rawToken = crypto.randomBytes(32).toString('base64url');
   const tokenHash = hashSessionSecret(rawToken);
   const fechaExpiracion = new Date(Date.now() + PASSWORD_RESET_TOKEN_TTL_SECONDS * 1000);
 
   await client.query(
-    `insert into agx.credenciales_reset_tokens (cuenta_id, token_hash, proposito, fecha_expiracion)
-     values ($1, $2, $3, $4)`,
-    [cuentaId, tokenHash, proposito, fechaExpiracion.toISOString()],
+    `insert into agx.credenciales_reset_tokens (cuenta_id, token_hash, proposito, fecha_expiracion, creado_por_cuenta_id)
+     values ($1, $2, $3, $4, $5)`,
+    [cuentaId, tokenHash, proposito, fechaExpiracion.toISOString(), creadoPorCuentaId],
   );
 
   return rawToken;
@@ -569,6 +614,38 @@ export function createRequireGanaderiaRole(...allowedRoles) {
       return;
     }
     next();
+  };
+}
+
+/**
+ * SPRINT-2-CLIENT-PROVISIONING: exige explícitamente rolInterno==='super_admin'
+ * (agx.staff_crh.rol_interno='administrador_plataforma', vía
+ * resolveInternalRole -- AGX-ADMIN-001, mismo mapeo ya usado por
+ * GET /session). Debe montarse DESPUÉS de requireIdentity. Nunca confía en
+ * ningún campo de rol enviado por el cliente -- resuelve el rol interno
+ * consultando agx.staff_crh por cuenta_id, cada vez. Una cuenta cliente
+ * autenticada normal (sin fila en staff_crh) recibe 403, igual que un rol
+ * interno no-superadmin (soporte/operaciones).
+ */
+export function createRequireGanaderiaSuperAdmin() {
+  return async function requireGanaderiaSuperAdmin(req, res, next) {
+    try {
+      const cuentaId = req.ganaderiaAuth?.cuentaId;
+      if (!cuentaId) {
+        res.status(401).json({ error: 'SESSION_REQUIRED' });
+        return;
+      }
+
+      const rolInterno = await resolveInternalRole(cuentaId);
+      if (rolInterno !== 'super_admin') {
+        res.status(403).json({ error: 'SUPERADMIN_REQUIRED' });
+        return;
+      }
+
+      next();
+    } catch (error) {
+      next(error);
+    }
   };
 }
 

@@ -45,6 +45,7 @@ import { GanaderiaAuthProvider } from './modules/ganaderia/auth/GanaderiaAuthCon
 import RequireGanaderiaAuth from './modules/ganaderia/auth/RequireGanaderiaAuth.jsx';
 import RequireGanaderiaSuperAdmin from './modules/ganaderia/auth/RequireGanaderiaSuperAdmin.jsx';
 import GanaderiaAdminShell from './modules/ganaderia/admin/GanaderiaAdminShell.jsx';
+import GanaderiaAdminCrearCuenta from './modules/ganaderia/admin/GanaderiaAdminCrearCuenta.jsx';
 import CatastroXApp from './modules/catastrox/CatastroXApp.jsx';
 import AgroGenomaXHome from './components/home/AgroGenomaXHome.jsx';
 
@@ -313,6 +314,18 @@ function App() {
             <GanaderiaAuthProvider>
               <RequireGanaderiaSuperAdmin>
                 <GanaderiaAdminShell />
+              </RequireGanaderiaSuperAdmin>
+            </GanaderiaAuthProvider>
+          }
+        />
+        {/* SPRINT-2-CLIENT-PROVISIONING: mismo guard que /ganaderia/admin --
+            provisionar clientes es una acción exclusivamente super_admin. */}
+        <Route
+          path="/ganaderia/admin/crear-cuenta"
+          element={
+            <GanaderiaAuthProvider>
+              <RequireGanaderiaSuperAdmin>
+                <GanaderiaAdminCrearCuenta />
               </RequireGanaderiaSuperAdmin>
             </GanaderiaAuthProvider>
           }

@@ -17,6 +17,7 @@ import { findAutonomousDeliveryJobIds, processDeliveryJob } from './services/cat
 import createAnimalesRouter from './routes/animales.js';
 import catastroxRouter from './routes/catastrox.js';
 import catastroxPaymentsRouter from './routes/catastroxPayments.js';
+import createGanaderiaAdminRouter from './routes/ganaderiaAdmin.js';
 import createGanaderiaAuthRouter from './routes/ganaderiaAuth.js';
 import createHealthRouter from './routes/health.js';
 import createPesajesRouter from './routes/pesajes.js';
@@ -119,6 +120,21 @@ app.use(
 );
 app.use('/api/catastrox', catastroxRouter);
 app.use('/api/catastrox/payments', catastroxPaymentsRouter);
+
+// SPRINT-2-CLIENT-PROVISIONING: router administrativo AISLADO de
+// /api/ganaderia/auth -- exige identidad + rol interno super_admin (nunca
+// solo sesión). Ver server/routes/ganaderiaAdmin.js para el detalle de
+// la precondición de grants de producción todavía pendiente (informe
+// Sprint 2, sección N) -- este mount es código, no implica que el
+// endpoint pueda escribir hoy en Postgres-AGX producción.
+app.use(
+  '/api/ganaderia/admin',
+  createGanaderiaAdminRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
 
 // FIX/GANADERIA-SPRINT-0-BUSINESS-AUTH: hallazgo crítico de la auditoría
 // "Organizaciones y QR" -- estas rutas de negocio legacy estaban montadas

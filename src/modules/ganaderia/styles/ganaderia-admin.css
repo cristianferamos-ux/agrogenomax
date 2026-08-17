@@ -104,6 +104,18 @@
   line-height: 1.4;
 }
 
+/* SPRINT-2-CLIENT-PROVISIONING: variante <button> de .gan-admin-card
+   ("Crear cuenta") -- mismo look, pero interactiva/navegable. */
+.gan-admin-card-active {
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gan-admin-card-active:hover {
+  border-color: rgba(57, 255, 20, 0.45);
+}
+
 .gan-admin-card-badge {
   align-self: flex-start;
   margin-top: 0.4rem;
