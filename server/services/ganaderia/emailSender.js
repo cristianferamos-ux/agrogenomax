@@ -178,6 +178,46 @@ function buildRecoveryEmailContent({ recoveryUrl }) {
   return { subject, html, text };
 }
 
+// SPRINT-2-CLIENT-PROVISIONING: correo de activación de una cuenta
+// provisionada por el superadmin -- mismo enlace/endpoint que recuperación
+// (POST /password/set, proposito='establecer_inicial'), copia distinta
+// (bienvenida, nunca "recuperar"). Nunca incluye contraseña, token plano
+// fuera de la URL, IDs internos ni información técnica (§6).
+function buildActivationEmailContent({ activationUrl, nombre }) {
+  const safeUrl = escapeHtml(activationUrl);
+  const safeNombre = escapeHtml(nombre);
+  const subject = 'Activa tu cuenta de AgroGenomaX';
+
+  const html = `<!doctype html>
+<html lang="es">
+  <body style="font-family: Arial, sans-serif; color: #1a1a1a; line-height: 1.5;">
+    <p><strong>AgroGenomaX</strong> — Ganadería Inteligente</p>
+    <p>Hola ${safeNombre},</p>
+    <p>Se creó una cuenta para ti en AgroGenomaX. Para activarla, define tu propia contraseña.</p>
+    <p>
+      <a href="${safeUrl}" style="display: inline-block; background: #39ff14; color: #04140b; font-weight: bold; padding: 12px 20px; border-radius: 999px; text-decoration: none;">
+        Activar mi cuenta
+      </a>
+    </p>
+    <p>Este enlace vence en 60 minutos.</p>
+  </body>
+</html>`;
+
+  const text = [
+    'AgroGenomaX — Ganadería Inteligente',
+    '',
+    `Hola ${nombre},`,
+    '',
+    'Se creó una cuenta para ti en AgroGenomaX. Para activarla, define tu propia contraseña.',
+    '',
+    `Activar mi cuenta: ${activationUrl}`,
+    '',
+    'Este enlace vence en 60 minutos.',
+  ].join('\n');
+
+  return { subject, html, text };
+}
+
 // --- Transporte (duplicado deliberadamente de la lógica de timeout/retry
 // de CatastroX -- mismo comportamiento, sin importar su código) ---
 
@@ -226,7 +266,7 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function sendViaResend({ to, recoveryUrl }) {
+async function sendViaResend({ to, subject, html, text }) {
   const apiKey = process.env.RESEND_API_KEY || '';
   if (!isNonEmpty(apiKey) || EMAIL_PLACEHOLDER_PATTERN.test(apiKey)) {
     logEmailFailure('envío fallido', { provider: 'resend', errorCode: 'EMAIL_API_KEY_MISSING' });
@@ -249,7 +289,6 @@ async function sendViaResend({ to, recoveryUrl }) {
   }
 
   const timeoutMs = resolveTimeoutMs();
-  const { subject, html, text } = buildRecoveryEmailContent({ recoveryUrl });
 
   const headers = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
   const body = JSON.stringify({ from: ganaderiaFromHeader, to: [to], subject, html, text });
@@ -304,15 +343,13 @@ async function sendViaResend({ to, recoveryUrl }) {
 const REAL_PROVIDER_ENABLED_ENVIRONMENTS = new Set(['staging']);
 
 /**
- * Único punto de integración con un proveedor de correo transaccional
- * real para Ganadería. `server/routes/ganaderiaAuth.js` es el único
- * llamador. Nunca lanza -- el fallo se comunica solo vía `delivered`/
- * `errorCode`, nunca al solicitante del recovery (§4/§9).
- *
- * @param {{ to: string, recoveryUrl: string }} input
- * @returns {Promise<{ delivered: boolean, provider: string, errorCode: string|null }>}
+ * Punto único de despacho (gate de ambiente + proveedor) compartido por
+ * sendRecoveryEmail y sendActivationEmail (SPRINT-2-CLIENT-PROVISIONING)
+ * -- mismo comportamiento fail-closed para ambos: development/test NUNCA
+ * llaman a un proveedor real, production sigue sin habilitarlo, solo
+ * staging despacha de verdad. Nunca lanza.
  */
-export async function sendRecoveryEmail({ to, recoveryUrl }) {
+async function dispatchGanaderiaEmail({ to, subject, html, text }) {
   const appEnv = String(process.env.APP_ENV || '').trim().toLowerCase();
 
   if (appEnv === 'development' || appEnv === 'test') {
@@ -333,5 +370,34 @@ export async function sendRecoveryEmail({ to, recoveryUrl }) {
     return { delivered: false, provider: 'stub', errorCode: 'EMAIL_PROVIDER_UNSUPPORTED' };
   }
 
-  return sendViaResend({ to, recoveryUrl });
+  return sendViaResend({ to, subject, html, text });
+}
+
+/**
+ * Único punto de integración con un proveedor de correo transaccional
+ * real para Ganadería. `server/routes/ganaderiaAuth.js` es el único
+ * llamador. Nunca lanza -- el fallo se comunica solo vía `delivered`/
+ * `errorCode`, nunca al solicitante del recovery (§4/§9).
+ *
+ * @param {{ to: string, recoveryUrl: string }} input
+ * @returns {Promise<{ delivered: boolean, provider: string, errorCode: string|null }>}
+ */
+export async function sendRecoveryEmail({ to, recoveryUrl }) {
+  const { subject, html, text } = buildRecoveryEmailContent({ recoveryUrl });
+  return dispatchGanaderiaEmail({ to, subject, html, text });
+}
+
+/**
+ * SPRINT-2-CLIENT-PROVISIONING §6: correo de activación de una cuenta
+ * provisionada por el superadmin. Único llamador: server/routes/
+ * ganaderiaAdmin.js (POST /clientes), SIEMPRE después del COMMIT de la
+ * transacción -- nunca dentro de ella (mismo criterio que sendRecoveryEmail
+ * en POST /recovery/request). Nunca lanza.
+ *
+ * @param {{ to: string, activationUrl: string, nombre: string }} input
+ * @returns {Promise<{ delivered: boolean, provider: string, errorCode: string|null }>}
+ */
+export async function sendActivationEmail({ to, activationUrl, nombre }) {
+  const { subject, html, text } = buildActivationEmailContent({ activationUrl, nombre });
+  return dispatchGanaderiaEmail({ to, subject, html, text });
 }

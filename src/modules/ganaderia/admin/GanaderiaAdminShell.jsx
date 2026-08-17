@@ -1,10 +1,9 @@
 // AGX-ADMIN-001 §8/§9: shell administrativo mínimo -- layout PROPIO, nunca
 // el sidebar operativo de cliente (Predios/Potreros/Animales/Pesajes/...).
-// Mismo branding AgroGenomaX. Los módulos listados son placeholders de
-// navegación (§8: "shell + cards/navigation placeholders funcionales") --
-// ninguno implementa lógica todavía (clientes/organizaciones, crear
-// cuenta, activaciones pendientes, cuentas existentes quedan fuera de
-// alcance de este lote).
+// Mismo branding AgroGenomaX. SPRINT-2-CLIENT-PROVISIONING: "Crear cuenta"
+// deja de ser placeholder -- navega a /ganaderia/admin/crear-cuenta. Los
+// otros 3 módulos (clientes/organizaciones, activaciones pendientes,
+// cuentas existentes) siguen fuera de alcance, sin lógica todavía.
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Building2, LogOut, ShieldCheck, UserPlus, Users } from 'lucide-react';
@@ -21,6 +20,7 @@ const adminModules = [
     label: 'Crear cuenta',
     text: 'Provisionar una nueva cuenta cliente.',
     icon: UserPlus,
+    to: '/ganaderia/admin/crear-cuenta',
   },
   {
     label: 'Activaciones pendientes',
@@ -84,14 +84,27 @@ export default function GanaderiaAdminShell() {
 
       <main className="gan-admin-main">
         <div className="gan-admin-grid">
-          {adminModules.map(({ label, text, icon: Icon }) => (
-            <article key={label} className="gan-admin-card" aria-disabled="true">
-              <Icon size={22} />
-              <strong>{label}</strong>
-              <p>{text}</p>
-              <span className="gan-admin-card-badge">Próximamente</span>
-            </article>
-          ))}
+          {adminModules.map(({ label, text, icon: Icon, to }) =>
+            to ? (
+              <button
+                key={label}
+                type="button"
+                className="gan-admin-card gan-admin-card-active"
+                onClick={() => navigate(to)}
+              >
+                <Icon size={22} />
+                <strong>{label}</strong>
+                <p>{text}</p>
+              </button>
+            ) : (
+              <article key={label} className="gan-admin-card" aria-disabled="true">
+                <Icon size={22} />
+                <strong>{label}</strong>
+                <p>{text}</p>
+                <span className="gan-admin-card-badge">Próximamente</span>
+              </article>
+            ),
+          )}
         </div>
       </main>
     </div>
