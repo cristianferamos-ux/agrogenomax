@@ -135,3 +135,12 @@ export function useGanaderiaAuth() {
   }
   return ctx;
 }
+
+// UX-SESSION-FIX-001: variante que NUNCA lanza -- GanaderiaSidebar.jsx (vía
+// GanaderiaShell.jsx) se monta también en /qr/:codigo, la única ruta de
+// GanaderiaApp fuera de <GanaderiaAuthProvider> (público, sin sesión que
+// exigir -- ver App.jsx). `useGanaderiaAuth()` lanzaría ahí; esta variante
+// devuelve null y el consumidor decide no renderizar identidad/logout.
+export function useGanaderiaAuthOptional() {
+  return useContext(GanaderiaAuthContext);
+}

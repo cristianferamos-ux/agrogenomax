@@ -60,6 +60,73 @@
   box-shadow: 0 0 22px rgba(57, 255, 20, 0.45);
 }
 
+/* UX-SESSION-FIX-001: identidad del cliente + logout -- fijado al final del
+   sidebar (columna flex) via margin-top:auto, siempre visible en escritorio
+   sin scroll adicional. */
+.gan-dash-sidebar-account {
+  margin-top: auto;
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.9rem 0.4rem 0.2rem;
+  border-top: 1px solid rgba(57, 255, 20, 0.18);
+}
+
+.gan-dash-sidebar-account-identity {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.gan-dash-sidebar-account-identity strong {
+  color: #e7f5ec;
+  font-size: 0.85rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.gan-dash-sidebar-account-role {
+  color: #7cff00;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.gan-dash-sidebar-account-org {
+  color: #9fb3a8;
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
+}
+
+.gan-dash-sidebar-logout {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border: 1px solid rgba(231, 245, 236, 0.18);
+  background: #06110c;
+  color: #e7f5ec;
+  border-radius: 999px;
+  padding: 0.55rem 1rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.gan-dash-sidebar-logout:hover {
+  border-color: rgba(57, 255, 20, 0.55);
+}
+
+.gan-dash-sidebar-logout:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.gan-dash-sidebar-account-error {
+  margin: 0;
+  color: #ff8a8a;
+  font-size: 0.76rem;
+}
+
 .gan-dash-main {
   display: flex;
   flex-direction: column;
