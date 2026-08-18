@@ -71,7 +71,13 @@ import {
   resolvePredioDataForDelivery,
 } from '../routes/catastrox.js';
 
-const CATASTROX_DATASET_VERSION = process.env.CATASTROX_DATASET_VERSION || '2026-01';
+// SPRINT-3C2.5 §5 (decisión aprobada): CATASTROX_DATASET_VERSION es la
+// versión del PIPELINE/dataset propio de CatastroX (usada por
+// resolveCanonicalPredioId en catastrox.js para IDs de respaldo) -- NUNCA
+// la versión real de la fuente oficial (IGAC). Este módulo YA NO la usa
+// para `versionFuente` (ver buildNormalizedPredio) -- no se borra de
+// catastrox.js porque ese archivo sí la necesita para sus propios IDs
+// internos; simplemente no se importa/duplica aquí, donde no aplica.
 
 /**
  * Centroide aproximado de una geometry GeoJSON (Polygon/MultiPolygon) --
@@ -113,8 +119,51 @@ function normalizeGeometry(geometry) {
   return { type: geo.type, coordinates: geo.coordinates };
 }
 
+// SPRINT-3C2.5 §2/§3: getVeredaDisplay() de catastrox.js devuelve un
+// objeto de PRESENTACIÓN (label/value/isCadastralCode/...), nunca un
+// string -- diseñado para la UI de CatastroX, no para persistirse. NO se
+// toca getVeredaDisplay() en catastrox.js -- este helper es exclusivo del
+// DTO de Ganadería.
+//
+// getVeredaDisplay() tiene 3 ramas, no 2 -- las dos primeras comparten
+// `isCadastralCode: false`, así que ese flag por sí solo NO basta para
+// distinguir "nombre humano real" de "sin dato" (bug real encontrado en
+// la primera versión de este helper, atrapado por
+// catastroxPredioLookup.test.js):
+//   1. Sin vereda_nombre en absoluto ->
+//        { value: 'Información no disponible', isCadastralCode: false }
+//   2. vereda_nombre es un código técnico (TECHNICAL_VEREDA_PATTERN) ->
+//        { value: 'Información no disponible', isCadastralCode: true, secondaryValue, note }
+//   3. vereda_nombre es un nombre humano real ->
+//        { value: <nombre real>, isCadastralCode: false }
+// Regla aprobada: solo la rama 3 produce un dato real que se conserva.
+// Las ramas 1 y 2 -> null explícito (nunca el objeto crudo, que
+// terminaría serializado como JSON.stringify por el driver `pg`; nunca
+// tampoco el texto placeholder "Información no disponible", que es copy
+// de UI, no un dato real).
+const VEREDA_PLACEHOLDER_VALUE = 'Información no disponible';
+
+function extractVeredaValue(veredaDisplay) {
+  if (!veredaDisplay) return null;
+  if (veredaDisplay.isCadastralCode) return null;
+  if (veredaDisplay.value === VEREDA_PLACEHOLDER_VALUE) return null;
+  return veredaDisplay.value ?? null;
+}
+
+// SPRINT-3C2.6 §7: cuando getVeredaDisplay() cae en la rama de código
+// técnico, conserva el código crudo en `secondaryValue` -- se preserva
+// aquí SOLO para trazabilidad interna (atributos_json del snapshot, ver
+// prediosRepository.js), nunca como el campo descriptivo `vereda`.
+function extractVeredaCodigoTecnico(veredaDisplay) {
+  if (!veredaDisplay || !veredaDisplay.isCadastralCode) return null;
+  return veredaDisplay.secondaryValue ?? null;
+}
+
 /**
- * Contrato normalizado compartido por ambas búsquedas (§8 del pedido).
+ * Contrato normalizado compartido por ambas búsquedas (§8 del pedido,
+ * SPRINT-3C2.5 §8: areaCatastralHa/areaCatastralM2, nunca areaHa/areaM2
+ * -- esta API todavía no tiene consumidor productivo, es el momento de
+ * corregir el nombre antes de que alguien dependa de él).
  * `delivery` es el resultado de resolvePredioDataForDelivery (ya
  * hidratado con geometry vía ST_AsGeoJSON, ya validado no-null).
  */
@@ -128,14 +177,32 @@ function buildNormalizedPredio(delivery) {
     nombrePredio: delivery.nombrePredio,
     departamento: delivery.departamento,
     municipio: delivery.municipio,
-    vereda: delivery.veredaDisplay,
-    sector: delivery.sectorCodigo,
-    areaM2: delivery.areaM2,
-    areaHa: delivery.areaHa,
+    vereda: extractVeredaValue(delivery.veredaDisplay),
+    // SPRINT-3C2.6 §2 (corrige la decisión anterior de 3C2.5 §4): a
+    // diferencia de codigoPredial/codigoAnterior, `sector` NO es un
+    // identificador -- Ganadería lo presenta como campo descriptivo, y
+    // toda la base de datos (grep exhaustivo sobre catastrox.js) solo
+    // expone `sector_codigo`, nunca un `sector_nombre` humano. Sin una
+    // fuente real de nombre, el campo descriptivo `sector` es SIEMPRE
+    // null -- nunca el código técnico disfrazado de nombre.
+    sector: null,
+    // Código técnico crudo, preservado SOLO para trazabilidad interna
+    // (atributos_json del snapshot) -- nunca expuesto como `sector`, y
+    // nunca reenviado al cliente (ver serializePredioSearchResult en
+    // ganaderiaPredios.js, que excluye explícitamente este campo de la
+    // respuesta pública de búsqueda).
+    sectorCodigoTecnico: delivery.sectorCodigo,
+    veredaCodigoTecnico: extractVeredaCodigoTecnico(delivery.veredaDisplay),
+    areaCatastralM2: delivery.areaM2,
+    areaCatastralHa: delivery.areaHa,
     centroide: computeApproximateCentroid(geometry),
     geometry,
     fuente: delivery.fuente,
-    versionFuente: CATASTROX_DATASET_VERSION,
+    // §5 (decisión aprobada): CATASTROX_DATASET_VERSION NO es la versión
+    // real de la fuente (IGAC) -- nunca inferir una fecha del nombre de
+    // `fuente` tampoco. Sin un campo real de versión por registro, el
+    // valor honesto es null, no un dato inventado o no relacionado.
+    versionFuente: null,
     fechaConsulta: new Date().toISOString(),
   };
 }
