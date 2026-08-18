@@ -62,6 +62,60 @@ psql "postgres://postgres:postgres@localhost:55436/postgres" \
 export AGX_BUSINESS_DATABASE_URL="postgres://agx_app:${AGX_APP_PASSWORD}@localhost:55436/postgres"
 ```
 
+## Pruebas de integración de "Mis Predios" (SPRINT-3C1/3C1.1/3C1.2)
+
+`server/services/__tests__/prediosRepositoryIntegration.test.js` prueba
+contra un Postgres/PostGIS REAL (RLS+FORCE, aislamiento entre
+organizaciones, rollback real de transacción, retry/concurrencia de
+candidatos).
+
+**⚠️ `AGX_BUSINESS_DATABASE_URL_TEST` NUNCA debe apuntar a Railway/producción.**
+Es una variable exclusiva de esta suite, deliberadamente distinta de
+`AGX_BUSINESS_DATABASE_URL` (la variable de producción/runtime real que
+lee `server/db/agxBusinessPool.js`) para que un test local o de CI no
+pueda conectarse a producción por herencia accidental de entorno -- el
+archivo de test borra explícitamente cualquier `AGX_BUSINESS_DATABASE_URL`
+ambiental antes de decidir si corre, y solo la fija internamente (en
+memoria de su propio proceso) derivada 1:1 de `_TEST`.
+
+Pasos completos, de cero:
+
+```bash
+# 1. Levantar el Postgres/PostGIS desechable (mismo entorno de arriba).
+docker run --name agx-business-integration-pg -e POSTGRES_PASSWORD=postgres \
+  -p 55436:5432 -d postgis/postgis:16-3.4
+docker exec agx-business-integration-pg pg_isready -U postgres
+
+# 2. Aplicar las migraciones (mismo orden de siempre).
+export AGX_APP_PASSWORD="$(openssl rand -base64 24)"
+psql "postgres://postgres:postgres@localhost:55436/postgres" \
+  -v ON_ERROR_STOP=1 -v agx_app_password="$AGX_APP_PASSWORD" \
+  -f db/agx-business/migrations/0000_bootstrap_roles.sql
+psql "postgres://postgres:postgres@localhost:55436/postgres" \
+  -v ON_ERROR_STOP=1 -f db/agx-business/migrations/0001_business_foundation.sql
+
+# 3. Configurar las variables EXCLUSIVAS de este test -- nunca
+# AGX_BUSINESS_DATABASE_URL (esa es la de producción/runtime).
+export AGX_BUSINESS_DATABASE_URL_TEST="postgres://agx_app:${AGX_APP_PASSWORD}@localhost:55436/postgres"
+export AGX_BUSINESS_INTEGRATION_ADMIN_DATABASE_URL="postgres://postgres:postgres@localhost:55436/postgres"
+
+# 4. Ejecutar el script dedicado.
+npm run test:ganaderia-predios-integration
+# -> 9/9 PASS
+
+# 5. Destruir la base desechable.
+docker rm -f agx-business-integration-pg
+```
+
+`npm run test:ganaderia-predios-integration` **falla explícitamente**
+(no se omite en silencio) si `AGX_BUSINESS_DATABASE_URL_TEST` no está
+configurada -- mensaje: `AGX_BUSINESS_DATABASE_URL_TEST is required for
+real integration tests.` (ver `.tools/require-ganaderia-predios-integration-env.mjs`).
+Este mismo archivo de test, cuando corre como parte de
+`npm run test:node` (la suite general), sigue auto-omitiéndose sin fallar
+el pipeline si esas variables no están configuradas -- el gate estricto
+es exclusivo del script dedicado, no del archivo de test en sí.
+
 ## Teardown
 
 ```bash

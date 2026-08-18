@@ -27,19 +27,27 @@ function jsonRateLimitHandler(publicCode, publicMessage) {
 // bloque /64 antes de usarlo como clave -- sin esto, un cliente IPv6 podría
 // eludir el límite variando la porción de interfaz de su propia dirección
 // (2^64 direcciones equivalentes a efectos de "un mismo cliente").
-function buildLimiter({ windowMs, max, publicCode, publicMessage }) {
+export function ipRateLimitKeyGenerator(req) {
+  return req.ip ? ipKeyGenerator(req.ip) : 'unknown';
+}
+
+// SPRINT-3C1.1 §4: keyGenerator por defecto, reutilizable, para limiters
+// que sí necesitan clave `keyGenerator` explícita en su factory (todos
+// los de más abajo, salvo prediosSearchLimiter).
+function buildLimiter({ windowMs, max, publicCode, publicMessage, keyGenerator = ipRateLimitKeyGenerator }) {
   return rateLimit({
     windowMs,
     max,
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: (req) => (req.ip ? ipKeyGenerator(req.ip) : 'unknown'),
+    keyGenerator,
     handler: jsonRateLimitHandler(publicCode, publicMessage),
   });
 }
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
 const ONE_MINUTE_MS = 60 * 1000;
+const TEN_MINUTES_MS = 10 * 60 * 1000;
 const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
 
 // Creación de orden: la operación con mayor costo (abre un checkout real de
@@ -141,4 +149,41 @@ export const temporaryPdfLimiter = buildLimiter({
   max: 10,
   publicCode: 'RATE_LIMITED_TEMPORARY_PDF',
   publicMessage: 'Demasiadas generaciones de PDF. Intenta nuevamente en unos minutos.',
+});
+
+// SPRINT-3C1.1 §4: clave por CUENTA autenticada (req.ganaderiaAuth.cuentaId
+// -- resuelto server-side por createRequireGanaderiaSession, NUNCA del
+// body/query/header del cliente), no por IP. Esto exige que este limiter
+// se monte DESPUÉS del middleware de sesión en el router (ver
+// server/routes/ganaderiaPredios.js) -- si req.ganaderiaAuth no existe
+// todavía en ese punto, es un error de montaje del router, no un caso
+// legítimo a tolerar en producción. El fallback a IP existe únicamente
+// para no romper con un 500 si algún día una ruta pública reutilizara
+// este limiter sin sesión resuelta; en la práctica, con el middleware de
+// sesión montado antes, cuentaId siempre está presente aquí.
+export function prediosSearchRateLimitKeyGenerator(req) {
+  const cuentaId = req.ganaderiaAuth?.cuentaId;
+  if (typeof cuentaId === 'string' && cuentaId.trim() !== '') {
+    return `cuenta:${cuentaId}`;
+  }
+  return ipRateLimitKeyGenerator(req);
+}
+
+// SPRINT-3C1-MIS-PREDIOS-API §21 (SPRINT-3C1.1 §4: reescrito de IP a
+// cuenta): búsquedas CatastroX desde "Mis Predios" (coordenadas/código).
+// 30 búsquedas / 10 minutos por CUENTA -- mismo orden de magnitud que
+// enforceLookupByCodeRateLimit de catastrox.js (30/10min, límite ya
+// validado en producción para el mismo tipo de operación: consulta contra
+// la base catastral), lo suficientemente amplio para el uso normal de un
+// productor cargando varios predios en una sesión, y suficientemente
+// estricto para no habilitar scraping masivo del dataset catastral vía
+// esta ruta autenticada. Por cuenta (no por IP) para que varias cuentas
+// detrás de la misma IP/NAT/oficina no compitan por el mismo cupo, y para
+// que una cuenta que cambia de red conserve su propio contador.
+export const prediosSearchLimiter = buildLimiter({
+  windowMs: TEN_MINUTES_MS,
+  max: 30,
+  publicCode: 'RATE_LIMITED_PREDIOS_SEARCH',
+  publicMessage: 'Demasiadas búsquedas de predios. Intenta nuevamente en unos minutos.',
+  keyGenerator: prediosSearchRateLimitKeyGenerator,
 });

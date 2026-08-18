@@ -19,6 +19,7 @@ import catastroxRouter from './routes/catastrox.js';
 import catastroxPaymentsRouter from './routes/catastroxPayments.js';
 import createGanaderiaAdminRouter from './routes/ganaderiaAdmin.js';
 import createGanaderiaAuthRouter from './routes/ganaderiaAuth.js';
+import createGanaderiaPrediosRouter from './routes/ganaderiaPredios.js';
 import createHealthRouter from './routes/health.js';
 import createPesajesRouter from './routes/pesajes.js';
 import createPotrerosRouter from './routes/potreros.js';
@@ -130,6 +131,22 @@ app.use('/api/catastrox/payments', catastroxPaymentsRouter);
 app.use(
   '/api/ganaderia/admin',
   createGanaderiaAdminRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
+
+// SPRINT-3C1-MIS-PREDIOS-API: primera vertical de negocio sobre
+// Postgres-AGX-Business (agx.predios/agx.predio_snapshots_catastrales,
+// RLS+FORCE, agx_app). Deliberadamente separado de /api/predios legacy
+// (Postgres legacy, sin aislamiento por organización, ver comentario
+// debajo) -- exige sesión CON organización activa resuelta server-side
+// (createRequireGanaderiaSession, no solo identidad) + CSRF en toda
+// mutación. Nunca usa server/db.js/DATABASE_URL.
+app.use(
+  '/api/ganaderia/predios',
+  createGanaderiaPrediosRouter({
     appEnv: appConfig.appEnv,
     csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
     allowedOrigins: appConfig.cors.allowedOrigins,
