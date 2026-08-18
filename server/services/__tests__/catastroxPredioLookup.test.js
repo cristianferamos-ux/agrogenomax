@@ -7,7 +7,6 @@
 // resolvePredioDataForDelivery) -- solo la orquestación/normalización
 // nueva de este módulo.
 process.env.APP_ENV = 'test';
-process.env.CATASTROX_DATASET_VERSION = '2026-01';
 process.env.CATASTROX_DATABASE_URL = 'postgres://test:test@192.0.2.1:5432/never_connects';
 
 import test from 'node:test';
@@ -142,15 +141,63 @@ test('lookupPredioPorCoordenadas: candidato único -> resolved con contrato norm
   assert.equal(result.predio.nombrePredio, 'Finca La Esperanza');
   assert.equal(result.predio.departamento, 'Caquetá');
   assert.equal(result.predio.municipio, 'Florencia');
-  assert.equal(result.predio.areaHa, 5);
-  assert.equal(result.predio.areaM2, 50000);
+  // SPRINT-3C2.5 §3: vereda_nombre='El Recreo' no coincide con
+  // TECHNICAL_VEREDA_PATTERN -- getVeredaDisplay() real (no mockeado)
+  // devuelve isCadastralCode:false, y extractVeredaValue() debe extraer
+  // el string, nunca el objeto de presentación completo.
+  assert.equal(result.predio.vereda, 'El Recreo');
+  assert.equal(typeof result.predio.vereda, 'string');
+  // SPRINT-3C2.6 §2: sector descriptivo SIEMPRE null -- no existe fuente
+  // de nombre humano de sector en toda la base (solo sector_codigo). El
+  // código técnico crudo se preserva bajo un nombre distinto, exclusivo
+  // para trazabilidad interna (atributos_json), nunca como `sector`.
+  assert.equal(result.predio.sector, null);
+  assert.equal(result.predio.sectorCodigoTecnico, '01');
+  // vereda_nombre='El Recreo' no es un código técnico -> sin código que preservar.
+  assert.equal(result.predio.veredaCodigoTecnico, null);
+  assert.equal(result.predio.areaCatastralHa, 5);
+  assert.equal(result.predio.areaCatastralM2, 50000);
   assert.deepEqual(result.predio.geometry, SQUARE_MULTIPOLYGON);
   assert.ok(result.predio.centroide);
-  assert.equal(result.predio.versionFuente, '2026-01');
+  // SPRINT-3C2.5 §5 (decisión aprobada): versionFuente siempre null --
+  // CATASTROX_DATASET_VERSION nunca representa la versión real de IGAC.
+  assert.equal(result.predio.versionFuente, null);
+  assert.equal(result.predio.fuente, 'catastrox_clean');
   assert.ok(result.predio.fechaConsulta);
-  // §3/§8: nunca debe filtrar campos internos.
+  // §3/§8: nunca debe filtrar campos internos, ni los nombres legacy.
   assert.equal(result.predio.organizacion_id, undefined);
   assert.equal(result.predio.wkt, undefined);
+  assert.equal(result.predio.areaHa, undefined);
+  assert.equal(result.predio.areaM2, undefined);
+});
+
+// SPRINT-3C2.5 §15: normalización de vereda -- los 3 casos pedidos.
+test('lookupPredioPorCoordenadas: vereda con nombre humano real -> string (caso real "Florida Uno")', async () => {
+  const queryImpl = buildQueryImpl({ deliveryRow: deliveryRow({ vereda_nombre: 'Florida Uno' }) });
+  const result = await lookupPredioPorCoordenadas(1.35, -75.45, queryImpl);
+  assert.equal(result.outcome, 'resolved');
+  assert.equal(result.predio.vereda, 'Florida Uno');
+});
+
+test('lookupPredioPorCoordenadas: vereda con código técnico catastral -> null (nunca el placeholder ni el objeto), código crudo preservado aparte', async () => {
+  // TECHNICAL_VEREDA_PATTERN = /^\d+[A-Z]{2}$/i (catastrox.js) -- dígitos
+  // seguidos de 2 letras.
+  const queryImpl = buildQueryImpl({ deliveryRow: deliveryRow({ vereda_nombre: '123AB' }) });
+  const result = await lookupPredioPorCoordenadas(1.35, -75.45, queryImpl);
+  assert.equal(result.outcome, 'resolved');
+  assert.equal(result.predio.vereda, null);
+  // SPRINT-3C2.6 §4/§7: el código técnico crudo SÍ se preserva, pero bajo
+  // un campo distinto exclusivo para trazabilidad interna -- nunca como
+  // `vereda`.
+  assert.equal(result.predio.veredaCodigoTecnico, '123AB');
+});
+
+test('lookupPredioPorCoordenadas: vereda inexistente -> null (sin código técnico que preservar)', async () => {
+  const queryImpl = buildQueryImpl({ deliveryRow: deliveryRow({ vereda_nombre: null }) });
+  const result = await lookupPredioPorCoordenadas(1.35, -75.45, queryImpl);
+  assert.equal(result.outcome, 'resolved');
+  assert.equal(result.predio.vereda, null);
+  assert.equal(result.predio.veredaCodigoTecnico, null);
 });
 
 test('lookupPredioPorCoordenadas: sin candidatos -> not_found', async () => {

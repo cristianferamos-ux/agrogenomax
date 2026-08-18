@@ -78,16 +78,44 @@ export function validateCoordinatesBody(body) {
   return { lat, lng };
 }
 
+const MAX_OBSERVACIONES_LENGTH = 2000;
+
+function validateAreaDeclaradaHa(rawValue) {
+  if (rawValue === undefined || rawValue === null || rawValue === '') return null;
+  const parsed = Number(rawValue);
+  if (!isFiniteNumber(parsed) || parsed <= 0) {
+    throw Object.assign(new Error('areaDeclaradaHa debe ser un número positivo.'), {
+      status: 400,
+      code: 'INVALID_AREA_DECLARADA_HA',
+    });
+  }
+  return parsed;
+}
+
+function validateObservaciones(rawValue) {
+  if (rawValue === undefined || rawValue === null || rawValue === '') return null;
+  if (typeof rawValue !== 'string' || rawValue.length > MAX_OBSERVACIONES_LENGTH) {
+    throw Object.assign(new Error(`observaciones debe ser texto (máx ${MAX_OBSERVACIONES_LENGTH} caracteres).`), {
+      status: 400,
+      code: 'INVALID_OBSERVACIONES',
+    });
+  }
+  return rawValue.trim() || null;
+}
+
 // §16: manual mode -- allowlist estricta, rechaza explícitamente
 // cualquier campo prohibido (geometry, codigo_predial, organizacion_id,
-// etc.) en vez de ignorarlo silenciosamente.
+// etc.) en vez de ignorarlo silenciosamente. SPRINT-3C2.5 §12:
+// areaDeclaradaHa (no areaTotalHa -- la API nunca expone ese nombre
+// legacy interno) + observaciones.
 const MANUAL_ALLOWED_KEYS = new Set([
   'mode',
   'nombrePredio',
   'departamento',
   'municipio',
   'vereda',
-  'areaTotalHa',
+  'areaDeclaradaHa',
+  'observaciones',
   'latitud',
   'longitud',
 ]);
@@ -121,18 +149,8 @@ export function validateManualPredioBody(body) {
   }
 
   const vereda = body.vereda === undefined || body.vereda === null ? null : String(body.vereda).trim().slice(0, MAX_TEXT_FIELD_LENGTH) || null;
-
-  let areaTotalHa = null;
-  if (body.areaTotalHa !== undefined && body.areaTotalHa !== null && body.areaTotalHa !== '') {
-    const parsed = Number(body.areaTotalHa);
-    if (!isFiniteNumber(parsed) || parsed <= 0) {
-      throw Object.assign(new Error('areaTotalHa debe ser un número positivo.'), {
-        status: 400,
-        code: 'INVALID_AREA_TOTAL_HA',
-      });
-    }
-    areaTotalHa = parsed;
-  }
+  const areaDeclaradaHa = validateAreaDeclaradaHa(body.areaDeclaradaHa);
+  const observaciones = validateObservaciones(body.observaciones);
 
   let latitud = null;
   let longitud = null;
@@ -154,16 +172,20 @@ export function validateManualPredioBody(body) {
     departamento: body.departamento.trim(),
     municipio: body.municipio.trim(),
     vereda,
-    areaTotalHa,
+    areaDeclaradaHa,
+    observaciones,
     latitud,
     longitud,
   };
 }
 
 // §12: modo automático -- allowlist igualmente estricta. candidateId es
-// la ÚNICA fuente de geometry/codigoPredial/areaCatastral/fuente; el
-// cuerpo nunca puede aportarlos (§12 explícito).
-const CATASTROX_ALLOWED_KEYS = new Set(['mode', 'candidateId', 'nombrePersonalizado']);
+// la ÚNICA fuente de geometry/codigoPredial/areaCatastral*/fuente/
+// versionFuente/departamento/municipio; el cuerpo nunca puede aportarlos
+// (§12/§17 explícito). SPRINT-3C2.5 §9: se admiten además
+// areaDeclaradaHa/observaciones -- ambos datos del cliente, nunca de
+// CatastroX.
+const CATASTROX_ALLOWED_KEYS = new Set(['mode', 'candidateId', 'nombrePersonalizado', 'areaDeclaradaHa', 'observaciones']);
 
 export function validateCatastroxSaveBody(body) {
   const unknownKeys = Object.keys(body || {}).filter((key) => !CATASTROX_ALLOWED_KEYS.has(key));
@@ -189,7 +211,10 @@ export function validateCatastroxSaveBody(body) {
     nombrePersonalizado = body.nombrePersonalizado.trim();
   }
 
-  return { candidateId: body.candidateId, nombrePersonalizado };
+  const areaDeclaradaHa = validateAreaDeclaradaHa(body.areaDeclaradaHa);
+  const observaciones = validateObservaciones(body.observaciones);
+
+  return { candidateId: body.candidateId, nombrePersonalizado, areaDeclaradaHa, observaciones };
 }
 
 // -----------------------------------------------------------------------
@@ -203,7 +228,11 @@ function serializePredioListItem(row) {
     departamento: row.departamento,
     municipio: row.municipio,
     vereda: row.vereda,
-    areaTotalHa: row.area_total_ha === null ? null : Number(row.area_total_ha),
+    // SPRINT-3C2.5 §6/§14: area_total_ha es semánticamente el área
+    // DECLARADA por el cliente (nunca la catastral) -- la API lo expone
+    // como areaDeclaradaHa, nunca areaTotalHa/areaCatastralHa.
+    areaDeclaradaHa: row.area_total_ha === null ? null : Number(row.area_total_ha),
+    observaciones: row.observaciones ?? null,
     codigoPredial: row.codigo_predial,
     latitud: row.latitud === null ? null : Number(row.latitud),
     longitud: row.longitud === null ? null : Number(row.longitud),
@@ -222,12 +251,42 @@ function serializeSnapshot(row) {
     municipio: row.municipio,
     vereda: row.vereda,
     sector: row.sector,
-    areaM2: row.area_m2 === null ? null : Number(row.area_m2),
-    areaHa: row.area_ha === null ? null : Number(row.area_ha),
+    // §11: datos oficiales/inmutables del snapshot -- siempre "catastral",
+    // nunca confundir con el área declarada operativa del predio.
+    areaCatastralM2: row.area_m2 === null ? null : Number(row.area_m2),
+    areaCatastralHa: row.area_ha === null ? null : Number(row.area_ha),
     geometry: row.geometry,
     fuente: row.fuente,
     versionFuente: row.version_fuente,
     fechaConsulta: row.fecha_consulta,
+  };
+}
+
+// SPRINT-3C2.6 (hardening): el objeto `predio` interno que
+// catastroxPredioLookup.js construye lleva campos EXCLUSIVOS de uso
+// server-side (sectorCodigoTecnico/veredaCodigoTecnico -- códigos
+// técnicos crudos, preservados solo para atributos_json del snapshot, ver
+// prediosRepository.js) que nunca deben llegar al cliente. Antes de este
+// endurecimiento, `res.json({ predio: result.predio })` reenviaba el
+// objeto interno completo tal cual -- este serializador es el único punto
+// de salida hacia el frontend para el resultado de una búsqueda, y expone
+// EXACTAMENTE el contrato público acordado (nunca `sector` ni los campos
+// *CodigoTecnico*).
+export function serializePredioSearchResult(predio) {
+  return {
+    nombrePredio: predio.nombrePredio,
+    departamento: predio.departamento,
+    municipio: predio.municipio,
+    vereda: predio.vereda,
+    areaCatastralHa: predio.areaCatastralHa,
+    areaCatastralM2: predio.areaCatastralM2,
+    codigoPredial: predio.codigoPredial,
+    codigoAnterior: predio.codigoAnterior,
+    fuente: predio.fuente,
+    versionFuente: predio.versionFuente,
+    centroide: predio.centroide,
+    geometry: predio.geometry,
+    fechaConsulta: predio.fechaConsulta,
   };
 }
 
@@ -239,7 +298,8 @@ function serializePredioDetail(row, snapshotRow) {
     departamento: row.departamento,
     municipio: row.municipio,
     vereda: row.vereda,
-    areaTotalHa: row.area_total_ha === null ? null : Number(row.area_total_ha),
+    areaDeclaradaHa: row.area_total_ha === null ? null : Number(row.area_total_ha),
+    observaciones: row.observaciones ?? null,
     codigoPredial: row.codigo_predial,
     latitud: row.latitud === null ? null : Number(row.latitud),
     longitud: row.longitud === null ? null : Number(row.longitud),
@@ -321,8 +381,11 @@ export default function createGanaderiaPrediosRouter({ appEnv, csrfServerSecret,
       }
 
       const { organizacionId, cuentaId } = req.ganaderiaAuth;
+      // El candidate store guarda el objeto INTERNO completo (incluye los
+      // códigos técnicos, necesarios más tarde en createCatastroxPredio) --
+      // solo la respuesta HTTP se filtra por el allowlist público.
       const candidateId = createPredioCandidate({ organizacionId, cuentaId, predio: result.predio });
-      res.json({ candidateId, predio: result.predio });
+      res.json({ candidateId, predio: serializePredioSearchResult(result.predio) });
     } catch (error) {
       if (error?.code === 'INVALID_COORDINATES') {
         res.status(400).json({ error: error.code, message: error.message });
@@ -352,7 +415,7 @@ export default function createGanaderiaPrediosRouter({ appEnv, csrfServerSecret,
 
       const { organizacionId, cuentaId } = req.ganaderiaAuth;
       const candidateId = createPredioCandidate({ organizacionId, cuentaId, predio: result.predio });
-      res.json({ candidateId, predio: result.predio });
+      res.json({ candidateId, predio: serializePredioSearchResult(result.predio) });
     } catch (error) {
       if (error?.publicCode === 'INVALID_CADASTRAL_CODE') {
         res.status(400).json({ error: 'INVALID_CADASTRAL_CODE', message: error.publicMessage });
@@ -382,7 +445,7 @@ export default function createGanaderiaPrediosRouter({ appEnv, csrfServerSecret,
       }
 
       // mode === 'catastrox'
-      const { candidateId, nombrePersonalizado } = validateCatastroxSaveBody(req.body);
+      const { candidateId, nombrePersonalizado, areaDeclaradaHa, observaciones } = validateCatastroxSaveBody(req.body);
 
       // SPRINT-3C1.1 §1: reserve() ANTES de la transacción de negocio --
       // pasa a PROCESSING, nunca CONSUMED todavía. Una segunda solicitud
@@ -419,7 +482,7 @@ export default function createGanaderiaPrediosRouter({ appEnv, csrfServerSecret,
       // CONSUMED sin que el predio exista de verdad.
       let predioId;
       try {
-        predioId = await createCatastroxPredio(organizacionId, { nombreFinal, predio, geometryJson });
+        predioId = await createCatastroxPredio(organizacionId, { nombreFinal, predio, geometryJson, areaDeclaradaHa, observaciones });
       } catch (transactionError) {
         releasePredioCandidate(candidateId);
         throw transactionError;

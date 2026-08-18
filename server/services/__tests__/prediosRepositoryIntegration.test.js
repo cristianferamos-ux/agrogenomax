@@ -81,12 +81,21 @@ function predioFixture(overrides = {}) {
     departamento: 'Caquetá',
     municipio: 'Florencia',
     vereda: 'El Recreo',
-    sector: '01',
-    areaM2: 50000,
-    areaHa: 5,
+    // SPRINT-3C2.6 §2: `sector` descriptivo YA NO existe en el contrato
+    // real del predio (buildNormalizedPredio siempre entrega null) --
+    // solo sobrevive el código técnico crudo, bajo un nombre distinto,
+    // usado exclusivamente para atributos_json (nunca snapshot.sector).
+    sector: null,
+    sectorCodigoTecnico: '01',
+    veredaCodigoTecnico: null,
+    areaCatastralM2: 50000,
+    areaCatastralHa: 5,
     geometry: SQUARE_MULTIPOLYGON,
     fuente: 'catastrox_clean',
-    versionFuente: '2026-01',
+    // SPRINT-3C2.5 §5: el DTO real siempre entrega null aquí -- se deja
+    // explícito en el fixture para no fingir un valor que el código de
+    // producción nunca produciría.
+    versionFuente: null,
     fechaConsulta: new Date().toISOString(),
     ...overrides,
   };
@@ -213,7 +222,8 @@ describe('SPRINT-3C1-MIS-PREDIOS-API: prediosRepository contra Postgres-AGX-Busi
       departamento: 'Caquetá',
       municipio: 'Florencia',
       vereda: null,
-      areaTotalHa: null,
+      areaDeclaradaHa: null,
+      observaciones: null,
       latitud: null,
       longitud: null,
     });
@@ -301,6 +311,249 @@ describe('SPRINT-3C1-MIS-PREDIOS-API: prediosRepository contra Postgres-AGX-Busi
 
     const listado = await repo.listPredios(orgA);
     assert.equal(listado.length, 1, 'nunca se crean dos predios a partir de la misma reserva concurrente');
+
+    await adminPool.query('delete from agx.predio_snapshots_catastrales where predio_id = $1', [predioId]);
+    await adminPool.query('delete from agx.predios where predio_id = $1', [predioId]);
+  });
+
+  // -----------------------------------------------------------------
+  // SPRINT-3C2.5 §15 (items 6-7): snapshot.vereda nunca es un objeto de
+  // presentación; snapshot.version_fuente siempre es null.
+  // -----------------------------------------------------------------
+
+  test('§15.6: snapshot.vereda es string cuando el predio tiene un nombre humano real, nunca el objeto veredaDisplay', async () => {
+    const orgA = randomOrgId();
+    const predio = predioFixture({ vereda: 'Florida Uno' });
+    const geometryJson = JSON.stringify(predio.geometry);
+
+    const predioId = await repo.createCatastroxPredio(orgA, { nombreFinal: predio.nombrePredio, predio, geometryJson });
+    const detail = await repo.getPredioDetail(orgA, predioId);
+
+    assert.equal(typeof detail.snapshotRow.vereda, 'string');
+    assert.equal(detail.snapshotRow.vereda, 'Florida Uno');
+
+    await adminPool.query('delete from agx.predio_snapshots_catastrales where predio_id = $1', [predioId]);
+    await adminPool.query('delete from agx.predios where predio_id = $1', [predioId]);
+  });
+
+  test('§15.6: snapshot.vereda es null cuando el predio no tiene vereda humana (nunca un objeto ni el placeholder)', async () => {
+    const orgA = randomOrgId();
+    const predio = predioFixture({ vereda: null });
+    const geometryJson = JSON.stringify(predio.geometry);
+
+    const predioId = await repo.createCatastroxPredio(orgA, { nombreFinal: predio.nombrePredio, predio, geometryJson });
+    const detail = await repo.getPredioDetail(orgA, predioId);
+
+    assert.ok(
+      detail.snapshotRow.vereda === null || typeof detail.snapshotRow.vereda === 'string',
+      'vereda debe ser string o null, nunca un objeto serializado',
+    );
+    assert.equal(detail.snapshotRow.vereda, null);
+
+    await adminPool.query('delete from agx.predio_snapshots_catastrales where predio_id = $1', [predioId]);
+    await adminPool.query('delete from agx.predios where predio_id = $1', [predioId]);
+  });
+
+  test('§15.7: snapshot.version_fuente siempre es null, incluso si el candidate trae un versionFuente (defensa en profundidad)', async () => {
+    const orgA = randomOrgId();
+    // predioFixture() ya fija versionFuente:null (contrato real actual),
+    // pero se fuerza aquí un valor no-null para confirmar que el
+    // repositorio IGNORA cualquier valor entrante y siempre persiste null
+    // -- nunca se deriva de CATASTROX_DATASET_VERSION ni de `fuente`
+    // (SPRINT-3C2.5 §5/§11, decisión aprobada).
+    const predio = predioFixture({ versionFuente: '2026-01' });
+    const geometryJson = JSON.stringify(predio.geometry);
+
+    const predioId = await repo.createCatastroxPredio(orgA, { nombreFinal: predio.nombrePredio, predio, geometryJson });
+    const detail = await repo.getPredioDetail(orgA, predioId);
+
+    assert.equal(detail.snapshotRow.version_fuente, null);
+
+    await adminPool.query('delete from agx.predio_snapshots_catastrales where predio_id = $1', [predioId]);
+    await adminPool.query('delete from agx.predios where predio_id = $1', [predioId]);
+  });
+
+  // -----------------------------------------------------------------
+  // SPRINT-3C2.5 §16: escenarios de confirmación A-G del modelo final
+  // de registro de predio (modo catastrox).
+  // -----------------------------------------------------------------
+
+  test('§16 A: nombrePersonalizado enviado -> se guarda como nombre_predio operativo (distinto del catastral)', async () => {
+    const orgA = randomOrgId();
+    const predio = predioFixture({ nombrePredio: 'Nombre Catastral Original' });
+    const geometryJson = JSON.stringify(predio.geometry);
+    const nombrePersonalizado = 'Mi Finca Personalizada';
+
+    const predioId = await repo.createCatastroxPredio(orgA, { nombreFinal: nombrePersonalizado, predio, geometryJson });
+    const detail = await repo.getPredioDetail(orgA, predioId);
+
+    assert.equal(detail.predioRow.nombre_predio, nombrePersonalizado);
+    assert.equal(
+      detail.snapshotRow.nombre_predio_catastral,
+      'Nombre Catastral Original',
+      'el snapshot preserva el nombre catastral original, inmutable, sin importar el nombre operativo elegido',
+    );
+
+    await adminPool.query('delete from agx.predio_snapshots_catastrales where predio_id = $1', [predioId]);
+    await adminPool.query('delete from agx.predios where predio_id = $1', [predioId]);
+  });
+
+  test('§16 B: sin nombrePersonalizado -> el nombreFinal recibido (fallback ya resuelto en el router) es el nombre catastral', async () => {
+    const orgA = randomOrgId();
+    const predio = predioFixture({ nombrePredio: 'Nombre Catastral Original' });
+    const geometryJson = JSON.stringify(predio.geometry);
+
+    // Replica el fallback nombreFinal = nombrePersonalizado ?? candidate.nombrePredio
+    // ya implementado en el router -- este test cubre el repositorio, que
+    // simplemente persiste lo que recibe como nombreFinal.
+    const predioId = await repo.createCatastroxPredio(orgA, { nombreFinal: predio.nombrePredio, predio, geometryJson });
+    const detail = await repo.getPredioDetail(orgA, predioId);
+
+    assert.equal(detail.predioRow.nombre_predio, 'Nombre Catastral Original');
+
+    await adminPool.query('delete from agx.predio_snapshots_catastrales where predio_id = $1', [predioId]);
+    await adminPool.query('delete from agx.predios where predio_id = $1', [predioId]);
+  });
+
+  test('§16 C/D/F: areaDeclaradaHa enviada se guarda como operacional; sin enviarla queda null; areaCatastralHa vive solo en el snapshot', async () => {
+    const orgA = randomOrgId();
+    const predioConArea = predioFixture({ areaCatastralHa: 5, areaCatastralM2: 50000 });
+    const geometryJsonConArea = JSON.stringify(predioConArea.geometry);
+
+    // C: con areaDeclaradaHa explícita del cliente.
+    const predioIdConArea = await repo.createCatastroxPredio(orgA, {
+      nombreFinal: predioConArea.nombrePredio,
+      predio: predioConArea,
+      geometryJson: geometryJsonConArea,
+      areaDeclaradaHa: 9.16,
+    });
+    const detailConArea = await repo.getPredioDetail(orgA, predioIdConArea);
+    assert.equal(Number(detailConArea.predioRow.area_total_ha), 9.16, 'C: areaDeclaradaHa enviada por el cliente se guarda como el área operacional');
+    // F: el área catastral oficial NUNCA se copia a agx.predios -- solo
+    // vive en el snapshot, y es un valor distinto (5) al operacional
+    // (9.16) enviado por el cliente -- prueba de que no se confunden ni
+    // se auto-rellenan entre sí.
+    assert.equal(Number(detailConArea.snapshotRow.area_ha), 5, 'F: el área catastral oficial vive únicamente en el snapshot');
+    assert.notEqual(
+      Number(detailConArea.predioRow.area_total_ha),
+      Number(detailConArea.snapshotRow.area_ha),
+      'F: operacional y catastral son valores independientes, nunca el mismo campo con dos nombres',
+    );
+
+    // D: sin areaDeclaradaHa (el llamador no la envía) -> queda null,
+    // JAMÁS se auto-rellena con predio.areaCatastralHa aunque exista.
+    const predioSinArea = predioFixture({ areaCatastralHa: 5, areaCatastralM2: 50000 });
+    const geometryJsonSinArea = JSON.stringify(predioSinArea.geometry);
+    const predioIdSinArea = await repo.createCatastroxPredio(orgA, {
+      nombreFinal: predioSinArea.nombrePredio,
+      predio: predioSinArea,
+      geometryJson: geometryJsonSinArea,
+    });
+    const detailSinArea = await repo.getPredioDetail(orgA, predioIdSinArea);
+    assert.equal(detailSinArea.predioRow.area_total_ha, null, 'D: sin areaDeclaradaHa del cliente, el área operacional queda null -- nunca se infiere del área catastral');
+
+    await adminPool.query('delete from agx.predio_snapshots_catastrales where predio_id = any($1)', [[predioIdConArea, predioIdSinArea]]);
+    await adminPool.query('delete from agx.predios where predio_id = any($1)', [[predioIdConArea, predioIdSinArea]]);
+  });
+
+  test('§16 E: observaciones enviada se guarda; sin enviarla queda null', async () => {
+    const orgA = randomOrgId();
+    const predioConObs = predioFixture();
+    const geometryJsonConObs = JSON.stringify(predioConObs.geometry);
+    const predioSinObs = predioFixture();
+    const geometryJsonSinObs = JSON.stringify(predioSinObs.geometry);
+
+    const predioIdConObs = await repo.createCatastroxPredio(orgA, {
+      nombreFinal: predioConObs.nombrePredio,
+      predio: predioConObs,
+      geometryJson: geometryJsonConObs,
+      observaciones: 'Acceso por la vía principal, cerca del río.',
+    });
+    const detailConObs = await repo.getPredioDetail(orgA, predioIdConObs);
+    assert.equal(detailConObs.predioRow.observaciones, 'Acceso por la vía principal, cerca del río.');
+
+    const predioIdSinObs = await repo.createCatastroxPredio(orgA, {
+      nombreFinal: predioSinObs.nombrePredio,
+      predio: predioSinObs,
+      geometryJson: geometryJsonSinObs,
+    });
+    const detailSinObs = await repo.getPredioDetail(orgA, predioIdSinObs);
+    assert.equal(detailSinObs.predioRow.observaciones, null);
+
+    await adminPool.query('delete from agx.predio_snapshots_catastrales where predio_id = any($1)', [[predioIdConObs, predioIdSinObs]]);
+    await adminPool.query('delete from agx.predios where predio_id = any($1)', [[predioIdConObs, predioIdSinObs]]);
+  });
+
+  test('§16 G: geometry persistida proviene exclusivamente del candidate/servidor, idéntica en predio y snapshot', async () => {
+    const orgA = randomOrgId();
+    const predio = predioFixture();
+    const geometryJson = JSON.stringify(predio.geometry);
+
+    const predioId = await repo.createCatastroxPredio(orgA, { nombreFinal: predio.nombrePredio, predio, geometryJson });
+    const detail = await repo.getPredioDetail(orgA, predioId);
+
+    assert.deepEqual(detail.predioRow.geometry, SQUARE_MULTIPOLYGON);
+    assert.deepEqual(detail.snapshotRow.geometry, SQUARE_MULTIPOLYGON);
+
+    await adminPool.query('delete from agx.predio_snapshots_catastrales where predio_id = $1', [predioId]);
+    await adminPool.query('delete from agx.predios where predio_id = $1', [predioId]);
+  });
+
+  // -----------------------------------------------------------------
+  // SPRINT-3C2.6 §2/§7/§8: sector descriptivo siempre null (defensa en
+  // profundidad, incluso si predio.sector llegara poblado por error);
+  // el código técnico crudo se preserva SOLO en atributos_json; nunca en
+  // snapshot.sector; codigoPredial/codigoAnterior se conservan intactos.
+  // -----------------------------------------------------------------
+
+  test('§2/§7 (defensa en profundidad): aunque predio.sector llegue poblado por error, snapshot.sector queda null y el código técnico va SOLO a atributos_json', async () => {
+    const orgA = randomOrgId();
+    // Simula un candidate corrupto/desactualizado que todavía trajera un
+    // código técnico en `sector` -- el repositorio debe ignorarlo por
+    // completo, nunca confiar en el candidate para esta columna.
+    const predio = predioFixture({ sector: '01', sectorCodigoTecnico: '01' });
+    const geometryJson = JSON.stringify(predio.geometry);
+
+    const predioId = await repo.createCatastroxPredio(orgA, { nombreFinal: predio.nombrePredio, predio, geometryJson });
+    const detail = await repo.getPredioDetail(orgA, predioId);
+
+    assert.equal(detail.snapshotRow.sector, null, 'snapshot.sector nunca debe recibir el código técnico, ni siquiera si predio.sector viene poblado');
+
+    await adminPool.query('delete from agx.predio_snapshots_catastrales where predio_id = $1', [predioId]);
+    await adminPool.query('delete from agx.predios where predio_id = $1', [predioId]);
+  });
+
+  test('§7: el código técnico de sector/vereda se preserva en atributos_json, nunca en una columna descriptiva', async () => {
+    const orgA = randomOrgId();
+    const predio = predioFixture({ sectorCodigoTecnico: '05', veredaCodigoTecnico: '123AB' });
+    const geometryJson = JSON.stringify(predio.geometry);
+
+    const predioId = await repo.createCatastroxPredio(orgA, { nombreFinal: predio.nombrePredio, predio, geometryJson });
+
+    const snapshotResult = await adminPool.query(
+      'select atributos_json from agx.predio_snapshots_catastrales where predio_id = $1',
+      [predioId],
+    );
+    const atributos = snapshotResult.rows[0].atributos_json;
+    assert.equal(atributos.sectorCodigoTecnico, '05');
+    assert.equal(atributos.veredaCodigoTecnico, '123AB');
+
+    await adminPool.query('delete from agx.predio_snapshots_catastrales where predio_id = $1', [predioId]);
+    await adminPool.query('delete from agx.predios where predio_id = $1', [predioId]);
+  });
+
+  test('§8.8: codigoPredial y codigoAnterior se conservan intactos en el snapshot, sin transformación alguna', async () => {
+    const orgA = randomOrgId();
+    // codigo_anterior es varchar(20) en el esquema real.
+    const predio = predioFixture({ codigoAnterior: '18600100000010001' });
+    const geometryJson = JSON.stringify(predio.geometry);
+
+    const predioId = await repo.createCatastroxPredio(orgA, { nombreFinal: predio.nombrePredio, predio, geometryJson });
+    const detail = await repo.getPredioDetail(orgA, predioId);
+
+    assert.equal(detail.snapshotRow.codigo_predial, predio.codigoPredial);
+    assert.equal(detail.snapshotRow.codigo_anterior, '18600100000010001');
+    assert.equal(detail.predioRow.codigo_predial, predio.codigoPredial);
 
     await adminPool.query('delete from agx.predio_snapshots_catastrales where predio_id = $1', [predioId]);
     await adminPool.query('delete from agx.predios where predio_id = $1', [predioId]);

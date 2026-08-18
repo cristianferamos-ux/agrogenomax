@@ -16,7 +16,7 @@ export async function listPredios(organizacionId) {
   return withOrganizacionTransaction(organizacionId, async (client) => {
     const result = await client.query(
       `select predio_id, nombre_predio, departamento, municipio, vereda,
-              area_total_ha, codigo_predial, latitud, longitud,
+              area_total_ha, observaciones, codigo_predial, latitud, longitud,
               (geometry is not null) as tiene_geometria, fecha_creacion
          from agx.predios
         order by fecha_creacion desc`,
@@ -32,7 +32,7 @@ export async function getPredioDetail(organizacionId, predioId) {
     // produce 0 filas aquí, indistinguible de "no existe" (§4).
     const predioResult = await client.query(
       `select predio_id, nombre_predio, propietario, departamento, municipio, vereda,
-              area_total_ha, latitud, longitud, codigo_predial,
+              area_total_ha, observaciones, latitud, longitud, codigo_predial,
               ST_AsGeoJSON(geometry)::json as geometry,
               fecha_creacion, fecha_actualizacion
          from agx.predios
@@ -63,10 +63,20 @@ export async function createManualPredio(organizacionId, value) {
   return withOrganizacionTransaction(organizacionId, async (client) => {
     const result = await client.query(
       `insert into agx.predios
-         (organizacion_id, nombre_predio, departamento, municipio, vereda, area_total_ha, latitud, longitud, codigo_predial)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, null)
+         (organizacion_id, nombre_predio, departamento, municipio, vereda, area_total_ha, observaciones, latitud, longitud, codigo_predial)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, null)
        returning predio_id`,
-      [organizacionId, value.nombrePredio, value.departamento, value.municipio, value.vereda, value.areaTotalHa, value.latitud, value.longitud],
+      [
+        organizacionId,
+        value.nombrePredio,
+        value.departamento,
+        value.municipio,
+        value.vereda,
+        value.areaDeclaradaHa,
+        value.observaciones,
+        value.latitud,
+        value.longitud,
+      ],
     );
     return result.rows[0].predio_id;
   });
@@ -83,16 +93,33 @@ function translateDuplicateCodigoPredial(error) {
 }
 
 /**
- * §12/§13/§14/§18: crea predio + snapshot en UNA sola transacción de
- * negocio -- si el INSERT del snapshot falla, el INSERT del predio se
- * revierte (withOrganizacionTransaction hace ROLLBACK ante cualquier
- * excepción). `predio` es el resultado YA hidratado y validado del
- * candidate store (nunca datos crudos del body del cliente) --
- * geometry/codigoPredial/areaCatastral/fuente vienen exclusivamente de
- * ahí. `geometryJson` es el mismo GeoJSON serializado una sola vez por el
- * llamador, reutilizado para predio y snapshot.
+ * §12/§13/§14/§18 + SPRINT-3C2.5 §10/§11: crea predio + snapshot en UNA
+ * sola transacción de negocio -- si el INSERT del snapshot falla, el
+ * INSERT del predio se revierte (withOrganizacionTransaction hace
+ * ROLLBACK ante cualquier excepción). `predio` es el resultado YA
+ * hidratado y validado del candidate store (nunca datos crudos del body
+ * del cliente) -- geometry/codigoPredial/areaCatastral(Ha|M2)/fuente
+ * vienen exclusivamente de ahí. `geometryJson` es el mismo GeoJSON serializado
+ * una sola vez por el llamador, reutilizado para predio y snapshot.
+ *
+ * SPRINT-3C2.5 §10 (regla explícita): `areaDeclaradaHa`/`observaciones`
+ * vienen del CLIENTE (body validado por el router), nunca se auto-rellena
+ * area_total_ha con predio.areaCatastralHa -- si el cliente no envía un
+ * valor, area_total_ha/observaciones quedan null.
+ *
+ * SPRINT-3C2.6 §2 (defensa en profundidad, mismo patrón ya usado para
+ * version_fuente en 3C2.5 §11): el snapshot.sector se hardcodea a `null`
+ * aquí -- NUNCA se lee predio.sector, aunque ese campo ya sea `null` en
+ * origen (catastroxPredioLookup.js). Así, incluso si una futura
+ * modificación de buildNormalizedPredio() reintrodujera por error un
+ * código técnico en `predio.sector`, este INSERT seguiría sin poder
+ * persistirlo como campo descriptivo. Los códigos técnicos crudos
+ * (predio.sectorCodigoTecnico/predio.veredaCodigoTecnico) se preservan
+ * únicamente en snapshot.atributos_json -- nunca en snapshot.sector ni en
+ * ninguna columna descriptiva de agx.predios (que ni siquiera tiene
+ * columna `sector`).
  */
-export async function createCatastroxPredio(organizacionId, { nombreFinal, predio, geometryJson }) {
+export async function createCatastroxPredio(organizacionId, { nombreFinal, predio, geometryJson, areaDeclaradaHa = null, observaciones = null }) {
   return withOrganizacionTransaction(organizacionId, async (client) => {
     // SPRINT-3C1.1 §8 (auditoría de la afirmación "ST_MakeValid ya era
     // estrategia auditada"): patrón EXACTO ya usado dos veces en
@@ -115,27 +142,38 @@ export async function createCatastroxPredio(organizacionId, { nombreFinal, predi
     // (nunca interpolada), SRID 4326, MultiPolygon forzado (§13).
     const predioResult = await client.query(
       `insert into agx.predios
-         (organizacion_id, nombre_predio, departamento, municipio, vereda, area_total_ha, codigo_predial, geometry)
+         (organizacion_id, nombre_predio, departamento, municipio, vereda, area_total_ha, observaciones, codigo_predial, geometry)
        values (
-         $1, $2, $3, $4, $5, $6, $7,
+         $1, $2, $3, $4, $5, $6, $7, $8,
          ST_Multi(ST_CollectionExtract(
            case
-             when ST_IsValid(ST_SetSRID(ST_GeomFromGeoJSON($8), 4326))
-             then ST_SetSRID(ST_GeomFromGeoJSON($8), 4326)
-             else ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON($8), 4326))
+             when ST_IsValid(ST_SetSRID(ST_GeomFromGeoJSON($9), 4326))
+             then ST_SetSRID(ST_GeomFromGeoJSON($9), 4326)
+             else ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON($9), 4326))
            end,
            3
          ))
        )
        returning predio_id`,
-      [organizacionId, nombreFinal, predio.departamento, predio.municipio, predio.vereda, predio.areaHa, predio.codigoPredial, geometryJson],
+      [organizacionId, nombreFinal, predio.departamento, predio.municipio, predio.vereda, areaDeclaradaHa, observaciones, predio.codigoPredial, geometryJson],
     );
     const newPredioId = predioResult.rows[0].predio_id;
+
+    // SPRINT-3C2.6 §7: único lugar donde se preservan códigos técnicos
+    // (sector_codigo/vereda_codigo) para trazabilidad -- nunca en una
+    // columna descriptiva. atributos_json ya existe en el esquema desde
+    // 0001 (nullable, sin usar hasta ahora); no se crea ninguna columna
+    // nueva. Mismo patrón JSON.stringify + ::jsonb ya usado en
+    // deliveryAttemptRepository.js.
+    const atributosJson = JSON.stringify({
+      sectorCodigoTecnico: predio.sectorCodigoTecnico ?? null,
+      veredaCodigoTecnico: predio.veredaCodigoTecnico ?? null,
+    });
 
     await client.query(
       `insert into agx.predio_snapshots_catastrales
          (predio_id, organizacion_id, codigo_predial, codigo_anterior, nombre_predio_catastral,
-          departamento, municipio, vereda, sector, area_m2, area_ha, geometry, fuente, version_fuente, fecha_consulta)
+          departamento, municipio, vereda, sector, area_m2, area_ha, geometry, fuente, version_fuente, fecha_consulta, atributos_json)
        values (
          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
          ST_Multi(ST_CollectionExtract(
@@ -146,7 +184,7 @@ export async function createCatastroxPredio(organizacionId, { nombreFinal, predi
            end,
            3
          )),
-         $13, $14, $15
+         $13, $14, $15, $16::jsonb
        )`,
       [
         newPredioId,
@@ -157,13 +195,19 @@ export async function createCatastroxPredio(organizacionId, { nombreFinal, predi
         predio.departamento,
         predio.municipio,
         predio.vereda,
-        predio.sector,
-        predio.areaM2,
-        predio.areaHa,
+        // SPRINT-3C2.6 §2: sector SIEMPRE null aquí (defensa en
+        // profundidad -- ver comentario del JSDoc de esta función);
+        // deliberadamente NO se lee predio.sector.
+        null,
+        predio.areaCatastralM2,
+        predio.areaCatastralHa,
         geometryJson,
         predio.fuente,
-        predio.versionFuente,
+        // SPRINT-3C2.5 §5/§11: version_fuente siempre null -- nunca se
+        // deriva de CATASTROX_DATASET_VERSION ni se infiere de `fuente`.
+        null,
         predio.fechaConsulta,
+        atributosJson,
       ],
     );
 
