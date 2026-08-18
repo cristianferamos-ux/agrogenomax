@@ -286,6 +286,7 @@ export function serializePredioSearchResult(predio) {
     versionFuente: predio.versionFuente,
     centroide: predio.centroide,
     geometry: predio.geometry,
+    fechaConsulta: predio.fechaConsulta,
   };
 }
 

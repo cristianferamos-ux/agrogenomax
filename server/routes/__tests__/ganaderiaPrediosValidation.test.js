@@ -228,11 +228,12 @@ function fullInternalPredioFixture() {
     geometry: { type: 'MultiPolygon', coordinates: [] },
     fuente: 'catastrox_clean',
     versionFuente: null,
+    // Timestamp ISO determinista -- SPRINT-3C2.9 §3.
     fechaConsulta: '2026-08-18T00:00:00.000Z',
   };
 }
 
-test('serializePredioSearchResult: expone exactamente el contrato público acordado (12 campos)', () => {
+test('serializePredioSearchResult: expone exactamente el contrato público acordado (13 campos, incluye fechaConsulta -- SPRINT-3C2.9)', () => {
   const result = serializePredioSearchResult(fullInternalPredioFixture());
   assert.deepEqual(Object.keys(result).sort(), [
     'areaCatastralHa',
@@ -241,6 +242,7 @@ test('serializePredioSearchResult: expone exactamente el contrato público acord
     'codigoAnterior',
     'codigoPredial',
     'departamento',
+    'fechaConsulta',
     'fuente',
     'geometry',
     'municipio',
@@ -248,6 +250,11 @@ test('serializePredioSearchResult: expone exactamente el contrato público acord
     'vereda',
     'versionFuente',
   ].sort());
+});
+
+test('serializePredioSearchResult: fechaConsulta viene exclusivamente de predio.fechaConsulta (objeto normalizado server-side)', () => {
+  const result = serializePredioSearchResult(fullInternalPredioFixture());
+  assert.equal(result.fechaConsulta, '2026-08-18T00:00:00.000Z');
 });
 
 test('serializePredioSearchResult: NUNCA incluye sector, sectorCodigoTecnico ni veredaCodigoTecnico, aunque el objeto interno los traiga poblados', () => {
@@ -266,4 +273,5 @@ test('serializePredioSearchResult: campos públicos conservan sus valores reales
   assert.equal(result.codigoPredial, fixture.codigoPredial);
   assert.equal(result.versionFuente, null);
   assert.deepEqual(result.geometry, fixture.geometry);
+  assert.equal(result.fechaConsulta, fixture.fechaConsulta);
 });
