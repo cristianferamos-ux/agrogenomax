@@ -1,52 +1,316 @@
-import { useEffect, useState } from 'react';
-import { ganaderiaApi, getRowId, getRowLabel } from '../api/ganaderiaApi.js';
+// SPRINT-3C3.2 — REGISTRO DE PREDIO (flujo aprobado de verificación +
+// edición) -- reemplaza la pantalla anterior (CRUD directo contra el
+// router legacy /api/predios, sin CSRF, sin CatastroX) por el flujo
+// real: búsqueda automática CatastroX -> verificación -> edición
+// opcional -> confirmación, más registro manual como alternativa
+// explícita.
+//
+// Habla EXCLUSIVAMENTE con /api/ganaderia/predios/* (server/routes/ganaderiaPredios.js,
+// Postgres-AGX-Business, org-scoped, CSRF-gated) -- nunca con el router
+// legacy /api/predios que usaba ganaderiaApi.js (ese router no aplica
+// aislamiento por organización y no exige CSRF). Sigue el mismo patrón
+// fetchCsrfToken + credentials:'include' + X-CSRF-Token ya usado en
+// GanaderiaAdminCrearCuenta.jsx.
+//
+// La identidad del cliente/organización viene exclusivamente de la
+// sesión autenticada server-side -- este formulario NUNCA pide código
+// interno, propietario, documento/NIT, teléfono ni correo.
+import { useState } from 'react';
+import { fetchCsrfToken } from '../auth/GanaderiaAuthContext.jsx';
 import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
+import CatastroXMap from '../../catastrox/components/CatastroXMap.jsx';
+import '../../catastrox/styles/catastrox.css';
 
-const initialForm = {
-  nombre: '',
-  codigo: '',
-  propietario: '',
-  documento: '',
-  telefono: '',
-  correo: '',
+const GENERIC_SEARCH_ERROR = 'No fue posible consultar el predio en este momento. Intenta nuevamente.';
+const GENERIC_SAVE_ERROR = 'No fue posible registrar el predio en este momento. Intenta nuevamente.';
+const SUCCESS_MESSAGE = 'Predio registrado correctamente.';
+
+// SPRINT-3C3.2 §9: copy de usuario para cada desenlace de búsqueda --
+// nunca detalles técnicos (backend/túnel/API/stack).
+const SEARCH_OUTCOME_MESSAGES = {
+  not_found: 'No encontramos un predio en esa ubicación o código. Puedes intentar de nuevo o registrar manualmente.',
+  ambiguous: 'No pudimos identificar un único predio para este punto. Intenta con el código predial o afina la ubicación.',
+  validation: 'Verifica los datos ingresados e intenta nuevamente.',
+  rate_limited: 'Has hecho demasiadas búsquedas. Espera un momento e intenta nuevamente.',
+  error: GENERIC_SEARCH_ERROR,
+};
+
+// SPRINT-3C3.2 §11 (protección backend ya existente, ver reservePredioCandidate
+// en prediosCandidateStore.js) -- copy amigable para cada código de error
+// real del POST /api/ganaderia/predios en modo catastrox.
+const SAVE_ERROR_MESSAGES = {
+  CANDIDATE_EXPIRED: 'La búsqueda expiró. Vuelve a buscar el predio.',
+  CANDIDATE_ALREADY_CONSUMED: 'Este resultado ya fue utilizado. Vuelve a buscar el predio.',
+  CANDIDATE_IN_USE: 'Esta búsqueda ya se está procesando. Espera un momento.',
+  CANDIDATE_NOT_FOUND: 'La búsqueda no es válida. Vuelve a intentarlo.',
+  DUPLICATE_CODIGO_PREDIAL: 'Este predio ya está registrado en tu cuenta.',
+};
+
+const INITIAL_MANUAL_FORM = {
+  nombrePredio: '',
   departamento: '',
   municipio: '',
   vereda: '',
-  area_total: '',
+  areaDeclaradaHa: '',
   observaciones: '',
 };
 
-export default function PrediosPage() {
-  const [items, setItems] = useState([]);
-  const [form, setForm] = useState(initialForm);
-  const [status, setStatus] = useState('');
-  const [error, setError] = useState('');
+function formatAreaHa(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '—';
+  return `${num.toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ha`;
+}
 
-  const load = async () => {
-    setItems(await ganaderiaApi.listPredios());
+// SPRINT-3C3.2 §12: el área catastral se redondea a 2 decimales SOLO
+// como sugerencia visual/precarga del campo editable -- nunca se envía
+// al backend un valor derivado del área catastral si el cliente no lo
+// confirma explícitamente (el body siempre lleva lo que esté en el
+// campo en el momento del envío, editado o no).
+function roundAreaHa(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '';
+  return Math.round(num * 100) / 100;
+}
+
+function buildMapPredio(predio) {
+  if (!predio?.geometry || !predio?.centroide) return null;
+  return {
+    polygonGeoJson: { type: 'Feature', properties: {}, geometry: predio.geometry },
+    referencePoint: predio.centroide,
+    municipio: predio.municipio,
+    departamento: predio.departamento,
   };
+}
 
-  useEffect(() => {
-    load().catch((err) => setError(err.message));
-  }, []);
+async function postGanaderiaPredios(path, body) {
+  const csrfToken = await fetchCsrfToken();
+  const response = await fetch(path, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+    body: JSON.stringify(body),
+  });
 
-  const update = (field, value) => setForm((current) => ({ ...current, [field]: value }));
+  let data = null;
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
+  }
 
-  const submit = async (event) => {
+  return { ok: response.ok, status: response.status, data };
+}
+
+function resolveSearchOutcomeKind(status) {
+  if (status === 409) return 'ambiguous';
+  if (status === 404) return 'not_found';
+  if (status === 400) return 'validation';
+  if (status === 429) return 'rate_limited';
+  return 'error';
+}
+
+export default function PrediosPage() {
+  // 'search' | 'manual' | 'result' | 'saved'
+  const [screen, setScreen] = useState('search');
+
+  // ---- búsqueda automática (§2 A/B, §3) ----
+  const [searchMode, setSearchMode] = useState('coordenadas'); // 'coordenadas' | 'codigo'
+  const [lat, setLat] = useState('');
+  const [lng, setLng] = useState('');
+  const [codigo, setCodigo] = useState('');
+  const [searchStatus, setSearchStatus] = useState('idle'); // idle | searching | not_found | ambiguous | validation | rate_limited | error
+
+  // ---- resultado / verificación / edición (§3, §5, §7) ----
+  const [candidateId, setCandidateId] = useState(null);
+  const [predio, setPredio] = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [nombreOperativo, setNombreOperativo] = useState('');
+  const [areaDeclarada, setAreaDeclarada] = useState('');
+  const [observaciones, setObservaciones] = useState('');
+  const [editSnapshot, setEditSnapshot] = useState(null);
+
+  // ---- guardado (§6, §8, §10, §11) ----
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+
+  // ---- registro manual (§14) ----
+  const [manualForm, setManualForm] = useState(INITIAL_MANUAL_FORM);
+  const [manualSaving, setManualSaving] = useState(false);
+  const [manualError, setManualError] = useState('');
+
+  function resetSearchState() {
+    setSearchStatus('idle');
+    setCandidateId(null);
+    setPredio(null);
+    setEditing(false);
+    setEditSnapshot(null);
+    setSaveError('');
+  }
+
+  function goToSearch() {
+    resetSearchState();
+    setScreen('search');
+  }
+
+  function goToManual() {
+    resetSearchState();
+    setManualForm(INITIAL_MANUAL_FORM);
+    setManualError('');
+    setScreen('manual');
+  }
+
+  // ---------------------------------------------------------------------
+  // §2 A/B: búsqueda automática CatastroX -- NUNCA guarda nada, solo
+  // genera un candidate temporal server-side.
+  // ---------------------------------------------------------------------
+  async function handleSearchSubmit(event) {
     event.preventDefault();
-    setError('');
-    setStatus('');
+    if (searchStatus === 'searching') return;
+
+    setSearchStatus('searching');
+
+    const path =
+      searchMode === 'coordenadas'
+        ? '/api/ganaderia/predios/buscar-por-coordenadas'
+        : '/api/ganaderia/predios/buscar-por-codigo';
+    const body = searchMode === 'coordenadas' ? { lat: Number(lat), lng: Number(lng) } : { codigo: codigo.trim() };
 
     try {
-      await ganaderiaApi.createPredio(form);
-      setForm(initialForm);
-      await load();
-      setStatus('Predio guardado en tu cuenta.');
-    } catch (err) {
-      setError(err.message);
+      const { ok, status, data } = await postGanaderiaPredios(path, body);
+
+      if (ok && data?.candidateId && data?.predio) {
+        setCandidateId(data.candidateId);
+        setPredio(data.predio);
+        setNombreOperativo(data.predio.nombrePredio || '');
+        setAreaDeclarada(roundAreaHa(data.predio.areaCatastralHa));
+        setObservaciones('');
+        setEditing(false);
+        setEditSnapshot(null);
+        setSearchStatus('idle');
+        setScreen('result');
+        return;
+      }
+
+      setSearchStatus(resolveSearchOutcomeKind(status));
+    } catch {
+      setSearchStatus('error');
     }
-  };
+  }
+
+  // ---------------------------------------------------------------------
+  // §7/§8: modo edición -- solo los campos OPERATIVOS son editables
+  // (nombre con el que se registra, área declarada, observaciones).
+  // departamento/municipio/vereda permanecen de solo lectura en este
+  // sprint: el contrato actual de POST /api/ganaderia/predios (modo
+  // catastrox) solo acepta candidateId/nombrePersonalizado/areaDeclaradaHa/
+  // observaciones -- NO se amplía el backend silenciosamente para
+  // aceptarlos (instrucción explícita del sprint). codigoPredial,
+  // codigoAnterior, areaCatastralHa, areaCatastralM2, geometry, fuente,
+  // versionFuente y snapshot NUNCA son editables desde este formulario.
+  // ---------------------------------------------------------------------
+  function startEditing() {
+    setEditSnapshot({ nombreOperativo, areaDeclarada, observaciones });
+    setEditing(true);
+  }
+
+  function cancelEditing() {
+    if (editSnapshot) {
+      setNombreOperativo(editSnapshot.nombreOperativo);
+      setAreaDeclarada(editSnapshot.areaDeclarada);
+      setObservaciones(editSnapshot.observaciones);
+    }
+    setEditSnapshot(null);
+    setEditing(false);
+    // §8: cancelar edición NUNCA consume el candidate ni escribe DB --
+    // no se dispara ningún fetch aquí, solo se restauran valores locales.
+  }
+
+  // ---------------------------------------------------------------------
+  // §6/§8: confirmación directa y "guardar tras editar" usan el MISMO
+  // endpoint y el MISMO body -- la única diferencia es si el usuario tocó
+  // los campos operativos antes de enviar. El área declarada mostrada
+  // precargada es solo una sugerencia visual: el body SIEMPRE envía el
+  // valor que esté actualmente en el campo, nunca un dato catastral
+  // adicional tomado del candidate en el frontend.
+  // ---------------------------------------------------------------------
+  async function handleConfirm() {
+    if (saving) return;
+    setSaving(true);
+    setSaveError('');
+
+    const trimmedNombre = nombreOperativo.trim();
+    const trimmedObservaciones = observaciones.trim();
+
+    const body = {
+      mode: 'catastrox',
+      candidateId,
+      nombrePersonalizado: trimmedNombre ? trimmedNombre : null,
+      areaDeclaradaHa: areaDeclarada === '' || areaDeclarada === null ? null : Number(areaDeclarada),
+      observaciones: trimmedObservaciones ? trimmedObservaciones : null,
+    };
+
+    try {
+      const { ok, status, data } = await postGanaderiaPredios('/api/ganaderia/predios', body);
+
+      if (ok) {
+        setSaving(false);
+        setScreen('saved');
+        return;
+      }
+
+      setSaveError(SAVE_ERROR_MESSAGES[data?.error] || GENERIC_SAVE_ERROR);
+      setSaving(false);
+      void status;
+    } catch {
+      setSaveError(GENERIC_SAVE_ERROR);
+      setSaving(false);
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // §14: registro manual -- solo los 6 campos aprobados, nunca geometry/
+  // snapshot/codigoPredial/código interno/propietario/documento/teléfono/
+  // correo.
+  // ---------------------------------------------------------------------
+  function updateManualField(field, value) {
+    setManualForm((current) => ({ ...current, [field]: value }));
+  }
+
+  async function handleManualSubmit(event) {
+    event.preventDefault();
+    if (manualSaving) return;
+    setManualSaving(true);
+    setManualError('');
+
+    const body = {
+      mode: 'manual',
+      nombrePredio: manualForm.nombrePredio.trim(),
+      departamento: manualForm.departamento.trim(),
+      municipio: manualForm.municipio.trim(),
+      vereda: manualForm.vereda.trim() ? manualForm.vereda.trim() : null,
+      areaDeclaradaHa: manualForm.areaDeclaradaHa === '' ? null : Number(manualForm.areaDeclaradaHa),
+      observaciones: manualForm.observaciones.trim() ? manualForm.observaciones.trim() : null,
+    };
+
+    try {
+      const { ok } = await postGanaderiaPredios('/api/ganaderia/predios', body);
+
+      if (ok) {
+        setManualSaving(false);
+        setScreen('saved');
+        return;
+      }
+
+      setManualError(GENERIC_SAVE_ERROR);
+      setManualSaving(false);
+    } catch {
+      setManualError(GENERIC_SAVE_ERROR);
+      setManualSaving(false);
+    }
+  }
+
+  const mapPredio = buildMapPredio(predio);
 
   return (
     <div className="gan-stack">
@@ -54,62 +318,296 @@ export default function PrediosPage() {
         <GanaderiaBackLink />
         <div className="gan-section-heading">
           <span className="gan-eyebrow">Registro de Predio</span>
-          <h2>Datos básicos del predio</h2>
+          <h2>
+            {screen === 'search' && 'Buscar predio en CatastroX'}
+            {screen === 'manual' && 'Registrar predio manualmente'}
+            {screen === 'result' && (editing ? 'Editar o completar información' : 'Encontramos este predio')}
+            {screen === 'saved' && 'Predio registrado'}
+          </h2>
         </div>
-        <form className="gan-form" onSubmit={submit}>
-          <FormField label="Nombre del predio" required>
-            <input value={form.nombre} onChange={(event) => update('nombre', event.target.value)} required />
-          </FormField>
-          <FormField label="Código interno">
-            <input value={form.codigo} onChange={(event) => update('codigo', event.target.value)} />
-          </FormField>
-          <FormField label="Propietario">
-            <input value={form.propietario} onChange={(event) => update('propietario', event.target.value)} />
-          </FormField>
-          <FormField label="Documento / NIT">
-            <input value={form.documento} onChange={(event) => update('documento', event.target.value)} />
-          </FormField>
-          <FormField label="Teléfono">
-            <input value={form.telefono} onChange={(event) => update('telefono', event.target.value)} />
-          </FormField>
-          <FormField label="Correo">
-            <input type="email" value={form.correo} onChange={(event) => update('correo', event.target.value)} />
-          </FormField>
-          <FormField label="Departamento">
-            <input value={form.departamento} onChange={(event) => update('departamento', event.target.value)} />
-          </FormField>
-          <FormField label="Municipio">
-            <input value={form.municipio} onChange={(event) => update('municipio', event.target.value)} />
-          </FormField>
-          <FormField label="Vereda">
-            <input value={form.vereda} onChange={(event) => update('vereda', event.target.value)} />
-          </FormField>
-          <FormField label="Área total ha">
-            <input type="number" value={form.area_total} onChange={(event) => update('area_total', event.target.value)} />
-          </FormField>
-          <FormField label="Observaciones">
-            <textarea value={form.observaciones} onChange={(event) => update('observaciones', event.target.value)} />
-          </FormField>
-          <button className="gan-submit" type="submit">Guardar predio</button>
-        </form>
-        <StatusMessage type="success">{status}</StatusMessage>
-        <StatusMessage type="error">{error}</StatusMessage>
-      </div>
 
-      <div className="gan-panel">
-        <div className="gan-section-heading">
-          <span className="gan-eyebrow">Predios existentes</span>
-          <h2>{items.length} registros</h2>
-        </div>
-        <div className="gan-list">
-          {items.map((item) => (
-            <article key={getRowId(item)} className="gan-list-row">
-              <strong>{getRowLabel(item)}</strong>
-              <span>{item.municipio || item.municipality || item.departamento || item.department || 'Sin ubicación'}</span>
-            </article>
-          ))}
-        </div>
+        {screen === 'search' ? (
+          <SearchScreen
+            searchMode={searchMode}
+            setSearchMode={setSearchMode}
+            lat={lat}
+            setLat={setLat}
+            lng={lng}
+            setLng={setLng}
+            codigo={codigo}
+            setCodigo={setCodigo}
+            searchStatus={searchStatus}
+            onSubmit={handleSearchSubmit}
+            onGoManual={goToManual}
+          />
+        ) : null}
+
+        {screen === 'manual' ? (
+          <ManualScreen
+            form={manualForm}
+            onChange={updateManualField}
+            onSubmit={handleManualSubmit}
+            saving={manualSaving}
+            error={manualError}
+            onCancel={goToSearch}
+          />
+        ) : null}
+
+        {screen === 'result' && predio ? (
+          <ResultScreen
+            predio={predio}
+            mapPredio={mapPredio}
+            editing={editing}
+            nombreOperativo={nombreOperativo}
+            setNombreOperativo={setNombreOperativo}
+            areaDeclarada={areaDeclarada}
+            setAreaDeclarada={setAreaDeclarada}
+            observaciones={observaciones}
+            setObservaciones={setObservaciones}
+            saving={saving}
+            saveError={saveError}
+            onConfirm={handleConfirm}
+            onStartEditing={startEditing}
+            onCancelEditing={cancelEditing}
+            onBackToSearch={goToSearch}
+          />
+        ) : null}
+
+        {screen === 'saved' ? (
+          <div className="gan-stack">
+            <StatusMessage type="success">{SUCCESS_MESSAGE}</StatusMessage>
+            <button type="button" className="gan-submit" onClick={goToSearch}>
+              Registrar otro predio
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------
+// Pantalla de búsqueda automática (§2 A, §9 estados: idle/buscando/
+// sin resultado/error técnico)
+// ---------------------------------------------------------------------
+function SearchScreen({
+  searchMode,
+  setSearchMode,
+  lat,
+  setLat,
+  lng,
+  setLng,
+  codigo,
+  setCodigo,
+  searchStatus,
+  onSubmit,
+  onGoManual,
+}) {
+  const searching = searchStatus === 'searching';
+
+  return (
+    <>
+      <div className="gan-segment" role="tablist">
+        <button type="button" className={searchMode === 'coordenadas' ? 'is-active' : ''} onClick={() => setSearchMode('coordenadas')}>
+          Por coordenadas
+        </button>
+        <button type="button" className={searchMode === 'codigo' ? 'is-active' : ''} onClick={() => setSearchMode('codigo')}>
+          Por código predial
+        </button>
+      </div>
+
+      <form className="gan-form" onSubmit={onSubmit}>
+        {searchMode === 'coordenadas' ? (
+          <>
+            <FormField label="Latitud" required>
+              <input
+                type="number"
+                step="any"
+                value={lat}
+                onChange={(event) => setLat(event.target.value)}
+                required
+              />
+            </FormField>
+            <FormField label="Longitud" required>
+              <input
+                type="number"
+                step="any"
+                value={lng}
+                onChange={(event) => setLng(event.target.value)}
+                required
+              />
+            </FormField>
+          </>
+        ) : (
+          <FormField label="Código predial" required>
+            <input value={codigo} onChange={(event) => setCodigo(event.target.value)} required />
+          </FormField>
+        )}
+
+        <button className="gan-submit" type="submit" disabled={searching}>
+          {searching ? 'Buscando...' : 'Buscar predio'}
+        </button>
+      </form>
+
+      {searchStatus !== 'idle' && searchStatus !== 'searching' ? (
+        <StatusMessage type="error">{SEARCH_OUTCOME_MESSAGES[searchStatus]}</StatusMessage>
+      ) : null}
+
+      <button type="button" className="gan-secondary-button" onClick={onGoManual} style={{ marginTop: '1rem' }}>
+        Registrar manualmente
+      </button>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------
+// §3/§4/§5/§7: resultado encontrado -- mapa + verificación + edición
+// opcional, sin navegar a otra pantalla.
+// ---------------------------------------------------------------------
+function ResultScreen({
+  predio,
+  mapPredio,
+  editing,
+  nombreOperativo,
+  setNombreOperativo,
+  areaDeclarada,
+  setAreaDeclarada,
+  observaciones,
+  setObservaciones,
+  saving,
+  saveError,
+  onConfirm,
+  onStartEditing,
+  onCancelEditing,
+  onBackToSearch,
+}) {
+  return (
+    <div className="gan-stack">
+      <div className="gan-eyebrow">ENCONTRAMOS ESTE PREDIO</div>
+
+      <div className="gan-form">
+        <FormField label="Nombre">
+          <input value={predio.nombrePredio || ''} readOnly />
+        </FormField>
+        <FormField label="Departamento">
+          <input value={predio.departamento || ''} readOnly />
+        </FormField>
+        <FormField label="Municipio">
+          <input value={predio.municipio || ''} readOnly />
+        </FormField>
+        <FormField label="Vereda">
+          <input value={predio.vereda || '—'} readOnly />
+        </FormField>
+        <FormField label="Área catastral">
+          <input value={formatAreaHa(predio.areaCatastralHa)} readOnly />
+        </FormField>
+        <FormField label="Código predial">
+          <input value={predio.codigoPredial || ''} readOnly />
+        </FormField>
+      </div>
+
+      {mapPredio ? (
+        <CatastroXMap mode="result" predio={mapPredio} />
+      ) : (
+        <StatusMessage type="error">Mapa no disponible para este predio.</StatusMessage>
+      )}
+
+      <div className="gan-form">
+        <FormField label="Nombre con el que quieres registrarlo">
+          <input
+            value={nombreOperativo}
+            onChange={(event) => setNombreOperativo(event.target.value)}
+            readOnly={!editing}
+          />
+        </FormField>
+        <FormField label="Área que manejas/declaras (ha)">
+          <input
+            type="number"
+            step="0.01"
+            value={areaDeclarada}
+            onChange={(event) => setAreaDeclarada(event.target.value)}
+            readOnly={!editing}
+          />
+        </FormField>
+        <FormField label="Observaciones">
+          <textarea
+            value={observaciones}
+            onChange={(event) => setObservaciones(event.target.value)}
+            readOnly={!editing}
+          />
+        </FormField>
+      </div>
+
+      <StatusMessage type="error">{saveError}</StatusMessage>
+
+      {editing ? (
+        <div className="gan-stack" style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <button type="button" className="gan-submit" onClick={onConfirm} disabled={saving}>
+            {saving ? 'Guardando...' : 'Guardar y registrar predio'}
+          </button>
+          <button type="button" className="gan-secondary-button" onClick={onCancelEditing} disabled={saving}>
+            Cancelar edición
+          </button>
+        </div>
+      ) : (
+        <div className="gan-stack" style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <button type="button" className="gan-submit" onClick={onConfirm} disabled={saving}>
+            {saving ? 'Guardando...' : '✓ Los datos son correctos'}
+          </button>
+          <button type="button" className="gan-secondary-button" onClick={onStartEditing} disabled={saving}>
+            ✎ Editar o completar información
+          </button>
+        </div>
+      )}
+
+      <button type="button" className="gan-back-inline" onClick={onBackToSearch} disabled={saving}>
+        Buscar otro predio
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------
+// §14: registro manual -- alternativa explícita, formulario mínimo.
+// ---------------------------------------------------------------------
+function ManualScreen({ form, onChange, onSubmit, saving, error, onCancel }) {
+  return (
+    <>
+      <form className="gan-form" onSubmit={onSubmit}>
+        <FormField label="Nombre del predio" required>
+          <input value={form.nombrePredio} onChange={(event) => onChange('nombrePredio', event.target.value)} required />
+        </FormField>
+        <FormField label="Departamento" required>
+          <input value={form.departamento} onChange={(event) => onChange('departamento', event.target.value)} required />
+        </FormField>
+        <FormField label="Municipio" required>
+          <input value={form.municipio} onChange={(event) => onChange('municipio', event.target.value)} required />
+        </FormField>
+        <FormField label="Vereda">
+          <input value={form.vereda} onChange={(event) => onChange('vereda', event.target.value)} />
+        </FormField>
+        <FormField label="Área que manejas/declaras (ha)">
+          <input
+            type="number"
+            step="0.01"
+            value={form.areaDeclaradaHa}
+            onChange={(event) => onChange('areaDeclaradaHa', event.target.value)}
+          />
+        </FormField>
+        <FormField label="Observaciones">
+          <textarea value={form.observaciones} onChange={(event) => onChange('observaciones', event.target.value)} />
+        </FormField>
+
+        <button className="gan-submit" type="submit" disabled={saving}>
+          {saving ? 'Guardando...' : 'Guardar predio'}
+        </button>
+      </form>
+
+      <StatusMessage type="error">{error}</StatusMessage>
+
+      <button type="button" className="gan-back-inline" onClick={onCancel} disabled={saving}>
+        Cancelar y volver a la búsqueda
+      </button>
+    </>
   );
 }
