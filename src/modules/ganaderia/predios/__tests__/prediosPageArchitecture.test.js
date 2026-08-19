@@ -325,3 +325,67 @@ test('handleSearchSubmit: solo guarda candidateId/predio en state -- nunca llama
   assert.match(fn, /setCandidateId\(data\.candidateId\)/);
   assert.match(fn, /setPredio\(data\.predio\)/);
 });
+
+// ---------------------------------------------------------------------
+// SPRINT-3C4.1 §9-§12: "Mi ubicación" -- getCurrentPosition puntual solo
+// bajo acción explícita, sin auto-búsqueda, sin tracking continuo.
+// ---------------------------------------------------------------------
+
+test('handleUseMyLocation: nunca se llama al montar -- no existe un useEffect que la invoque', () => {
+  assert.doesNotMatch(codeOnly, /useEffect\(\(\) => \{\s*handleUseMyLocation/);
+});
+
+test('handleUseMyLocation: usa exclusivamente getCurrentPosition -- nunca watchPosition (sin tracking continuo)', () => {
+  const fn = codeOnly.match(/function handleUseMyLocation\(\)\s*\{[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(fn, /navigator\.geolocation\.getCurrentPosition\(/);
+  assert.doesNotMatch(codeOnly, /watchPosition/);
+});
+
+test('handleUseMyLocation: si navigator.geolocation no existe, cae a geoStatus "unsupported" sin lanzar', () => {
+  const fn = codeOnly.match(/function handleUseMyLocation\(\)\s*\{[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(fn, /!navigator\.geolocation/);
+  assert.match(fn, /setGeoStatus\('unsupported'\)/);
+});
+
+test('handleUseMyLocation: al obtener posición, precarga lat/lng en state -- nunca dispara la búsqueda automáticamente', () => {
+  const fn = codeOnly.match(/function handleUseMyLocation\(\)\s*\{[\s\S]*?\n  \}/)?.[0] ?? '';
+  const successCallback = fn.match(/\(position\) => \{[\s\S]*?\n      \},/)?.[0] ?? '';
+  assert.match(successCallback, /setLat\(String\(position\.coords\.latitude\)\)/);
+  assert.match(successCallback, /setLng\(String\(position\.coords\.longitude\)\)/);
+  assert.match(successCallback, /setGeoStatus\('success'\)/);
+  assert.doesNotMatch(successCallback, /handleSearchSubmit/);
+  assert.doesNotMatch(successCallback, /onSubmit/);
+  assert.doesNotMatch(successCallback, /postGanaderiaPredios/);
+});
+
+test('handleUseMyLocation: distingue permiso denegado / timeout / no disponible sin exponer el código técnico del navegador', () => {
+  const fn = codeOnly.match(/function handleUseMyLocation\(\)\s*\{[\s\S]*?\n  \}/)?.[0] ?? '';
+  const errorCallback = fn.match(/\(error\) => \{[\s\S]*?\n      \},/)?.[0] ?? '';
+  assert.match(errorCallback, /error\.code === 1/);
+  assert.match(errorCallback, /setGeoStatus\('denied'\)/);
+  assert.match(errorCallback, /error\.code === 3/);
+  assert.match(errorCallback, /setGeoStatus\('timeout'\)/);
+  assert.match(errorCallback, /setGeoStatus\('unavailable'\)/);
+});
+
+test('GEO_MESSAGES: copy amigable exacto para cada estado, sin códigos técnicos GeolocationPositionError ni stack traces', () => {
+  assert.doesNotMatch(codeOnly, /GeolocationPositionError/);
+  assert.match(source, /locating: 'Obteniendo tu ubicación\.\.\.'/);
+  assert.match(source, /success: 'Ubicación encontrada\. Revisa las coordenadas y pulsa Buscar predio\.'/);
+  assert.match(source, /denied: 'No fue posible acceder a tu ubicación\. Verifica los permisos del navegador\.'/);
+  assert.match(source, /unavailable: 'No fue posible determinar tu ubicación en este momento\.'/);
+});
+
+test('SearchScreen: agrega el botón "Mi ubicación" sin eliminar las opciones "Por coordenadas" / "Por código predial"', () => {
+  const fn = source.match(/function SearchScreen\([\s\S]*$/)?.[0] ?? '';
+  assert.match(fn, /Por coordenadas/);
+  assert.match(fn, /Por código predial/);
+  assert.match(fn, /Mi ubicación/);
+  assert.match(fn, /onClick=\{onUseMyLocation\}/);
+});
+
+test('SearchScreen: "Buscar predio" sigue siendo un submit explícito -- la búsqueda nunca depende de geoStatus', () => {
+  const fn = source.match(/function SearchScreen\([\s\S]*$/)?.[0] ?? '';
+  assert.doesNotMatch(fn, /geoStatus[\s\S]{0,40}onSubmit\(/);
+  assert.match(fn, /\{searching \? 'Buscando\.\.\.' : 'Buscar predio'\}/);
+});

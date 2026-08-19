@@ -39,6 +39,17 @@ const SEARCH_OUTCOME_MESSAGES = {
   error: GENERIC_SEARCH_ERROR,
 };
 
+// SPRINT-3C4.1 §10: copy amigable para cada desenlace de geolocalización --
+// nunca códigos técnicos GeolocationPositionError ni detalles internos.
+const GEO_MESSAGES = {
+  locating: 'Obteniendo tu ubicación...',
+  success: 'Ubicación encontrada. Revisa las coordenadas y pulsa Buscar predio.',
+  denied: 'No fue posible acceder a tu ubicación. Verifica los permisos del navegador.',
+  unavailable: 'No fue posible determinar tu ubicación en este momento.',
+  timeout: 'La solicitud de ubicación tardó demasiado. Intenta nuevamente.',
+  unsupported: 'Tu navegador o dispositivo no permite obtener tu ubicación.',
+};
+
 // SPRINT-3C3.2 §11 (protección backend ya existente, ver reservePredioCandidate
 // en prediosCandidateStore.js) -- copy amigable para cada código de error
 // real del POST /api/ganaderia/predios en modo catastrox.
@@ -159,6 +170,11 @@ export default function PrediosPage() {
   const [codigo, setCodigo] = useState('');
   const [searchStatus, setSearchStatus] = useState('idle'); // idle | searching | not_found | ambiguous | validation | rate_limited | error
 
+  // ---- "Mi ubicación" (§9-§12 sprint 3C4.1) ----
+  // idle | locating | success | denied | unavailable | timeout | unsupported
+  const [geoStatus, setGeoStatus] = useState('idle');
+  const [geoAccuracy, setGeoAccuracy] = useState(null);
+
   // ---- resultado / verificación / edición (§3, §5, §7) ----
   const [candidateId, setCandidateId] = useState(null);
   const [predio, setPredio] = useState(null);
@@ -234,6 +250,40 @@ export default function PrediosPage() {
     } catch {
       setSearchStatus('error');
     }
+  }
+
+  // ---------------------------------------------------------------------
+  // §9/§12 sprint 3C4.1: "Mi ubicación" -- SOLO bajo acción explícita del
+  // usuario (nunca al montar la página), SOLO getCurrentPosition (nunca
+  // watchPosition / tracking continuo). Precarga lat/lng pero NUNCA
+  // dispara la búsqueda automáticamente -- el usuario debe pulsar
+  // "Buscar predio" para confirmar la consulta.
+  // ---------------------------------------------------------------------
+  function handleUseMyLocation() {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setGeoStatus('unsupported');
+      return;
+    }
+
+    setSearchMode('coordenadas');
+    setGeoStatus('locating');
+    setGeoAccuracy(null);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLat(String(position.coords.latitude));
+        setLng(String(position.coords.longitude));
+        setGeoAccuracy(Number.isFinite(position.coords.accuracy) ? Math.round(position.coords.accuracy) : null);
+        setGeoStatus('success');
+      },
+      (error) => {
+        // PERMISSION_DENIED=1, POSITION_UNAVAILABLE=2, TIMEOUT=3 (spec fijo).
+        if (error.code === 1) setGeoStatus('denied');
+        else if (error.code === 3) setGeoStatus('timeout');
+        else setGeoStatus('unavailable');
+      },
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 },
+    );
   }
 
   // ---------------------------------------------------------------------
@@ -396,6 +446,9 @@ export default function PrediosPage() {
             searchStatus={searchStatus}
             onSubmit={handleSearchSubmit}
             onGoManual={goToManual}
+            geoStatus={geoStatus}
+            geoAccuracy={geoAccuracy}
+            onUseMyLocation={handleUseMyLocation}
           />
         ) : null}
 
@@ -471,31 +524,47 @@ function MisPrediosSection({ loading, error, predios }) {
   );
 }
 
+// SPRINT-3C4.1 §2/§4/§6: card de dos columnas -- datos operativos a la
+// izquierda, mapa satelital ampliado a la derecha (desktop); se apilan
+// verticalmente en tablet/móvil vía CSS (ver .gan-predio-card-body en
+// styles.css). El nombre del predio es el elemento principal, y cada dato
+// va en su propia fila LABEL/valor (.gan-ficha-row) en vez de texto
+// concatenado.
 function PredioCard({ predio }) {
   return (
-    <div className="gan-breed-box gan-predio-card">
-      <strong>{displayOrDash(predio.nombrePredio)}</strong>
-      <div className="gan-ficha-row">
-        <span>Departamento</span>
-        <strong>{displayOrDash(predio.departamento)}</strong>
+    <div className="gan-predio-card">
+      <strong className="gan-predio-card-name">{displayOrDash(predio.nombrePredio)}</strong>
+      <div className="gan-predio-card-body">
+        <div className="gan-predio-data">
+          <div className="gan-ficha-row">
+            <span>Departamento</span>
+            <strong>{displayOrDash(predio.departamento)}</strong>
+          </div>
+          <div className="gan-ficha-row">
+            <span>Municipio</span>
+            <strong>{displayOrDash(predio.municipio)}</strong>
+          </div>
+          <div className="gan-ficha-row">
+            <span>Vereda</span>
+            <strong>{displayOrDash(predio.vereda)}</strong>
+          </div>
+          <div className="gan-ficha-row">
+            <span>Área declarada</span>
+            <strong>{predio.areaDeclaradaHa === null ? '—' : formatAreaHa(predio.areaDeclaradaHa)}</strong>
+          </div>
+          <div className="gan-ficha-row">
+            <span>Código predial</span>
+            <strong>{predio.codigoPredial || 'Registro manual'}</strong>
+          </div>
+        </div>
+        <div className="gan-predio-map-wrap">
+          {predio.tieneGeometria ? (
+            <GanaderiaPredioMiniMap predioId={predio.predioId} />
+          ) : (
+            <div className="gan-predio-map-empty">Mapa no disponible para este predio.</div>
+          )}
+        </div>
       </div>
-      <div className="gan-ficha-row">
-        <span>Municipio</span>
-        <strong>{displayOrDash(predio.municipio)}</strong>
-      </div>
-      <div className="gan-ficha-row">
-        <span>Vereda</span>
-        <strong>{displayOrDash(predio.vereda)}</strong>
-      </div>
-      <div className="gan-ficha-row">
-        <span>Área declarada</span>
-        <strong>{predio.areaDeclaradaHa === null ? '—' : formatAreaHa(predio.areaDeclaradaHa)}</strong>
-      </div>
-      <div className="gan-ficha-row">
-        <span>Código predial</span>
-        <strong>{predio.codigoPredial || 'Registro manual'}</strong>
-      </div>
-      {predio.tieneGeometria ? <GanaderiaPredioMiniMap predioId={predio.predioId} /> : null}
     </div>
   );
 }
@@ -516,8 +585,12 @@ function SearchScreen({
   searchStatus,
   onSubmit,
   onGoManual,
+  geoStatus,
+  geoAccuracy,
+  onUseMyLocation,
 }) {
   const searching = searchStatus === 'searching';
+  const locating = geoStatus === 'locating';
 
   return (
     <>
@@ -528,7 +601,20 @@ function SearchScreen({
         <button type="button" className={searchMode === 'codigo' ? 'is-active' : ''} onClick={() => setSearchMode('codigo')}>
           Por código predial
         </button>
+        <button type="button" onClick={onUseMyLocation} disabled={locating}>
+          {locating ? 'Obteniendo ubicación...' : 'Mi ubicación'}
+        </button>
       </div>
+
+      {geoStatus !== 'idle' ? (
+        <StatusMessage type={geoStatus === 'success' ? 'success' : geoStatus === 'locating' ? 'info' : 'error'}>
+          {GEO_MESSAGES[geoStatus]}
+        </StatusMessage>
+      ) : null}
+
+      {geoStatus === 'success' && geoAccuracy !== null ? (
+        <p className="gan-geo-accuracy">Precisión aproximada: {geoAccuracy} m</p>
+      ) : null}
 
       <form className="gan-form" onSubmit={onSubmit}>
         {searchMode === 'coordenadas' ? (

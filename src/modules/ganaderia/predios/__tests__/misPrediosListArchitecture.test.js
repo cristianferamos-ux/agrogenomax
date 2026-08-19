@@ -101,9 +101,15 @@ test('PredioCard: área declarada null cae a "—", si no formatAreaHa (reutiliz
   assert.match(fn, /predio\.areaDeclaradaHa === null \? '—' : formatAreaHa\(predio\.areaDeclaradaHa\)/);
 });
 
-test('PredioCard: mini-mapa solo se renderiza si tieneGeometria es true', () => {
+test('PredioCard: mini-mapa (con su GET de detalle) solo se monta si tieneGeometria es true; si es false muestra un estado visual limpio sin disparar fetch', () => {
   const fn = source.match(/function PredioCard\([\s\S]*?\n\}/)?.[0] ?? '';
-  assert.match(fn, /predio\.tieneGeometria \? <GanaderiaPredioMiniMap predioId=\{predio\.predioId\} \/> : null/);
+  assert.match(fn, /predio\.tieneGeometria \? \(\s*<GanaderiaPredioMiniMap predioId=\{predio\.predioId\} \/>/);
+  // El branch "sin geometría" no debe montar GanaderiaPredioMiniMap (ese
+  // componente es el único que hace el GET de detalle) -- solo un div de
+  // estado vacío, sin fetch propio.
+  const noGeometryBranch = fn.match(/\) : \(([\s\S]*?)\)\}/)?.[1] ?? '';
+  assert.doesNotMatch(noGeometryBranch, /GanaderiaPredioMiniMap/);
+  assert.match(noGeometryBranch, /gan-predio-map-empty/);
 });
 
 // ---------------------------------------------------------------------
@@ -180,4 +186,48 @@ test('GanaderiaPredioMiniMap.jsx: fetch de detalle bajo /api/ganaderia/predios/:
   const miniMapCodeOnly = stripComments(miniMapSource);
   assert.match(miniMapCodeOnly, /fetch\(`\/api\/ganaderia\/predios\/\$\{predioId\}`,\s*\{\s*credentials:\s*'include'\s*\}\)/);
   assert.doesNotMatch(miniMapCodeOnly, /organizacionId/);
+});
+
+// ---------------------------------------------------------------------
+// SPRINT-3C4.1 §2/§3/§4/§7: layout de dos columnas + label/valor
+// separados + polígono sin relleno -- exclusivo de Ganadería.
+// ---------------------------------------------------------------------
+
+test('PredioCard: el nombre del predio es el elemento principal (clase dedicada gan-predio-card-name), y el cuerpo separa datos/mapa en gan-predio-data/gan-predio-map-wrap', () => {
+  const fn = source.match(/function PredioCard\([\s\S]*?\n\}/)?.[0] ?? '';
+  assert.match(fn, /className="gan-predio-card-name"/);
+  assert.match(fn, /className="gan-predio-card-body"/);
+  assert.match(fn, /className="gan-predio-data"/);
+  assert.match(fn, /className="gan-predio-map-wrap"/);
+});
+
+test('PredioCard: cada dato usa gan-ficha-row con label (span) y valor (strong) en filas separadas -- nunca texto concatenado', () => {
+  const fn = source.match(/function PredioCard\([\s\S]*?\n\}/)?.[0] ?? '';
+  const ganFichaRowCount = (fn.match(/className="gan-ficha-row"/g) || []).length;
+  assert.equal(ganFichaRowCount, 5, 'departamento, municipio, vereda, área declarada y código predial deben usar gan-ficha-row');
+});
+
+test('styles.css: .gan-predio-card ocupa el ancho completo de la grilla (grid-column: 1 / -1), no 1/3 columna', () => {
+  const stylesSource = fs.readFileSync(path.resolve(PREDIOS_DIR, '../../..', 'styles.css'), 'utf8');
+  const rule = stylesSource.match(/\.gan-predio-card\s*\{[\s\S]*?\n\}/)?.[0] ?? '';
+  assert.match(rule, /grid-column:\s*1\s*\/\s*-1/);
+});
+
+test('styles.css: .gan-predio-card-body usa dos columnas en desktop y colapsa a una en la media query de 900px (tablet/móvil)', () => {
+  const stylesSource = fs.readFileSync(path.resolve(PREDIOS_DIR, '../../..', 'styles.css'), 'utf8');
+  const desktopRule = stylesSource.match(/\.gan-predio-card-body\s*\{[\s\S]*?\n\}/)?.[0] ?? '';
+  assert.match(desktopRule, /grid-template-columns:\s*minmax/);
+  const afterBreakpoint = stylesSource.split('@media (max-width: 900px)')[1] ?? '';
+  assert.match(afterBreakpoint.slice(0, 4000), /\.gan-predio-card-body\s*\{\s*grid-template-columns:\s*1fr;/);
+});
+
+test('GanaderiaPredioMiniMap.jsx: el polígono no tiene relleno (fillOpacity: 0) -- solo contorno verde AGX', () => {
+  assert.match(miniMapSource, /fillOpacity:\s*0\b/);
+  assert.doesNotMatch(miniMapSource, /fillOpacity:\s*0\.\d/);
+});
+
+test('GanaderiaPredioMiniMap.jsx: nunca importa CatastroXMap ni nada de src/modules/catastrox -- componente propio de Ganadería (solo puede documentarlo en comentarios)', () => {
+  const miniMapCodeOnly = stripComments(miniMapSource);
+  assert.doesNotMatch(miniMapCodeOnly, /CatastroXMap/);
+  assert.doesNotMatch(miniMapCodeOnly, /from ['"].*catastrox/i);
 });
