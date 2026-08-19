@@ -5048,6 +5048,47 @@ header nav > div[role='navigation']::-webkit-scrollbar {
   padding: 1rem;
 }
 
+/* SPRINT-3C4: "Mis Predios Registrados" -- grilla responsiva de cards
+   (gan-card-grid ya colapsa a 1 columna bajo 900px), cada card ocupa una
+   sola celda en vez del ancho completo que usa gan-breed-box por defecto. */
+.gan-predios-grid {
+  margin-top: 1rem;
+}
+
+.gan-predio-card {
+  grid-column: auto;
+  display: grid;
+  gap: 0.5rem;
+}
+
+/* Código predial es una cadena numérica larga sin espacios (30 dígitos) --
+   sin esto, en viewports angostos fuerza un ancho mínimo mayor al
+   viewport y produce overflow horizontal de toda la página. */
+.gan-predio-card strong {
+  overflow-wrap: anywhere;
+}
+
+.gan-predio-minimap {
+  height: 140px;
+  border-radius: 0.6rem;
+  overflow: hidden;
+  margin-top: 0.4rem;
+}
+
+.gan-predio-minimap-canvas {
+  height: 100%;
+  width: 100%;
+}
+
+.gan-predio-minimap-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #a7b3c2;
+  font-size: 0.8rem;
+}
+
 .gan-segment {
   display: inline-flex;
   gap: 0.4rem;

@@ -15,16 +15,19 @@
 // La identidad del cliente/organización viene exclusivamente de la
 // sesión autenticada server-side -- este formulario NUNCA pide código
 // interno, propietario, documento/NIT, teléfono ni correo.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { fetchCsrfToken } from '../auth/GanaderiaAuthContext.jsx';
 import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
 import CatastroXMap from '../../catastrox/components/CatastroXMap.jsx';
+import GanaderiaPredioMiniMap from './GanaderiaPredioMiniMap.jsx';
 import '../../catastrox/styles/catastrox.css';
 
 const GENERIC_SEARCH_ERROR = 'No fue posible consultar el predio en este momento. Intenta nuevamente.';
 const GENERIC_SAVE_ERROR = 'No fue posible registrar el predio en este momento. Intenta nuevamente.';
 const SUCCESS_MESSAGE = 'Predio registrado correctamente.';
+const LIST_ERROR_MESSAGE = 'No fue posible cargar tus predios registrados. Intenta nuevamente.';
+const LIST_EMPTY_MESSAGE = 'Aún no tienes predios registrados.';
 
 // SPRINT-3C3.2 §9: copy de usuario para cada desenlace de búsqueda --
 // nunca detalles técnicos (backend/túnel/API/stack).
@@ -83,6 +86,19 @@ function buildMapPredio(predio) {
   };
 }
 
+// §2 del sprint 3C4: GET simple, sin CSRF (no es mutación) --
+// credentials:'include' para que la sesión viaje igual que en los POST.
+async function fetchRegisteredPrediosList() {
+  const response = await fetch('/api/ganaderia/predios', { credentials: 'include' });
+  if (!response.ok) throw new Error('LIST_FAILED');
+  const data = await response.json();
+  return Array.isArray(data?.predios) ? data.predios : [];
+}
+
+function displayOrDash(value) {
+  return value === null || value === undefined || value === '' ? '—' : value;
+}
+
 async function postGanaderiaPredios(path, body) {
   const csrfToken = await fetchCsrfToken();
   const response = await fetch(path, {
@@ -111,6 +127,28 @@ function resolveSearchOutcomeKind(status) {
 }
 
 export default function PrediosPage() {
+  // ---- Mis Predios Registrados (§2/§3/§6/§7 del sprint 3C4) ----
+  const [registeredPredios, setRegisteredPredios] = useState([]);
+  const [prediosListLoading, setPrediosListLoading] = useState(true);
+  const [prediosListError, setPrediosListError] = useState('');
+
+  async function reloadRegisteredPredios() {
+    setPrediosListLoading(true);
+    setPrediosListError('');
+    try {
+      const predios = await fetchRegisteredPrediosList();
+      setRegisteredPredios(predios);
+    } catch {
+      setPrediosListError(LIST_ERROR_MESSAGE);
+    } finally {
+      setPrediosListLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    reloadRegisteredPredios();
+  }, []);
+
   // 'search' | 'manual' | 'result' | 'saved'
   const [screen, setScreen] = useState('search');
 
@@ -256,6 +294,9 @@ export default function PrediosPage() {
       if (ok) {
         setSaving(false);
         setScreen('saved');
+        // §6: refetch de la fuente real (GET) -- nunca insertar una copia
+        // optimista del candidate/body enviado.
+        reloadRegisteredPredios();
         return;
       }
 
@@ -299,6 +340,9 @@ export default function PrediosPage() {
       if (ok) {
         setManualSaving(false);
         setScreen('saved');
+        // §6: refetch de la fuente real (GET) -- nunca insertar una copia
+        // optimista del body enviado.
+        reloadRegisteredPredios();
         return;
       }
 
@@ -317,7 +361,20 @@ export default function PrediosPage() {
       <div className="gan-panel">
         <GanaderiaBackLink />
         <div className="gan-section-heading">
-          <span className="gan-eyebrow">Registro de Predio</span>
+          <span className="gan-eyebrow">Predios</span>
+          <h2>Mis predios registrados</h2>
+        </div>
+
+        <MisPrediosSection
+          loading={prediosListLoading}
+          error={prediosListError}
+          predios={registeredPredios}
+        />
+      </div>
+
+      <div className="gan-panel">
+        <div className="gan-section-heading">
+          <span className="gan-eyebrow">Registrar nuevo predio</span>
           <h2>
             {screen === 'search' && 'Buscar predio en CatastroX'}
             {screen === 'manual' && 'Registrar predio manualmente'}
@@ -382,6 +439,63 @@ export default function PrediosPage() {
           </div>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------
+// §1/§3/§7 sprint 3C4: "Mis Predios Registrados" -- lista los predios ya
+// guardados en Postgres-AGX-Business (GET /api/ganaderia/predios). Cada
+// card usa EXCLUSIVAMENTE campos que el GET realmente entrega -- nunca
+// predioId, organizacionId ni geometry cruda como texto.
+// ---------------------------------------------------------------------
+function MisPrediosSection({ loading, error, predios }) {
+  if (loading) {
+    return <StatusMessage>Cargando tus predios registrados...</StatusMessage>;
+  }
+
+  if (error) {
+    return <StatusMessage type="error">{error}</StatusMessage>;
+  }
+
+  if (predios.length === 0) {
+    return <p className="gan-empty-text">{LIST_EMPTY_MESSAGE}</p>;
+  }
+
+  return (
+    <div className="gan-card-grid gan-predios-grid">
+      {predios.map((item) => (
+        <PredioCard key={item.predioId} predio={item} />
+      ))}
+    </div>
+  );
+}
+
+function PredioCard({ predio }) {
+  return (
+    <div className="gan-breed-box gan-predio-card">
+      <strong>{displayOrDash(predio.nombrePredio)}</strong>
+      <div className="gan-ficha-row">
+        <span>Departamento</span>
+        <strong>{displayOrDash(predio.departamento)}</strong>
+      </div>
+      <div className="gan-ficha-row">
+        <span>Municipio</span>
+        <strong>{displayOrDash(predio.municipio)}</strong>
+      </div>
+      <div className="gan-ficha-row">
+        <span>Vereda</span>
+        <strong>{displayOrDash(predio.vereda)}</strong>
+      </div>
+      <div className="gan-ficha-row">
+        <span>Área declarada</span>
+        <strong>{predio.areaDeclaradaHa === null ? '—' : formatAreaHa(predio.areaDeclaradaHa)}</strong>
+      </div>
+      <div className="gan-ficha-row">
+        <span>Código predial</span>
+        <strong>{predio.codigoPredial || 'Registro manual'}</strong>
+      </div>
+      {predio.tieneGeometria ? <GanaderiaPredioMiniMap predioId={predio.predioId} /> : null}
     </div>
   );
 }
