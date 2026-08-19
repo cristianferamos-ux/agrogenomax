@@ -11,7 +11,12 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PREDIOS_DIR = path.resolve(__dirname, '..');
 
-const source = fs.readFileSync(path.join(PREDIOS_DIR, 'PrediosPage.jsx'), 'utf8');
+// Normaliza CRLF->LF: en checkouts Windows con core.autocrlf=true el
+// archivo se materializa con \r\n, lo que rompe las regex de este
+// archivo que anclan en \n literal (p.ej. el split de los branches
+// editing/verificación más abajo). El contenido lógico -- lo que estas
+// pruebas verifican -- es idéntico en ambos casos.
+const source = fs.readFileSync(path.join(PREDIOS_DIR, 'PrediosPage.jsx'), 'utf8').replace(/\r\n/g, '\n');
 
 function stripComments(text) {
   return text.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
