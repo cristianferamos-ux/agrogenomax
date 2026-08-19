@@ -24,7 +24,10 @@ import { GeoJSON, MapContainer, TileLayer } from 'react-leaflet';
 const SATELLITE_TILE_URL =
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
 
-const POLYGON_STYLE = { color: '#9cff1a', weight: 2, fillColor: '#00d8ff', fillOpacity: 0.2 };
+// SPRINT-3C4.1 §7: solo contorno -- sin relleno, para no oscurecer
+// pasturas/caminos/bosques/construcciones sobre la imagen satelital.
+// Estilo exclusivo de Ganadería: CatastroXMap.jsx no se modifica.
+const POLYGON_STYLE = { color: '#9cff1a', weight: 3, fillOpacity: 0 };
 
 function extractRingLatLngs(geometry) {
   const ring =
