@@ -55,6 +55,29 @@ export function previewPotreroGps(predioId, puntos) {
   return postJson(`/api/ganaderia/predios/${predioId}/potreros/preview-gps`, { puntos });
 }
 
+// SPRINT-3D5: el archivo (File/Blob del <input type="file">) viaja crudo en
+// el body -- NUNCA se lee con FileReader ni se convierte a geometry en el
+// cliente, eso es exclusivamente responsabilidad del backend
+// (potreroKmlImport.js). El nombre del archivo va codificado en un header
+// (los headers HTTP no aceptan con seguridad acentos/espacios sin escapar)
+// -- el backend solo usa la extensión final (.kml/.kmz), que
+// encodeURIComponent nunca altera.
+export async function previewPotreroFile(predioId, file) {
+  const csrfToken = await fetchCsrfToken();
+  const response = await fetch(`/api/ganaderia/predios/${predioId}/potreros/preview-file`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'X-CSRF-Token': csrfToken,
+      'X-Potrero-File-Name': encodeURIComponent(file.name || ''),
+    },
+    body: file,
+  });
+  const data = await parseJson(response);
+  return { ok: response.ok, status: response.status, data };
+}
+
 // body: { candidateId, nombre, capacidadAnimales?, observaciones? } --
 // NUNCA geometry/areaHa/metodoDelimitacion/organizacionId/predioId (esos
 // tres primeros vienen exclusivamente del candidate ya validado

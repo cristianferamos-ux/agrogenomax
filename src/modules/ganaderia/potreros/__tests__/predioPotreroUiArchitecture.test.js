@@ -120,15 +120,98 @@ test('J: PotreroRegistrationPanel.jsx nunca usa watchPosition (sin tracking cont
 });
 
 // ---------------------------------------------------------------------
-// K: KML/KMZ deshabilitado/"Próximamente" -- nunca conectado a nada falso.
+// K/Z: SPRINT-3D5 -- KML/KMZ habilitado. El parseo/seguridad (togeojson/
+// xmldom/jszip) vive EXCLUSIVAMENTE en el backend
+// (server/services/ganaderia/potreroKmlImport.js); el frontend nunca
+// convierte geometry por su cuenta (ni FileReader, ni las libs server-side).
 // ---------------------------------------------------------------------
 
-test('K: la opción KML/KMZ se muestra deshabilitada con copy "Próximamente" -- ningún parser/handler frontend la conecta', () => {
-  const methodGrid = registrationSource.match(/<div className="gan-potrero-method-grid"[\s\S]*?<\/div>\s*\n\n\s*<button type="button" className="gan-submit"/)?.[0] ?? '';
-  assert.match(methodGrid, /KML\/KMZ · Próximamente/);
-  const kmlButton = methodGrid.match(/<button type="button" className="gan-potrero-method-card" disabled>\s*KML\/KMZ · Próximamente\s*<\/button>/);
-  assert.ok(kmlButton, 'el botón KML/KMZ debe estar disabled');
-  assert.doesNotMatch(registrationCode, /togeojson|xmldom|jszip/i);
+test('K: la opción KML/KMZ está habilitada -- ya no muestra "Próximamente" ni queda disabled', () => {
+  const methodGrid = registrationSource.match(/<div className="gan-potrero-method-grid"[\s\S]*?<\/div>\s*\n\n\s*<button\s+type="button"\s+className="gan-submit"/)?.[0] ?? '';
+  assert.doesNotMatch(methodGrid, /Próximamente/);
+  assert.match(methodGrid, /onClick=\{\(\) => setMetodo\('kml'\)\}[\s\S]*?KML\/KMZ/);
+  assert.doesNotMatch(methodGrid, /<button[^>]*className="gan-potrero-method-card"[^>]*disabled/);
+});
+
+test('Z1: el frontend nunca parsea/convierte geometry por su cuenta -- ni FileReader ni las libs de parseo server-side (togeojson/xmldom/jszip)', () => {
+  for (const code of [registrationCode, apiCode]) {
+    assert.doesNotMatch(code, /togeojson|xmldom|jszip|FileReader/i);
+  }
+});
+
+test('Z2: el input file solo acepta .kml/.kmz', () => {
+  assert.match(registrationCode, /<input[^>]*type="file"[^>]*accept="\.kml,\.kmz"/);
+});
+
+test('Z3: previewPotreroFile (ganaderiaPotrerosApi.js) llama a POST .../potreros/preview-file bajo /api/ganaderia/predios/:predioId/potreros, y el archivo viaja como body crudo (nunca JSON.stringify del archivo)', () => {
+  assert.match(
+    apiCode,
+    /export async function previewPotreroFile\(predioId, file\) \{[\s\S]*?\/api\/ganaderia\/predios\/\$\{predioId\}\/potreros\/preview-file[\s\S]*?\n\}/,
+  );
+  const fn = apiCode.match(/export async function previewPotreroFile\(predioId, file\) \{[\s\S]*?\n\}/)?.[0] ?? '';
+  assert.match(fn, /body:\s*file/);
+  assert.doesNotMatch(fn, /JSON\.stringify\(file\)/);
+});
+
+test('Z4: la subida usa previewPotreroFile (handleFileChange), y candidateId proviene EXCLUSIVAMENTE de la respuesta del backend -- nunca generado en el cliente', () => {
+  const fn = registrationCode.match(/async function handleFileChange\(event\)\s*\{[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(fn, /previewPotreroFile\(predioId, file\)/);
+  assert.doesNotMatch(registrationCode, /randomUUID|crypto\.random|Math\.random\(\).*candidateId/i);
+  const applyFn = registrationCode.match(/function applyFileCandidate\(candidate\)\s*\{[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(applyFn, /candidateId:\s*candidate\.candidateId/);
+});
+
+test('Z5: múltiples candidates del mismo archivo se muestran SEPARADOS (lista), nunca se registran todos automáticamente', () => {
+  const fn = registrationCode.match(/async function handleFileChange\(event\)\s*\{[\s\S]*?\n  \}/)?.[0] ?? '';
+  // Un único candidate salta directo a preview; con más de uno, se guardan
+  // en fileCandidates para que el usuario elija -- nunca un bucle que
+  // llame applyFileCandidate/createPotrero por cada uno automáticamente.
+  assert.match(fn, /candidates\.length === 1/);
+  assert.match(fn, /setFileCandidates\(candidates\)/);
+  assert.doesNotMatch(fn, /candidates\.forEach\(.*applyFileCandidate/);
+  assert.doesNotMatch(fn, /candidates\.forEach\(.*createPotrero/);
+  assert.match(registrationCode, /fileCandidates\.map\(\(candidate, index\) =>/);
+});
+
+test('Z6: la selección de un candidate KML reutiliza el mismo shape de previewData que coordenadas/gps -- el paso preview y handleCreate no tienen lógica separada por método', () => {
+  const applyFn = registrationCode.match(/function applyFileCandidate\(candidate\)\s*\{[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(applyFn, /setPreviewData\(\{\s*candidateId:\s*candidate\.candidateId,\s*areaHa:\s*candidate\.areaHa,\s*geometry:\s*candidate\.geometry,\s*metodoDelimitacion:\s*candidate\.metodoDelimitacion,\s*\}\);/);
+  assert.match(applyFn, /setStep\('preview'\)/);
+});
+
+test('Z7: previewPotreroFile siempre recibe predioId de la prop del componente (nunca un id distinto/seleccionable) -- misma garantía de aislamiento entre predios que coordenadas/gps', () => {
+  const fn = registrationCode.match(/async function handleFileChange\(event\)\s*\{[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(fn, /previewPotreroFile\(predioId, file\)/);
+  assert.doesNotMatch(registrationCode, /previewPotreroFile\([^p][\s\S]*?\)/);
+});
+
+// ---------------------------------------------------------------------
+// SPRINT-3D5-CIERRE-SEMANTICO: geometrías no poligonales nunca se
+// procesan en silencio (§1); KMZ con >1 .kml es ambiguo y se rechaza con
+// copy propio (§2).
+// ---------------------------------------------------------------------
+
+test('G: si preview-file devuelve elementos ignorados, el frontend muestra un aviso amigable con las cantidades -- nunca en silencio', () => {
+  assert.match(registrationCode, /function describeIgnoredElements\(ignorados\)/);
+  const fn = registrationCode.match(/function describeIgnoredElements\(ignorados\)\s*\{[\s\S]*?\n\}/)?.[0] ?? '';
+  assert.match(fn, /ignorados\.points/);
+  assert.match(fn, /ignorados\.lineStrings/);
+  assert.match(fn, /ignorados\.multiLineStrings/);
+
+  const handleFn = registrationCode.match(/async function handleFileChange\(event\)\s*\{[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(handleFn, /setFileIgnoredNotice\(describeIgnoredElements\(data\?\.ignorados\)/);
+
+  // El aviso debe seguir visible tanto en la lista de candidates como en
+  // el paso preview (el caso de 1 solo candidate salta directo a preview).
+  assert.match(registrationCode, /fileIgnoredNotice \? <StatusMessage type="info">\{fileIgnoredNotice\}<\/StatusMessage> : null/);
+  assert.match(registrationCode, /metodo === 'kml' && fileIgnoredNotice/);
+});
+
+test('H: KMZ con varios .kml (KMZ_MULTIPLE_KML_FILES) muestra copy amigable propio, distinto del resto de errores de archivo', () => {
+  assert.match(
+    registrationSource,
+    /KMZ_MULTIPLE_KML_FILES:\s*\n?\s*'El archivo KMZ contiene varios archivos KML\. Exporta el potrero en un KMZ con un solo archivo KML principal\.'/,
+  );
 });
 
 // ---------------------------------------------------------------------

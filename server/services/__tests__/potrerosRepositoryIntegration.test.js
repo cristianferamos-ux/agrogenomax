@@ -116,6 +116,14 @@ describe('SPRINT-3D3: legacy y CatastroX quedan intactos (sin DB)', () => {
     assert.ok(fs.existsSync(path.join(repoRoot, 'server', 'routes', 'catastrox.js')));
     assert.ok(fs.existsSync(path.join(repoRoot, 'src', 'modules', 'catastrox')));
   });
+
+  test('SPRINT-3D5: potreroKmlImport.js (parser KML/KMZ) no importa server/db.js ni nada de CatastroX', () => {
+    const importPath = path.join(repoRoot, 'server', 'services', 'ganaderia', 'potreroKmlImport.js');
+    const content = fs.readFileSync(importPath, 'utf8');
+    assert.doesNotMatch(content, /from ['"].*\/db\.js['"]/);
+    assert.doesNotMatch(content, /catastrox/i);
+    assert.doesNotMatch(content, /DATABASE_URL/);
+  });
 });
 
 describe('SPRINT-3D3: potrerosRepository contra Postgres-AGX-Business real', { skip: !dbAvailable }, () => {
@@ -342,5 +350,87 @@ describe('SPRINT-3D3: potrerosRepository contra Postgres-AGX-Business real', { s
         }),
       /Polygon|geometry type/i,
     );
+  });
+
+  // ---------------------------------------------------------------------
+  // SPRINT-3D5-POTRERO-KML-KMZ: computePotreroPreviewsBatch -- misma
+  // validación espacial exacta de computePotreroPreview, aplicada a varios
+  // polígonos de un mismo archivo KML/KMZ en una única transacción. Nunca
+  // ST_Union: cada resultado se evalúa y devuelve por separado, en el
+  // mismo orden que la lista de entrada.
+  // ---------------------------------------------------------------------
+
+  test('SPRINT-3D5: computePotreroPreviewsBatch evalúa cada polígono por separado (válido, autointersectante, fuera del predio, borde compartido) preservando el orden', async () => {
+    const org = randomOrgId();
+    const predioId = await seedPredio(org, { nombre: 'Predio Sprint3D3 KMLBATCH' });
+
+    const results = await repo.computePotreroPreviewsBatch(org, predioId, [
+      POTRERO_INSIDE_WKT,
+      POTRERO_SELF_INTERSECTING_WKT,
+      POTRERO_OUTSIDE_WKT,
+      POTRERO_SHARED_EDGE_WKT,
+    ]);
+
+    assert.equal(results.length, 4);
+    assert.equal(results[0].ok, true);
+    assert.ok(results[0].areaHa > 0);
+    assert.equal(results[1].ok, false);
+    assert.equal(results[1].code, 'INVALID_POTRERO_GEOMETRY');
+    assert.equal(results[2].ok, false);
+    assert.equal(results[2].code, 'POTRERO_OUTSIDE_PREDIO');
+    assert.equal(results[3].ok, true);
+    assert.ok(results[3].areaHa > 0);
+  });
+
+  test('SPRINT-3D5: computePotreroPreviewsBatch con predio sin geometry -> PREDIO_WITHOUT_GEOMETRY (falla el archivo completo, no por polígono)', async () => {
+    const org = randomOrgId();
+    const predioId = await seedPredio(org, { nombre: 'Predio Sprint3D3 KMLBATCH-SINGEO', wkt: null });
+
+    await assert.rejects(
+      () => repo.computePotreroPreviewsBatch(org, predioId, [POTRERO_INSIDE_WKT]),
+      (error) => error.status === 422 && error.code === 'PREDIO_WITHOUT_GEOMETRY',
+    );
+  });
+
+  test('SPRINT-3D5: computePotreroPreviewsBatch con predio de OTRA organización -> PREDIO_NOT_FOUND', async () => {
+    const orgA = randomOrgId();
+    const orgB = randomOrgId();
+    const predioA = await seedPredio(orgA, { nombre: 'Predio Sprint3D3 KMLBATCH-XORG' });
+
+    await assert.rejects(
+      () => repo.computePotreroPreviewsBatch(orgB, predioA, [POTRERO_INSIDE_WKT]),
+      (error) => error.status === 404 && error.code === 'PREDIO_NOT_FOUND',
+    );
+  });
+
+  test('SPRINT-3D5: candidatos de un preview-file quedan ligados a organizacionId/cuentaId/predioId igual que coordenadas/gps (mismo candidate store, sin mecanismo paralelo)', async () => {
+    const { createPotreroCandidate, reservePotreroCandidate, __resetPotrerosCandidateStoreForTests } = await import(
+      '../ganaderia/potrerosCandidateStore.js'
+    );
+    __resetPotrerosCandidateStoreForTests();
+
+    const org = randomOrgId();
+    const cuentaId = randomOrgId();
+    const predioA = await seedPredio(org, { nombre: 'Predio Sprint3D3 KMLBATCH-CAND-A' });
+    const predioB = await seedPredio(org, { nombre: 'Predio Sprint3D3 KMLBATCH-CAND-B' });
+
+    const [previewA] = await repo.computePotreroPreviewsBatch(org, predioA, [POTRERO_INSIDE_WKT]);
+    const candidateId = createPotreroCandidate({
+      organizacionId: org,
+      cuentaId,
+      predioId: predioA,
+      geometry: previewA.geometry,
+      areaHa: previewA.areaHa,
+      metodoDelimitacion: 'kml',
+    });
+
+    // Mismo candidate, mismo dueño, pero confirmando bajo OTRO predio de la
+    // misma organización -> scope_mismatch (nunca se cuela en predioB).
+    const crossPredio = reservePotreroCandidate({ candidateId, organizacionId: org, cuentaId, predioId: predioB });
+    assert.equal(crossPredio.status, 'scope_mismatch');
+
+    const ok = reservePotreroCandidate({ candidateId, organizacionId: org, cuentaId, predioId: predioA });
+    assert.equal(ok.status, 'ok');
+    assert.equal(ok.metodoDelimitacion, 'kml');
   });
 });
