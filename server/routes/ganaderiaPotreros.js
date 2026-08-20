@@ -17,7 +17,7 @@
 // Router({ mergeParams: true }) es OBLIGATORIO aquí -- sin esto,
 // req.params.predioId (definido en el path de montaje en server/index.js)
 // no sería visible dentro de los handlers de este router.
-import { Router } from 'express';
+import { Router, raw } from 'express';
 import {
   createRequireGanaderiaSession,
   createRequireGanaderiaCsrf,
@@ -28,6 +28,7 @@ import {
   getPotreroDetail,
   buildPolygonWktFromPuntos,
   computePotreroPreview,
+  computePotreroPreviewsBatch,
   createPotreroFromCandidate,
 } from '../services/ganaderia/potrerosRepository.js';
 import {
@@ -36,6 +37,7 @@ import {
   commitPotreroCandidate,
   releasePotreroCandidate,
 } from '../services/ganaderia/potrerosCandidateStore.js';
+import { parseKmlOrKmzUpload, FILE_MAX_BYTES } from '../services/ganaderia/potreroKmlImport.js';
 
 const MAX_NOMBRE_LENGTH = 120;
 const MAX_OBSERVACIONES_LENGTH = 2000;
@@ -297,11 +299,112 @@ export default function createGanaderiaPotrerosRouter({ appEnv, csrfServerSecret
     }
   });
 
-  // §15: POST .../preview-file (KML/KMZ) -- DELIBERADAMENTE NO
-  // implementado en este sprint (3D3). Requiere @tmcw/togeojson +
-  // @xmldom/xmldom + jszip, ninguna instalada todavía (auditado, ver
-  // handoff). No se monta ninguna ruta para evitar una implementación
-  // parcial insegura -- queda documentado como alcance de 3D4.
+  // §15/SPRINT-3D5: POST .../preview-file (KML/KMZ). El archivo viaja como
+  // bytes crudos en el body (Content-Type: application/octet-stream),
+  // NUNCA como JSON/base64 -- por eso este router monta su propio
+  // middleware `raw()` únicamente en esta ruta (el resto del router sigue
+  // colgando de express.json() global en server/index.js, que ignora esta
+  // request porque el Content-Type no es application/json). El nombre de
+  // archivo declarado viaja en el header X-Potrero-File-Name -- se usa
+  // SOLO para decidir .kml vs .kmz (ver potreroKmlImport.js, que además
+  // verifica la firma binaria real; la extensión nunca es la única
+  // defensa, y nunca se usa para escribir a disco ni como identificador).
+  const rawKmlFileParser = raw({ type: 'application/octet-stream', limit: FILE_MAX_BYTES });
+
+  // Middleware de error de 4 argumentos: captura específicamente el
+  // PayloadTooLargeError que lanza `raw()` cuando el body excede
+  // FILE_MAX_BYTES, y lo reescribe al contrato de error semántico del
+  // sprint (§18: FILE_TOO_LARGE) en vez de dejarlo caer al errorHandler
+  // genérico (que expondría el mensaje crudo de body-parser).
+  function handleRawFileParseError(err, _req, res, next) {
+    if (!err) {
+      next();
+      return;
+    }
+    if (err.type === 'entity.too.large' || err.status === 413) {
+      res.status(413).json({
+        error: 'FILE_TOO_LARGE',
+        message: `El archivo supera el máximo permitido (${Math.round(FILE_MAX_BYTES / (1024 * 1024))} MB).`,
+      });
+      return;
+    }
+    res.status(400).json({ error: 'INVALID_KML', message: 'No fue posible leer el archivo enviado.' });
+  }
+
+  router.post('/preview-file', potrerosPreviewLimiter, rawKmlFileParser, handleRawFileParseError, async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const { predioId } = req.params;
+      if (!isPredioIdValid(predioId)) {
+        res.status(400).json({ error: 'INVALID_PREDIO_ID' });
+        return;
+      }
+
+      // Defensa en profundidad -- redundante con el límite de `raw()`
+      // arriba, pero §4 exige validar tamaño ANTES de parsear, y esto lo
+      // deja explícito en el propio handler, no solo implícito en la
+      // config del body-parser.
+      if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+        res.status(400).json({ error: 'INVALID_KML', message: 'No se recibió ningún archivo.' });
+        return;
+      }
+      if (req.body.length > FILE_MAX_BYTES) {
+        res.status(413).json({
+          error: 'FILE_TOO_LARGE',
+          message: `El archivo supera el máximo permitido (${Math.round(FILE_MAX_BYTES / (1024 * 1024))} MB).`,
+        });
+        return;
+      }
+
+      const fileNameHeader = req.get('X-Potrero-File-Name') || '';
+      const { organizacionId, cuentaId } = req.ganaderiaAuth;
+
+      const { metodoDelimitacion, polygons, ignored } = await parseKmlOrKmzUpload(req.body, { fileNameHeader });
+
+      // §8/§9: NUNCA ST_Union -- cada polígono (ya separado si venía de un
+      // MultiPolygon) se valida por separado en una única transacción.
+      const previews = await computePotreroPreviewsBatch(organizacionId, predioId, polygons.map((polygon) => polygon.wkt));
+
+      const candidates = [];
+      const invalidos = [];
+
+      previews.forEach((preview, index) => {
+        const { nombreSugerido } = polygons[index];
+        if (preview.ok) {
+          // §12: candidate store reutilizado sin cambios -- mismo TTL,
+          // mismo state machine, mismo ligamen organizacionId/cuentaId/
+          // predioId que coordenadas/gps. metodoDelimitacion es 'kml' o
+          // 'kmz' según el archivo subido.
+          const candidateId = createPotreroCandidate({
+            organizacionId,
+            cuentaId,
+            predioId,
+            geometry: preview.geometry,
+            areaHa: preview.areaHa,
+            metodoDelimitacion,
+          });
+          candidates.push({
+            candidateId,
+            nombreSugerido,
+            areaHa: preview.areaHa,
+            metodoDelimitacion,
+            geometry: preview.geometry,
+          });
+        } else {
+          invalidos.push({ index, nombreSugerido, error: preview.code });
+        }
+      });
+
+      // SPRINT-3D5-CIERRE-SEMANTICO §1: Point/LineString/MultiLineString
+      // nunca se procesan en silencio -- se reportan explícitamente al
+      // cliente (conteos, no solo un booleano) para que el frontend pueda
+      // avisar al usuario sin abortar los Polygon válidos del mismo archivo.
+      res.json({ candidates, invalidos, ignorados: ignored });
+    } catch (error) {
+      if (sendSemanticError(res, error)) return;
+      next(error);
+    }
+  });
 
   // §6: POST /api/ganaderia/predios/:predioId/potreros -- crear potrero
   // definitivo a partir de un candidate ya reservado.

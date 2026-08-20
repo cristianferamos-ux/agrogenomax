@@ -183,6 +183,62 @@ export async function computePotreroPreview(organizacionId, predioId, wkt) {
 }
 
 /**
+ * SPRINT-3D5-POTRERO-KML-KMZ: variante batch de computePotreroPreview --
+ * misma validación espacial exacta (ST_IsValid sin ST_MakeValid,
+ * ST_CoveredBy sin buffer/snap/tolerancia, ST_Area/10000), pero aplicada a
+ * VARIOS polígonos de un mismo archivo KML/KMZ dentro de UNA sola
+ * transacción (predio se busca/valida una única vez). Regla de dominio
+ * §8/§9: nunca ST_Union, nunca se aborta el archivo completo por un
+ * polígono inválido individual -- cada wkt se evalúa de forma
+ * independiente y su resultado (válido u ordenado por índice inválido con
+ * su código) se devuelve en el mismo orden que `wktList`.
+ */
+export async function computePotreroPreviewsBatch(organizacionId, predioId, wktList) {
+  assertPredioIdFormat(predioId);
+  return withOrganizacionTransaction(organizacionId, async (client) => {
+    const predioResult = await client.query(
+      'select (geometry is null) as sin_geometria from agx.predios where predio_id = $1',
+      [predioId],
+    );
+    if (predioResult.rows.length === 0) {
+      throw semanticError('PREDIO_NOT_FOUND', 404, 'El predio no existe o no pertenece a tu organización.');
+    }
+    if (predioResult.rows[0].sin_geometria) {
+      throw semanticError('PREDIO_WITHOUT_GEOMETRY', 422, 'El predio no tiene geometría registrada.');
+    }
+
+    const results = [];
+    for (const wkt of wktList) {
+      const geometryResult = await client.query(
+        `select ST_IsValid(g.geom) as is_valid,
+                ST_Area(g.geom::geography) / 10000 as area_ha,
+                ST_AsGeoJSON(g.geom)::json as geometry
+           from (select ST_GeomFromText($1, 4326) as geom) g`,
+        [wkt],
+      );
+      const { is_valid: isValid, area_ha: areaHa, geometry } = geometryResult.rows[0];
+      if (!isValid) {
+        results.push({ ok: false, code: 'INVALID_POTRERO_GEOMETRY' });
+        continue;
+      }
+
+      const coveredResult = await client.query(
+        'select ST_CoveredBy(ST_GeomFromText($1, 4326), geometry) as covered_by from agx.predios where predio_id = $2',
+        [wkt, predioId],
+      );
+      if (!coveredResult.rows[0].covered_by) {
+        results.push({ ok: false, code: 'POTRERO_OUTSIDE_PREDIO' });
+        continue;
+      }
+
+      results.push({ ok: true, geometry, areaHa: Number(areaHa) });
+    }
+
+    return results;
+  });
+}
+
+/**
  * Crea el potrero definitivo a partir de un candidate ya reservado (§6 del
  * sprint) -- geometry/areaHa/metodoDelimitacion vienen EXCLUSIVAMENTE del
  * candidate (nunca del body), nombre/capacidadAnimales/observaciones son

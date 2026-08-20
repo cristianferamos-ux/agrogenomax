@@ -10,7 +10,12 @@
 // con área/mapa calculados server-side) -> 'success'.
 import { useState } from 'react';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
-import { createPotrero, previewPotreroCoordinates, previewPotreroGps } from './ganaderiaPotrerosApi.js';
+import {
+  createPotrero,
+  previewPotreroCoordinates,
+  previewPotreroFile,
+  previewPotreroGps,
+} from './ganaderiaPotrerosApi.js';
 import GanaderiaPotreroPreviewMap from './GanaderiaPotreroPreviewMap.jsx';
 
 const GENERIC_PREVIEW_ERROR = 'No fue posible generar la vista previa en este momento. Intenta nuevamente.';
@@ -25,6 +30,60 @@ const PREVIEW_ERROR_MESSAGES = {
   PREDIO_WITHOUT_GEOMETRY: 'Este predio no tiene un polígono disponible para registrar potreros.',
   INVALID_POTRERO_COORDINATES:
     'Verifica los puntos: se requieren al menos 3 vértices distintos con coordenadas válidas.',
+};
+
+// SPRINT-3D5 §18: errores propios de la importación KML/KMZ -- el
+// frontend nunca decide si un archivo es válido, solo traduce el código
+// real devuelto por preview-file (potreroKmlImport.js) a copy amigable.
+const FILE_ERROR_MESSAGES = {
+  UNSUPPORTED_FILE_TYPE: 'Solo se aceptan archivos .kml o .kmz.',
+  FILE_TOO_LARGE: 'El archivo es demasiado grande.',
+  INVALID_KML: 'El archivo KML no es válido.',
+  INVALID_KMZ: 'El archivo KMZ no es válido.',
+  KMZ_TOO_MANY_ENTRIES: 'El archivo KMZ contiene demasiados elementos.',
+  KMZ_DECOMPRESSED_TOO_LARGE: 'El contenido del archivo KMZ es demasiado grande.',
+  NO_POLYGONS_FOUND: 'El archivo no contiene ningún polígono.',
+  TOO_MANY_POLYGONS: 'El archivo contiene demasiados polígonos.',
+  PREDIO_WITHOUT_GEOMETRY: 'Este predio no tiene un polígono disponible para registrar potreros.',
+  // SPRINT-3D5-CIERRE-SEMANTICO §2: KMZ con más de un .kml es ambiguo --
+  // nunca se elige "el primero" en silencio, se rechaza con copy claro.
+  KMZ_MULTIPLE_KML_FILES:
+    'El archivo KMZ contiene varios archivos KML. Exporta el potrero en un KMZ con un solo archivo KML principal.',
+};
+
+// SPRINT-3D5-CIERRE-SEMANTICO §1: Point/LineString/MultiLineString nunca
+// se procesan en silencio -- si preview-file reporta elementos ignorados
+// (ignorados.{points,lineStrings,multiLineStrings}), se muestra un aviso
+// amigable con las cantidades, sin abortar los Polygon válidos del mismo
+// archivo.
+function describeIgnoredElements(ignorados) {
+  if (!ignorados) return null;
+  const parts = [];
+  if (ignorados.points > 0) parts.push(`${ignorados.points} punto${ignorados.points === 1 ? '' : 's'}`);
+  if (ignorados.lineStrings > 0) parts.push(`${ignorados.lineStrings} línea${ignorados.lineStrings === 1 ? '' : 's'}`);
+  if (ignorados.multiLineStrings > 0) {
+    parts.push(`${ignorados.multiLineStrings} multilínea${ignorados.multiLineStrings === 1 ? '' : 's'}`);
+  }
+  if (parts.length === 0) return null;
+  return `Se importaron los polígonos encontrados. Algunos puntos o líneas del archivo fueron ignorados porque no representan potreros (${parts.join(', ')}).`;
+}
+
+const ACCEPTED_FILE_EXTENSIONS = ['.kml', '.kmz'];
+
+function hasAcceptedFileExtension(fileName) {
+  const lower = String(fileName || '').toLowerCase();
+  return ACCEPTED_FILE_EXTENSIONS.some((extension) => lower.endsWith(extension));
+}
+
+function resolveFileErrorMessage(code) {
+  return FILE_ERROR_MESSAGES[code] || GENERIC_PREVIEW_ERROR;
+}
+
+const METODO_DELIMITACION_LABELS = {
+  coordenadas: 'Coordenadas',
+  gps_movil: 'GPS del dispositivo',
+  kml: 'KML',
+  kmz: 'KMZ',
 };
 
 // §21: errores de candidate en la creación definitiva.
@@ -86,13 +145,23 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
   const [nombre, setNombre] = useState('');
   const [capacidadAnimales, setCapacidadAnimales] = useState('');
   const [observaciones, setObservaciones] = useState('');
-  const [metodo, setMetodo] = useState('coordenadas'); // 'coordenadas' | 'gps'
+  const [metodo, setMetodo] = useState('coordenadas'); // 'coordenadas' | 'gps' | 'kml'
 
   const [coordPoints, setCoordPoints] = useState([emptyPoint(), emptyPoint(), emptyPoint()]);
   const [gpsPoints, setGpsPoints] = useState([]);
   // idle | locating | denied | unavailable | timeout | unsupported --
   // arranca en 'idle': NUNCA se solicita ubicación al montar la vista.
   const [gpsStatus, setGpsStatus] = useState('idle');
+
+  // SPRINT-3D5: estado del flujo KML/KMZ. `fileCandidates` solo se llena
+  // cuando preview-file devuelve MÁS de un candidato válido -- §15: un
+  // único polígono válido salta directo a 'preview', nunca se lista.
+  const [fileLoading, setFileLoading] = useState(false);
+  const [fileError, setFileError] = useState('');
+  const [fileName, setFileName] = useState('');
+  const [fileCandidates, setFileCandidates] = useState([]);
+  const [fileInvalidCount, setFileInvalidCount] = useState(0);
+  const [fileIgnoredNotice, setFileIgnoredNotice] = useState('');
 
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState('');
@@ -102,8 +171,16 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
   const [createError, setCreateError] = useState('');
 
   function goToPoints() {
-    if (!nombre.trim()) return;
+    // KML/KMZ: el nombre puede quedar vacío aquí -- si el archivo trae
+    // nombreSugerido por Placemark, se usa como valor inicial editable en
+    // el paso de confirmación (§13). Coordenadas/GPS siguen exigiendo
+    // nombre desde este paso (comportamiento sin cambios).
+    if (metodo !== 'kml' && !nombre.trim()) return;
     setPreviewError('');
+    setFileError('');
+    setFileCandidates([]);
+    setFileInvalidCount(0);
+    setFileIgnoredNotice('');
     setStep('points');
   }
 
@@ -155,6 +232,87 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
 
   function removeGpsPoint(index) {
     setGpsPoints((current) => current.filter((_, i) => i !== index));
+  }
+
+  // SPRINT-3D5: aplica un candidate resuelto por preview-file (uno solo, o
+  // uno elegido de una lista) como previewData -- MISMO shape exacto que
+  // coordenadas/gps, para que el paso 'preview' no necesite lógica extra
+  // por método. Si el usuario no escribió nombre todavía, se usa
+  // nombreSugerido como valor inicial (editable, nunca se envía tal cual
+  // sin pasar por el input).
+  function applyFileCandidate(candidate) {
+    if (!nombre.trim() && candidate.nombreSugerido) {
+      setNombre(candidate.nombreSugerido);
+    }
+    setPreviewData({
+      candidateId: candidate.candidateId,
+      areaHa: candidate.areaHa,
+      geometry: candidate.geometry,
+      metodoDelimitacion: candidate.metodoDelimitacion,
+    });
+    setCreateError('');
+    setStep('preview');
+  }
+
+  // §14/§15/§21: sube el archivo tal cual (Blob/File nativo, nunca
+  // FileReader ni parseo/geometry en el cliente) a preview-file. Backend
+  // decide todo: tipo, tamaño, seguridad ZIP/XML, validez geométrica,
+  // pertenencia al predio y área. Un único polígono válido -> preview
+  // directo (§15); varios -> lista para que el usuario elija (§8/§15).
+  async function handleFileChange(event) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    setFileError('');
+    setFileCandidates([]);
+    setFileInvalidCount(0);
+    setFileIgnoredNotice('');
+    setFileName(file.name || '');
+
+    if (!hasAcceptedFileExtension(file.name)) {
+      setFileError(resolveFileErrorMessage('UNSUPPORTED_FILE_TYPE'));
+      return;
+    }
+
+    setFileLoading(true);
+    try {
+      const { ok, data } = await previewPotreroFile(predioId, file);
+      setFileLoading(false);
+
+      if (!ok) {
+        setFileError(resolveFileErrorMessage(data?.error));
+        return;
+      }
+
+      const candidates = Array.isArray(data?.candidates) ? data.candidates : [];
+      const invalidos = Array.isArray(data?.invalidos) ? data.invalidos : [];
+      setFileInvalidCount(invalidos.length);
+
+      if (candidates.length === 0) {
+        setFileError(
+          invalidos.length > 0
+            ? 'Ningún polígono del archivo quedó dentro del predio.'
+            : resolveFileErrorMessage('NO_POLYGONS_FOUND'),
+        );
+        return;
+      }
+
+      // §1: se informa SIEMPRE que haya elementos ignorados, sin importar
+      // si el archivo produjo 1 candidate (preview directo) o varios
+      // (lista) -- el aviso debe seguir visible en ambos casos.
+      setFileIgnoredNotice(describeIgnoredElements(data?.ignorados) || '');
+
+      if (candidates.length === 1) {
+        applyFileCandidate(candidates[0]);
+        return;
+      }
+
+      setFileCandidates(candidates);
+    } catch {
+      setFileLoading(false);
+      setFileError(GENERIC_PREVIEW_ERROR);
+    }
   }
 
   async function handlePreview() {
@@ -283,12 +441,21 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
             >
               GPS del dispositivo
             </button>
-            <button type="button" className="gan-potrero-method-card" disabled>
-              KML/KMZ · Próximamente
+            <button
+              type="button"
+              className={`gan-potrero-method-card${metodo === 'kml' ? ' is-active' : ''}`}
+              onClick={() => setMetodo('kml')}
+            >
+              KML/KMZ
             </button>
           </div>
 
-          <button type="button" className="gan-submit" onClick={goToPoints} disabled={!nombre.trim()}>
+          <button
+            type="button"
+            className="gan-submit"
+            onClick={goToPoints}
+            disabled={metodo !== 'kml' && !nombre.trim()}
+          >
             Continuar
           </button>
         </div>
@@ -394,15 +561,72 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
         </div>
       ) : null}
 
+      {step === 'points' && metodo === 'kml' ? (
+        <div className="gan-stack">
+          <p className="gan-potrero-points-hint">Sube un archivo .kml o .kmz con el contorno del potrero.</p>
+
+          <label className="gan-secondary-button" htmlFor="gan-potrero-kml-input">
+            {fileLoading ? 'Procesando archivo...' : 'Seleccionar archivo'}
+          </label>
+          <input
+            id="gan-potrero-kml-input"
+            type="file"
+            accept=".kml,.kmz"
+            onChange={handleFileChange}
+            disabled={fileLoading}
+            style={{ display: 'none' }}
+          />
+          {fileName ? <p className="gan-potrero-points-hint">Archivo: {fileName}</p> : null}
+
+          <StatusMessage type="error">{fileError}</StatusMessage>
+          {fileIgnoredNotice ? <StatusMessage type="info">{fileIgnoredNotice}</StatusMessage> : null}
+
+          {fileCandidates.length > 0 ? (
+            <div className="gan-potrero-points">
+              {fileInvalidCount > 0 ? (
+                <StatusMessage type="info">
+                  {fileInvalidCount === 1
+                    ? '1 polígono del archivo quedó fuera del predio y no se muestra.'
+                    : `${fileInvalidCount} polígonos del archivo quedaron fuera del predio y no se muestran.`}
+                </StatusMessage>
+              ) : null}
+              {fileCandidates.map((candidate, index) => (
+                <div className="gan-potrero-point-row gan-potrero-point-row-readonly" key={candidate.candidateId}>
+                  <span className="gan-potrero-point-label">
+                    {candidate.nombreSugerido || `Polígono ${index + 1}`}
+                  </span>
+                  <span>{candidate.areaHa.toFixed(2)} ha</span>
+                  <button type="button" className="gan-secondary-button" onClick={() => applyFileCandidate(candidate)}>
+                    Vista previa / Seleccionar
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          <div className="gan-potrero-actions">
+            <button type="button" className="gan-back-inline" onClick={backToForm} disabled={fileLoading}>
+              Volver
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {step === 'preview' && previewData ? (
         <div className="gan-stack">
           <div className="gan-eyebrow">CONFIRMA EL REGISTRO</div>
 
           <GanaderiaPotreroPreviewMap predioId={predioId} potreroGeometry={previewData.geometry} />
 
+          {metodo === 'kml' && fileIgnoredNotice ? <StatusMessage type="info">{fileIgnoredNotice}</StatusMessage> : null}
+
           <div className="gan-form">
-            <FormField label="Nombre">
-              <input value={nombre} readOnly />
+            <FormField label="Nombre" required={metodo === 'kml'}>
+              {metodo === 'kml' ? (
+                <input value={nombre} onChange={(event) => setNombre(event.target.value)} required />
+              ) : (
+                <input value={nombre} readOnly />
+              )}
             </FormField>
             <FormField label="Predio">
               <input value={predioNombre} readOnly />
@@ -411,10 +635,7 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
               <input value={`${previewData.areaHa.toFixed(2)} ha`} readOnly />
             </FormField>
             <FormField label="Método">
-              <input
-                value={previewData.metodoDelimitacion === 'gps_movil' ? 'GPS del dispositivo' : 'Coordenadas'}
-                readOnly
-              />
+              <input value={METODO_DELIMITACION_LABELS[previewData.metodoDelimitacion] || 'Coordenadas'} readOnly />
             </FormField>
             <FormField label="Capacidad de animales">
               <input value={capacidadAnimales || '—'} readOnly />
@@ -427,7 +648,7 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
           <StatusMessage type="error">{createError}</StatusMessage>
 
           <div className="gan-potrero-actions">
-            <button type="button" className="gan-submit" onClick={handleCreate} disabled={creating}>
+            <button type="button" className="gan-submit" onClick={handleCreate} disabled={creating || !nombre.trim()}>
               {creating ? 'Registrando...' : 'Registrar potrero'}
             </button>
             <button type="button" className="gan-back-inline" onClick={backToPointsFromPreview} disabled={creating}>

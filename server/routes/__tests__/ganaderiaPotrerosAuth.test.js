@@ -93,6 +93,26 @@ describe('SPRINT-3D3-POTREROS-API-FOUNDATION: exige sesión con organización', 
     await assertAnonymousRejected('POST', '/101/potreros', { candidateId: 'x', nombre: 'Potrero 1' });
   });
 
+  // SPRINT-3D5: requireSession se monta vía router.use() ANTES de
+  // cualquier ruta -- corre para preview-file igual que para el resto,
+  // sin importar que esta ruta use un body-parser distinto (raw()) más
+  // abajo en la cadena. Una request anónima nunca llega a leer el body.
+  test('POST /:predioId/potreros/preview-file sin sesión -> 401', async () => {
+    const ctx = await startApp();
+    try {
+      const response = await fetch(`${ctx.baseUrl}/101/potreros/preview-file`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream', 'X-Potrero-File-Name': 'x.kml' },
+        body: Buffer.from('<kml/>'),
+      });
+      assert.equal(response.status, 401);
+      const responseBody = await response.json();
+      assert.equal(responseBody.error, 'SESSION_REQUIRED');
+    } finally {
+      await closeApp(ctx);
+    }
+  });
+
   test('nunca toca Postgres (ni legacy ni AGX-Business) en una solicitud anónima', async () => {
     const ctx = await startApp();
     try {
