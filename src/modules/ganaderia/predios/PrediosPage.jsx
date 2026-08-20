@@ -21,6 +21,8 @@ import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
 import CatastroXMap from '../../catastrox/components/CatastroXMap.jsx';
 import GanaderiaPredioMiniMap from './GanaderiaPredioMiniMap.jsx';
+import PotreroRegistrationPanel from '../potreros/PotreroRegistrationPanel.jsx';
+import PotrerosByPredioPanel from '../potreros/PotrerosByPredioPanel.jsx';
 import '../../catastrox/styles/catastrox.css';
 
 const GENERIC_SEARCH_ERROR = 'No fue posible consultar el predio en este momento. Intenta nuevamente.';
@@ -530,7 +532,42 @@ function MisPrediosSection({ loading, error, predios }) {
 // styles.css). El nombre del predio es el elemento principal, y cada dato
 // va en su propia fila LABEL/valor (.gan-ficha-row) en vez de texto
 // concatenado.
+// SPRINT-3D4 §2/§3: cada card fija su propio predioId -- "Registrar
+// potrero"/"Ver potreros" actúan EXCLUSIVAMENTE sobre el predio de ESTA
+// card (nunca un selector global, nunca estado compartido entre cards).
 function PredioCard({ predio }) {
+  // null | 'registrar' | 'ver' -- expansión inline dentro de la MISMA
+  // tarjeta, nunca una lista plana que mezcle potreros de otros predios.
+  const [activePanel, setActivePanel] = useState(null);
+
+  // SPRINT-3D4 (cierre): mecanismo EXPLÍCITO y determinístico de refetch
+  // post-save -- potrerosRefreshKey es un contador que PotrerosByPredioPanel
+  // consume en su useEffect ([predioId, refreshKey]); se incrementa
+  // exclusivamente en handlePotreroCreated, invocado de forma síncrona por
+  // PotreroRegistrationPanel justo después de un POST create exitoso.
+  // Nunca window.location.reload, nunca depende de que el usuario
+  // cierre/reabra el panel manualmente, nunca un cambio artificial de
+  // predioId. La fuente de verdad sigue siendo el GET real que dispara ese
+  // useEffect -- ver PotrerosByPredioPanel.jsx.
+  const [potrerosRefreshKey, setPotrerosRefreshKey] = useState(0);
+  const [potreroSuccessMessage, setPotreroSuccessMessage] = useState('');
+
+  function toggleRegistrar() {
+    setPotreroSuccessMessage('');
+    setActivePanel((current) => (current === 'registrar' ? null : 'registrar'));
+  }
+
+  function toggleVer() {
+    setPotreroSuccessMessage('');
+    setActivePanel((current) => (current === 'ver' ? null : 'ver'));
+  }
+
+  function handlePotreroCreated() {
+    setPotrerosRefreshKey((key) => key + 1);
+    setPotreroSuccessMessage('Potrero registrado correctamente.');
+    setActivePanel('ver');
+  }
+
   return (
     <div className="gan-predio-card">
       <strong className="gan-predio-card-name">{displayOrDash(predio.nombrePredio)}</strong>
@@ -565,6 +602,32 @@ function PredioCard({ predio }) {
           )}
         </div>
       </div>
+
+      <div className="gan-predio-card-actions">
+        <button type="button" className="gan-secondary-button" onClick={toggleRegistrar}>
+          Registrar potrero
+        </button>
+        <button type="button" className="gan-secondary-button" onClick={toggleVer}>
+          Ver potreros
+        </button>
+      </div>
+
+      {activePanel === 'registrar' ? (
+        <PotreroRegistrationPanel
+          predioId={predio.predioId}
+          predioNombre={predio.nombrePredio}
+          onClose={() => setActivePanel(null)}
+          onCreated={handlePotreroCreated}
+        />
+      ) : null}
+
+      {activePanel === 'ver' ? (
+        <PotrerosByPredioPanel
+          predioId={predio.predioId}
+          refreshKey={potrerosRefreshKey}
+          successMessage={potreroSuccessMessage}
+        />
+      ) : null}
     </div>
   );
 }
