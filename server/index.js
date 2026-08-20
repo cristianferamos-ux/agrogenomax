@@ -20,6 +20,7 @@ import catastroxPaymentsRouter from './routes/catastroxPayments.js';
 import createGanaderiaAdminRouter from './routes/ganaderiaAdmin.js';
 import createGanaderiaAuthRouter from './routes/ganaderiaAuth.js';
 import createGanaderiaPrediosRouter from './routes/ganaderiaPredios.js';
+import createGanaderiaPotrerosRouter from './routes/ganaderiaPotreros.js';
 import createHealthRouter from './routes/health.js';
 import createPesajesRouter from './routes/pesajes.js';
 import createPotrerosRouter from './routes/potreros.js';
@@ -147,6 +148,19 @@ app.use(
 app.use(
   '/api/ganaderia/predios',
   createGanaderiaPrediosRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
+
+// SPRINT-3D3-POTREROS-API-FOUNDATION: subordinado a /api/ganaderia/predios
+// -- regla de dominio ORGANIZACIÓN -> PREDIO -> POTRERO, no existe potrero
+// global. Mismo criterio de aislamiento que el router de predios (sesión
+// con organización + CSRF), sobre Postgres-AGX-Business (agx.potreros).
+app.use(
+  '/api/ganaderia/predios/:predioId/potreros',
+  createGanaderiaPotrerosRouter({
     appEnv: appConfig.appEnv,
     csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
     allowedOrigins: appConfig.cors.allowedOrigins,

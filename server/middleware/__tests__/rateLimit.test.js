@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
-import { checkoutLimiter, webhookLimiter, prediosSearchLimiter, prediosSearchRateLimitKeyGenerator } from '../rateLimit.js';
+import { checkoutLimiter, webhookLimiter, prediosSearchLimiter, prediosSearchRateLimitKeyGenerator, potrerosPreviewLimiter } from '../rateLimit.js';
 
 async function startApp(limiter) {
   const app = express();
@@ -122,5 +122,27 @@ test('prediosSearchLimiter: Cuenta A y Cuenta B desde la MISMA IP tienen contado
     assert.equal(responseB.status, 200, 'cuenta B debe tener su propio cupo intacto, aunque comparta IP con A');
   } finally {
     await appB.close();
+  }
+});
+
+// SPRINT-3D3-POTREROS-API-FOUNDATION §18/§Z: previews de potreros
+// (coordenadas/gps) -- mismo límite 30/10min por cuenta que
+// prediosSearchLimiter, instancia de limiter independiente (store propio,
+// no comparte cupo con prediosSearchLimiter aunque reutilice el mismo
+// keyGenerator).
+test('potrerosPreviewLimiter: agota el cupo de 30/10min por cuenta y responde 429 sin filtrar detalles internos', async () => {
+  const app = await startAppWithSimulatedAuth(potrerosPreviewLimiter, () => ({ cuentaId: 'cuenta-potreros-preview-test' }));
+  try {
+    for (let i = 0; i < 30; i += 1) {
+      const response = await fetch(app.baseUrl);
+      assert.equal(response.status, 200, `solicitud ${i + 1}/30 debe pasar`);
+    }
+    const blocked = await fetch(app.baseUrl);
+    assert.equal(blocked.status, 429);
+    const payload = await blocked.json();
+    assert.equal(payload.code, 'RATE_LIMITED_POTREROS_PREVIEW');
+    assert.equal(Object.keys(payload).length, 3);
+  } finally {
+    await app.close();
   }
 });
