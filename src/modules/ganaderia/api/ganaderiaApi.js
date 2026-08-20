@@ -89,6 +89,9 @@ export function isCloudflareWithoutLocalApi() {
 export const ganaderiaApi = {
   health: () => request('/health'),
   listPredios: () => request('/predios'),
+  // Fuente tenant-safe moderna (Postgres-AGX-Business, server/routes/ganaderiaPredios.js).
+  // Distinta de listPredios() (legacy /api/predios) para no romper sus otros consumidores.
+  listGanaderiaPredios: () => request('/ganaderia/predios'),
   createPredio: (payload) => request('/predios', { method: 'POST', body: JSON.stringify(payload) }),
   listPotreros: (predioId) => request(predioId ? `/potreros?predio_id=${predioId}` : '/potreros'),
   createPotrero: (payload) => request('/potreros', { method: 'POST', body: JSON.stringify(payload) }),

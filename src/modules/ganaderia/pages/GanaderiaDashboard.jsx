@@ -62,7 +62,7 @@ const operationCards = [
   },
 ];
 
-const flowSteps = ['Predio y propietario', 'Potrero', 'Animal / QR', 'Ficha animal'];
+const flowSteps = ['Predio', 'Potrero', 'Animal / QR', 'Ficha animal'];
 
 const secondaryModules = [
   { label: 'Ficha', icon: ShieldPlus, to: '/ganaderia/animales/listado?modulo=ficha' },
@@ -75,42 +75,29 @@ const secondaryModules = [
 ];
 
 export default function GanaderiaDashboard() {
-  const [summary, setSummary] = useState({ animales: [], predios: [], potreros: [] });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  // Predios: fuente tenant-safe (Postgres-AGX-Business). Potreros y Animales
+  // aún no tienen fuente tenant-safe en Business DB (pendiente Sprint 3D2) --
+  // se muestran como "No disponible" sin consultar sus endpoints legacy.
+  const [prediosState, setPrediosState] = useState({ status: 'loading', count: null });
 
   useEffect(() => {
     let active = true;
 
-    Promise.allSettled([
-      ganaderiaApi.listAnimales(),
-      ganaderiaApi.listPredios(),
-      ganaderiaApi.listPotreros(),
-    ])
-      .then(([animalesResult, prediosResult, potrerosResult]) => {
+    ganaderiaApi
+      .listGanaderiaPredios()
+      .then((response) => {
         if (!active) return;
-        const hasUnavailableIndicator = [animalesResult, prediosResult, potrerosResult].some(
-          (result) => result.status === 'rejected',
-        );
-
-        if (hasUnavailableIndicator) {
-          console.error('Algunos indicadores de Ganadería no están disponibles temporalmente.', {
-            animales: animalesResult.status,
-            predios: prediosResult.status,
-            potreros: potrerosResult.status,
-          });
+        if (!Array.isArray(response?.predios)) {
+          console.error('Respuesta con forma inválida para el indicador de Predios registrados.', response);
+          setPrediosState({ status: 'error', count: null });
+          return;
         }
-
-        setSummary({
-          animales: animalesResult.status === 'fulfilled' && Array.isArray(animalesResult.value) ? animalesResult.value : [],
-          predios: prediosResult.status === 'fulfilled' && Array.isArray(prediosResult.value) ? prediosResult.value : [],
-          potreros: potrerosResult.status === 'fulfilled' && Array.isArray(potrerosResult.value) ? potrerosResult.value : [],
-        });
-
-        setError(hasUnavailableIndicator ? 'Algunos indicadores no están disponibles temporalmente.' : '');
+        setPrediosState({ status: 'ok', count: response.predios.length });
       })
-      .finally(() => {
-        if (active) setLoading(false);
+      .catch((error) => {
+        if (!active) return;
+        console.error('No se pudo obtener el indicador de Predios registrados.', error);
+        setPrediosState({ status: 'error', count: null });
       });
 
     return () => {
@@ -118,11 +105,35 @@ export default function GanaderiaDashboard() {
     };
   }, []);
 
-  const indicators = useMemo(() => [
-    { label: 'Predios registrados', value: summary.predios.length || 'Sin datos', icon: MapPin },
-    { label: 'Potreros registrados', value: summary.potreros.length || 'Sin datos', icon: Sprout },
-    { label: 'Animales registrados', value: summary.animales.length || 'Sin datos', icon: Beef },
-  ], [summary]);
+  const indicators = useMemo(() => {
+    const prediosValue =
+      prediosState.status === 'loading'
+        ? 'Cargando...'
+        : prediosState.status === 'error'
+          ? 'No disponible'
+          : String(prediosState.count);
+
+    return [
+      {
+        label: 'Predios registrados',
+        value: prediosValue,
+        helper: prediosState.status === 'error' ? 'No se pudo consultar este indicador.' : 'Datos reales de tu cuenta.',
+        icon: MapPin,
+      },
+      {
+        label: 'Potreros registrados',
+        value: 'No disponible',
+        helper: 'Fuente tenant-safe en desarrollo.',
+        icon: Sprout,
+      },
+      {
+        label: 'Animales registrados',
+        value: 'No disponible',
+        helper: 'Fuente tenant-safe en desarrollo.',
+        icon: Beef,
+      },
+    ];
+  }, [prediosState]);
 
   return (
     <div className="gan-dash-shell">
@@ -135,19 +146,19 @@ export default function GanaderiaDashboard() {
             <p>Gestiona tu hato con trazabilidad QR, control productivo, sanidad y decisiones inteligentes por animal.</p>
           </div>
           <Link to="/ganaderia/predios" className="gan-dash-btn is-primary">
-            Registrar predio y propietario <MapPin size={17} />
+            Registrar predio <MapPin size={17} />
           </Link>
         </header>
 
         <section className="gan-dash-productivity-grid" aria-label="Indicadores reales de la cuenta">
-          {indicators.map(({ label, value, icon: Icon }) => (
+          {indicators.map(({ label, value, helper, icon: Icon }) => (
             <article className="gan-dash-productivity-card" key={label}>
               <div className="gan-dash-quick-icon">
                 <Icon size={20} />
               </div>
               <span>{label}</span>
-              <strong>{loading ? 'Cargando...' : value}</strong>
-              <p>{error || 'Datos reales de tu cuenta.'}</p>
+              <strong>{value}</strong>
+              <p>{helper}</p>
             </article>
           ))}
         </section>
@@ -157,8 +168,8 @@ export default function GanaderiaDashboard() {
             <span className="gan-dash-badge">Operación de campo</span>
             <h2>Operación ganadera por QR desde campo.</h2>
             <p>
-              Primero registra el predio con los datos de su propietario y luego los potreros. Después podrás registrar
-              animales nuevos o abrir fichas mediante QR con datos reales de tu cuenta.
+              Primero registra el predio y completa su información básica. Luego registra los potreros. Después
+              podrás registrar animales nuevos o abrir fichas mediante QR con datos reales de tu cuenta.
             </p>
           </div>
 
