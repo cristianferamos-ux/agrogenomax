@@ -187,3 +187,16 @@ export const prediosSearchLimiter = buildLimiter({
   publicMessage: 'Demasiadas búsquedas de predios. Intenta nuevamente en unos minutos.',
   keyGenerator: prediosSearchRateLimitKeyGenerator,
 });
+
+// SPRINT-3D3-POTREROS-API-FOUNDATION §18: mismo patrón/orden de magnitud
+// que prediosSearchLimiter -- previews de potreros (coordenadas/gps) son
+// consultas espaciales contra Postgres-AGX-Business (ST_IsValid/
+// ST_CoveredBy/ST_Area), no gratis mantener sin límite. 30/10min por
+// CUENTA (reutiliza el mismo keyGenerator ya validado).
+export const potrerosPreviewLimiter = buildLimiter({
+  windowMs: TEN_MINUTES_MS,
+  max: 30,
+  publicCode: 'RATE_LIMITED_POTREROS_PREVIEW',
+  publicMessage: 'Demasiados previews de potreros. Intenta nuevamente en unos minutos.',
+  keyGenerator: prediosSearchRateLimitKeyGenerator,
+});

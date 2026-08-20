@@ -1,0 +1,204 @@
+// SPRINT-3D3-POTREROS-API-FOUNDATION: acceso a datos de Potreros contra
+// Postgres-AGX-Business (agx.potreros, fundación aplicada en
+// 0003_potreros_foundation.sql / SPRINT-3D2). Mismo principio de
+// separación router/repositorio ya usado en prediosRepository.js --
+// probable directamente contra un Postgres/PostGIS real vía
+// withOrganizacionTransaction, sin stack HTTP/sesión.
+//
+// Regla de dominio (§ dominio del sprint): ORGANIZACIÓN -> PREDIO ->
+// POTRERO. Toda función recibe `organizacionId` ya autorizado por el
+// llamador y confía en RLS+FORCE (0003) como aislamiento de tenant --
+// además, cada consulta filtra explícitamente por `predio_id` (RLS NO
+// aísla por predio, solo por organización) para nunca mezclar potreros de
+// dos predios de la misma organización.
+import { withOrganizacionTransaction } from '../../db/agxBusinessPool.js';
+
+function semanticError(code, status, message) {
+  return Object.assign(new Error(message || code), { status, code });
+}
+
+function assertPredioIdFormat(predioId) {
+  if (!/^\d+$/.test(String(predioId))) {
+    throw semanticError('INVALID_PREDIO_ID', 400, 'predioId inválido.');
+  }
+}
+
+function assertPotreroIdFormat(potreroId) {
+  if (!/^\d+$/.test(String(potreroId))) {
+    throw semanticError('INVALID_POTRERO_ID', 400, 'potreroId inválido.');
+  }
+}
+
+/**
+ * Confirma que `predioId` pertenece a la organización activa (RLS +
+ * FORCE). Lanza PREDIO_NOT_FOUND (404) si no existe o pertenece a otro
+ * tenant -- ambos casos son indistinguibles para el cliente.
+ */
+async function assertPredioBelongsToOrg(client, predioId) {
+  const result = await client.query('select predio_id from agx.predios where predio_id = $1', [predioId]);
+  if (result.rows.length === 0) {
+    throw semanticError('PREDIO_NOT_FOUND', 404, 'El predio no existe o no pertenece a tu organización.');
+  }
+}
+
+export async function listPotrerosByPredio(organizacionId, predioId) {
+  assertPredioIdFormat(predioId);
+  return withOrganizacionTransaction(organizacionId, async (client) => {
+    await assertPredioBelongsToOrg(client, predioId);
+
+    const result = await client.query(
+      `select potrero_id, nombre, area_ha, capacidad_animales, observaciones,
+              metodo_delimitacion, created_at, updated_at
+         from agx.potreros
+        where predio_id = $1
+        order by created_at desc`,
+      [predioId],
+    );
+    return result.rows;
+  });
+}
+
+export async function getPotreroDetail(organizacionId, predioId, potreroId) {
+  assertPredioIdFormat(predioId);
+  assertPotreroIdFormat(potreroId);
+  return withOrganizacionTransaction(organizacionId, async (client) => {
+    // Una sola consulta verifica simultáneamente tenant (RLS) + predio
+    // correcto + pertenencia del potrero a ESE predio -- si el mismo
+    // potrero_id existe bajo otro predio, o el potrero pertenece a otra
+    // organización, esta consulta devuelve 0 filas en ambos casos.
+    const result = await client.query(
+      `select potrero_id, nombre, area_ha, capacidad_animales, observaciones,
+              metodo_delimitacion, ST_AsGeoJSON(geometry)::json as geometry,
+              created_at, updated_at
+         from agx.potreros
+        where potrero_id = $1 and predio_id = $2`,
+      [potreroId, predioId],
+    );
+    return result.rows[0] || null;
+  });
+}
+
+const MIN_DISTINCT_VERTICES = 3;
+
+function isFiniteNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+/**
+ * Construye un WKT Polygon cerrado explícitamente a partir de una lista de
+ * puntos {latitud, longitud} (§13 del sprint). NUNCA aplica buffer, snap,
+ * clip ni tolerancia oculta -- la única normalización es cerrar el anillo
+ * si el cliente no lo cerró él mismo, y eso se hace explícitamente aquí,
+ * nunca en SQL.
+ */
+export function buildPolygonWktFromPuntos(puntos) {
+  if (!Array.isArray(puntos) || puntos.length < MIN_DISTINCT_VERTICES) {
+    throw semanticError('INVALID_POTRERO_COORDINATES', 400, `Se requieren al menos ${MIN_DISTINCT_VERTICES} vértices.`);
+  }
+
+  const parsed = puntos.map((punto) => {
+    const lat = Number(punto?.latitud);
+    const lng = Number(punto?.longitud);
+    if (!isFiniteNumber(lat) || !isFiniteNumber(lng)) {
+      throw semanticError('INVALID_POTRERO_COORDINATES', 400, 'Cada punto requiere latitud/longitud numéricas.');
+    }
+    if (lat < -90 || lat > 90) {
+      throw semanticError('INVALID_POTRERO_COORDINATES', 400, 'latitud debe estar entre -90 y 90.');
+    }
+    if (lng < -180 || lng > 180) {
+      throw semanticError('INVALID_POTRERO_COORDINATES', 400, 'longitud debe estar entre -180 y 180.');
+    }
+    return { lat, lng };
+  });
+
+  // Si el cliente ya envió el anillo cerrado (primer punto === último),
+  // se descarta el duplicado final antes de contar vértices distintos --
+  // el cierre real se vuelve a aplicar explícitamente más abajo.
+  let ring = parsed;
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  if (ring.length > MIN_DISTINCT_VERTICES && first.lat === last.lat && first.lng === last.lng) {
+    ring = ring.slice(0, -1);
+  }
+
+  const distinctCount = new Set(ring.map((p) => `${p.lat}:${p.lng}`)).size;
+  if (ring.length < MIN_DISTINCT_VERTICES || distinctCount < MIN_DISTINCT_VERTICES) {
+    throw semanticError('INVALID_POTRERO_COORDINATES', 400, `Se requieren al menos ${MIN_DISTINCT_VERTICES} vértices distintos.`);
+  }
+
+  const closedRing = [...ring, ring[0]];
+  const wkt = `POLYGON((${closedRing.map((p) => `${p.lng} ${p.lat}`).join(', ')}))`;
+  return wkt;
+}
+
+/**
+ * Valida y calcula el preview espacial de un potrero contra el predio
+ * padre (§9/§10/§11/§13 del sprint): predio existe y pertenece al tenant,
+ * predio tiene geometry, el polygon propuesto es topológicamente válido
+ * (ST_IsValid -- sin ST_MakeValid, sin auto-corrección), queda cubierto
+ * por el predio (ST_CoveredBy, borde compartido permitido), y su área se
+ * calcula server-side (ST_Area(geometry::geography)/10000). Las tres
+ * comprobaciones son consultas SEPARADAS deliberadamente: ST_CoveredBy
+ * sobre una geometría inválida puede lanzar una excepción a nivel SQL, así
+ * que nunca se evalúa hasta confirmar ST_IsValid primero.
+ *
+ * Devuelve { geometry (GeoJSON), areaHa } listos para un candidate.
+ */
+export async function computePotreroPreview(organizacionId, predioId, wkt) {
+  assertPredioIdFormat(predioId);
+  return withOrganizacionTransaction(organizacionId, async (client) => {
+    const predioResult = await client.query(
+      'select (geometry is null) as sin_geometria from agx.predios where predio_id = $1',
+      [predioId],
+    );
+    if (predioResult.rows.length === 0) {
+      throw semanticError('PREDIO_NOT_FOUND', 404, 'El predio no existe o no pertenece a tu organización.');
+    }
+    if (predioResult.rows[0].sin_geometria) {
+      throw semanticError('PREDIO_WITHOUT_GEOMETRY', 422, 'El predio no tiene geometría registrada.');
+    }
+
+    const geometryResult = await client.query(
+      `select ST_IsValid(g.geom) as is_valid,
+              ST_Area(g.geom::geography) / 10000 as area_ha,
+              ST_AsGeoJSON(g.geom)::json as geometry
+         from (select ST_GeomFromText($1, 4326) as geom) g`,
+      [wkt],
+    );
+    const { is_valid: isValid, area_ha: areaHa, geometry } = geometryResult.rows[0];
+    if (!isValid) {
+      throw semanticError('INVALID_POTRERO_GEOMETRY', 422, 'El polígono propuesto no es una geometría válida (posible autointersección).');
+    }
+
+    const coveredResult = await client.query(
+      'select ST_CoveredBy(ST_GeomFromText($1, 4326), geometry) as covered_by from agx.predios where predio_id = $2',
+      [wkt, predioId],
+    );
+    if (!coveredResult.rows[0].covered_by) {
+      throw semanticError('POTRERO_OUTSIDE_PREDIO', 422, 'El potrero debe quedar completamente dentro del predio.');
+    }
+
+    return { geometry, areaHa: Number(areaHa) };
+  });
+}
+
+/**
+ * Crea el potrero definitivo a partir de un candidate ya reservado (§6 del
+ * sprint) -- geometry/areaHa/metodoDelimitacion vienen EXCLUSIVAMENTE del
+ * candidate (nunca del body), nombre/capacidadAnimales/observaciones son
+ * los únicos campos que puede aportar el cliente en este paso.
+ */
+export async function createPotreroFromCandidate(organizacionId, predioId, { geometry, areaHa, metodoDelimitacion, nombre, capacidadAnimales, observaciones }) {
+  assertPredioIdFormat(predioId);
+  return withOrganizacionTransaction(organizacionId, async (client) => {
+    const geometryJson = JSON.stringify(geometry);
+    const result = await client.query(
+      `insert into agx.potreros
+         (organizacion_id, predio_id, nombre, geometry, area_ha, metodo_delimitacion, capacidad_animales, observaciones)
+       values ($1, $2, $3, ST_SetSRID(ST_GeomFromGeoJSON($4), 4326), $5, $6, $7, $8)
+       returning potrero_id`,
+      [organizacionId, predioId, nombre, geometryJson, areaHa, metodoDelimitacion, capacidadAnimales, observaciones],
+    );
+    return result.rows[0].potrero_id;
+  });
+}
