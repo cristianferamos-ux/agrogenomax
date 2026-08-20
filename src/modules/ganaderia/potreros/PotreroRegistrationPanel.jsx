@@ -68,6 +68,18 @@ function describeIgnoredElements(ignorados) {
   return `Se importaron los polígonos encontrados. Algunos puntos o líneas del archivo fueron ignorados porque no representan potreros (${parts.join(', ')}).`;
 }
 
+// SPRINT-3D5.1-KML-CLOSED-LINESTRING: si preview-file reporta
+// convertidos.closedLineStrings > 0, la conversión LineString cerrado ->
+// Polygon NUNCA es silenciosa -- se avisa al usuario, sin detalles
+// técnicos, sin bloquear el preview.
+function describeConversionNotice(convertidos) {
+  const count = convertidos?.closedLineStrings;
+  if (!(count > 0)) return null;
+  return count === 1
+    ? 'Se detectó una línea cerrada en el archivo y se interpretó como polígono del potrero.'
+    : `Se detectaron ${count} líneas cerradas en el archivo y se interpretaron como polígonos de potrero.`;
+}
+
 const ACCEPTED_FILE_EXTENSIONS = ['.kml', '.kmz'];
 
 function hasAcceptedFileExtension(fileName) {
@@ -162,6 +174,7 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
   const [fileCandidates, setFileCandidates] = useState([]);
   const [fileInvalidCount, setFileInvalidCount] = useState(0);
   const [fileIgnoredNotice, setFileIgnoredNotice] = useState('');
+  const [fileConversionNotice, setFileConversionNotice] = useState('');
 
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState('');
@@ -268,6 +281,7 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
     setFileCandidates([]);
     setFileInvalidCount(0);
     setFileIgnoredNotice('');
+    setFileConversionNotice('');
     setFileName(file.name || '');
 
     if (!hasAcceptedFileExtension(file.name)) {
@@ -302,6 +316,10 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
       // si el archivo produjo 1 candidate (preview directo) o varios
       // (lista) -- el aviso debe seguir visible en ambos casos.
       setFileIgnoredNotice(describeIgnoredElements(data?.ignorados) || '');
+      // SPRINT-3D5.1: mismo criterio para la conversión LineString cerrado
+      // -> Polygon -- nunca silenciosa, visible tanto en la lista de
+      // candidates como en el preview final.
+      setFileConversionNotice(describeConversionNotice(data?.convertidos) || '');
 
       if (candidates.length === 1) {
         applyFileCandidate(candidates[0]);
@@ -580,6 +598,7 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
 
           <StatusMessage type="error">{fileError}</StatusMessage>
           {fileIgnoredNotice ? <StatusMessage type="info">{fileIgnoredNotice}</StatusMessage> : null}
+          {fileConversionNotice ? <StatusMessage type="info">{fileConversionNotice}</StatusMessage> : null}
 
           {fileCandidates.length > 0 ? (
             <div className="gan-potrero-points">
@@ -619,6 +638,7 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
           <GanaderiaPotreroPreviewMap predioId={predioId} potreroGeometry={previewData.geometry} />
 
           {metodo === 'kml' && fileIgnoredNotice ? <StatusMessage type="info">{fileIgnoredNotice}</StatusMessage> : null}
+          {metodo === 'kml' && fileConversionNotice ? <StatusMessage type="info">{fileConversionNotice}</StatusMessage> : null}
 
           <div className="gan-form">
             <FormField label="Nombre" required={metodo === 'kml'}>

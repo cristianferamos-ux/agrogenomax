@@ -182,12 +182,53 @@ function parseKmlXmlToDom(xmlText) {
 // §7/§8: extracción de geometrías. Solo Polygon. MultiPolygon se separa en
 // Polygon individuales de forma determinística (por índice del array
 // `coordinates`) -- nunca ST_Union, nunca se guarda MultiPolygon.
-// Point/LineString/MultiLineString se ignoran (no producen candidato ni
-// abortan el archivo completo), pero SIEMPRE se cuentan y se reportan al
-// llamador (`ignored`) -- nunca de forma silenciosa (SPRINT-3D5-CIERRE-
-// SEMANTICO §1). Si al final no queda ningún Polygon, se lanza
-// NO_POLYGONS_FOUND igual que antes.
+// Point/MultiLineString se ignoran (no producen candidato ni abortan el
+// archivo completo), pero SIEMPRE se cuentan y se reportan al llamador
+// (`ignored`) -- nunca de forma silenciosa (SPRINT-3D5-CIERRE-SEMANTICO
+// §1). Si al final no queda ningún Polygon, se lanza NO_POLYGONS_FOUND
+// igual que antes.
+//
+// SPRINT-3D5.1-KML-CLOSED-LINESTRING: LineString ya NO se ignora
+// incondicionalmente -- si está CERRADO (primer punto = último punto,
+// comparación exacta tras el parseo numérico, sin tolerancia geográfica
+// oculta) y tiene al menos 4 coordenadas, se convierte explícitamente en
+// Polygon candidate (caso real: contornos de potrero exportados desde
+// AutoCAD como LineString cerrado). Un LineString ABIERTO sigue
+// ignorándose exactamente igual que antes. La conversión NUNCA garantiza
+// validez geométrica: el WKT resultante entra al MISMO pipeline PostGIS
+// (ST_IsValid/ST_CoveredBy/ST_Area) que cualquier otro Polygon, vía
+// computePotreroPreviewsBatch -- este módulo nunca evalúa self-intersection
+// ni área por sí mismo.
 // -----------------------------------------------------------------------
+
+// Mínimo de pares de coordenadas para que un LineString pueda considerarse
+// cerrado de forma útil: MIN_DISTINCT_VERTICES vértices distintos + 1
+// repetición del primer punto para cerrar el anillo (p.ej. A,B,C,A).
+const MIN_CLOSED_LINESTRING_COORDS = MIN_DISTINCT_VERTICES + 1;
+
+/**
+ * Cierre EXACTO, sin tolerancia geográfica: el primer y el último par
+ * lon/lat deben coincidir tal cual tras convertirlos a Number. Si no
+ * coinciden exactamente (por mínimo que sea el margen), el LineString se
+ * trata como ABIERTO -- nunca se "casi cierra" con un umbral oculto (si en
+ * el futuro se necesitara tolerancia, debe proponerse y aprobarse antes de
+ * implementarla, nunca agregarse en silencio).
+ */
+function isClosedLineStringCoordinates(coordinates) {
+  if (!Array.isArray(coordinates) || coordinates.length < MIN_CLOSED_LINESTRING_COORDS) return false;
+
+  const first = coordinates[0];
+  const last = coordinates[coordinates.length - 1];
+  const firstLng = Number(first?.[0]);
+  const firstLat = Number(first?.[1]);
+  const lastLng = Number(last?.[0]);
+  const lastLat = Number(last?.[1]);
+  if (!isFiniteNumber(firstLng) || !isFiniteNumber(firstLat) || !isFiniteNumber(lastLng) || !isFiniteNumber(lastLat)) {
+    return false;
+  }
+
+  return firstLng === lastLng && firstLat === lastLat;
+}
 function sanitizeNombreSugerido(rawName) {
   if (typeof rawName !== 'string') return null;
   // eslint-disable-next-line no-control-regex
@@ -250,7 +291,7 @@ export function geoJsonPolygonToWkt(coordinates) {
   return `POLYGON(${rings.join(', ')})`;
 }
 
-function collectPolygonGeometries(geometry, results, name, ignored) {
+function collectPolygonGeometries(geometry, results, name, ignored, converted) {
   if (!geometry || typeof geometry.type !== 'string') return;
 
   if (geometry.type === 'Polygon') {
@@ -267,22 +308,36 @@ function collectPolygonGeometries(geometry, results, name, ignored) {
 
   if (geometry.type === 'GeometryCollection') {
     for (const sub of geometry.geometries || []) {
-      collectPolygonGeometries(sub, results, name, ignored);
+      collectPolygonGeometries(sub, results, name, ignored, converted);
     }
     return;
   }
 
-  // SPRINT-3D5-CIERRE-SEMANTICO §1: Point/LineString/MultiLineString se
-  // ignoran (nunca se convierten en polígono, nunca abortan un archivo
-  // mixto), pero el conteo se reporta al llamador -- nunca de forma
-  // silenciosa. Cualquier otro tipo (p.ej. MultiPoint) no forma parte del
-  // contrato aprobado y se descarta sin contar (fuera de alcance).
-  if (geometry.type === 'Point') {
-    ignored.points += 1;
+  // SPRINT-3D5.1-KML-CLOSED-LINESTRING: LineString cerrado -> Polygon
+  // candidate, trazable mediante `origenConversion`. LineString abierto
+  // sigue el comportamiento previo (SPRINT-3D5-CIERRE-SEMANTICO §1):
+  // ignorado, contado, nunca convertido, nunca aborta el archivo completo.
+  if (geometry.type === 'LineString') {
+    if (isClosedLineStringCoordinates(geometry.coordinates)) {
+      results.push({
+        wkt: geoJsonPolygonToWkt([geometry.coordinates]),
+        nombreSugerido: name,
+        origenConversion: 'linestring_cerrado',
+      });
+      converted.closedLineStrings += 1;
+      return;
+    }
+    ignored.lineStrings += 1;
     return;
   }
-  if (geometry.type === 'LineString') {
-    ignored.lineStrings += 1;
+
+  // SPRINT-3D5-CIERRE-SEMANTICO §1: Point/MultiLineString se ignoran
+  // (nunca se convierten en polígono, nunca abortan un archivo mixto),
+  // pero el conteo se reporta al llamador -- nunca de forma silenciosa.
+  // Cualquier otro tipo (p.ej. MultiPoint) no forma parte del contrato
+  // aprobado y se descarta sin contar (fuera de alcance).
+  if (geometry.type === 'Point') {
+    ignored.points += 1;
     return;
   }
   if (geometry.type === 'MultiLineString') {
@@ -294,11 +349,12 @@ function collectPolygonGeometries(geometry, results, name, ignored) {
 function extractPolygonsFromGeoJson(featureCollection) {
   const results = [];
   const ignored = { points: 0, lineStrings: 0, multiLineStrings: 0 };
+  const converted = { closedLineStrings: 0 };
   const features = Array.isArray(featureCollection?.features) ? featureCollection.features : [];
 
   for (const feature of features) {
     const nombreSugerido = sanitizeNombreSugerido(feature?.properties?.name);
-    collectPolygonGeometries(feature?.geometry, results, nombreSugerido, ignored);
+    collectPolygonGeometries(feature?.geometry, results, nombreSugerido, ignored, converted);
   }
 
   if (results.length === 0) {
@@ -308,7 +364,7 @@ function extractPolygonsFromGeoJson(featureCollection) {
     throw semanticError('TOO_MANY_POLYGONS', 422, `El archivo supera el máximo de ${MAX_POLYGONS} polígonos procesables.`);
   }
 
-  return { polygons: results, ignored };
+  return { polygons: results, ignored, converted };
 }
 
 // -----------------------------------------------------------------------
@@ -364,7 +420,7 @@ export async function parseKmlOrKmzUpload(buffer, { fileNameHeader } = {}) {
     throw semanticError('INVALID_KML', 422, 'No fue posible interpretar el contenido KML.');
   }
 
-  const { polygons, ignored } = extractPolygonsFromGeoJson(geojson);
+  const { polygons, ignored, converted } = extractPolygonsFromGeoJson(geojson);
 
-  return { metodoDelimitacion, polygons, ignored };
+  return { metodoDelimitacion, polygons, ignored, converted };
 }

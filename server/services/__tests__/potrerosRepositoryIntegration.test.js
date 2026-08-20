@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
+import { geoJsonPolygonToWkt } from '../ganaderia/potreroKmlImport.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
@@ -63,6 +64,27 @@ const POTRERO_SHARED_EDGE_WKT = 'POLYGON((-75.5 1.3, -75.45 1.3, -75.45 1.35, -7
 const POTRERO_OUTSIDE_WKT = 'POLYGON((-75.42 1.35, -75.35 1.35, -75.35 1.42, -75.42 1.42, -75.42 1.35))';
 // Bowtie -- autointersección clásica.
 const POTRERO_SELF_INTERSECTING_WKT = 'POLYGON((-75.48 1.32, -75.42 1.38, -75.48 1.38, -75.42 1.32, -75.48 1.32))';
+
+// SPRINT-3D5.1-KML-CLOSED-LINESTRING: predio y coordenadas del caso real
+// confirmado POTRERO_1.kml -- un LineString cerrado exportado desde
+// AutoCAD que representa el perímetro del potrero.
+const PREDIO_POTRERO1_WKT = 'POLYGON((-75.89 1.249, -75.88 1.249, -75.88 1.251, -75.89 1.251, -75.89 1.249))';
+const POTRERO_1_CLOSED_LINE_COORDS = [
+  [-75.8847911620009, 1.24967933395856],
+  [-75.8852492360009, 1.24993185695855],
+  [-75.8847978338518, 1.25050614366061],
+  [-75.8844887570009, 1.25007831195854],
+  [-75.8847911620009, 1.24967933395856],
+];
+// Bowtie cerrado -- misma forma que el fixture 3D5.1-E de
+// potreroKmlImport.test.js, usada aquí para probar ST_IsValid REAL.
+const CLOSED_BOWTIE_COORDS = [
+  [-74.6, 4.6],
+  [-74.58, 4.62],
+  [-74.6, 4.62],
+  [-74.58, 4.6],
+  [-74.6, 4.6],
+];
 
 function randomOrgId() {
   return crypto.randomUUID();
@@ -432,5 +454,51 @@ describe('SPRINT-3D3: potrerosRepository contra Postgres-AGX-Business real', { s
     const ok = reservePotreroCandidate({ candidateId, organizacionId: org, cuentaId, predioId: predioA });
     assert.equal(ok.status, 'ok');
     assert.equal(ok.metodoDelimitacion, 'kml');
+  });
+
+  // -----------------------------------------------------------------
+  // SPRINT-3D5.1-KML-CLOSED-LINESTRING §13: el WKT que produce
+  // geoJsonPolygonToWkt() a partir de un LineString cerrado NO se valida
+  // distinto de cualquier otro Polygon -- pasa por el MISMO pipeline
+  // PostGIS real (ST_IsValid, ST_CoveredBy, ST_Area). Esto prueba contra
+  // Postgres/PostGIS real, no solo JS, que la conversión es correcta.
+  // -----------------------------------------------------------------
+  test('3D5.1-B/13: WKT convertido desde el LineString cerrado real de POTRERO_1.kml -> ST_IsValid=true, ST_CoveredBy=true, área>0', async () => {
+    const org = randomOrgId();
+    const predioId = await seedPredio(org, { nombre: 'Predio Sprint3D3 KMLCLOSEDLINE-P1', wkt: PREDIO_POTRERO1_WKT });
+
+    const wkt = geoJsonPolygonToWkt([POTRERO_1_CLOSED_LINE_COORDS]);
+    const preview = await repo.computePotreroPreview(org, predioId, wkt);
+
+    assert.ok(preview.areaHa > 0);
+    assert.ok(preview.geometry);
+  });
+
+  test('3D5.1-E/13: WKT convertido desde un LineString cerrado autointersectante (bowtie) -> ST_IsValid=false, INVALID_POTRERO_GEOMETRY, nunca ST_MakeValid', async () => {
+    const org = randomOrgId();
+    const predioId = await seedPredio(org, { nombre: 'Predio Sprint3D3 KMLCLOSEDLINE-BOWTIE' });
+
+    const wkt = geoJsonPolygonToWkt([CLOSED_BOWTIE_COORDS]);
+
+    await assert.rejects(
+      () => repo.computePotreroPreview(org, predioId, wkt),
+      (error) => error.status === 422 && error.code === 'INVALID_POTRERO_GEOMETRY',
+    );
+  });
+
+  test('3D5.1-13: computePotreroPreviewsBatch con varios LineString cerrados (algunos válidos, uno autointersectante) preserva el orden, sin ST_Union', async () => {
+    const org = randomOrgId();
+    const predioId = await seedPredio(org, { nombre: 'Predio Sprint3D3 KMLCLOSEDLINE-BATCH', wkt: PREDIO_POTRERO1_WKT });
+
+    const validWkt = geoJsonPolygonToWkt([POTRERO_1_CLOSED_LINE_COORDS]);
+    const bowtieWkt = geoJsonPolygonToWkt([CLOSED_BOWTIE_COORDS]);
+
+    const results = await repo.computePotreroPreviewsBatch(org, predioId, [validWkt, bowtieWkt]);
+
+    assert.equal(results.length, 2);
+    assert.equal(results[0].ok, true);
+    assert.ok(results[0].areaHa > 0);
+    assert.equal(results[1].ok, false);
+    assert.equal(results[1].code, 'INVALID_POTRERO_GEOMETRY');
   });
 });

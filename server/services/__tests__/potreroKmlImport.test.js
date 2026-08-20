@@ -29,6 +29,11 @@ function polygonPlacemark(name, ring) {
   return `<Placemark><name>${name}</name><Polygon><outerBoundaryIs><LinearRing><coordinates>${coords}</coordinates></LinearRing></outerBoundaryIs></Polygon></Placemark>`;
 }
 
+function lineStringPlacemark(name, points) {
+  const coords = points.map(([lng, lat]) => `${lng},${lat},0`).join(' ');
+  return `<Placemark><name>${name}</name><LineString><coordinates>${coords}</coordinates></LineString></Placemark>`;
+}
+
 const SQUARE_A = [
   [-74.1, 4.1],
   [-74.1, 4.12],
@@ -190,6 +195,166 @@ test('KML con Polygon + MultiLineString -> candidate válido, reportado en ignor
 test('KML válido sin elementos mixtos -> ignored en cero (contrato estable incluso sin nada que ignorar)', async () => {
   const result = await parseKmlOrKmzUpload(Buffer.from(KML_SINGLE_POLYGON, 'utf8'), { fileNameHeader: 'limpio.kml' });
   assert.deepEqual(result.ignored, { points: 0, lineStrings: 0, multiLineStrings: 0 });
+  assert.deepEqual(result.converted, { closedLineStrings: 0 });
+});
+
+// ---------------------------------------------------------------------
+// SPRINT-3D5.1-KML-CLOSED-LINESTRING: LineString CERRADO (primer punto =
+// último punto, comparación exacta) exportado desde AutoCAD -> conversión
+// explícita a Polygon candidate. LineString ABIERTO sigue ignorado
+// exactamente igual que antes. Self-intersection/área>0 los decide el
+// pipeline PostGIS real (potrerosRepositoryIntegration.test.js) -- este
+// archivo solo cubre la extracción/conversión en JS.
+// ---------------------------------------------------------------------
+
+const CLOSED_LINE_SQUARE = [
+  [-74.3, 4.3],
+  [-74.3, 4.32],
+  [-74.28, 4.32],
+  [-74.28, 4.3],
+  [-74.3, 4.3],
+];
+
+const OTHER_CLOSED_LINE_TRIANGLE = [
+  [-74.5, 4.5],
+  [-74.5, 4.52],
+  [-74.48, 4.51],
+  [-74.5, 4.5],
+];
+
+// Caso real confirmado del sprint: POTRERO_1.kml.
+const POTRERO_1_CLOSED_LINE = [
+  [-75.8847911620009, 1.24967933395856],
+  [-75.8852492360009, 1.24993185695855],
+  [-75.8847978338518, 1.25050614366061],
+  [-75.8844887570009, 1.25007831195854],
+  [-75.8847911620009, 1.24967933395856],
+];
+
+test('3D5.1-A: LineString cerrado válido (4 vértices distintos, primer punto = último punto) -> convertido a Polygon candidate trazable', async () => {
+  const kml = kmlDocument(lineStringPlacemark('Potrero Cerrado', CLOSED_LINE_SQUARE));
+  const result = await parseKmlOrKmzUpload(Buffer.from(kml, 'utf8'), { fileNameHeader: 'cerrado.kml' });
+  assert.equal(result.polygons.length, 1);
+  assert.match(result.polygons[0].wkt, /^POLYGON\(/);
+  assert.equal(result.polygons[0].nombreSugerido, 'Potrero Cerrado');
+  assert.equal(result.polygons[0].origenConversion, 'linestring_cerrado');
+  assert.deepEqual(result.converted, { closedLineStrings: 1 });
+  assert.deepEqual(result.ignored, { points: 0, lineStrings: 0, multiLineStrings: 0 });
+});
+
+test('3D5.1-B: caso real POTRERO_1.kml (LineString cerrado exportado desde AutoCAD) -> candidate Polygon válido, ya no NO_POLYGONS_FOUND', async () => {
+  const kml = kmlDocument(lineStringPlacemark('POTRERO_1', POTRERO_1_CLOSED_LINE));
+  const result = await parseKmlOrKmzUpload(Buffer.from(kml, 'utf8'), { fileNameHeader: 'POTRERO_1.kml' });
+  assert.equal(result.polygons.length, 1);
+  assert.equal(result.polygons[0].origenConversion, 'linestring_cerrado');
+  assert.match(result.polygons[0].wkt, /^POLYGON\(\(-75\.8847911620009 1\.24967933395856,/);
+  assert.deepEqual(result.converted, { closedLineStrings: 1 });
+});
+
+test('3D5.1-C: LineString abierto sigue ignorado exactamente igual que antes -- nunca convertido', async () => {
+  const openLine = [
+    [-74.3, 4.3],
+    [-74.3, 4.32],
+    [-74.28, 4.32],
+  ]; // primer punto != último punto
+  const kml = kmlDocument(polygonPlacemark('Potrero Norte', SQUARE_A) + lineStringPlacemark('Cerca abierta', openLine));
+  const result = await parseKmlOrKmzUpload(Buffer.from(kml, 'utf8'), { fileNameHeader: 'abierta.kml' });
+  assert.equal(result.polygons.length, 1);
+  assert.equal(result.polygons[0].origenConversion, undefined);
+  assert.deepEqual(result.ignored, { points: 0, lineStrings: 1, multiLineStrings: 0 });
+  assert.deepEqual(result.converted, { closedLineStrings: 0 });
+});
+
+test('3D5.1-D: KML con SOLO un LineString abierto -> sigue NO_POLYGONS_FOUND, nunca se convierte', async () => {
+  const openLine = [
+    [-74.3, 4.3],
+    [-74.3, 4.32],
+    [-74.28, 4.32],
+  ];
+  const kml = kmlDocument(lineStringPlacemark('Cerca abierta', openLine));
+  await assert.rejects(
+    parseKmlOrKmzUpload(Buffer.from(kml, 'utf8'), { fileNameHeader: 'solo-abierta.kml' }),
+    (error) => error.code === 'NO_POLYGONS_FOUND',
+  );
+});
+
+test('3D5.1-E: LineString cerrado autointersectante se convierte igualmente a Polygon candidate -- la invalidez la decide PostGIS (ST_IsValid) río abajo, nunca este parser', async () => {
+  // Forma de "corbata de moño" (bowtie): los dos lados se cruzan entre sí.
+  const selfIntersecting = [
+    [-74.6, 4.6],
+    [-74.58, 4.62],
+    [-74.6, 4.62],
+    [-74.58, 4.6],
+    [-74.6, 4.6],
+  ];
+  const kml = kmlDocument(lineStringPlacemark('Bowtie', selfIntersecting));
+  const result = await parseKmlOrKmzUpload(Buffer.from(kml, 'utf8'), { fileNameHeader: 'bowtie.kml' });
+  assert.equal(result.polygons.length, 1);
+  assert.equal(result.polygons[0].origenConversion, 'linestring_cerrado');
+  assert.match(result.polygons[0].wkt, /^POLYGON\(/);
+  // La validación de self-intersection real (ST_IsValid) se prueba contra
+  // PostGIS en potrerosRepositoryIntegration.test.js -- ver 3D5.1-E allí.
+});
+
+test('3D5.1-F: varios LineString cerrados en el mismo archivo -> varios Polygon candidates independientes, nunca ST_Union', async () => {
+  const kml = kmlDocument(
+    lineStringPlacemark('Potrero Cerrado 1', CLOSED_LINE_SQUARE) +
+      lineStringPlacemark('Potrero Cerrado 2', OTHER_CLOSED_LINE_TRIANGLE),
+  );
+  const result = await parseKmlOrKmzUpload(Buffer.from(kml, 'utf8'), { fileNameHeader: 'varias-cerradas.kml' });
+  assert.equal(result.polygons.length, 2);
+  assert.deepEqual(
+    result.polygons.map((p) => p.origenConversion),
+    ['linestring_cerrado', 'linestring_cerrado'],
+  );
+  assert.notEqual(result.polygons[0].wkt, result.polygons[1].wkt);
+  assert.deepEqual(result.converted, { closedLineStrings: 2 });
+});
+
+test('3D5.1-G: Polygon + LineString cerrado en el mismo archivo -> ambos se convierten en candidates independientes', async () => {
+  const kml = kmlDocument(
+    polygonPlacemark('Potrero Norte', SQUARE_A) + lineStringPlacemark('Potrero Cerrado', CLOSED_LINE_SQUARE),
+  );
+  const result = await parseKmlOrKmzUpload(Buffer.from(kml, 'utf8'), { fileNameHeader: 'poligono-y-cerrada.kml' });
+  assert.equal(result.polygons.length, 2);
+  assert.equal(result.polygons[0].origenConversion, undefined);
+  assert.equal(result.polygons[1].origenConversion, 'linestring_cerrado');
+  assert.deepEqual(result.converted, { closedLineStrings: 1 });
+  assert.deepEqual(result.ignored, { points: 0, lineStrings: 0, multiLineStrings: 0 });
+});
+
+test('3D5.1-H: Polygon + LineString abierto -> Polygon candidate + línea ignorada (comportamiento previo intacto)', async () => {
+  const openLine = [
+    [-74.3, 4.3],
+    [-74.3, 4.32],
+    [-74.28, 4.32],
+  ];
+  const kml = kmlDocument(polygonPlacemark('Potrero Norte', SQUARE_A) + lineStringPlacemark('Cerca abierta', openLine));
+  const result = await parseKmlOrKmzUpload(Buffer.from(kml, 'utf8'), { fileNameHeader: 'poligono-y-abierta.kml' });
+  assert.equal(result.polygons.length, 1);
+  assert.deepEqual(result.ignored, { points: 0, lineStrings: 1, multiLineStrings: 0 });
+  assert.deepEqual(result.converted, { closedLineStrings: 0 });
+});
+
+test('3D5.1-I: MultiGeometry mixto (Polygon + LineString cerrado + LineString abierto) -> 2 candidates, 1 ignorado, conteos correctos', async () => {
+  const polygonCoords = SQUARE_A.map(([lng, lat]) => `${lng},${lat},0`).join(' ');
+  const closedCoords = CLOSED_LINE_SQUARE.map(([lng, lat]) => `${lng},${lat},0`).join(' ');
+  const openCoords = '-74.3,4.3,0 -74.3,4.32,0 -74.28,4.32,0';
+  const kml = kmlDocument(
+    `<Placemark><name>Grupo Mixto</name><MultiGeometry>` +
+      `<Polygon><outerBoundaryIs><LinearRing><coordinates>${polygonCoords}</coordinates></LinearRing></outerBoundaryIs></Polygon>` +
+      `<LineString><coordinates>${closedCoords}</coordinates></LineString>` +
+      `<LineString><coordinates>${openCoords}</coordinates></LineString>` +
+      `</MultiGeometry></Placemark>`,
+  );
+  const result = await parseKmlOrKmzUpload(Buffer.from(kml, 'utf8'), { fileNameHeader: 'multigeometry-mixto.kml' });
+  assert.equal(result.polygons.length, 2);
+  assert.deepEqual(
+    result.polygons.map((p) => p.origenConversion),
+    [undefined, 'linestring_cerrado'],
+  );
+  assert.deepEqual(result.converted, { closedLineStrings: 1 });
+  assert.deepEqual(result.ignored, { points: 0, lineStrings: 1, multiLineStrings: 0 });
 });
 
 // ---------------------------------------------------------------------
