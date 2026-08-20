@@ -207,6 +207,31 @@ test('G: si preview-file devuelve elementos ignorados, el frontend muestra un av
   assert.match(registrationCode, /metodo === 'kml' && fileIgnoredNotice/);
 });
 
+// ---------------------------------------------------------------------
+// SPRINT-3D5.1-KML-CLOSED-LINESTRING §10/§J: si preview-file reporta un
+// LineString cerrado convertido a Polygon (convertidos.closedLineStrings),
+// el frontend muestra un aviso amigable propio, nunca en silencio, sin
+// bloquear el preview ni cambiar el flujo final de candidateId.
+// ---------------------------------------------------------------------
+
+test('J: si preview-file convirtió un LineString cerrado en Polygon, el frontend muestra un aviso amigable de conversión -- nunca en silencio', () => {
+  assert.match(registrationCode, /function describeConversionNotice\(convertidos\)/);
+  const fn = registrationCode.match(/function describeConversionNotice\(convertidos\)\s*\{[\s\S]*?\n\}/)?.[0] ?? '';
+  assert.match(fn, /convertidos\?\.closedLineStrings/);
+  assert.match(fn, /interpretó como polígono del potrero/);
+
+  const handleFn = registrationCode.match(/async function handleFileChange\(event\)\s*\{[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(handleFn, /setFileConversionNotice\(describeConversionNotice\(data\?\.convertidos\)/);
+
+  // Mismo criterio que fileIgnoredNotice: visible tanto en la lista de
+  // candidates como en el paso preview.
+  assert.match(
+    registrationCode,
+    /fileConversionNotice \? <StatusMessage type="info">\{fileConversionNotice\}<\/StatusMessage> : null/,
+  );
+  assert.match(registrationCode, /metodo === 'kml' && fileConversionNotice/);
+});
+
 test('H: KMZ con varios .kml (KMZ_MULTIPLE_KML_FILES) muestra copy amigable propio, distinto del resto de errores de archivo', () => {
   assert.match(
     registrationSource,

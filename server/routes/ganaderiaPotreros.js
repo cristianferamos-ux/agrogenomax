@@ -359,7 +359,7 @@ export default function createGanaderiaPotrerosRouter({ appEnv, csrfServerSecret
       const fileNameHeader = req.get('X-Potrero-File-Name') || '';
       const { organizacionId, cuentaId } = req.ganaderiaAuth;
 
-      const { metodoDelimitacion, polygons, ignored } = await parseKmlOrKmzUpload(req.body, { fileNameHeader });
+      const { metodoDelimitacion, polygons, ignored, converted } = await parseKmlOrKmzUpload(req.body, { fileNameHeader });
 
       // §8/§9: NUNCA ST_Union -- cada polígono (ya separado si venía de un
       // MultiPolygon) se valida por separado en una única transacción.
@@ -389,17 +389,23 @@ export default function createGanaderiaPotrerosRouter({ appEnv, csrfServerSecret
             areaHa: preview.areaHa,
             metodoDelimitacion,
             geometry: preview.geometry,
+            // SPRINT-3D5.1: trazabilidad -- null salvo que este candidate
+            // provenga de un LineString cerrado convertido a Polygon.
+            origenConversion: polygons[index].origenConversion ?? null,
           });
         } else {
           invalidos.push({ index, nombreSugerido, error: preview.code });
         }
       });
 
-      // SPRINT-3D5-CIERRE-SEMANTICO §1: Point/LineString/MultiLineString
-      // nunca se procesan en silencio -- se reportan explícitamente al
-      // cliente (conteos, no solo un booleano) para que el frontend pueda
-      // avisar al usuario sin abortar los Polygon válidos del mismo archivo.
-      res.json({ candidates, invalidos, ignorados: ignored });
+      // SPRINT-3D5-CIERRE-SEMANTICO §1: Point/LineString abierto/
+      // MultiLineString nunca se procesan en silencio -- se reportan
+      // explícitamente al cliente (conteos, no solo un booleano) para que
+      // el frontend pueda avisar al usuario sin abortar los Polygon
+      // válidos del mismo archivo. SPRINT-3D5.1: `convertidos` reporta,
+      // también de forma explícita, cuántos LineString CERRADOS fueron
+      // interpretados como Polygon (nunca silencioso).
+      res.json({ candidates, invalidos, ignorados: ignored, convertidos: converted });
     } catch (error) {
       if (sendSemanticError(res, error)) return;
       next(error);
