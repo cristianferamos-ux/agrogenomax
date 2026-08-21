@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { StatusMessage } from '../components/FormField.jsx';
 import { listPotrerosByPredio } from './ganaderiaPotrerosApi.js';
 import { formatDateDisplay } from '../utils/dateFormat.js';
+import GanaderiaPotreroCardMap from './GanaderiaPotreroCardMap.jsx';
 
 const LIST_ERROR_MESSAGE = 'No fue posible cargar los potreros de este predio. Intenta nuevamente.';
 const LIST_EMPTY_MESSAGE = 'Aún no tienes potreros registrados en este predio.';
@@ -13,12 +14,24 @@ const LIST_EMPTY_MESSAGE = 'Aún no tienes potreros registrados en este predio.'
 const METODO_LABELS = {
   coordenadas: 'Coordenadas',
   gps_movil: 'GPS del dispositivo',
+  kml: 'KML',
+  kmz: 'KMZ',
 };
 
 function formatAreaHa(value) {
   const num = Number(value);
   if (!Number.isFinite(num)) return '—';
   return `${num.toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ha`;
+}
+
+// SPRINT-3D5.3 §1: m² es SOLO presentación -- se deriva del areaHa ya
+// calculado server-side (autoritativo), nunca se recalcula desde geometry
+// en el cliente. areaHa * 10000 es una conversión de unidad pura (1 ha =
+// 10000 m²), no un nuevo cálculo geométrico.
+function formatAreaM2(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '—';
+  return `${(num * 10000).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m²`;
 }
 
 // refreshKey: contador explícito controlado por el padre (PredioCard en
@@ -32,6 +45,12 @@ export default function PotrerosByPredioPanel({ predioId, refreshKey = 0, succes
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [potreros, setPotreros] = useState([]);
+  // SPRINT-3D5.3-PERF: geometry del predio resuelta UNA sola vez por
+  // predioId aquí -- nunca por GanaderiaPotreroCardMap.jsx (antes cada
+  // card la pedía por su cuenta: N potreros -> N GETs idénticos del mismo
+  // predio). Se pasa como prop a cada card; null mientras carga o si el
+  // GET falla, y eso nunca oculta las cards (§4 del sprint).
+  const [predioGeometry, setPredioGeometry] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -60,6 +79,23 @@ export default function PotrerosByPredioPanel({ predioId, refreshKey = 0, succes
       active = false;
     };
   }, [predioId, refreshKey]);
+
+  useEffect(() => {
+    let active = true;
+    setPredioGeometry(null);
+
+    fetch(`/api/ganaderia/predios/${predioId}`, { credentials: 'include' })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (!active) return;
+        setPredioGeometry(data?.geometry || null);
+      })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+    };
+  }, [predioId]);
 
   const successBanner = successMessage ? <StatusMessage type="success">{successMessage}</StatusMessage> : null;
 
@@ -94,23 +130,41 @@ export default function PotrerosByPredioPanel({ predioId, refreshKey = 0, succes
     <div className="gan-potrero-list">
       {successBanner}
       {potreros.map((potrero) => (
-        <div className="gan-potrero-list-item" key={potrero.potreroId}>
-          <strong>{potrero.nombre}</strong>
-          <div className="gan-ficha-row">
-            <span>Área</span>
-            <strong>{formatAreaHa(potrero.areaHa)}</strong>
-          </div>
-          <div className="gan-ficha-row">
-            <span>Capacidad de animales</span>
-            <strong>{potrero.capacidadAnimales === null ? '—' : potrero.capacidadAnimales}</strong>
-          </div>
-          <div className="gan-ficha-row">
-            <span>Método de delimitación</span>
-            <strong>{METODO_LABELS[potrero.metodoDelimitacion] || potrero.metodoDelimitacion}</strong>
-          </div>
-          <div className="gan-ficha-row">
-            <span>Fecha de creación</span>
-            <strong>{formatDateDisplay(potrero.fechaCreacion)}</strong>
+        <div className="gan-potrero-card" key={potrero.potreroId}>
+          <strong className="gan-potrero-card-name">{potrero.nombre}</strong>
+          <div className="gan-potrero-card-body">
+            <div className="gan-potrero-data">
+              <div className="gan-ficha-row">
+                <span>Área</span>
+                <strong>{formatAreaHa(potrero.areaHa)}</strong>
+                <strong>{formatAreaM2(potrero.areaHa)}</strong>
+              </div>
+              <div className="gan-ficha-row">
+                <span>Capacidad de animales</span>
+                <strong>{potrero.capacidadAnimales === null ? '—' : potrero.capacidadAnimales}</strong>
+              </div>
+              <div className="gan-ficha-row">
+                <span>Método de delimitación</span>
+                <strong>{METODO_LABELS[potrero.metodoDelimitacion] || potrero.metodoDelimitacion}</strong>
+              </div>
+              <div className="gan-ficha-row">
+                <span>Fecha de creación</span>
+                <strong>{formatDateDisplay(potrero.fechaCreacion)}</strong>
+              </div>
+              {potrero.observaciones ? (
+                <div className="gan-ficha-row">
+                  <span>Observaciones</span>
+                  <strong>{potrero.observaciones}</strong>
+                </div>
+              ) : null}
+            </div>
+            <div className="gan-potrero-map-wrap">
+              <GanaderiaPotreroCardMap
+                predioId={predioId}
+                potreroId={potrero.potreroId}
+                predioGeometry={predioGeometry}
+              />
+            </div>
           </div>
         </div>
       ))}
