@@ -5322,6 +5322,10 @@ header nav > div[role='navigation']::-webkit-scrollbar {
   background: #00d8ff;
 }
 
+.gan-potrero-legend-rejected::before {
+  background: #ff4d4d;
+}
+
 .gan-segment {
   display: inline-flex;
   flex-wrap: wrap;

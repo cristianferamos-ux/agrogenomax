@@ -38,11 +38,17 @@ function purgeExpired(now = Date.now()) {
 /**
  * Crea un candidato ligado a organizacionId + cuentaId + predioId (§7).
  * `geometry` (GeoJSON), `areaHa` y `metodoDelimitacion` ya fueron
- * calculados/validados server-side (ST_IsValid + ST_CoveredBy + ST_Area)
- * antes de llegar aquí -- nunca datos crudos del cliente. Estado inicial:
- * AVAILABLE.
+ * calculados/validados server-side (ST_IsValid + validación operacional de
+ * tolerancia + ST_Area) antes de llegar aquí -- nunca datos crudos del
+ * cliente. Estado inicial: AVAILABLE.
+ *
+ * SPRINT-3D5.2 §15: `toleranceInfo` (opcional) es la `validacion` que
+ * devolvió el pipeline espacial ({estado: STRICT_OK|TOLERANCE_OK,
+ * areaFueraM2, porcentajeFuera, distanciaMaximaFueraM, toleranceApplied})
+ * -- metadata INTERNA para auditoría (nunca viaja a agx.potreros, §16: no
+ * hay columna nueva en este sprint, deuda documentada en el handoff).
  */
-export function createPotreroCandidate({ organizacionId, cuentaId, predioId, geometry, areaHa, metodoDelimitacion }) {
+export function createPotreroCandidate({ organizacionId, cuentaId, predioId, geometry, areaHa, metodoDelimitacion, toleranceInfo = null }) {
   purgeExpired();
 
   const candidateId = buildCandidateId();
@@ -55,6 +61,7 @@ export function createPotreroCandidate({ organizacionId, cuentaId, predioId, geo
     geometry,
     areaHa,
     metodoDelimitacion,
+    toleranceInfo,
     createdAt: now,
     state: STATE.AVAILABLE,
   });
@@ -116,6 +123,7 @@ export function reservePotreroCandidate({ candidateId, organizacionId, cuentaId,
     geometry: record.geometry,
     areaHa: record.areaHa,
     metodoDelimitacion: record.metodoDelimitacion,
+    toleranceInfo: record.toleranceInfo,
   };
 }
 
@@ -152,4 +160,8 @@ export function __hasPotreroCandidateForTests(candidateId) {
 
 export function __getPotreroCandidateStateForTests(candidateId) {
   return store.get(candidateId)?.state ?? null;
+}
+
+export function __getPotreroCandidateToleranceForTests(candidateId) {
+  return store.get(candidateId)?.toleranceInfo ?? null;
 }

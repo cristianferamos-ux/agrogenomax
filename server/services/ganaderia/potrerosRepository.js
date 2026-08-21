@@ -12,6 +12,7 @@
 // aísla por predio, solo por organización) para nunca mezclar potreros de
 // dos predios de la misma organización.
 import { withOrganizacionTransaction } from '../../db/agxBusinessPool.js';
+import { computeCoverageMetrics, decideToleranceStatus, TOLERANCE_STATUS } from './potreroSpatialTolerance.js';
 
 function semanticError(code, status, message) {
   return Object.assign(new Error(message || code), { status, code });
@@ -132,19 +133,84 @@ export function buildPolygonWktFromPuntos(puntos) {
 }
 
 /**
- * Valida y calcula el preview espacial de un potrero contra el predio
- * padre (§9/§10/§11/§13 del sprint): predio existe y pertenece al tenant,
- * predio tiene geometry, el polygon propuesto es topológicamente válido
- * (ST_IsValid -- sin ST_MakeValid, sin auto-corrección), queda cubierto
- * por el predio (ST_CoveredBy, borde compartido permitido), y su área se
- * calcula server-side (ST_Area(geometry::geography)/10000). Las tres
- * comprobaciones son consultas SEPARADAS deliberadamente: ST_CoveredBy
- * sobre una geometría inválida puede lanzar una excepción a nivel SQL, así
- * que nunca se evalúa hasta confirmar ST_IsValid primero.
+ * SPRINT-3D5.2: evalúa UN polígono ya ST_IsValid=true contra el predio y
+ * decide STRICT_OK/TOLERANCE_OK/OUTSIDE (potreroSpatialTolerance.js).
+ * NUNCA modifica la geometría del usuario -- `geometry` que se devuelve es
+ * siempre exactamente ST_AsGeoJSON(ST_GeomFromText(wkt)), jamás el
+ * resultado de ST_Difference/ST_Buffer/ST_Snap (esas operaciones viven
+ * exclusivamente dentro de computeCoverageMetrics, solo para medir).
  *
- * Devuelve { geometry (GeoJSON), areaHa } listos para un candidate.
+ * Devuelve { geometry, areaHa, validacion } si STRICT_OK/TOLERANCE_OK, o
+ * lanza POTRERO_OUTSIDE_PREDIO (con `.details` -- geometry/areaHa/metrics
+ * -- para que el caller pueda ofrecer un preview de solo lectura de la
+ * geometría rechazada, §13 del sprint) si OUTSIDE.
  */
-export async function computePotreroPreview(organizacionId, predioId, wkt) {
+async function evaluatePolygonAgainstPredio(client, wkt, predioId, { metodoDelimitacion, gpsAccuracyMaxM = null } = {}) {
+  const geometryResult = await client.query(
+    `select ST_IsValid(g.geom) as is_valid,
+            ST_Area(g.geom::geography) as area_total_m2,
+            ST_AsGeoJSON(g.geom)::json as geometry
+       from (select ST_GeomFromText($1, 4326) as geom) g`,
+    [wkt],
+  );
+  const { is_valid: isValid, area_total_m2: areaTotalM2Raw, geometry } = geometryResult.rows[0];
+  if (!isValid) {
+    throw semanticError('INVALID_POTRERO_GEOMETRY', 422, 'El polígono propuesto no es una geometría válida (posible autointersección).');
+  }
+
+  const areaTotalM2 = Number(areaTotalM2Raw);
+  if (!(areaTotalM2 > 0)) {
+    throw semanticError('INVALID_POTRERO_GEOMETRY', 422, 'El polígono no tiene área (área total <= 0).');
+  }
+  const areaHa = areaTotalM2 / 10000;
+
+  const metrics = await computeCoverageMetrics(client, wkt, predioId, areaTotalM2);
+  const decision = decideToleranceStatus({ ...metrics, areaTotalM2, metodoDelimitacion, gpsAccuracyMaxM });
+
+  if (decision.status === TOLERANCE_STATUS.OUTSIDE) {
+    const error = semanticError('POTRERO_OUTSIDE_PREDIO', 422, 'El potrero se encuentra fuera del predio más allá del margen operacional permitido.');
+    error.details = {
+      geometry,
+      areaHa,
+      metrics: {
+        areaFueraM2: metrics.areaFueraM2,
+        porcentajeFuera: metrics.porcentajeFuera,
+        distanciaMaximaFueraM: metrics.distanciaMaximaFueraM,
+      },
+      toleranceApplied: decision.toleranceApplied,
+    };
+    throw error;
+  }
+
+  return {
+    geometry,
+    areaHa,
+    validacion: {
+      estado: decision.status,
+      areaFueraM2: metrics.areaFueraM2,
+      porcentajeFuera: metrics.porcentajeFuera,
+      distanciaMaximaFueraM: metrics.distanciaMaximaFueraM,
+      toleranceApplied: decision.toleranceApplied,
+    },
+  };
+}
+
+/**
+ * Valida y calcula el preview espacial de un potrero contra el predio
+ * padre (§9/§10/§11/§13 del sprint 3D3; tolerancia operacional §3D5.2):
+ * predio existe y pertenece al tenant, predio tiene geometry, el polygon
+ * propuesto es topológicamente válido (ST_IsValid -- sin ST_MakeValid, sin
+ * auto-corrección), y queda STRICT_OK o TOLERANCE_OK contra el predio
+ * (evaluatePolygonAgainstPredio/potreroSpatialTolerance.js). Su área se
+ * calcula server-side (ST_Area(geometry::geography)/10000).
+ *
+ * `context.metodoDelimitacion` decide el umbral de tolerancia aplicado;
+ * `context.gpsAccuracyMaxM` solo aplica a gps_movil (§7/§8 del sprint).
+ *
+ * Devuelve { geometry (GeoJSON), areaHa, validacion } listos para un
+ * candidate.
+ */
+export async function computePotreroPreview(organizacionId, predioId, wkt, context = {}) {
   assertPredioIdFormat(predioId);
   return withOrganizacionTransaction(organizacionId, async (client) => {
     const predioResult = await client.query(
@@ -158,42 +224,25 @@ export async function computePotreroPreview(organizacionId, predioId, wkt) {
       throw semanticError('PREDIO_WITHOUT_GEOMETRY', 422, 'El predio no tiene geometría registrada.');
     }
 
-    const geometryResult = await client.query(
-      `select ST_IsValid(g.geom) as is_valid,
-              ST_Area(g.geom::geography) / 10000 as area_ha,
-              ST_AsGeoJSON(g.geom)::json as geometry
-         from (select ST_GeomFromText($1, 4326) as geom) g`,
-      [wkt],
-    );
-    const { is_valid: isValid, area_ha: areaHa, geometry } = geometryResult.rows[0];
-    if (!isValid) {
-      throw semanticError('INVALID_POTRERO_GEOMETRY', 422, 'El polígono propuesto no es una geometría válida (posible autointersección).');
-    }
-
-    const coveredResult = await client.query(
-      'select ST_CoveredBy(ST_GeomFromText($1, 4326), geometry) as covered_by from agx.predios where predio_id = $2',
-      [wkt, predioId],
-    );
-    if (!coveredResult.rows[0].covered_by) {
-      throw semanticError('POTRERO_OUTSIDE_PREDIO', 422, 'El potrero debe quedar completamente dentro del predio.');
-    }
-
-    return { geometry, areaHa: Number(areaHa) };
+    return evaluatePolygonAgainstPredio(client, wkt, predioId, context);
   });
 }
 
 /**
- * SPRINT-3D5-POTRERO-KML-KMZ: variante batch de computePotreroPreview --
- * misma validación espacial exacta (ST_IsValid sin ST_MakeValid,
- * ST_CoveredBy sin buffer/snap/tolerancia, ST_Area/10000), pero aplicada a
- * VARIOS polígonos de un mismo archivo KML/KMZ dentro de UNA sola
- * transacción (predio se busca/valida una única vez). Regla de dominio
- * §8/§9: nunca ST_Union, nunca se aborta el archivo completo por un
- * polígono inválido individual -- cada wkt se evalúa de forma
- * independiente y su resultado (válido u ordenado por índice inválido con
- * su código) se devuelve en el mismo orden que `wktList`.
+ * SPRINT-3D5-POTRERO-KML-KMZ (tolerancia §3D5.2): variante batch de
+ * computePotreroPreview -- misma validación espacial exacta
+ * (evaluatePolygonAgainstPredio: ST_IsValid sin ST_MakeValid,
+ * STRICT_OK/TOLERANCE_OK/OUTSIDE sin buffer/snap/ajuste de vértices,
+ * ST_Area/10000), pero aplicada a VARIOS polígonos de un mismo archivo
+ * KML/KMZ dentro de UNA sola transacción (predio se busca/valida una
+ * única vez). Regla de dominio §8/§9: nunca ST_Union, nunca se aborta el
+ * archivo completo por un polígono individual inválido/OUTSIDE -- cada
+ * wkt se evalúa de forma independiente y su resultado (ok con
+ * geometry/areaHa/validacion, u ok:false con code + details de la
+ * geometría rechazada si aplica) se devuelve en el mismo orden que
+ * `wktList`.
  */
-export async function computePotreroPreviewsBatch(organizacionId, predioId, wktList) {
+export async function computePotreroPreviewsBatch(organizacionId, predioId, wktList, context = {}) {
   assertPredioIdFormat(predioId);
   return withOrganizacionTransaction(organizacionId, async (client) => {
     const predioResult = await client.query(
@@ -209,29 +258,13 @@ export async function computePotreroPreviewsBatch(organizacionId, predioId, wktL
 
     const results = [];
     for (const wkt of wktList) {
-      const geometryResult = await client.query(
-        `select ST_IsValid(g.geom) as is_valid,
-                ST_Area(g.geom::geography) / 10000 as area_ha,
-                ST_AsGeoJSON(g.geom)::json as geometry
-           from (select ST_GeomFromText($1, 4326) as geom) g`,
-        [wkt],
-      );
-      const { is_valid: isValid, area_ha: areaHa, geometry } = geometryResult.rows[0];
-      if (!isValid) {
-        results.push({ ok: false, code: 'INVALID_POTRERO_GEOMETRY' });
-        continue;
+      try {
+        const evaluated = await evaluatePolygonAgainstPredio(client, wkt, predioId, context);
+        results.push({ ok: true, ...evaluated });
+      } catch (error) {
+        if (typeof error?.code !== 'string') throw error;
+        results.push({ ok: false, code: error.code, details: error.details ?? null });
       }
-
-      const coveredResult = await client.query(
-        'select ST_CoveredBy(ST_GeomFromText($1, 4326), geometry) as covered_by from agx.predios where predio_id = $2',
-        [wkt, predioId],
-      );
-      if (!coveredResult.rows[0].covered_by) {
-        results.push({ ok: false, code: 'POTRERO_OUTSIDE_PREDIO' });
-        continue;
-      }
-
-      results.push({ ok: true, geometry, areaHa: Number(areaHa) });
     }
 
     return results;

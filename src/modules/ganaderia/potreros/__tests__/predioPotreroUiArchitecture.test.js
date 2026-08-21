@@ -175,7 +175,7 @@ test('Z5: múltiples candidates del mismo archivo se muestran SEPARADOS (lista),
 
 test('Z6: la selección de un candidate KML reutiliza el mismo shape de previewData que coordenadas/gps -- el paso preview y handleCreate no tienen lógica separada por método', () => {
   const applyFn = registrationCode.match(/function applyFileCandidate\(candidate\)\s*\{[\s\S]*?\n  \}/)?.[0] ?? '';
-  assert.match(applyFn, /setPreviewData\(\{\s*candidateId:\s*candidate\.candidateId,\s*areaHa:\s*candidate\.areaHa,\s*geometry:\s*candidate\.geometry,\s*metodoDelimitacion:\s*candidate\.metodoDelimitacion,\s*\}\);/);
+  assert.match(applyFn, /setPreviewData\(\{\s*candidateId:\s*candidate\.candidateId,\s*areaHa:\s*candidate\.areaHa,\s*geometry:\s*candidate\.geometry,\s*metodoDelimitacion:\s*candidate\.metodoDelimitacion,\s*validacion:\s*candidate\.validacion,\s*\}\);/);
   assert.match(applyFn, /setStep\('preview'\)/);
 });
 
@@ -330,8 +330,15 @@ test('R.8: ningún archivo de Potreros usa window.location.reload en ningún pun
 // S/T/U: copy amigable exacto para los errores semánticos del backend.
 // ---------------------------------------------------------------------
 
-test('S: POTRERO_OUTSIDE_PREDIO -> copy exacto pedido', () => {
-  assert.match(registrationSource, /POTRERO_OUTSIDE_PREDIO: 'El potrero debe quedar completamente dentro del predio\.'/);
+// SPRINT-3D5.2 §12: POTRERO_OUTSIDE_PREDIO ahora significa "más allá del
+// margen de tolerancia operacional" (una diferencia pequeña se acepta
+// como TOLERANCE_OK sin llegar a este código) -- el copy exacto del
+// sprint 3D4 queda reemplazado por el copy exacto pedido en 3D5.2 §12.
+test('S: POTRERO_OUTSIDE_PREDIO -> copy exacto pedido (§12, sprint 3D5.2)', () => {
+  assert.match(
+    registrationSource,
+    /POTRERO_OUTSIDE_PREDIO:\s*\n?\s*'Una parte importante del potrero se encuentra fuera del límite registrado del predio\. Revisa la delimitación antes de continuar\.'/,
+  );
 });
 
 test('T: PREDIO_WITHOUT_GEOMETRY -> copy exacto pedido', () => {
@@ -433,4 +440,71 @@ test('MIN_POINTS = 3 y removeCoordPoint nunca reduce por debajo del mínimo', ()
   assert.match(registrationCode, /const MIN_POINTS = 3;/);
   const fn = registrationCode.match(/function removeCoordPoint\(index\)\s*\{[\s\S]*?\n  \}/)?.[0] ?? '';
   assert.match(fn, /current\.length <= MIN_POINTS \? current : current\.filter/);
+});
+
+// ---------------------------------------------------------------------
+// SPRINT-3D5.2-OPERATIONAL-SPATIAL-TOLERANCE: aviso TOLERANCE_OK (§11),
+// preview de solo lectura para OUTSIDE (§13), accuracy GPS (§7/§19), y
+// "nunca ajuste de geometría client-side" (regla crítica del sprint).
+// ---------------------------------------------------------------------
+
+test('§11: aviso TOLERANCE_OK -- copy exacto pedido, mostrado como StatusMessage type="info" (nunca error)', () => {
+  assert.match(
+    registrationCode,
+    /const TOLERANCE_OK_NOTICE =\s*\n?\s*'El potrero presenta una pequeña diferencia respecto al límite registrado del predio\. Se considera una delimitación operativa válida\.'/,
+  );
+  assert.match(
+    registrationCode,
+    /previewData\.validacion\?\.estado === 'TOLERANCE_OK'[\s\S]{0,80}<StatusMessage type="info">\{TOLERANCE_OK_NOTICE\}<\/StatusMessage>/,
+  );
+});
+
+test('§13: OUTSIDE (rejected) se renderiza en GanaderiaPotreroPreviewMap vía la prop rejectedGeometry -- nunca como candidate/preview normal', () => {
+  assert.match(registrationCode, /rejectedGeometry=\{rejectedPreview\.geometry\}/);
+  // El estado rejectedPreview nunca trae candidateId -- solo geometry de
+  // solo lectura (comentario junto a la declaración del state, ver arriba).
+  assert.match(registrationCode, /const \[rejectedPreview, setRejectedPreview\] = useState\(null\)/);
+});
+
+test('§13: GanaderiaPotreroPreviewMap acepta rejectedGeometry con estilo distinto (rojo) del potrero aceptado -- nunca el mismo estilo', () => {
+  assert.match(previewMapCode, /POTRERO_REJECTED_STYLE = \{ color: '#ff4d4d'/);
+  assert.doesNotMatch(previewMapCode, /POTRERO_REJECTED_STYLE = \{ color: '#00d8ff'/);
+});
+
+test('§7/§19: cada punto GPS capturado guarda accuracy (navigator.geolocation.coords.accuracy) -- coordenadas manuales nunca la reportan', () => {
+  assert.match(registrationCode, /const accuracy = Number\.isFinite\(position\.coords\.accuracy\) \? position\.coords\.accuracy : null/);
+  // El body de coordenadas (emptyPoint) nunca incluye accuracy.
+  assert.match(registrationCode, /function emptyPoint\(\)\s*\{\s*return \{ latitud: '', longitud: '' \};\s*\}/);
+});
+
+test('§7: accuracy por encima de GPS_MAX_ACCURACY_M se rechaza client-side ANTES de agregar el punto -- pide recaptura, nunca inventa/recorta el valor', () => {
+  assert.match(registrationCode, /const GPS_MAX_ACCURACY_M = 100;/);
+  assert.match(
+    registrationCode,
+    /accuracy !== null && accuracy > GPS_MAX_ACCURACY_M[\s\S]{0,80}setGpsStatus\('low_accuracy'\)[\s\S]{0,20}return;/,
+  );
+});
+
+test('§7: accuracy viaja en el body de preview-gps SOLO para método gps -- nunca para coordenadas', () => {
+  const fn = registrationCode.match(/async function handlePreview\(\)\s*\{[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(fn, /metodo === 'gps' && point\.accuracy !== null && point\.accuracy !== undefined/);
+});
+
+test('§13/§23: OUTSIDE en coordenadas/gps nunca llama setStep(\'preview\') -- sin candidate no hay nada que confirmar, el botón "Registrar potrero" no puede aparecer', () => {
+  const fn = registrationCode.match(/async function handlePreview\(\)\s*\{[\s\S]*?\n  \}/)?.[0] ?? '';
+  const outsideBranch = fn.match(/if \(data\?\.error === 'POTRERO_OUTSIDE_PREDIO'[\s\S]*?setPreviewLoading\(false\);/)?.[0] ?? '';
+  assert.notEqual(outsideBranch, '');
+  assert.doesNotMatch(outsideBranch, /setStep\(/);
+  // setStep('preview') solo debe aparecer UNA vez en todo handlePreview
+  // -- la rama de éxito (ok && candidateId && preview), nunca la de error.
+  assert.equal((fn.match(/setStep\('preview'\)/g) || []).length, 1);
+});
+
+test('Regla crítica del sprint: PotreroRegistrationPanel/GanaderiaPotreroPreviewMap NUNCA ajustan/recortan la geometría en el cliente (sin turf, sin buffer/snap/clip, sin recalcular vértices)', () => {
+  for (const code of [registrationCode, previewMapCode]) {
+    assert.doesNotMatch(code, /turf\./);
+    assert.doesNotMatch(code, /\bbuffer\(/i);
+    assert.doesNotMatch(code, /\bsnap\(/i);
+    assert.doesNotMatch(code, /ST_(Buffer|Snap|Clip|Intersection|MakeValid|Union|Difference)/);
+  }
 });
