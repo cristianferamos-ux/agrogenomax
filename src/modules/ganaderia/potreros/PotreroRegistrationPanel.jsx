@@ -24,13 +24,33 @@ const MIN_POINTS = 3;
 
 // §12: el frontend NUNCA decide si el potrero cae dentro del predio --
 // solo traduce los códigos de error reales del backend a copy amigable.
+// SPRINT-3D5.2 §12: POTRERO_OUTSIDE_PREDIO ahora significa "más allá del
+// margen de tolerancia operacional" (OUTSIDE), no cualquier desvío -- el
+// copy deja de sugerir que CUALQUIER diferencia es un error, ya que una
+// diferencia pequeña se acepta como TOLERANCE_OK sin llegar a este código.
 const PREVIEW_ERROR_MESSAGES = {
-  POTRERO_OUTSIDE_PREDIO: 'El potrero debe quedar completamente dentro del predio.',
+  POTRERO_OUTSIDE_PREDIO:
+    'Una parte importante del potrero se encuentra fuera del límite registrado del predio. Revisa la delimitación antes de continuar.',
   INVALID_POTRERO_GEOMETRY: 'Los puntos ingresados no forman un polígono válido.',
   PREDIO_WITHOUT_GEOMETRY: 'Este predio no tiene un polígono disponible para registrar potreros.',
   INVALID_POTRERO_COORDINATES:
     'Verifica los puntos: se requieren al menos 3 vértices distintos con coordenadas válidas.',
+  // §7: accuracy GPS fuera de rango -- el backend rechaza ANTES de tocar
+  // PostGIS si algún punto trae accuracy > GPS_MAX_ACCURACY_M.
+  GPS_ACCURACY_TOO_LOW: 'La precisión GPS de alguno de los puntos capturados es demasiado baja. Vuelve a capturarlo.',
+  INVALID_GPS_ACCURACY: 'La precisión GPS de alguno de los puntos capturados no es válida. Vuelve a capturarlo.',
 };
+
+// §11: aviso informativo cuando el backend acepta el potrero POR
+// TOLERANCIA (TOLERANCE_OK) -- nunca se presenta como error.
+const TOLERANCE_OK_NOTICE =
+  'El potrero presenta una pequeña diferencia respecto al límite registrado del predio. Se considera una delimitación operativa válida.';
+
+// §7: espejo del máximo de GPS_MAX_ACCURACY_M en
+// server/services/ganaderia/potreroSpatialTolerance.js -- validación
+// client-side es solo UX (recaptura inmediata); el backend siempre vuelve
+// a validar server-side, nunca confía en este chequeo.
+const GPS_MAX_ACCURACY_M = 100;
 
 // SPRINT-3D5 §18: errores propios de la importación KML/KMZ -- el
 // frontend nunca decide si un archivo es válido, solo traduce el código
@@ -115,6 +135,9 @@ const GEO_MESSAGES = {
   unavailable: 'No fue posible determinar tu ubicación en este momento.',
   timeout: 'La solicitud de ubicación tardó demasiado. Intenta nuevamente.',
   unsupported: 'Tu navegador o dispositivo no permite obtener tu ubicación.',
+  // SPRINT-3D5.2 §7: precisión reportada por el dispositivo demasiado
+  // baja -- se pide recaptura, el punto NUNCA se agrega con esa precisión.
+  low_accuracy: `La precisión de tu ubicación actual es muy baja (más de ${GPS_MAX_ACCURACY_M} m). Intenta capturar el punto nuevamente en un lugar más despejado.`,
 };
 
 function emptyPoint() {
@@ -178,7 +201,10 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
 
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState('');
-  const [previewData, setPreviewData] = useState(null); // { candidateId, areaHa, geometry, metodoDelimitacion }
+  const [previewData, setPreviewData] = useState(null); // { candidateId, areaHa, geometry, metodoDelimitacion, validacion }
+  // SPRINT-3D5.2 §13: geometría RECHAZADA (OUTSIDE) para preview de solo
+  // lectura -- nunca trae candidateId, nunca habilita "Registrar potrero".
+  const [rejectedPreview, setRejectedPreview] = useState(null); // { geometry } | null
 
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
@@ -190,6 +216,7 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
     // nombre desde este paso (comportamiento sin cambios).
     if (metodo !== 'kml' && !nombre.trim()) return;
     setPreviewError('');
+    setRejectedPreview(null);
     setFileError('');
     setFileCandidates([]);
     setFileInvalidCount(0);
@@ -198,6 +225,7 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
   }
 
   function backToForm() {
+    setRejectedPreview(null);
     setStep('form');
   }
 
@@ -223,12 +251,20 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
     setGpsStatus('locating');
     navigator.geolocation.getCurrentPosition(
       (position) => {
+        const accuracy = Number.isFinite(position.coords.accuracy) ? position.coords.accuracy : null;
+        // §7: precisión fuera de rango -- se pide recaptura, el punto
+        // NUNCA se agrega (el backend igual lo rechazaría server-side,
+        // pero evitamos el viaje redondo y el mensaje es más inmediato).
+        if (accuracy !== null && accuracy > GPS_MAX_ACCURACY_M) {
+          setGpsStatus('low_accuracy');
+          return;
+        }
         setGpsPoints((current) => [
           ...current,
           {
             latitud: String(position.coords.latitude),
             longitud: String(position.coords.longitude),
-            precision: Number.isFinite(position.coords.accuracy) ? Math.round(position.coords.accuracy) : null,
+            accuracy,
           },
         ]);
         setGpsStatus('idle');
@@ -262,6 +298,7 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
       areaHa: candidate.areaHa,
       geometry: candidate.geometry,
       metodoDelimitacion: candidate.metodoDelimitacion,
+      validacion: candidate.validacion,
     });
     setCreateError('');
     setStep('preview');
@@ -282,6 +319,7 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
     setFileInvalidCount(0);
     setFileIgnoredNotice('');
     setFileConversionNotice('');
+    setRejectedPreview(null);
     setFileName(file.name || '');
 
     if (!hasAcceptedFileExtension(file.name)) {
@@ -304,11 +342,24 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
       setFileInvalidCount(invalidos.length);
 
       if (candidates.length === 0) {
-        setFileError(
-          invalidos.length > 0
-            ? 'Ningún polígono del archivo quedó dentro del predio.'
-            : resolveFileErrorMessage('NO_POLYGONS_FOUND'),
-        );
+        // SPRINT-3D5.2 §12: si algún polígono fue rechazado por OUTSIDE
+        // (intersecta parcialmente pero supera el margen de tolerancia),
+        // NUNCA se usa el copy genérico "ningún polígono quedó dentro" --
+        // eso sugeriría que no hubo intersección alguna. Se muestra el
+        // mismo aviso de OUTSIDE que coordenadas/gps, y si el backend trajo
+        // la geometría rechazada del primer caso, se ofrece en preview de
+        // solo lectura (documentado como alcance mínimo -- ver §13).
+        const outsideInvalido = invalidos.find((item) => item.error === 'POTRERO_OUTSIDE_PREDIO' && item.rejected);
+        if (outsideInvalido) {
+          setFileError(PREVIEW_ERROR_MESSAGES.POTRERO_OUTSIDE_PREDIO);
+          setRejectedPreview({ geometry: outsideInvalido.rejected.geometry });
+        } else {
+          setFileError(
+            invalidos.length > 0
+              ? 'Ningún polígono del archivo quedó dentro del predio.'
+              : resolveFileErrorMessage('NO_POLYGONS_FOUND'),
+          );
+        }
         return;
       }
 
@@ -343,8 +394,17 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
 
     setPreviewLoading(true);
     setPreviewError('');
+    setRejectedPreview(null);
 
-    const puntos = points.map((point) => ({ latitud: Number(point.latitud), longitud: Number(point.longitud) }));
+    // §7/§19: accuracy SOLO viaja para GPS -- coordenadas nunca reporta
+    // precisión de dispositivo, no hay metadata que lo justifique (§18).
+    const puntos = points.map((point) => ({
+      latitud: Number(point.latitud),
+      longitud: Number(point.longitud),
+      ...(metodo === 'gps' && point.accuracy !== null && point.accuracy !== undefined
+        ? { accuracy: point.accuracy }
+        : {}),
+    }));
 
     try {
       const { ok, data } =
@@ -358,12 +418,19 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
           areaHa: data.preview.areaHa,
           geometry: data.preview.geometry,
           metodoDelimitacion: data.preview.metodoDelimitacion,
+          validacion: data.preview.validacion,
         });
         setPreviewLoading(false);
         setStep('preview');
         return;
       }
 
+      // SPRINT-3D5.2 §13: OUTSIDE trae `rejected` -- geometría de solo
+      // lectura, nunca un candidate. Se muestra debajo del error, sin
+      // avanzar de paso (no hay nada que confirmar).
+      if (data?.error === 'POTRERO_OUTSIDE_PREDIO' && data?.rejected?.geometry) {
+        setRejectedPreview({ geometry: data.rejected.geometry });
+      }
       setPreviewError(resolvePreviewErrorMessage(data?.error));
       setPreviewLoading(false);
     } catch {
@@ -516,6 +583,9 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
           </button>
 
           <StatusMessage type="error">{previewError}</StatusMessage>
+          {rejectedPreview ? (
+            <GanaderiaPotreroPreviewMap predioId={predioId} rejectedGeometry={rejectedPreview.geometry} />
+          ) : null}
 
           <div className="gan-potrero-actions">
             <button type="button" className="gan-submit" onClick={handlePreview} disabled={previewLoading}>
@@ -552,7 +622,7 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
                 <span>{point.latitud}</span>
                 <span>{point.longitud}</span>
                 <span className="gan-potrero-point-precision">
-                  {point.precision !== null ? `±${point.precision} m` : '—'}
+                  {point.accuracy !== null ? `±${Math.round(point.accuracy)} m` : '—'}
                 </span>
                 <button type="button" className="gan-potrero-point-remove" onClick={() => removeGpsPoint(index)}>
                   Eliminar
@@ -562,6 +632,9 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
           </div>
 
           <StatusMessage type="error">{previewError}</StatusMessage>
+          {rejectedPreview ? (
+            <GanaderiaPotreroPreviewMap predioId={predioId} rejectedGeometry={rejectedPreview.geometry} />
+          ) : null}
 
           <div className="gan-potrero-actions">
             <button
@@ -597,6 +670,9 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
           {fileName ? <p className="gan-potrero-points-hint">Archivo: {fileName}</p> : null}
 
           <StatusMessage type="error">{fileError}</StatusMessage>
+          {rejectedPreview ? (
+            <GanaderiaPotreroPreviewMap predioId={predioId} rejectedGeometry={rejectedPreview.geometry} />
+          ) : null}
           {fileIgnoredNotice ? <StatusMessage type="info">{fileIgnoredNotice}</StatusMessage> : null}
           {fileConversionNotice ? <StatusMessage type="info">{fileConversionNotice}</StatusMessage> : null}
 
@@ -636,6 +712,10 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
           <div className="gan-eyebrow">CONFIRMA EL REGISTRO</div>
 
           <GanaderiaPotreroPreviewMap predioId={predioId} potreroGeometry={previewData.geometry} />
+
+          {previewData.validacion?.estado === 'TOLERANCE_OK' ? (
+            <StatusMessage type="info">{TOLERANCE_OK_NOTICE}</StatusMessage>
+          ) : null}
 
           {metodo === 'kml' && fileIgnoredNotice ? <StatusMessage type="info">{fileIgnoredNotice}</StatusMessage> : null}
           {metodo === 'kml' && fileConversionNotice ? <StatusMessage type="info">{fileConversionNotice}</StatusMessage> : null}

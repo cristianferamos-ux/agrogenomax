@@ -38,6 +38,7 @@ import {
   releasePotreroCandidate,
 } from '../services/ganaderia/potrerosCandidateStore.js';
 import { parseKmlOrKmzUpload, FILE_MAX_BYTES } from '../services/ganaderia/potreroKmlImport.js';
+import { validateGpsAccuracyList } from '../services/ganaderia/potreroSpatialTolerance.js';
 
 const MAX_NOMBRE_LENGTH = 120;
 const MAX_OBSERVACIONES_LENGTH = 2000;
@@ -177,6 +178,22 @@ function sendSemanticError(res, error) {
   return false;
 }
 
+// SPRINT-3D5.2 §13: cuando el resultado espacial es OUTSIDE (más allá del
+// margen de tolerancia operacional), el error POTRERO_OUTSIDE_PREDIO trae
+// `.details` (geometry/areaHa/métricas de la geometría RECHAZADA) --
+// se expone en el cuerpo de la respuesta para que el frontend pueda
+// mostrar un preview de solo lectura (contorno rechazado), sin crear
+// candidate ni persistir nada. NUNCA se filtran métricas internas fuera
+// de este contrato explícito (áreaFueraM2/porcentajeFuera/
+// distanciaMaximaFueraM/toleranceApplied -- nunca SQL ni stack traces).
+function sendPreviewError(res, error) {
+  if (error?.code === 'POTRERO_OUTSIDE_PREDIO' && error?.details) {
+    res.status(error.status).json({ error: error.code, message: error.message, rejected: error.details });
+    return true;
+  }
+  return sendSemanticError(res, error);
+}
+
 // -----------------------------------------------------------------------
 // Router
 // -----------------------------------------------------------------------
@@ -246,7 +263,9 @@ export default function createGanaderiaPotrerosRouter({ appEnv, csrfServerSecret
 
       const wkt = validatePreviewBody(req.body);
       const { organizacionId, cuentaId } = req.ganaderiaAuth;
-      const { geometry, areaHa } = await computePotreroPreview(organizacionId, predioId, wkt);
+      const { geometry, areaHa, validacion } = await computePotreroPreview(organizacionId, predioId, wkt, {
+        metodoDelimitacion: 'coordenadas',
+      });
 
       const candidateId = createPotreroCandidate({
         organizacionId,
@@ -255,21 +274,26 @@ export default function createGanaderiaPotrerosRouter({ appEnv, csrfServerSecret
         geometry,
         areaHa,
         metodoDelimitacion: 'coordenadas',
+        toleranceInfo: validacion,
       });
 
-      res.json({ candidateId, preview: { areaHa, metodoDelimitacion: 'coordenadas', geometry } });
+      res.json({ candidateId, preview: { areaHa, metodoDelimitacion: 'coordenadas', geometry, validacion } });
     } catch (error) {
-      if (sendSemanticError(res, error)) return;
+      if (sendPreviewError(res, error)) return;
       next(error);
     }
   });
 
-  // §14: POST /api/ganaderia/predios/:predioId/potreros/preview-gps --
-  // mismo contrato geométrico exacto que preview-coordinates (misma
-  // validación server-side: cierre de anillo, ST_IsValid, ST_CoveredBy,
-  // ST_Area), única diferencia es metodoDelimitacion='gps_movil'. No se
-  // introduce precisión GPS catastral ni lógica adicional -- el frontend
-  // GPS (watchPosition) queda fuera de alcance de este sprint (§14).
+  // §14/SPRINT-3D5.2 §7-9: POST .../preview-gps -- mismo contrato
+  // geométrico que preview-coordinates (cierre de anillo, ST_IsValid,
+  // validación operacional espacial, ST_Area), con dos diferencias: (1)
+  // metodoDelimitacion='gps_movil', (2) cada punto puede traer `accuracy`
+  // opcional (metros, navigator.geolocation.coords.accuracy) -- si algún
+  // punto la trae y supera GPS_MAX_ACCURACY_M, se rechaza con
+  // GPS_ACCURACY_TOO_LOW (pide recaptura) ANTES de tocar PostGIS. Sin
+  // accuracy en ningún punto, se aplica el margen fijo conservador
+  // GPS_FALLBACK_NO_ACCURACY (ver potreroSpatialTolerance.js) -- nunca se
+  // inventa un valor de precisión.
   router.post('/preview-gps', potrerosPreviewLimiter, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
@@ -280,8 +304,12 @@ export default function createGanaderiaPotrerosRouter({ appEnv, csrfServerSecret
       }
 
       const wkt = validatePreviewBody(req.body);
+      const { maxAccuracyM } = validateGpsAccuracyList(req.body?.puntos);
       const { organizacionId, cuentaId } = req.ganaderiaAuth;
-      const { geometry, areaHa } = await computePotreroPreview(organizacionId, predioId, wkt);
+      const { geometry, areaHa, validacion } = await computePotreroPreview(organizacionId, predioId, wkt, {
+        metodoDelimitacion: 'gps_movil',
+        gpsAccuracyMaxM: maxAccuracyM,
+      });
 
       const candidateId = createPotreroCandidate({
         organizacionId,
@@ -290,11 +318,12 @@ export default function createGanaderiaPotrerosRouter({ appEnv, csrfServerSecret
         geometry,
         areaHa,
         metodoDelimitacion: 'gps_movil',
+        toleranceInfo: validacion,
       });
 
-      res.json({ candidateId, preview: { areaHa, metodoDelimitacion: 'gps_movil', geometry } });
+      res.json({ candidateId, preview: { areaHa, metodoDelimitacion: 'gps_movil', geometry, validacion } });
     } catch (error) {
-      if (sendSemanticError(res, error)) return;
+      if (sendPreviewError(res, error)) return;
       next(error);
     }
   });
@@ -363,7 +392,15 @@ export default function createGanaderiaPotrerosRouter({ appEnv, csrfServerSecret
 
       // §8/§9: NUNCA ST_Union -- cada polígono (ya separado si venía de un
       // MultiPolygon) se valida por separado en una única transacción.
-      const previews = await computePotreroPreviewsBatch(organizacionId, predioId, polygons.map((polygon) => polygon.wkt));
+      // §3D5.2/§17: mismo pipeline de tolerancia operacional que
+      // coordenadas/gps -- metodoDelimitacion ('kml'/'kmz') decide el
+      // umbral técnico aplicado.
+      const previews = await computePotreroPreviewsBatch(
+        organizacionId,
+        predioId,
+        polygons.map((polygon) => polygon.wkt),
+        { metodoDelimitacion },
+      );
 
       const candidates = [];
       const invalidos = [];
@@ -382,6 +419,7 @@ export default function createGanaderiaPotrerosRouter({ appEnv, csrfServerSecret
             geometry: preview.geometry,
             areaHa: preview.areaHa,
             metodoDelimitacion,
+            toleranceInfo: preview.validacion,
           });
           candidates.push({
             candidateId,
@@ -389,12 +427,16 @@ export default function createGanaderiaPotrerosRouter({ appEnv, csrfServerSecret
             areaHa: preview.areaHa,
             metodoDelimitacion,
             geometry: preview.geometry,
+            validacion: preview.validacion,
             // SPRINT-3D5.1: trazabilidad -- null salvo que este candidate
             // provenga de un LineString cerrado convertido a Polygon.
             origenConversion: polygons[index].origenConversion ?? null,
           });
         } else {
-          invalidos.push({ index, nombreSugerido, error: preview.code });
+          // SPRINT-3D5.2 §13: si el rechazo fue por OUTSIDE (más allá del
+          // margen de tolerancia), `details` trae la geometría rechazada
+          // para preview de solo lectura -- nunca se crea candidate.
+          invalidos.push({ index, nombreSugerido, error: preview.code, rejected: preview.details ?? null });
         }
       });
 

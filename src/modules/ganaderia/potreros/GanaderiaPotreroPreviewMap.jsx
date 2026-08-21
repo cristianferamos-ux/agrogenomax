@@ -17,6 +17,10 @@ const SATELLITE_TILE_URL =
 
 const PREDIO_STYLE = { color: '#9cff1a', weight: 3, fillOpacity: 0 };
 const POTRERO_STYLE = { color: '#00d8ff', weight: 3, fillColor: '#00d8ff', fillOpacity: 0.12 };
+// SPRINT-3D5.2 §13: potrero RECHAZADO por tolerancia (OUTSIDE) -- contorno
+// rojo, relleno muy tenue, solo para visualización de solo lectura. Nunca
+// acompaña un candidate confirmable.
+const POTRERO_REJECTED_STYLE = { color: '#ff4d4d', weight: 3, fillColor: '#ff4d4d', fillOpacity: 0.12 };
 
 function extractRingLatLngs(geometry) {
   const ring =
@@ -30,7 +34,11 @@ function extractRingLatLngs(geometry) {
   return ring.map(([lng, lat]) => [lat, lng]);
 }
 
-export default function GanaderiaPotreroPreviewMap({ predioId, potreroGeometry }) {
+// §13: `potreroGeometry` (aceptado, STRICT_OK/TOLERANCE_OK) y
+// `rejectedGeometry` (OUTSIDE, solo lectura) son mutuamente excluyentes en
+// la práctica -- si ambos llegan, se prioriza `rejectedGeometry` porque
+// nunca debe verse un contorno rechazado como si fuera confirmable.
+export default function GanaderiaPotreroPreviewMap({ predioId, potreroGeometry, rejectedGeometry }) {
   const [predioStatus, setPredioStatus] = useState('loading'); // loading | ready | unavailable
   const [predioGeoJsonFeature, setPredioGeoJsonFeature] = useState(null);
   const [predioBounds, setPredioBounds] = useState(null);
@@ -69,9 +77,12 @@ export default function GanaderiaPotreroPreviewMap({ predioId, potreroGeometry }
     return <div className="gan-potrero-preview-map-loading">Mapa no disponible para este predio.</div>;
   }
 
-  const potreroFeature = potreroGeometry ? { type: 'Feature', properties: {}, geometry: potreroGeometry } : null;
-  const potreroBounds = potreroFeature ? extractRingLatLngs(potreroGeometry) : null;
-  const bounds = potreroBounds || predioBounds;
+  const rejectedFeature = rejectedGeometry ? { type: 'Feature', properties: {}, geometry: rejectedGeometry } : null;
+  const potreroFeature =
+    !rejectedFeature && potreroGeometry ? { type: 'Feature', properties: {}, geometry: potreroGeometry } : null;
+  const focusGeometry = rejectedFeature ? rejectedGeometry : potreroGeometry;
+  const focusBounds = focusGeometry ? extractRingLatLngs(focusGeometry) : null;
+  const bounds = focusBounds || predioBounds;
 
   return (
     <div className="gan-potrero-preview-map">
@@ -85,11 +96,17 @@ export default function GanaderiaPotreroPreviewMap({ predioId, potreroGeometry }
         <TileLayer url={SATELLITE_TILE_URL} />
         <GeoJSON key="predio-base" data={predioGeoJsonFeature} style={PREDIO_STYLE} />
         {potreroFeature ? <GeoJSON key="potrero-preview" data={potreroFeature} style={POTRERO_STYLE} /> : null}
+        {rejectedFeature ? (
+          <GeoJSON key="potrero-rejected" data={rejectedFeature} style={POTRERO_REJECTED_STYLE} />
+        ) : null}
       </MapContainer>
       <div className="gan-potrero-preview-legend">
         <span className="gan-potrero-legend-item gan-potrero-legend-predio">Predio base</span>
         {potreroFeature ? (
           <span className="gan-potrero-legend-item gan-potrero-legend-potrero">Potrero a registrar</span>
+        ) : null}
+        {rejectedFeature ? (
+          <span className="gan-potrero-legend-item gan-potrero-legend-rejected">Potrero fuera de rango (no confirmable)</span>
         ) : null}
       </div>
     </div>

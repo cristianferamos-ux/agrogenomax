@@ -19,6 +19,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { geoJsonPolygonToWkt } from '../ganaderia/potreroKmlImport.js';
+import { createPotreroCandidate } from '../ganaderia/potrerosCandidateStore.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
@@ -153,8 +154,9 @@ describe('SPRINT-3D3: potrerosRepository contra Postgres-AGX-Business real', { s
     if (!adminPool) return;
     await adminPool.query(`delete from agx.potreros where nombre like 'Potrero Sprint3D3%'`);
     await adminPool.query(`delete from agx.predios where nombre_predio like 'Predio Sprint3D3%'`);
-    if (businessDb) await businessDb.closeAgxBusinessPool();
-    await adminPool.end();
+    // adminPool/businessDb se cierran UNA sola vez, en el after() de nivel
+    // de archivo al final -- este pool se reutiliza en el describe
+    // SPRINT-3D5.2 más abajo (mismo módulo, mismo proceso node --test).
   });
 
   // -----------------------------------------------------------------
@@ -501,4 +503,335 @@ describe('SPRINT-3D3: potrerosRepository contra Postgres-AGX-Business real', { s
     assert.equal(results[1].ok, false);
     assert.equal(results[1].code, 'INVALID_POTRERO_GEOMETRY');
   });
+});
+
+// ---------------------------------------------------------------------
+// SPRINT-3D5.2-OPERATIONAL-SPATIAL-TOLERANCE: STRICT_OK/TOLERANCE_OK/
+// OUTSIDE contra Postgres/PostGIS real -- ST_CoveredBy binario ya no
+// decide solo; computeCoverageMetrics (potreroSpatialTolerance.js) mide
+// área_fuera/porcentaje_fuera/distancia_maxima_fuera vía ST_Difference/
+// ST_Segmentize/ST_Distance reales. Ninguna geometría se persiste
+// modificada -- ST_Difference/ST_Segmentize se usan EXCLUSIVAMENTE para
+// medir (ver aserciones "geometry intacta" abajo).
+// ---------------------------------------------------------------------
+
+// §9 del sprint: geometría REAL de 180290001000000270015000000000_profesional.kml
+// (predio, Albania/Caquetá) y POTRERO_1.kml (LineString cerrado exportado
+// desde AutoCAD) -- ambos archivos existen fuera del repo (Downloads del
+// usuario), estas son sus coordenadas exactas. NO son datos de producción
+// de AgroGenomaX (nunca se insertan bajo un tenant real ni se usan fuera
+// de este test) -- es el caso real que el sprint exige verificar: un
+// LineString cerrado cuyos vértices casi coinciden con el borde del
+// predio (redondeo de exportación CAD/GIS), covered_by=false mínimo.
+const PREDIO_REAL_180290001_WKT =
+  'POLYGON((-75.884488757 1.250078312, -75.884791162 1.249679334, -75.885249236 1.249931857, ' +
+  '-75.885572107 1.249661242, -75.885772344 1.249281257, -75.886334251 1.249339175, ' +
+  '-75.886370545 1.249246636, -75.88714238 1.2495102, -75.887322034 1.249560789, ' +
+  '-75.888366666 1.249854943, -75.889706451 1.250430245, -75.889567419 1.25068918, ' +
+  '-75.889373067 1.251117663, -75.88916434 1.251457647, -75.889041128 1.25175685, ' +
+  '-75.889001435 1.251825205, -75.888920176 1.251965141, -75.888819963 1.252104691, ' +
+  '-75.886756916 1.25114852, -75.886671234 1.250751222, -75.885846273 1.250820736, ' +
+  '-75.88583486 1.250804167, -75.885668433 1.250720643, -75.885377254 1.250637257, ' +
+  '-75.885133788 1.250727214, -75.884923274 1.250679781, -75.884488757 1.250078312))';
+
+describe('SPRINT-3D5.2: tolerancia espacial operacional (STRICT_OK/TOLERANCE_OK/OUTSIDE) contra Postgres/PostGIS real', { skip: !dbAvailable }, () => {
+  after(async () => {
+    if (!adminPool) return;
+    await adminPool.query(`delete from agx.potreros where nombre like 'Potrero Sprint3D5.2%'`);
+    await adminPool.query(`delete from agx.predios where nombre_predio like 'Predio Sprint3D5.2%'`);
+  });
+
+  // ST_Project trabaja en metros reales sobre geography -- azimuth 0=norte,
+  // 90=este (radianes). Construye rectángulos con offsets EXACTOS en
+  // metros sin conversión manual grados<->metros (evita error de
+  // redondeo/latitud en los casos de control §10).
+  async function projectPoint(lon, lat, distanceM, azimuthDeg) {
+    const result = await adminPool.query(
+      `select ST_X(g) as lon, ST_Y(g) as lat from (
+         select ST_Project(ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, $3::float8, radians($4::float8))::geometry as g
+       ) t`,
+      [lon, lat, distanceM, azimuthDeg],
+    );
+    return { lon: Number(result.rows[0].lon), lat: Number(result.rows[0].lat) };
+  }
+
+  function ring(points) {
+    const closed = [...points, points[0]];
+    return `POLYGON((${closed.map((p) => `${p.lon} ${p.lat}`).join(', ')}))`;
+  }
+
+  // Predio cuadrado de `sideM` metros (esquina suroeste en base). Potrero
+  // "abultado": mismo cuadrado, pero el borde ESTE desplazado exactamente
+  // `bulgeM` metros más hacia el este -- una franja rectangular de ancho
+  // `bulgeM` y alto `sideM` queda fuera del predio. Para esa franja:
+  //   area_fuera_m2 ~= bulgeM * sideM
+  //   distancia_maxima_fuera_m ~= bulgeM (el punto más profundo es el
+  //     borde exterior de la franja, a exactamente bulgeM del límite)
+  async function buildBulgedSquare(base, sideM, bulgeM) {
+    const p1 = await projectPoint(base.lon, base.lat, sideM, 90); // SE
+    const p2 = await projectPoint(p1.lon, p1.lat, sideM, 0); // NE
+    const p3 = await projectPoint(base.lon, base.lat, sideM, 0); // NO
+    const predioWkt = ring([base, p1, p2, p3]);
+
+    const p1b = await projectPoint(p1.lon, p1.lat, bulgeM, 90);
+    const p2b = await projectPoint(p2.lon, p2.lat, bulgeM, 90);
+    const potreroWkt = ring([base, p1b, p2b, p3]);
+
+    return { predioWkt, potreroWkt };
+  }
+
+  // -----------------------------------------------------------------
+  // §9: caso real obligatorio POTRERO_1.kml contra el predio catastral
+  // real -- ST_CoveredBy estricto=false, área/porcentaje fuera
+  // despreciables (redondeo de exportación CAD, ~4 micrómetros de
+  // profundidad máxima), resultado final TOLERANCE_OK, geometry intacta
+  // (nunca la geometría "recortada" por ST_Difference).
+  // -----------------------------------------------------------------
+  test('§9: caso real POTRERO_1.kml contra el predio real 180290001000000270015000000000 -> TOLERANCE_OK, métricas despreciables, geometry intacta', async () => {
+    const org = randomOrgId();
+    const predioId = await seedPredio(org, { nombre: 'Predio Sprint3D5.2 POTRERO1-REAL', wkt: PREDIO_REAL_180290001_WKT });
+    const wkt = geoJsonPolygonToWkt([POTRERO_1_CLOSED_LINE_COORDS]);
+
+    const preview = await repo.computePotreroPreview(org, predioId, wkt, { metodoDelimitacion: 'kml' });
+
+    assert.equal(preview.validacion.estado, 'TOLERANCE_OK');
+    assert.ok(preview.validacion.areaFueraM2 < 0.01, `areaFueraM2 inesperadamente alto: ${preview.validacion.areaFueraM2}`);
+    assert.ok(preview.validacion.porcentajeFuera < 0.001, `porcentajeFuera inesperadamente alto: ${preview.validacion.porcentajeFuera}`);
+    assert.ok(preview.areaHa > 0.3 && preview.areaHa < 0.5, `areaHa fuera de rango: ${preview.areaHa}`);
+
+    // Geometría intacta: el primer vértice devuelto es EXACTAMENTE el
+    // primer vértice aportado por el usuario (nunca ST_Difference/
+    // ST_Buffer/ST_Snap aplicado a lo persistido).
+    const [firstLng, firstLat] = preview.geometry.coordinates[0][0];
+    assert.ok(Math.abs(firstLng - -75.8847911620009) < 1e-9);
+    assert.ok(Math.abs(firstLat - 1.24967933395856) < 1e-9);
+
+    const candidateId = createPotreroCandidate({
+      organizacionId: org,
+      cuentaId: randomOrgId(),
+      predioId,
+      geometry: preview.geometry,
+      areaHa: preview.areaHa,
+      metodoDelimitacion: 'kml',
+      toleranceInfo: preview.validacion,
+    });
+    assert.ok(candidateId);
+  });
+
+  // -----------------------------------------------------------------
+  // §5 (AJUSTE FINAL): casos de control con offsets EXACTOS en metros
+  // (ST_Project) contra los umbrales finales -- KML/KMZ (distancia<=1.0m
+  // Y %<=0.25%) y coordenadas (distancia<=3.0m Y %<=0.5%). El predio se
+  // dimensiona (`sideM`) para que el % resultante (bulgeM/sideM*100)
+  // aísle deliberadamente el criterio bajo prueba (distancia vs %).
+  // -----------------------------------------------------------------
+
+  test('KML: 0.5 m fuera + porcentaje pequeño -> TOLERANCE_OK', async () => {
+    const org = randomOrgId();
+    const { predioWkt, potreroWkt } = await buildBulgedSquare({ lon: -75.70, lat: 1.30 }, 2000, 0.5);
+    const predioId = await seedPredio(org, { nombre: 'Predio Sprint3D5.2 CTRL-KML-A', wkt: predioWkt });
+
+    const preview = await repo.computePotreroPreview(org, predioId, potreroWkt, { metodoDelimitacion: 'kml' });
+    assert.equal(preview.validacion.estado, 'TOLERANCE_OK');
+    assert.ok(preview.validacion.distanciaMaximaFueraM > 0.3 && preview.validacion.distanciaMaximaFueraM < 0.7);
+  });
+
+  test('KML: justo debajo de 1.0 m con porcentaje que cumple -> TOLERANCE_OK', async () => {
+    // 0.99 m en vez de exactamente 1.0 m -- ST_Project/ST_Segmentize sobre
+    // geography introducen ruido geodésico de punto flotante (~1e-7 m) que
+    // puede empujar una distancia "exactamente 1.0" a 1.00000002; el
+    // límite EXACTO (<=, inclusive) ya está cubierto sin ese ruido en
+    // potreroSpatialTolerance.test.js (métricas sintéticas, sin PostGIS).
+    const org = randomOrgId();
+    const { predioWkt, potreroWkt } = await buildBulgedSquare({ lon: -75.71, lat: 1.30 }, 2000, 0.99);
+    const predioId = await seedPredio(org, { nombre: 'Predio Sprint3D5.2 CTRL-KML-B', wkt: predioWkt });
+
+    const preview = await repo.computePotreroPreview(org, predioId, potreroWkt, { metodoDelimitacion: 'kml' });
+    assert.equal(preview.validacion.estado, 'TOLERANCE_OK');
+  });
+
+  test('KML: justo > 1.0 m -> OUTSIDE aunque el porcentaje sea mínimo', async () => {
+    const org = randomOrgId();
+    const { predioWkt, potreroWkt } = await buildBulgedSquare({ lon: -75.72, lat: 1.30 }, 2000, 1.01);
+    const predioId = await seedPredio(org, { nombre: 'Predio Sprint3D5.2 CTRL-KML-C', wkt: predioWkt });
+
+    await assert.rejects(
+      () => repo.computePotreroPreview(org, predioId, potreroWkt, { metodoDelimitacion: 'kml' }),
+      (error) => {
+        assert.equal(error.code, 'POTRERO_OUTSIDE_PREDIO');
+        assert.ok(error.details.metrics.porcentajeFuera < 0.25, 'este caso debe fallar por DISTANCIA, no por porcentaje');
+        return true;
+      },
+    );
+  });
+
+  test('KML: porcentaje > 0.25% -> OUTSIDE aunque distancia <= 1 m', async () => {
+    const org = randomOrgId();
+    const { predioWkt, potreroWkt } = await buildBulgedSquare({ lon: -75.73, lat: 1.30 }, 100, 0.3);
+    const predioId = await seedPredio(org, { nombre: 'Predio Sprint3D5.2 CTRL-KML-D', wkt: predioWkt });
+
+    await assert.rejects(
+      () => repo.computePotreroPreview(org, predioId, potreroWkt, { metodoDelimitacion: 'kml' }),
+      (error) => {
+        assert.equal(error.code, 'POTRERO_OUTSIDE_PREDIO');
+        assert.ok(error.details.metrics.distanciaMaximaFueraM <= 1.0, 'este caso debe fallar por PORCENTAJE, no por distancia');
+        assert.ok(error.details.metrics.porcentajeFuera > 0.25);
+        return true;
+      },
+    );
+  });
+
+  test('COORDENADAS: justo debajo de 3 m y <= 0.5% -> TOLERANCE_OK (margen mayor que KML/KMZ)', async () => {
+    // 2.99 m en vez de exactamente 3.0 m -- mismo motivo que el caso KML
+    // de arriba (ruido geodésico de punto flotante en la medición real).
+    const org = randomOrgId();
+    const { predioWkt, potreroWkt } = await buildBulgedSquare({ lon: -75.74, lat: 1.30 }, 2000, 2.99);
+    const predioId = await seedPredio(org, { nombre: 'Predio Sprint3D5.2 CTRL-COORD-A', wkt: predioWkt });
+
+    const preview = await repo.computePotreroPreview(org, predioId, potreroWkt, { metodoDelimitacion: 'coordenadas' });
+    assert.equal(preview.validacion.estado, 'TOLERANCE_OK');
+  });
+
+  test('COORDENADAS: > 3 m -> OUTSIDE', async () => {
+    const org = randomOrgId();
+    const { predioWkt, potreroWkt } = await buildBulgedSquare({ lon: -75.20, lat: 1.30 }, 2000, 3.01);
+    const predioId = await seedPredio(org, { nombre: 'Predio Sprint3D5.2 CTRL-COORD-B', wkt: predioWkt });
+
+    await assert.rejects(
+      () => repo.computePotreroPreview(org, predioId, potreroWkt, { metodoDelimitacion: 'coordenadas' }),
+      (error) => error.code === 'POTRERO_OUTSIDE_PREDIO',
+    );
+  });
+
+  test('COORDENADAS: > 0.5% -> OUTSIDE aunque la distancia cumpla', async () => {
+    const org = randomOrgId();
+    const { predioWkt, potreroWkt } = await buildBulgedSquare({ lon: -75.21, lat: 1.30 }, 100, 0.6);
+    const predioId = await seedPredio(org, { nombre: 'Predio Sprint3D5.2 CTRL-COORD-C', wkt: predioWkt });
+
+    await assert.rejects(
+      () => repo.computePotreroPreview(org, predioId, potreroWkt, { metodoDelimitacion: 'coordenadas' }),
+      (error) => {
+        assert.equal(error.code, 'POTRERO_OUTSIDE_PREDIO');
+        assert.ok(error.details.metrics.distanciaMaximaFueraM <= 3.0, 'este caso debe fallar por PORCENTAJE, no por distancia');
+        return true;
+      },
+    );
+  });
+
+  test('el mismo desvío de 1.5 m es OUTSIDE para KML pero TOLERANCE_OK para coordenadas -- confirma que ambos métodos usan umbrales DISTINTOS contra PostGIS real', async () => {
+    const org = randomOrgId();
+    const { predioWkt, potreroWkt } = await buildBulgedSquare({ lon: -75.22, lat: 1.30 }, 2000, 1.5);
+    const predioId = await seedPredio(org, { nombre: 'Predio Sprint3D5.2 CTRL-CROSS', wkt: predioWkt });
+
+    await assert.rejects(
+      () => repo.computePotreroPreview(org, predioId, potreroWkt, { metodoDelimitacion: 'kml' }),
+      (error) => error.code === 'POTRERO_OUTSIDE_PREDIO',
+    );
+    const preview = await repo.computePotreroPreview(org, predioId, potreroWkt, { metodoDelimitacion: 'coordenadas' });
+    assert.equal(preview.validacion.estado, 'TOLERANCE_OK');
+  });
+
+  test('§10-G: potrero completamente fuera del predio (sin intersección) -> OUTSIDE, area_fuera=100%', async () => {
+    const org = randomOrgId();
+    const base = { lon: -75.75, lat: 1.30 };
+    const { predioWkt } = await buildBulgedSquare(base, 50, 0);
+    const predioId = await seedPredio(org, { nombre: 'Predio Sprint3D5.2 CTRL-G', wkt: predioWkt });
+
+    // Cuadrado separado, 500 m al sur -- ninguna intersección con el predio.
+    const farBase = await projectPoint(base.lon, base.lat, 500, 180);
+    const { predioWkt: farSquareWkt } = await buildBulgedSquare(farBase, 20, 0);
+
+    await assert.rejects(
+      () => repo.computePotreroPreview(org, predioId, farSquareWkt, { metodoDelimitacion: 'coordenadas' }),
+      (error) => {
+        assert.equal(error.code, 'POTRERO_OUTSIDE_PREDIO');
+        assert.ok(error.details.metrics.porcentajeFuera > 99);
+        return true;
+      },
+    );
+  });
+
+  // -----------------------------------------------------------------
+  // GPS con accuracy -- §7/§8: el margen depende de la accuracy reportada
+  // (acotado a 10 m), nunca "aceptar todo dentro de ±accuracy".
+  // -----------------------------------------------------------------
+  test('GPS con accuracy=5m: 3 m fuera / 0.3% -> TOLERANCE_OK (dentro de min(accuracy,10)=5m y 1%)', async () => {
+    const org = randomOrgId();
+    const { predioWkt, potreroWkt } = await buildBulgedSquare({ lon: -75.60, lat: 1.30 }, 1000, 3);
+    const predioId = await seedPredio(org, { nombre: 'Predio Sprint3D5.2 GPS-OK', wkt: predioWkt });
+
+    const preview = await repo.computePotreroPreview(org, predioId, potreroWkt, {
+      metodoDelimitacion: 'gps_movil',
+      gpsAccuracyMaxM: 5,
+    });
+
+    assert.equal(preview.validacion.estado, 'TOLERANCE_OK');
+    assert.equal(preview.validacion.toleranceApplied.kind, 'gps_accuracy');
+    assert.equal(preview.validacion.toleranceApplied.distanciaMaximaFueraMaxM, 5);
+  });
+
+  test('GPS con accuracy=90m: el margen de distancia queda acotado a 10 m -- 15 m fuera sigue OUTSIDE', async () => {
+    const org = randomOrgId();
+    const { predioWkt, potreroWkt } = await buildBulgedSquare({ lon: -75.61, lat: 1.30 }, 5000, 15);
+    const predioId = await seedPredio(org, { nombre: 'Predio Sprint3D5.2 GPS-CAP', wkt: predioWkt });
+
+    await assert.rejects(
+      () =>
+        repo.computePotreroPreview(org, predioId, potreroWkt, {
+          metodoDelimitacion: 'gps_movil',
+          gpsAccuracyMaxM: 90,
+        }),
+      (error) => {
+        assert.equal(error.code, 'POTRERO_OUTSIDE_PREDIO');
+        assert.equal(error.details.toleranceApplied.distanciaMaximaFueraMaxM, 10);
+        return true;
+      },
+    );
+  });
+
+  test('GPS sin accuracy (fallback conservador): 4 m / 0.4% -> TOLERANCE_OK, pero 6 m / 0.6% -> OUTSIDE (mismo predio)', async () => {
+    const org = randomOrgId();
+    const base = { lon: -75.62, lat: 1.30 };
+
+    const ok = await buildBulgedSquare(base, 1000, 4);
+    const predioIdOk = await seedPredio(org, { nombre: 'Predio Sprint3D5.2 GPS-FALLBACK-OK', wkt: ok.predioWkt });
+    const previewOk = await repo.computePotreroPreview(org, predioIdOk, ok.potreroWkt, { metodoDelimitacion: 'gps_movil' });
+    assert.equal(previewOk.validacion.estado, 'TOLERANCE_OK');
+    assert.equal(previewOk.validacion.toleranceApplied.kind, 'gps_fallback');
+
+    const bad = await buildBulgedSquare(base, 1000, 6);
+    const predioIdBad = await seedPredio(org, { nombre: 'Predio Sprint3D5.2 GPS-FALLBACK-BAD', wkt: bad.predioWkt });
+    await assert.rejects(
+      () => repo.computePotreroPreview(org, predioIdBad, bad.potreroWkt, { metodoDelimitacion: 'gps_movil' }),
+      (error) => error.code === 'POTRERO_OUTSIDE_PREDIO',
+    );
+  });
+
+  test('GPS: porcentaje fuera > 1% -> OUTSIDE aunque la distancia cumpla el cap de accuracy (§5 ajuste final)', async () => {
+    const org = randomOrgId();
+    // Predio pequeño (20x20m) + accuracy generosa (8m, cap=min(8,10)=8m):
+    // 1 m de profundidad cumple el cap de distancia con margen, pero pesa
+    // 5% del predio -- muy por encima del 1% permitido.
+    const { predioWkt, potreroWkt } = await buildBulgedSquare({ lon: -75.63, lat: 1.30 }, 20, 1);
+    const predioId = await seedPredio(org, { nombre: 'Predio Sprint3D5.2 GPS-PCT-FAIL', wkt: predioWkt });
+
+    await assert.rejects(
+      () => repo.computePotreroPreview(org, predioId, potreroWkt, { metodoDelimitacion: 'gps_movil', gpsAccuracyMaxM: 8 }),
+      (error) => {
+        assert.equal(error.code, 'POTRERO_OUTSIDE_PREDIO');
+        assert.ok(error.details.metrics.distanciaMaximaFueraM <= 8, 'este caso debe fallar por PORCENTAJE, no por distancia');
+        assert.ok(error.details.metrics.porcentajeFuera > 1);
+        return true;
+      },
+    );
+  });
+});
+
+// Cierre único de adminPool/agxBusinessPool -- después de TODOS los
+// describe de este archivo (SPRINT-3D3 y SPRINT-3D5.2 comparten el mismo
+// pool de administración).
+after(async () => {
+  if (!adminPool) return;
+  if (businessDb) await businessDb.closeAgxBusinessPool();
+  await adminPool.end();
 });

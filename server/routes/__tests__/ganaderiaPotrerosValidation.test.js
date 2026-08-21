@@ -9,6 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validatePreviewBody, validateCreatePotreroBody } from '../ganaderiaPotreros.js';
 import { buildPolygonWktFromPuntos } from '../../services/ganaderia/potrerosRepository.js';
+import { validateGpsAccuracyList } from '../../services/ganaderia/potreroSpatialTolerance.js';
 
 // ---------------------------------------------------------------------
 // buildPolygonWktFromPuntos / validatePreviewBody (§13)
@@ -36,6 +37,29 @@ test('buildPolygonWktFromPuntos: rechaza menos de 3 vértices', () => {
     () => buildPolygonWktFromPuntos([{ latitud: 1, longitud: -75 }, { latitud: 1.1, longitud: -75.1 }]),
     (e) => e.status === 400 && e.code === 'INVALID_POTRERO_COORDINATES',
   );
+});
+
+// ---------------------------------------------------------------------
+// SPRINT-3D5.2 §7/§19: el router de preview-gps compone
+// buildPolygonWktFromPuntos (geometría) + validateGpsAccuracyList
+// (accuracy opcional) sobre el MISMO array `puntos` -- ambas funciones
+// deben ignorar los campos que no les corresponden sin pisarse.
+// ---------------------------------------------------------------------
+
+test('buildPolygonWktFromPuntos ignora `accuracy` -- el campo GPS no afecta la construcción del WKT', () => {
+  const withAccuracy = SQUARE.map((p, i) => ({ ...p, accuracy: (i + 1) * 3 }));
+  assert.equal(buildPolygonWktFromPuntos(withAccuracy), buildPolygonWktFromPuntos(SQUARE));
+});
+
+test('validateGpsAccuracyList ignora `latitud`/`longitud` -- solo mira `accuracy`, sobre el mismo array de puntos', () => {
+  const withAccuracy = SQUARE.map((p, i) => ({ ...p, accuracy: (i + 1) * 3 }));
+  const { maxAccuracyM } = validateGpsAccuracyList(withAccuracy);
+  assert.equal(maxAccuracyM, 9);
+});
+
+test('validateGpsAccuracyList: preview-coordinates nunca envía `accuracy` -- puntos sin ese campo devuelven maxAccuracyM=null', () => {
+  const { maxAccuracyM } = validateGpsAccuracyList(SQUARE);
+  assert.equal(maxAccuracyM, null);
 });
 
 test('buildPolygonWktFromPuntos: rechaza vértices no distintos (todos el mismo punto)', () => {
