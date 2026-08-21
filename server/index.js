@@ -21,6 +21,8 @@ import createGanaderiaAdminRouter from './routes/ganaderiaAdmin.js';
 import createGanaderiaAuthRouter from './routes/ganaderiaAuth.js';
 import createGanaderiaPrediosRouter from './routes/ganaderiaPredios.js';
 import createGanaderiaPotrerosRouter from './routes/ganaderiaPotreros.js';
+import createGanaderiaPotreroFichaProductivaRouter from './routes/ganaderiaPotreroFichaProductiva.js';
+import createGanaderiaCatalogoPasturasRouter from './routes/ganaderiaCatalogoPasturas.js';
 import createHealthRouter from './routes/health.js';
 import createPesajesRouter from './routes/pesajes.js';
 import createPotrerosRouter from './routes/potreros.js';
@@ -161,6 +163,32 @@ app.use(
 app.use(
   '/api/ganaderia/predios/:predioId/potreros',
   createGanaderiaPotrerosRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
+
+// SPRINT-3D6-FICHA-PRODUCTIVA: subordinado a
+// /api/ganaderia/predios/:predioId/potreros/:potreroId -- regla de
+// dominio ORGANIZACIÓN -> PREDIO -> POTRERO -> FICHA PRODUCTIVA. Mismo
+// criterio de aislamiento (sesión con organización + CSRF) que el resto
+// de routers Ganadería sobre Postgres-AGX-Business.
+app.use(
+  '/api/ganaderia/predios/:predioId/potreros/:potreroId/ficha-productiva',
+  createGanaderiaPotreroFichaProductivaRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
+
+// SPRINT-3D6-FICHA-PRODUCTIVA: catálogo de pasturas -- transversal a la
+// organización activa (sistema + personalizado), NO subordinado a
+// predio/potrero.
+app.use(
+  '/api/ganaderia/catalogo-pasturas',
+  createGanaderiaCatalogoPasturasRouter({
     appEnv: appConfig.appEnv,
     csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
     allowedOrigins: appConfig.cors.allowedOrigins,

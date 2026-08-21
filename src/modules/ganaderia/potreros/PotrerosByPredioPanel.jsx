@@ -7,6 +7,7 @@ import { StatusMessage } from '../components/FormField.jsx';
 import { listPotrerosByPredio } from './ganaderiaPotrerosApi.js';
 import { formatDateDisplay } from '../utils/dateFormat.js';
 import GanaderiaPotreroCardMap from './GanaderiaPotreroCardMap.jsx';
+import PotreroFichaProductivaPanel from './PotreroFichaProductivaPanel.jsx';
 
 const LIST_ERROR_MESSAGE = 'No fue posible cargar los potreros de este predio. Intenta nuevamente.';
 const LIST_EMPTY_MESSAGE = 'Aún no tienes potreros registrados en este predio.';
@@ -51,6 +52,10 @@ export default function PotrerosByPredioPanel({ predioId, refreshKey = 0, succes
   // predio). Se pasa como prop a cada card; null mientras carga o si el
   // GET falla, y eso nunca oculta las cards (§4 del sprint).
   const [predioGeometry, setPredioGeometry] = useState(null);
+  // SPRINT-3D6-FICHA-PRODUCTIVA: a lo sumo UNA ficha productiva abierta a
+  // la vez, ligada al potreroId de la tarjeta que la abrió -- nunca un
+  // flujo global (§20 del sprint: siempre Predio -> Potrero -> Ficha).
+  const [openFichaPotreroId, setOpenFichaPotreroId] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -166,6 +171,24 @@ export default function PotrerosByPredioPanel({ predioId, refreshKey = 0, succes
               />
             </div>
           </div>
+
+          <div className="gan-potrero-card-actions">
+            <button
+              type="button"
+              className="gan-secondary-button"
+              onClick={() => setOpenFichaPotreroId((current) => (current === potrero.potreroId ? null : potrero.potreroId))}
+            >
+              Ficha productiva
+            </button>
+          </div>
+
+          {openFichaPotreroId === potrero.potreroId ? (
+            <PotreroFichaProductivaPanel
+              predioId={predioId}
+              potreroId={potrero.potreroId}
+              areaHa={potrero.areaHa}
+            />
+          ) : null}
         </div>
       ))}
     </div>
