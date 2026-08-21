@@ -22,6 +22,7 @@ import {
   listCatalogoPasturas,
   createPasturaPersonalizada,
 } from './ganaderiaFichaProductivaApi.js';
+import PotreroCapacidadPastoreoPanel from './PotreroCapacidadPastoreoPanel.jsx';
 
 const GENERIC_ERROR = 'No fue posible completar la operación en este momento. Intenta nuevamente.';
 const MAX_AFORO_G_M2 = 10000;
@@ -398,6 +399,21 @@ export default function PotreroFichaProductivaPanel({ predioId, potreroId, areaH
             </div>
           ) : null}
         </>
+      ) : null}
+
+      {/* SPRINT-3D7-CAPACIDAD-PASTOREO: debajo de la ficha productiva
+          (§25 del sprint) -- siempre visible salvo mientras se está
+          registrando un aforo nuevo (showForm). Sin ficha vigente
+          (tieneFicha=false), el propio panel muestra su estado vacío
+          (§26), nunca un flujo global desconectado. */}
+      {!showForm ? (
+        <PotreroCapacidadPastoreoPanel
+          predioId={predioId}
+          potreroId={potreroId}
+          areaHa={areaHa}
+          tieneFicha={Boolean(actual)}
+          onCrearFicha={openForm}
+        />
       ) : null}
 
       {showForm ? (
