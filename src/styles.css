@@ -5436,6 +5436,156 @@ header nav > div[role='navigation']::-webkit-scrollbar {
   opacity: 0.48;
 }
 
+/* SPRINT-3D6-FICHA-PRODUCTIVA: acciones dentro de la tarjeta de potrero
+   ("Ficha productiva") -- mismo patrón que .gan-predio-card-actions. */
+.gan-potrero-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.gan-ficha-productiva-panel {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.gan-ficha-productiva-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.gan-ficha-productiva-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.gan-ficha-especie-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.gan-ficha-especie-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.gan-ficha-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: rgba(0, 216, 255, 0.1);
+  border: 1px solid rgba(0, 216, 255, 0.3);
+  color: #d7f6ff;
+  border-radius: 999px;
+  padding: 0.35rem 0.5rem 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  max-width: 100%;
+}
+
+.gan-ficha-chip-readonly {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #e7ecf3;
+}
+
+.gan-ficha-chip-porcentaje {
+  width: 3.2rem;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.25);
+  color: inherit;
+  padding: 0.1rem 0.2rem;
+  text-align: center;
+}
+
+.gan-ficha-chip button {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 0.15rem;
+}
+
+.gan-ficha-especie-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.5rem;
+  padding: 0.4rem;
+}
+
+.gan-ficha-especie-result {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  background: transparent;
+  border: none;
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+  text-align: left;
+  color: #e7ecf3;
+}
+
+.gan-ficha-especie-result:hover,
+.gan-ficha-especie-result:focus-visible {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.gan-ficha-especie-result em {
+  font-size: 0.75rem;
+  color: #8b96a5;
+  font-style: italic;
+}
+
+.gan-ficha-otra-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border: 1px dashed rgba(255, 255, 255, 0.15);
+  border-radius: 0.5rem;
+  padding: 0.85rem;
+}
+
+.gan-ficha-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  background: rgba(156, 255, 26, 0.06);
+  border: 1px solid rgba(156, 255, 26, 0.2);
+  border-radius: 0.5rem;
+  padding: 0.85rem 1rem;
+}
+
+.gan-ficha-historial-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.gan-ficha-historial-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto auto;
+  gap: 0.6rem;
+  align-items: center;
+  font-size: 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.75rem;
+}
+
 @media (max-width: 900px) {
   .gan-header,
   .gan-hero-panel,
@@ -5568,6 +5718,25 @@ header nav > div[role='navigation']::-webkit-scrollbar {
   .gan-health-pill {
     width: 100%;
     justify-content: center;
+  }
+
+  /* SPRINT-3D6-FICHA-PRODUCTIVA §28: 390px -- chips sin overflow, inputs
+     full width, historial apilado en una columna, biomasa siempre
+     visible sin scroll horizontal. */
+  .gan-ficha-chip {
+    max-width: 100%;
+    white-space: normal;
+  }
+
+  .gan-ficha-historial-item {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+
+  .gan-ficha-especie-selector input,
+  .gan-ficha-especie-selector select,
+  .gan-ficha-otra-form select {
+    width: 100%;
   }
 
   .gan-metric-grid {
