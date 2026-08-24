@@ -2749,6 +2749,14 @@ header nav > div[role='navigation']::-webkit-scrollbar {
   color: #ffb4b4;
 }
 
+/* SPRINT-3D7-CAPACIDAD-PASTOREO §30/§20: advertencia neutral sobre un
+   resultado extremo -- nunca el mismo tono alarmista que un error real. */
+.gan-status-warning {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.05);
+  color: #d7dde6;
+}
+
 .gan-list {
   display: grid;
   gap: 0.7rem;
@@ -5584,6 +5592,39 @@ header nav > div[role='navigation']::-webkit-scrollbar {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 0.4rem;
   padding: 0.5rem 0.75rem;
+}
+
+/* SPRINT-3D7-CAPACIDAD-PASTOREO */
+.gan-capacidad-panel {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 1rem;
+}
+
+.gan-capacidad-section-label {
+  margin: 0.25rem 0 0;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8b96a5;
+}
+
+.gan-capacidad-disclaimer {
+  margin-top: 0.25rem;
+}
+
+.gan-capacidad-modo-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.gan-capacidad-modo-active {
+  border-color: rgba(156, 255, 26, 0.5);
+  color: #9cff1a;
+}
+
+.gan-capacidad-historial-item {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1fr) auto auto;
 }
 
 @media (max-width: 900px) {
