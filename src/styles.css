@@ -5627,6 +5627,43 @@ header nav > div[role='navigation']::-webkit-scrollbar {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1fr) auto auto;
 }
 
+/* SPRINT-3D7.2-RECOMENDACION-PASTOREO-AUTO: wrapper de motor (§12) +
+   selector jerárquico (§2) + resultado de recomendación automática (§10). */
+.gan-motor-pastoreo-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.gan-recomendacion-panel {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 1rem;
+}
+
+.gan-recomendacion-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.gan-recomendacion-grupo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.gan-recomendacion-categorias {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-left: 1rem;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.gan-recomendacion-resultado {
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 900px) {
   .gan-header,
   .gan-hero-panel,

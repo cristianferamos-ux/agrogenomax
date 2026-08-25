@@ -114,21 +114,25 @@ test('mutaciones usan CSRF (fetchCsrfToken + X-CSRF-Token), GET no', () => {
 });
 
 // ---------------------------------------------------------------------
-// §25/§26: integrado dentro de la ficha productiva -- SIEMPRE montado
-// (salvo mientras se registra un aforo nuevo), con tieneFicha derivado
-// de `actual` -- el propio panel resuelve su estado vacío (§26), nunca
-// queda oculto sin explicación cuando no hay ficha.
+// §25/§26 (3D7) + §12 (3D7.2): integrado dentro de la ficha productiva --
+// SIEMPRE montado (salvo mientras se registra un aforo nuevo), con
+// tieneFicha derivado de `actual`. Desde SPRINT-3D7.2, PotreroFichaProductivaPanel
+// monta PotreroMotorPastoreoPanel (que decide entre "Recomendación
+// automática" y "Modo técnico") en vez de PotreroCapacidadPastoreoPanel
+// directamente -- ver potreroMotorPastoreoArchitecture.test.js para la
+// garantía de que PotreroCapacidadPastoreoPanel ("Modo técnico") sigue
+// montado, intacto, dentro de ese wrapper.
 // ---------------------------------------------------------------------
 
-test('PotreroFichaProductivaPanel.jsx monta PotreroCapacidadPastoreoPanel siempre que no se esté registrando un aforo, con tieneFicha={Boolean(actual)}', () => {
-  assert.match(fichaPanelSource, /import PotreroCapacidadPastoreoPanel from '\.\/PotreroCapacidadPastoreoPanel\.jsx';/);
+test('PotreroFichaProductivaPanel.jsx monta PotreroMotorPastoreoPanel siempre que no se esté registrando un aforo, con tieneFicha={Boolean(actual)}', () => {
+  assert.match(fichaPanelSource, /import PotreroMotorPastoreoPanel from '\.\/PotreroMotorPastoreoPanel\.jsx';/);
   assert.match(fichaPanelSource, /tieneFicha=\{Boolean\(actual\)\}/);
   assert.match(fichaPanelSource, /onCrearFicha=\{openForm\}/);
 
   // Debe estar fuera de la rama "actual" (para renderizar también cuando
   // no hay ficha) y fuera de la rama "showForm" (oculto mientras se
   // registra un aforo nuevo).
-  const componentIndex = fichaPanelSource.indexOf('<PotreroCapacidadPastoreoPanel');
+  const componentIndex = fichaPanelSource.indexOf('<PotreroMotorPastoreoPanel');
   const formBranchStart = fichaPanelSource.indexOf('{showForm ? (');
   assert.ok(componentIndex > 0 && formBranchStart > componentIndex, 'debe montarse antes del formulario de nueva ficha, nunca dentro de él');
 });
