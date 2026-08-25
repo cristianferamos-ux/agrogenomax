@@ -24,7 +24,9 @@ import createGanaderiaPotrerosRouter from './routes/ganaderiaPotreros.js';
 import createGanaderiaPotreroFichaProductivaRouter from './routes/ganaderiaPotreroFichaProductiva.js';
 import createGanaderiaPotreroCapacidadPastoreoRouter from './routes/ganaderiaPotreroCapacidadPastoreo.js';
 import createGanaderiaPotreroContextoAgroclimaticoRouter from './routes/ganaderiaPotreroContextoAgroclimatico.js';
+import createGanaderiaPotreroRecomendacionPastoreoRouter from './routes/ganaderiaPotreroRecomendacionPastoreo.js';
 import createGanaderiaCatalogoPasturasRouter from './routes/ganaderiaCatalogoPasturas.js';
+import createGanaderiaCategoriasProductivasRouter from './routes/ganaderiaCategoriasProductivas.js';
 import createHealthRouter from './routes/health.js';
 import createPesajesRouter from './routes/pesajes.js';
 import createPotrerosRouter from './routes/potreros.js';
@@ -214,12 +216,41 @@ app.use(
   }),
 );
 
+// SPRINT-3D7.2-RECOMENDACION-PASTOREO-AUTO: subordinado a
+// /api/ganaderia/predios/:predioId/potreros/:potreroId -- regla de
+// dominio ORGANIZACIÓN -> PREDIO -> POTRERO -> FICHA PRODUCTIVA (+
+// CONTEXTO AGROCLIMÁTICO opcional) -> CATEGORÍA PRODUCTIVA ->
+// RECOMENDACIÓN DE PASTOREO. Mismo criterio de aislamiento (sesión con
+// organización + CSRF) que el resto de routers Ganadería sobre
+// Postgres-AGX-Business. "Modo técnico" (capacidad-pastoreo, arriba)
+// permanece intacto y disponible en paralelo.
+app.use(
+  '/api/ganaderia/predios/:predioId/potreros/:potreroId/recomendacion-pastoreo',
+  createGanaderiaPotreroRecomendacionPastoreoRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
+
 // SPRINT-3D6-FICHA-PRODUCTIVA: catálogo de pasturas -- transversal a la
 // organización activa (sistema + personalizado), NO subordinado a
 // predio/potrero.
 app.use(
   '/api/ganaderia/catalogo-pasturas',
   createGanaderiaCatalogoPasturasRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
+
+// SPRINT-3D7.2-RECOMENDACION-PASTOREO-AUTO: catálogo de categorías
+// productivas -- transversal a la organización activa (sistema
+// únicamente en v1), NO subordinado a predio/potrero.
+app.use(
+  '/api/ganaderia/categorias-productivas',
+  createGanaderiaCategoriasProductivasRouter({
     appEnv: appConfig.appEnv,
     csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
     allowedOrigins: appConfig.cors.allowedOrigins,

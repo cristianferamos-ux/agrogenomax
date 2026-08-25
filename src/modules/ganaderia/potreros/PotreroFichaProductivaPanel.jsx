@@ -22,7 +22,7 @@ import {
   listCatalogoPasturas,
   createPasturaPersonalizada,
 } from './ganaderiaFichaProductivaApi.js';
-import PotreroCapacidadPastoreoPanel from './PotreroCapacidadPastoreoPanel.jsx';
+import PotreroMotorPastoreoPanel from './PotreroMotorPastoreoPanel.jsx';
 
 const GENERIC_ERROR = 'No fue posible completar la operación en este momento. Intenta nuevamente.';
 const MAX_AFORO_G_M2 = 10000;
@@ -401,13 +401,16 @@ export default function PotreroFichaProductivaPanel({ predioId, potreroId, areaH
         </>
       ) : null}
 
-      {/* SPRINT-3D7-CAPACIDAD-PASTOREO: debajo de la ficha productiva
-          (§25 del sprint) -- siempre visible salvo mientras se está
-          registrando un aforo nuevo (showForm). Sin ficha vigente
-          (tieneFicha=false), el propio panel muestra su estado vacío
-          (§26), nunca un flujo global desconectado. */}
+      {/* SPRINT-3D7.2-RECOMENDACION-PASTOREO-AUTO: debajo de la ficha
+          productiva (§25 del sprint 3D7, §12 del sprint 3D7.2) -- siempre
+          visible salvo mientras se está registrando un aforo nuevo
+          (showForm). Sin ficha vigente (tieneFicha=false), el propio
+          panel muestra su estado vacío (§26 del sprint 3D7), nunca un
+          flujo global desconectado. PotreroMotorPastoreoPanel decide
+          entre "Recomendación automática" (principal) y "Modo técnico"
+          (PotreroCapacidadPastoreoPanel, intacto). */}
       {!showForm ? (
-        <PotreroCapacidadPastoreoPanel
+        <PotreroMotorPastoreoPanel
           predioId={predioId}
           potreroId={potreroId}
           areaHa={areaHa}
