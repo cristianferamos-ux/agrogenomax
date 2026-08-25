@@ -8,6 +8,7 @@ import { listPotrerosByPredio } from './ganaderiaPotrerosApi.js';
 import { formatDateDisplay } from '../utils/dateFormat.js';
 import GanaderiaPotreroCardMap from './GanaderiaPotreroCardMap.jsx';
 import PotreroFichaProductivaPanel from './PotreroFichaProductivaPanel.jsx';
+import PotreroAgroClimaPanel from './PotreroAgroClimaPanel.jsx';
 
 const LIST_ERROR_MESSAGE = 'No fue posible cargar los potreros de este predio. Intenta nuevamente.';
 const LIST_EMPTY_MESSAGE = 'Aún no tienes potreros registrados en este predio.';
@@ -56,6 +57,10 @@ export default function PotrerosByPredioPanel({ predioId, refreshKey = 0, succes
   // la vez, ligada al potreroId de la tarjeta que la abrió -- nunca un
   // flujo global (§20 del sprint: siempre Predio -> Potrero -> Ficha).
   const [openFichaPotreroId, setOpenFichaPotreroId] = useState(null);
+  // SPRINT-3D7.1-AGROCLIMA: a lo sumo UN contexto agroclimático abierto a
+  // la vez, independiente de la ficha productiva -- se resuelve
+  // directamente de la geometry del potrero (§1 del sprint).
+  const [openAgroClimaPotreroId, setOpenAgroClimaPotreroId] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -180,6 +185,13 @@ export default function PotrerosByPredioPanel({ predioId, refreshKey = 0, succes
             >
               Ficha productiva
             </button>
+            <button
+              type="button"
+              className="gan-secondary-button"
+              onClick={() => setOpenAgroClimaPotreroId((current) => (current === potrero.potreroId ? null : potrero.potreroId))}
+            >
+              Contexto agroclimático
+            </button>
           </div>
 
           {openFichaPotreroId === potrero.potreroId ? (
@@ -188,6 +200,10 @@ export default function PotrerosByPredioPanel({ predioId, refreshKey = 0, succes
               potreroId={potrero.potreroId}
               areaHa={potrero.areaHa}
             />
+          ) : null}
+
+          {openAgroClimaPotreroId === potrero.potreroId ? (
+            <PotreroAgroClimaPanel predioId={predioId} potreroId={potrero.potreroId} />
           ) : null}
         </div>
       ))}
