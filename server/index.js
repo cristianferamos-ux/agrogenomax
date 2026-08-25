@@ -23,6 +23,7 @@ import createGanaderiaPrediosRouter from './routes/ganaderiaPredios.js';
 import createGanaderiaPotrerosRouter from './routes/ganaderiaPotreros.js';
 import createGanaderiaPotreroFichaProductivaRouter from './routes/ganaderiaPotreroFichaProductiva.js';
 import createGanaderiaPotreroCapacidadPastoreoRouter from './routes/ganaderiaPotreroCapacidadPastoreo.js';
+import createGanaderiaPotreroContextoAgroclimaticoRouter from './routes/ganaderiaPotreroContextoAgroclimatico.js';
 import createGanaderiaCatalogoPasturasRouter from './routes/ganaderiaCatalogoPasturas.js';
 import createHealthRouter from './routes/health.js';
 import createPesajesRouter from './routes/pesajes.js';
@@ -193,6 +194,20 @@ app.use(
 app.use(
   '/api/ganaderia/predios/:predioId/potreros/:potreroId/capacidad-pastoreo',
   createGanaderiaPotreroCapacidadPastoreoRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
+
+// SPRINT-3D7.1-AGROCLIMA: subordinado a
+// /api/ganaderia/predios/:predioId/potreros/:potreroId -- regla de
+// dominio ORGANIZACIÓN -> PREDIO -> POTRERO -> CONTEXTO AGROCLIMÁTICO.
+// Mismo criterio de aislamiento (sesión con organización + CSRF) que el
+// resto de routers Ganadería sobre Postgres-AGX-Business.
+app.use(
+  '/api/ganaderia/predios/:predioId/potreros/:potreroId/contexto-agroclimatico',
+  createGanaderiaPotreroContextoAgroclimaticoRouter({
     appEnv: appConfig.appEnv,
     csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
     allowedOrigins: appConfig.cors.allowedOrigins,
