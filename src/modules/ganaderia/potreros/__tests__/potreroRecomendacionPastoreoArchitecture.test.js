@@ -194,3 +194,36 @@ test('errores nuevos (MISSING_DIAS_EN_LECHE, INVALID_DIAS_EN_LECHE, INVALID_GRAS
   assert.match(panelSource, /INVALID_GRASA_LECHE/);
   assert.match(panelSource, /PESO_FUERA_DE_RANGO_CATEGORIA/);
 });
+
+// ---------------------------------------------------------------------
+// Hardening ronda 5 -- corrige un bug real detectado en el primer preview
+// de producción: "remanente proyectado" NUNCA debe recalcularse en el
+// cliente como materiaSecaTotalKg - materiaSecaUtilizableKg (eso es el
+// remanente OBJETIVO, un concepto distinto) -- siempre viene ya calculado
+// del backend (resultado.remanenteProyectadoKg).
+// ---------------------------------------------------------------------
+
+test('ResultadoBlock NUNCA recalcula remanente/consumo en el cliente -- usa exclusivamente los campos del backend', () => {
+  const resultadoBlock = panelSource.match(/function ResultadoBlock\(\{ payload \}\) \{[\s\S]*?\n\}/)?.[0] ?? '';
+  assert.notEqual(resultadoBlock, '');
+  assert.doesNotMatch(resultadoBlock, /materiaSecaTotalKg\s*-\s*materiaSecaUtilizableKg/);
+  assert.match(resultadoBlock, /resultado\.remanenteProyectadoKg/);
+  assert.match(resultadoBlock, /resultado\.remanenteObjetivoKg/);
+  assert.match(resultadoBlock, /resultado\.consumoProyectadoKg/);
+  assert.match(resultadoBlock, /resultado\.diasOcupacionRecomendados/);
+});
+
+test('la permanencia mostrada usa diasOcupacionRecomendados (ya floor en backend), nunca diasOcupacionEstimados directamente', () => {
+  const resultadoBlock = panelSource.match(/function ResultadoBlock\(\{ payload \}\) \{[\s\S]*?\n\}/)?.[0] ?? '';
+  assert.doesNotMatch(resultadoBlock, /formatDias\(resultado\.diasOcupacionEstimados\)/);
+});
+
+test('el historial usa diasOcupacionRecomendados por item, misma semántica que el resultado fresco', () => {
+  assert.match(panelSource, /formatDias\(item\.diasOcupacionRecomendados\)/);
+});
+
+test('etiquetas exactas preferidas del hotfix: "Consumo estimado en", "Remanente estimado al retiro", "Remanente objetivo protegido"', () => {
+  assert.match(panelSource, /Consumo estimado en/);
+  assert.match(panelSource, /Remanente estimado al retiro/);
+  assert.match(panelSource, /Remanente objetivo protegido/);
+});

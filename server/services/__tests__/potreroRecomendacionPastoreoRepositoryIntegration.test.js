@@ -258,6 +258,55 @@ describe('SPRINT-3D7.2: potreroRecomendacionPastoreoRepository contra Postgres-A
     assert.equal(getResult.historial.length, 0);
   });
 
+  // ---------------------------------------------------------------------
+  // Hardening ronda 5 -- corrige un bug real detectado en el primer preview
+  // de producción: "remanente proyectado" NUNCA debe ser un alias de
+  // "remanente objetivo". Confirma la separación end-to-end (preview,
+  // create, y GET sobre una fila ya persistida -- que recalcula desde
+  // columnas ya guardadas, sin columnas nuevas).
+  // ---------------------------------------------------------------------
+
+  test('preview: remanente proyectado usa los DÍAS RECOMENDADOS (floor), nunca es igual al remanente objetivo cuando los días exactos no son enteros', async () => {
+    const org = randomOrgId();
+    const predioId = await seedPredio(org, 'Predio Sprint3D72R REMANENTE');
+    const potreroId = await seedPotrero(org, predioId, 'Potrero Sprint3D72R REMANENTE');
+    const pasturaId = await seedPasturaPersonalizada(org, 'Pastura Sprint3D72R REMANENTE');
+    await seedFicha(org, potreroId, pasturaId, { biomasaTotalKg: 5900 });
+
+    const preview = await repo.previewRecomendacionPastoreo(org, predioId, potreroId, {
+      categoriaCodigo: 'novillo_ceba', numeroAnimales: 10, pesoPromedioKg: 420,
+    });
+
+    // materiaSecaTotalKg = 5900*0.20 = 1180; utilizable = 590;
+    // demandaDiaria = 420*0.024*10 = 100.8; días exactos = 590/100.8 ≈ 5.853.
+    assert.ok(Math.abs(preview.resultado.diasOcupacionEstimados - 5.853) < 0.01);
+    assert.equal(preview.resultado.diasOcupacionRecomendados, 5);
+    assert.ok(Math.abs(preview.resultado.consumoProyectadoKg - 504) < 0.01);
+    assert.ok(Math.abs(preview.resultado.remanenteObjetivoKg - 590) < 0.01);
+    assert.ok(Math.abs(preview.resultado.remanenteProyectadoKg - 676) < 0.01);
+    assert.notEqual(preview.resultado.remanenteProyectadoKg, preview.resultado.remanenteObjetivoKg);
+  });
+
+  test('create + GET: la recomendación persistida refleja el remanente proyectado correcto (recalculado desde columnas persistidas, sin columnas nuevas)', async () => {
+    const org = randomOrgId();
+    const predioId = await seedPredio(org, 'Predio Sprint3D72R REMANENTE-DB');
+    const potreroId = await seedPotrero(org, predioId, 'Potrero Sprint3D72R REMANENTE-DB');
+    const pasturaId = await seedPasturaPersonalizada(org, 'Pastura Sprint3D72R REMANENTE-DB');
+    await seedFicha(org, potreroId, pasturaId, { biomasaTotalKg: 5900 });
+
+    const created = await repo.createRecomendacionPastoreo(org, predioId, potreroId, {
+      categoriaCodigo: 'novillo_ceba', numeroAnimales: 10, pesoPromedioKg: 420,
+    });
+    assert.equal(created.diasOcupacionRecomendados, 5);
+    assert.ok(Math.abs(created.remanenteProyectadoKg - 676) < 0.01);
+
+    const getResult = await repo.getRecomendacionPastoreoByPotrero(org, predioId, potreroId);
+    assert.equal(getResult.actual.diasOcupacionRecomendados, 5);
+    assert.ok(Math.abs(getResult.actual.remanenteProyectadoKg - 676) < 0.01);
+    assert.ok(Math.abs(getResult.actual.remanenteObjetivoKg - 590) < 0.01);
+    assert.notEqual(getResult.actual.remanenteProyectadoKg, getResult.actual.remanenteObjetivoKg);
+  });
+
   test('histórico: múltiples create del mismo potrero -- actual es el más reciente, historial preserva los anteriores (append-only)', async () => {
     const org = randomOrgId();
     const predioId = await seedPredio(org, 'Predio Sprint3D72R HIST');

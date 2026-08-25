@@ -15,6 +15,7 @@ import {
   computeRecomendacionPastoreo,
   computeDemandaIndividualLecheNrc2001,
   computeFcmKgDia,
+  computeRemnantDerivatives,
   resolveNivelConfianza,
   FICHA_STALE_DIAS,
   DENSIDAD_LECHE_KG_POR_LITRO,
@@ -217,4 +218,64 @@ test('resolveNivelConfianza: nunca baja de BAJA aunque se cumplan todas las cond
     usaPerfilGenericoLeche: true,
   });
   assert.equal(nivel, 'BAJA');
+});
+
+// -----------------------------------------------------------------------
+// Hardening ronda 5 -- corrige el bug real detectado en el primer preview
+// de producción (POTRERO 1, Novillas de levante, 2026-08-25): "remanente
+// proyectado" era un alias de "remanente objetivo" (materiaSecaTotalKg -
+// materiaSecaUtilizableKg), un concepto DISTINTO del remanente físico real
+// tras retirar el lote a los días REDONDEADOS (floor) realmente mostrados.
+// -----------------------------------------------------------------------
+
+test('fixture real (POTRERO 1, Novillas de levante): consumo/remanente proyectados usan los DÍAS RECOMENDADOS (floor), no los días exactos', () => {
+  const materiaSecaTotalKg = 735.46;
+  const materiaSecaUtilizableKg = 367.73; // 735.46 * 0.5
+  const demandaDiariaLoteKgMs = 72.80;
+  const diasOcupacionEstimados = materiaSecaUtilizableKg / demandaDiariaLoteKgMs; // ≈ 5.0511
+
+  const remnant = computeRemnantDerivatives({
+    materiaSecaTotalKg, materiaSecaUtilizableKg, demandaDiariaLoteKgMs, diasOcupacionEstimados,
+  });
+
+  assert.ok(Math.abs(diasOcupacionEstimados - 5.0511) < 0.001);
+  assert.equal(remnant.diasOcupacionRecomendados, 5);
+  assert.ok(Math.abs(remnant.consumoProyectadoKg - 364.00) < 0.005);
+  assert.ok(Math.abs(remnant.remanenteObjetivoKg - 367.73) < 0.005);
+  assert.ok(Math.abs(remnant.remanenteProyectadoKg - 371.46) < 0.005);
+  // El bug de la ronda 4: remanente proyectado NUNCA debe coincidir con el
+  // remanente objetivo cuando los días exactos no son un entero exacto.
+  assert.notEqual(remnant.remanenteProyectadoKg, remnant.remanenteObjetivoKg);
+});
+
+test('diasOcupacionRecomendados usa floor, nunca round -- manejo conservador (§3 del hotfix)', () => {
+  // 5.9 días exactos -- round daría 6 (consumiría más MS de la utilizable),
+  // floor da 5 (conservador, nunca excede lo utilizable).
+  const remnant = computeRemnantDerivatives({
+    materiaSecaTotalKg: 1000, materiaSecaUtilizableKg: 590, demandaDiariaLoteKgMs: 100, diasOcupacionEstimados: 5.9,
+  });
+  assert.equal(remnant.diasOcupacionRecomendados, 5);
+  assert.notEqual(remnant.diasOcupacionRecomendados, Math.round(5.9));
+});
+
+test('cuando diasOcupacionEstimados es un ENTERO exacto, remanente proyectado === remanente objetivo (sin pérdida por floor)', () => {
+  const remnant = computeRemnantDerivatives({
+    materiaSecaTotalKg: 1000, materiaSecaUtilizableKg: 500, demandaDiariaLoteKgMs: 100, diasOcupacionEstimados: 5,
+  });
+  assert.equal(remnant.diasOcupacionRecomendados, 5);
+  assert.equal(remnant.consumoProyectadoKg, 500);
+  assert.equal(remnant.remanenteObjetivoKg, 500);
+  assert.equal(remnant.remanenteProyectadoKg, 500);
+  assert.equal(remnant.remanenteProyectadoKg, remnant.remanenteObjetivoKg);
+});
+
+test('computeRecomendacionPastoreo expone los 4 campos derivados del remanente en su resultado (nunca solo diasOcupacionEstimados)', () => {
+  const resultado = computeRecomendacionPastoreo({
+    biomasaFrescaKg: 5000, materiaSecaPct: 20, utilizacionPct: 50, consumoPctPesoVivo: 2.4,
+    pesoPromedioKg: 420, numeroAnimales: 10,
+  });
+  for (const campo of ['diasOcupacionRecomendados', 'consumoProyectadoKg', 'remanenteObjetivoKg', 'remanenteProyectadoKg']) {
+    assert.ok(campo in resultado, `falta el campo ${campo}`);
+    assert.ok(Number.isFinite(resultado[campo]), `${campo} debe ser un número finito`);
+  }
 });
