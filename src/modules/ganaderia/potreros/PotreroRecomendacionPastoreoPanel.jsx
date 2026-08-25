@@ -149,7 +149,12 @@ const LIMITACION_LABELS = {
 // este bloque resumido.
 function ResultadoBlock({ payload }) {
   const { categoria, resultado, nivelConfianza, requiereAdvertenciaLeche, inputs, estado, provenance, limitaciones } = payload;
-  const remanenteProyectadoKg = resultado.materiaSecaTotalKg - resultado.materiaSecaUtilizableKg;
+  // Hardening ronda 5: diasOcupacionRecomendados/consumoProyectadoKg/
+  // remanenteObjetivoKg/remanenteProyectadoKg vienen SIEMPRE del backend
+  // (computeRemnantDerivatives) -- nunca recalculados aquí. "Remanente
+  // proyectado" NUNCA es alias de "remanente objetivo" (ver
+  // recomendacionPastoreoFormulas.js para la definición de cada uno).
+  const diasRecomendados = resultado.diasOcupacionRecomendados;
 
   return (
     <div className="gan-ficha-preview gan-recomendacion-resultado">
@@ -168,19 +173,23 @@ function ResultadoBlock({ payload }) {
       </div>
       <div className="gan-ficha-row">
         <span>Permanencia estimada</span>
-        <strong>{formatDias(resultado.diasOcupacionEstimados)}</strong>
+        <strong>{formatDias(diasRecomendados)}</strong>
       </div>
       <div className="gan-ficha-row">
         <span>Materia seca utilizable</span>
         <strong>{formatKg(resultado.materiaSecaUtilizableKg)}</strong>
       </div>
       <div className="gan-ficha-row">
-        <span>Demanda diaria estimada</span>
-        <strong>{formatKg(resultado.demandaDiariaLoteKgMs)}/día</strong>
+        <span>Consumo estimado en {formatDias(diasRecomendados)}</span>
+        <strong>{formatKg(resultado.consumoProyectadoKg)}</strong>
       </div>
       <div className="gan-ficha-row">
-        <span>Remanente proyectado</span>
-        <strong>{formatKg(remanenteProyectadoKg)}</strong>
+        <span>Remanente estimado al retiro</span>
+        <strong>{formatKg(resultado.remanenteProyectadoKg)}</strong>
+      </div>
+      <div className="gan-ficha-row">
+        <span>Remanente objetivo protegido</span>
+        <strong>{formatKg(resultado.remanenteObjetivoKg)}</strong>
       </div>
       <div className="gan-ficha-row">
         <span>Confianza</span>
@@ -400,7 +409,7 @@ export default function PotreroRecomendacionPastoreoPanel({ predioId, potreroId,
                   <span>{item.categoriaNombre}</span>
                   <span>{item.numeroAnimales} animales</span>
                   <span>{item.pesoPromedioKg} kg PV</span>
-                  <span>{formatDias(item.diasOcupacionEstimados)}</span>
+                  <span>{formatDias(item.diasOcupacionRecomendados)}</span>
                 </div>
               ))}
             </div>

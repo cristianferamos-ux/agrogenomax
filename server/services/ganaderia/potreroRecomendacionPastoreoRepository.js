@@ -30,6 +30,7 @@ import { fetchCategoriaByCodigo } from './categoriaProductivaRepository.js';
 import { resolvePastureClimateParams } from './motorPastoreoAuto/pastureClimateEngine.js';
 import {
   computeRecomendacionPastoreo,
+  computeRemnantDerivatives,
   resolveNivelConfianza,
 } from './motorPastoreoAuto/recomendacionPastoreoFormulas.js';
 import { ESTADO_RECOMENDACION } from './motorPastoreoAuto/estadosRecomendacion.js';
@@ -419,13 +420,20 @@ function buildResponsePayload({
       consumoPctPesoVivo: consumoPctPvAplicado,
     },
     // CALCULATED -- derivado matemáticamente de biomasa real + los
-    // ASSUMED de arriba (§7 hardening).
+    // ASSUMED de arriba (§7 hardening). Hardening ronda 5: remanente
+    // objetivo (reserva planeada) y remanente/consumo proyectado (usando
+    // los DÍAS REALMENTE RECOMENDADOS, ya redondeados hacia abajo) son
+    // conceptos separados -- ninguno es alias del otro.
     resultado: {
       materiaSecaTotalKg: resultado.materiaSecaTotalKg,
       materiaSecaUtilizableKg: resultado.materiaSecaUtilizableKg,
       demandaIndividualKgMsDia: resultado.demandaIndividualKgMsDia,
       demandaDiariaLoteKgMs: resultado.demandaDiariaLoteKgMs,
       diasOcupacionEstimados: resultado.diasOcupacionEstimados,
+      diasOcupacionRecomendados: resultado.diasOcupacionRecomendados,
+      consumoProyectadoKg: resultado.consumoProyectadoKg,
+      remanenteObjetivoKg: resultado.remanenteObjetivoKg,
+      remanenteProyectadoKg: resultado.remanenteProyectadoKg,
     },
     // Provenance de cada ASSUMED (§3/§4/§5/§6/§7 hardening) -- nunca
     // scoring opaco, nunca falsa precisión.
@@ -464,6 +472,19 @@ export async function previewRecomendacionPastoreo(organizacionId, predioId, pot
 }
 
 function serializeRecomendacionRow(row) {
+  const materiaSecaTotalKg = Number(row.materia_seca_total_kg);
+  const materiaSecaUtilizableKg = Number(row.materia_seca_utilizable_kg);
+  const demandaDiariaLoteKgMs = Number(row.demanda_diaria_lote_kg_ms);
+  const diasOcupacionEstimados = Number(row.dias_ocupacion_estimados);
+  // Hardening ronda 5: remanente/consumo proyectado NUNCA se persistieron
+  // como columnas (son 100% derivables de lo ya persistido) -- se
+  // recalculan aquí en cada lectura, misma fórmula que en el cálculo
+  // fresco (computeRemnantDerivatives), para que una recomendación
+  // histórica muestre la semántica correcta sin necesitar migrar datos.
+  const remnant = computeRemnantDerivatives({
+    materiaSecaTotalKg, materiaSecaUtilizableKg, demandaDiariaLoteKgMs, diasOcupacionEstimados,
+  });
+
   return {
     recomendacionId: String(row.recomendacion_id),
     categoriaCodigo: row.categoria_codigo,
@@ -480,10 +501,14 @@ function serializeRecomendacionRow(row) {
     materiaSecaPctAplicada: Number(row.materia_seca_pct_aplicada),
     utilizacionPctAplicada: Number(row.utilizacion_pct_aplicada),
     consumoPctPvAplicado: Number(row.consumo_pct_pv_aplicado),
-    materiaSecaTotalKg: Number(row.materia_seca_total_kg),
-    materiaSecaUtilizableKg: Number(row.materia_seca_utilizable_kg),
-    demandaDiariaLoteKgMs: Number(row.demanda_diaria_lote_kg_ms),
-    diasOcupacionEstimados: Number(row.dias_ocupacion_estimados),
+    materiaSecaTotalKg,
+    materiaSecaUtilizableKg,
+    demandaDiariaLoteKgMs,
+    diasOcupacionEstimados,
+    diasOcupacionRecomendados: remnant.diasOcupacionRecomendados,
+    consumoProyectadoKg: remnant.consumoProyectadoKg,
+    remanenteObjetivoKg: remnant.remanenteObjetivoKg,
+    remanenteProyectadoKg: remnant.remanenteProyectadoKg,
     nivelConfianza: row.nivel_confianza,
     motorVersion: row.motor_version,
     parametrosFuente: row.parametros_fuente_json,

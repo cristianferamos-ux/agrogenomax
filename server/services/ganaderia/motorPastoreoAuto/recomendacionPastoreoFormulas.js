@@ -103,9 +103,50 @@ export function computeDemandaIndividualLecheNrc2001({ pesoPromedioKg, litrosPro
   };
 }
 
+// -----------------------------------------------------------------------
+// Hardening ronda 5 -- corrige un bug real detectado en el primer preview
+// de producción (POTRERO 1, Novillas de levante): "remanente proyectado"
+// era literalmente un alias de "remanente objetivo" (materiaSecaTotalKg -
+// materiaSecaUtilizableKg), un concepto DISTINTO. Se separan explícitamente
+// 5 conceptos, ninguno alias del otro:
+//   A. materiaSecaTotalKg          -- ya existía.
+//   B. materiaSecaUtilizableKg     -- ya existía.
+//   C. remanenteObjetivoKg         = A - B (reserva PLANEADA, nunca pastoreada
+//                                    según el %utilización -- lo que el
+//                                    motor pretendía dejar).
+//   D. diasOcupacionRecomendados   = floor(diasOcupacionEstimados) -- manejo
+//                                    conservador (§3 del hotfix): nunca
+//                                    redondear hacia arriba un día que
+//                                    consumiría más MS de la utilizable.
+//   E. consumoProyectadoKg         = demandaDiariaLoteKgMs × diasOcupacionRecomendados
+//                                    (consumo REAL esperado durante los días
+//                                    realmente recomendados, no los exactos
+//                                    antes de redondear).
+//   F. remanenteProyectadoKg       = materiaSecaTotalKg - consumoProyectadoKg
+//                                    (lo que FÍSICAMENTE queda en el potrero
+//                                    al retirar el lote -- por el floor,
+//                                    siempre >= remanenteObjetivoKg, nunca
+//                                    igual salvo que diasOcupacionEstimados
+//                                    sea un entero exacto).
+// -----------------------------------------------------------------------
+export function computeRemnantDerivatives({
+  materiaSecaTotalKg, materiaSecaUtilizableKg, demandaDiariaLoteKgMs, diasOcupacionEstimados,
+}) {
+  const diasOcupacionRecomendados = Math.floor(diasOcupacionEstimados);
+  const consumoProyectadoKg = demandaDiariaLoteKgMs * diasOcupacionRecomendados;
+  const remanenteObjetivoKg = materiaSecaTotalKg - materiaSecaUtilizableKg;
+  const remanenteProyectadoKg = materiaSecaTotalKg - consumoProyectadoKg;
+  return {
+    diasOcupacionRecomendados,
+    consumoProyectadoKg,
+    remanenteObjetivoKg,
+    remanenteProyectadoKg,
+  };
+}
+
 /**
  * Cálculo completo del motor automático (§7 del sprint, hardening rondas
- * 3/4) -- toma biomasaFrescaKg (de la ficha real), los parámetros ya
+ * 3/4/5) -- toma biomasaFrescaKg (de la ficha real), los parámetros ya
  * resueltos server-side (categoría + pastura/clima), numeroAnimales/
  * pesoPromedioKg (inputs mínimos, §6) y, para vacas en producción:
  * - si grasaLechePct está disponible: ejecuta NRC (2001) completo (DIRECT).
@@ -154,12 +195,26 @@ export function computeRecomendacionPastoreo({
 
   const diasOcupacionEstimados = computeDiasOcupacionEstimados(materiaSecaUtilizableKg, demandaDiariaLoteKgMs);
 
+  // Hardening ronda 5: derivados de remanente/consumo proyectado -- ver
+  // computeRemnantDerivatives arriba. Se calculan aquí incluso si
+  // diasOcupacionEstimados resulta no-finito/negativo (guardrail de
+  // CALCULATION_UNAVAILABLE vive en el repositorio, después de esta
+  // llamada) -- no rompen, solo producen valores no-finitos que nunca
+  // llegan a persistirse/responderse en ese caso.
+  const remnant = computeRemnantDerivatives({
+    materiaSecaTotalKg, materiaSecaUtilizableKg, demandaDiariaLoteKgMs, diasOcupacionEstimados,
+  });
+
   return {
     materiaSecaTotalKg,
     materiaSecaUtilizableKg,
     demandaIndividualKgMsDia,
     demandaDiariaLoteKgMs,
     diasOcupacionEstimados,
+    diasOcupacionRecomendados: remnant.diasOcupacionRecomendados,
+    consumoProyectadoKg: remnant.consumoProyectadoKg,
+    remanenteObjetivoKg: remnant.remanenteObjetivoKg,
+    remanenteProyectadoKg: remnant.remanenteProyectadoKg,
     terneroAlPieDemandaIncluida: false,
     dmiModel,
     dmiDetalle,
