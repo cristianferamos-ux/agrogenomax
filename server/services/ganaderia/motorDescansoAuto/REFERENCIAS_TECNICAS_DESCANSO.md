@@ -339,3 +339,38 @@ madrugada UTC/Bogotá), `ganaderiaPotreroDescansoReentradaValidation.test.js`
 A-I": timezone, sin input, anti-spoof, autosuficiencia, día-cambiado,
 ancla-preserva-fechas, reporte integrado), `potreroDescansoReentradaArchitecture.test.js`
 (sin selector de fecha, reporte integrado, STALE_PREVIEW_DATE_CHANGED).
+
+## HOTFIX 3D8.2 -- SINGLE CLICK REST CALCULATION
+
+El smoke real de producción reportó que el PRIMER cálculo de descanso
+necesitaba DOS clics en "Calcular descanso". Auditoría de
+`previewDescansoReentrada`/`resolveDescanso`/`getOrGenerateClimatologia`/
+`refreshPotreroClimatologia` -- **ningún early-return, ninguna doble
+llamada al proveedor histórico, ningún `climatologyGenerated:true` con
+`resultado` incompleto** (confirmado con tests dedicados de "una sola
+llamada", sin cache y con cache, ambos con plan completo en la misma
+respuesta). El backend ya era correcto desde el hotfix 3D8.1.
+
+**Causa raíz real -- frontend, wiring del botón inicial**.
+`PotreroDescansoReentradaPanel.jsx`: el botón "Calcular descanso" del
+estado COLAPSADO estaba conectado a `handleAbrir`, que solo expandía el
+panel y ejecutaba un GET (`loadDescanso`) para ver si ya existía una
+recomendación -- si no existía ninguna (el caso típico de un primer
+cálculo), el usuario veía un SEGUNDO botón "Calcular descanso" (dentro
+del panel ya expandido) que recién ahí disparaba el `POST /preview` real.
+Dos clics para lo que el usuario percibía como una sola acción.
+
+**Corrección**: `loadDescanso({ autoCalcularSiVacio })` encadena
+`calcularPreview(false)` automáticamente, dentro de la MISMA promesa,
+cuando el GET confirma que no existe ninguna recomendación previa --
+`handleAbrir` pasa `autoCalcularSiVacio: true`. El refresh posterior a un
+guardado exitoso (`handleGuardar`) NUNCA pasa ese flag -- ahí solo
+queremos mostrar el plan recién guardado, no disparar otro cálculo.
+
+Tests: `potreroDescansoReentradaArchitecture.test.js` (wiring exacto de
+`handleAbrir`/`loadDescanso`, ausencia de un segundo punto de llamada a
+`previewDescansoReentrada`, botón deshabilitado durante toda la request),
+`potreroDescansoRepositoryIntegration.test.js` (bloque "HOTFIX 3D8.2":
+una sola llamada sin caché persiste climatología y devuelve plan
+completo; una sola llamada con caché -- proveedor histórico cero
+llamadas, mismo resultado científico).

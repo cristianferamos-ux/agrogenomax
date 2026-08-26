@@ -618,6 +618,17 @@ describe('SPRINT-3D8 (hardening dinámico): potreroDescansoRepository contra Pos
   // hotfix. Nested por el mismo motivo que describeAutogenTests().
   // -----------------------------------------------------------------------
   describeAutoStartHotfixTests();
+
+  // -----------------------------------------------------------------------
+  // HOTFIX 3D8.2 (SINGLE CLICK REST CALCULATION): confirma -- de nuevo, a
+  // nivel del repositorio -- que UNA sola llamada a previewDescansoReentrada
+  // (sin caché o con caché) siempre devuelve el plan COMPLETO. La causa
+  // raíz real del "doble clic" reportado en producción NO estaba en estas
+  // funciones (backend) sino en el wiring del frontend (handleAbrir no
+  // encadenaba el cálculo real) -- corregido en
+  // PotreroDescansoReentradaPanel.jsx, ver potreroDescansoReentradaArchitecture.test.js.
+  // -----------------------------------------------------------------------
+  describeSingleClickHotfixTests();
 });
 
 // fetchImpl mockeado que SIEMPRE responde con éxito (mismo patrón que
@@ -991,6 +1002,72 @@ describe('HOTFIX 3D8.1: fechaInicioPastoreo resuelta server-side (America/Bogota
     assert.ok(typeof preview.nivelConfianza === 'string');
     assert.ok(Array.isArray(preview.agroClimate.appliedRules));
     assert.ok(Array.isArray(preview.condicionesReentrada));
+  });
+});
+}
+
+// -----------------------------------------------------------------------
+// HOTFIX 3D8.2 (SINGLE CLICK REST CALCULATION) §4/§5/§9-§11: UNA sola
+// llamada a previewDescansoReentrada -- con o sin caché -- siempre
+// devuelve el plan COMPLETO (nunca `resultado: null` con
+// `climatologyGenerated: true`).
+// -----------------------------------------------------------------------
+function describeSingleClickHotfixTests() {
+describe('HOTFIX 3D8.2: UNA sola llamada a preview basta (sin cache y con cache) -- nunca climatologyGenerated:true con resultado incompleto', { skip: !dbAvailable }, () => {
+  after(async () => {
+    if (!adminPool) return;
+    await adminPool.query(`delete from agx.potrero_climatologias_agroclimaticas where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D8R AUTOGEN-SINGLECLICK%')`);
+    await adminPool.query(`delete from agx.potrero_recomendaciones_descanso where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D8R AUTOGEN-SINGLECLICK%')`);
+    await adminPool.query(`delete from agx.potrero_recomendaciones_pastoreo where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D8R AUTOGEN-SINGLECLICK%')`);
+    await adminPool.query(`delete from agx.potrero_contextos_agroclimaticos where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D8R AUTOGEN-SINGLECLICK%')`);
+    await adminPool.query(`delete from agx.potrero_ficha_pasturas where ficha_id in (select ficha_id from agx.potrero_fichas_productivas where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D8R AUTOGEN-SINGLECLICK%'))`);
+    await adminPool.query(`delete from agx.potrero_fichas_productivas where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D8R AUTOGEN-SINGLECLICK%')`);
+    await adminPool.query(`delete from agx.potreros where nombre like 'Potrero Sprint3D8R AUTOGEN-SINGLECLICK%'`);
+    await adminPool.query(`delete from agx.predios where nombre_predio like 'Predio Sprint3D8R AUTOGEN-SINGLECLICK%'`);
+  });
+
+  test('§4 flujo SIN cache: UNA sola llamada -> provider invocado, climatología insertada (0 -> 1 fila), plan completo en la MISMA respuesta -- NO se necesita una segunda llamada', async () => {
+    const org = randomOrgId();
+    const { predioId, potreroId } = await seedEscenarioAutogen(org, 'SINGLECLICK-NOCACHE');
+
+    const antes = await adminPool.query('select count(*) from agx.potrero_climatologias_agroclimaticas where potrero_id = $1', [potreroId]);
+    assert.equal(Number(antes.rows[0].count), 0, 'precondición: sin climatología cacheada');
+
+    const fetchImpl = buildAutoGenMockFetchImpl();
+    // UNA sola invocación -- exactamente lo que hace un solo clic real.
+    const preview = await repo.previewDescansoReentrada(org, predioId, potreroId, { climatologyFetchImpl: fetchImpl });
+
+    assert.equal(preview.climatologyGenerated, true, 'el provider histórico SÍ fue invocado en esta misma llamada');
+    assert.ok(fetchImpl.contarLlamadas() > 0, 'el provider histórico fue efectivamente llamado');
+    assert.equal(preview.agroClimate.localClimatologyStatus, 'AVAILABLE');
+    assert.equal(preview.estado, 'READY');
+    assert.ok(Number.isFinite(preview.resultado.diasDescansoMin), 'el plan de descanso viene COMPLETO -- nunca climatologyGenerated:true con resultado nulo/incompleto');
+    assert.ok(Number.isFinite(preview.resultado.diasDescansoMax));
+    assert.match(preview.fechaSalidaEstimada, /^\d{4}-\d{2}-\d{2}$/);
+    assert.match(preview.resultado.fechaReingresoRecomendada, /^\d{4}-\d{2}-\d{2}$/);
+
+    const despues = await adminPool.query('select count(*) from agx.potrero_climatologias_agroclimaticas where potrero_id = $1', [potreroId]);
+    assert.equal(Number(despues.rows[0].count), 1, 'la climatología quedó persistida tras la ÚNICA llamada');
+  });
+
+  test('§5 flujo CON cache: UNA sola llamada -> provider histórico CERO llamadas, mismo resultado científico, plan completo', async () => {
+    const org = randomOrgId();
+    const { predioId, potreroId } = await seedEscenarioAutogen(org, 'SINGLECLICK-CACHE');
+
+    const primero = await repo.previewDescansoReentrada(org, predioId, potreroId, { climatologyFetchImpl: buildAutoGenMockFetchImpl() });
+    assert.equal(primero.climatologyGenerated, true);
+
+    // Segunda "sesión" (simula un cálculo posterior, no el mismo clic) --
+    // el provider NUNCA debe volver a ser llamado.
+    const fetchImplSegundaSesion = buildFallaSiSeLlamaFetchImpl();
+    const segundo = await repo.previewDescansoReentrada(org, predioId, potreroId, { climatologyFetchImpl: fetchImplSegundaSesion });
+
+    assert.equal(segundo.climatologyGenerated, false, 'provider histórico CERO llamadas -- caché reutilizada');
+    assert.equal(segundo.agroClimate.status, primero.agroClimate.status, 'mismo resultado científico con o sin climatologyGenerated');
+    assert.equal(segundo.resultado.diasDescansoMin, primero.resultado.diasDescansoMin);
+    assert.equal(segundo.resultado.diasDescansoMax, primero.resultado.diasDescansoMax);
+    assert.equal(segundo.nivelConfianza, primero.nivelConfianza);
+    assert.ok(Number.isFinite(segundo.resultado.diasDescansoMin), 'plan completo también en el flujo con caché');
   });
 });
 }

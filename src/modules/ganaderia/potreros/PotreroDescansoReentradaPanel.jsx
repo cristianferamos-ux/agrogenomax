@@ -299,7 +299,20 @@ export default function PotreroDescansoReentradaPanel({ predioId, potreroId }) {
   // curso/terminó.
   const [climatologiaRecienGenerada, setClimatologiaRecienGenerada] = useState(false);
 
-  function loadDescanso() {
+  // HOTFIX 3D8.2 (SINGLE CLICK REST CALCULATION): la causa raíz del "doble
+  // clic" NO estaba en el backend (previewDescansoReentrada/resolveDescanso/
+  // getOrGenerateClimatologia ya resolvían todo en UNA sola respuesta,
+  // verificado con tests dedicados) -- estaba aquí: el botón "Calcular
+  // descanso" del estado COLAPSADO (`handleAbrir`) solo expandía el panel y
+  // hacía un GET (`loadDescanso`) para ver si ya existía una recomendación.
+  // Si NO existía ninguna, el usuario veía un SEGUNDO botón "Calcular
+  // descanso" que recién ahí disparaba el preview real -- dos clics para
+  // lo que el usuario percibía como una sola acción. `autoCalcularSiVacio`
+  // encadena el preview automáticamente EN LA MISMA acción cuando el GET
+  // confirma que no hay nada que mostrar todavía -- nunca se usa en el
+  // refresh posterior a un guardado exitoso (ahí sí queremos mostrar el
+  // plan recién guardado, no disparar otro cálculo).
+  function loadDescanso({ autoCalcularSiVacio = false } = {}) {
     setLoading(true);
     setLoadError('');
     getDescansoReentrada(predioId, potreroId)
@@ -309,9 +322,13 @@ export default function PotreroDescansoReentradaPanel({ predioId, potreroId }) {
           setLoading(false);
           return;
         }
-        setActual(data?.actual ?? null);
+        const actualCargado = data?.actual ?? null;
+        setActual(actualCargado);
         setLoaded(true);
         setLoading(false);
+        if (autoCalcularSiVacio && !actualCargado) {
+          calcularPreview(false);
+        }
       })
       .catch(() => {
         setLoadError(GENERIC_ERROR);
@@ -321,7 +338,7 @@ export default function PotreroDescansoReentradaPanel({ predioId, potreroId }) {
 
   function handleAbrir() {
     setExpanded(true);
-    if (!loaded) loadDescanso();
+    if (!loaded) loadDescanso({ autoCalcularSiVacio: true });
   }
 
   // HOTFIX 3D8.1 §1/§7: UN CLIC -- "Calcular descanso" ejecuta el preview
