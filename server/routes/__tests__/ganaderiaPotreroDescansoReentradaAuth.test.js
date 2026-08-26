@@ -72,7 +72,9 @@ async function assertAnonymousRejected(method, path, body) {
   }
 }
 
-const VALID_BODY = { fechaInicioPastoreo: '2026-09-01' };
+// HOTFIX 3D8.1: fechaInicioPastoreo ya no es un input del cliente --
+// "Calcular descanso" es un POST sin body (el body vacío ya es válido).
+const VALID_BODY = {};
 
 describe('SPRINT-3D8: descanso/reentrada exige sesión con organización', () => {
   test('GET .../descanso-reentrada sin sesión -> 401', async () => {

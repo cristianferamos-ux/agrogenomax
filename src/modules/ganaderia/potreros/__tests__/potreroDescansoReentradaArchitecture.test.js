@@ -40,16 +40,25 @@ test('PotreroRecomendacionPastoreoPanel embebe el panel de descanso dentro del b
 });
 
 // ---------------------------------------------------------------------
-// §11/§12 del sprint: único input del cliente es la fecha prevista de
-// ingreso -- nunca "hoy" silencioso, nunca campos derivados.
+// HOTFIX 3D8.1 (AUTOMATIC GRAZING START): fechaInicioPastoreo YA NO es un
+// input del cliente -- "Calcular descanso" es UN CLIC, sin selector de
+// fecha. El servidor resuelve la fecha de ingreso (hoy, hora del
+// negocio).
 // ---------------------------------------------------------------------
 
-test('el formulario pide "Fecha prevista de ingreso" como único input', () => {
-  assert.match(panelSource, /Fecha prevista de ingreso/);
+test('HOTFIX 3D8.1: NO existe ningún selector de fecha ("Fecha prevista de ingreso") -- "Calcular descanso" es un solo clic', () => {
+  assert.doesNotMatch(panelSource, /Fecha prevista de ingreso/);
+  assert.doesNotMatch(panelSource, /type="date"/);
+  assert.doesNotMatch(panelSource, /<FormField/);
 });
 
-test('el cliente de API documenta fechaInicioPastoreo como único body esperado', () => {
-  assert.match(apiSource, /fechaInicioPastoreo/);
+test('HOTFIX 3D8.1 test D: el cliente de API NUNCA envía fechaInicioPastoreo -- ni en preview ni en create', () => {
+  assert.doesNotMatch(apiCode, /fechaInicioPastoreo/);
+});
+
+test('HOTFIX 3D8.1: previewDescansoReentrada/createDescansoReentrada usan anclarAFechaExistente/confirmedFechaInicioPastoreo (nunca una fecha fijada por el cliente)', () => {
+  assert.match(apiSource, /anclarAFechaExistente/);
+  assert.match(apiSource, /confirmedFechaInicioPastoreo/);
 });
 
 test('el cliente de API nunca referencia campos derivados server-side (spoofing)', () => {
@@ -103,9 +112,10 @@ test('NO_GRAZING_RECOMMENDATION y NO_PASTURE_PROFILE tienen mensajes de error ex
 // estimación" reutiliza la fecha ya registrada, nunca pide un nuevo input.
 // ---------------------------------------------------------------------
 
-test('el botón "Actualizar estimación" existe y reutiliza fechaInicioPastoreo ya guardado', () => {
+test('HOTFIX 3D8.1 §15: el botón "Actualizar estimación" ancla a la fecha existente (anclarAFechaExistente) -- nunca reenvía una fecha del cliente', () => {
   assert.match(panelSource, /Actualizar estimación/);
-  assert.match(panelSource, /actual\.fechaInicioPastoreo/);
+  assert.match(panelSource, /handleActualizarEstimacion/);
+  assert.match(panelSource, /calcularPreview\(true\)/);
 });
 
 test('la condición REASSESSMENT_RECOMMENDED se muestra como aviso de cambio de condiciones', () => {
@@ -222,4 +232,47 @@ test('§9: el copy de construcción/disponibilidad de climatología nunca expone
   const bloqueDisponible = panelSource.match(/Referencia climática local disponible[\s\S]{0,20}/)?.[0] ?? '';
   assert.doesNotMatch(bloqueCopy, /ERA5|percentil|grid|1991|2020/i);
   assert.doesNotMatch(bloqueDisponible, /ERA5|percentil|grid|1991|2020/i);
+});
+
+// ---------------------------------------------------------------------
+// HOTFIX 3D8.1 §14: preview/save -- si el día cambió entre el preview
+// visto y el guardado, el servidor rechaza (STALE_PREVIEW_DATE_CHANGED)
+// en vez de guardar silenciosamente bajo otra fecha -- el cliente
+// recalcula y muestra el preview nuevo, nunca muta el calendario en
+// silencio.
+// ---------------------------------------------------------------------
+
+test('HOTFIX 3D8.1 test G: create envía confirmedFechaInicioPastoreo (eco del preview visto) -- el servidor detecta cambio de día, nunca lo hace el cliente', () => {
+  assert.match(panelSource, /confirmedFechaInicioPastoreo:\s*preview\.fechaInicioPastoreo/);
+});
+
+test('HOTFIX 3D8.1: STALE_PREVIEW_DATE_CHANGED dispara un recálculo automático, nunca guarda silenciosamente bajo la fecha nueva', () => {
+  assert.match(panelSource, /STALE_PREVIEW_DATE_CHANGED/);
+  const bloqueHandleGuardar = panelSource.match(/async function handleGuardar\(\)[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(bloqueHandleGuardar, /calcularPreview\(previewAnclado\)/);
+});
+
+// ---------------------------------------------------------------------
+// HOTFIX 3D8.1 §8/§10: reporte integrado -- lote, pastoreo (ingreso/
+// permanencia/salida), descanso, reentrada, confianza, por qué y
+// condición de reingreso en UNA sola lectura, nunca bloques separados.
+// ---------------------------------------------------------------------
+
+test('HOTFIX 3D8.1 test I: PlanPastoreoReport (reporte integrado) incluye lote, ingreso, permanencia, salida, descanso, reentrada, confianza y condición de reingreso', () => {
+  assert.match(panelSource, /function PlanPastoreoReport/);
+  assert.match(panelSource, /Plan de pastoreo AgroGenomaX/i);
+  assert.match(panelSource, /<span>Lote<\/span>/);
+  assert.match(panelSource, /<span>Ingreso<\/span>/);
+  assert.match(panelSource, /Permanencia recomendada/);
+  assert.match(panelSource, /<span>Salida estimada<\/span>/);
+  assert.match(panelSource, /<span>Descanso estimado<\/span>/);
+  assert.match(panelSource, /Próxima ventana estimada de ingreso/);
+  assert.match(panelSource, /Fecha central recomendada/);
+  assert.match(panelSource, /<span>Confianza<\/span>/);
+  assert.match(panelSource, /Por qué/);
+});
+
+test('HOTFIX 3D8.1: el reporte integrado se usa TANTO para el preview recién calculado como para `actual` (recomendación ya guardada) -- una sola implementación', () => {
+  const usosPlanPastoreoReport = panelSource.match(/<PlanPastoreoReport/g) ?? [];
+  assert.ok(usosPlanPastoreoReport.length >= 2, 'debe reutilizarse para `actual` y para `preview`, nunca duplicar el layout');
 });

@@ -11,8 +11,13 @@
 //
 // Regla de fuente autoritativa: potrero, última ficha/recomendación de
 // pastoreo guardada, contexto agroclimático más reciente y pastura
-// identificada se resuelven SIEMPRE aquí -- el cliente solo aporta
-// fechaInicioPastoreo.
+// identificada se resuelven SIEMPRE aquí. HOTFIX 3D8.1 (AUTOMATIC GRAZING
+// START): el cliente ya NO aporta fechaInicioPastoreo -- AgroGenomaX
+// asume UN CLIC ("Calcular descanso") = el pastoreo inicia HOY (fecha
+// local del negocio, America/Bogota). El único campo opcional que el
+// cliente puede enviar es `confirmedFechaInicioPastoreo` en `create`,
+// exclusivamente para detectar (nunca para fijar) un cambio de día entre
+// el preview visto y el guardado (§14).
 import { withOrganizacionTransaction } from '../../db/agxBusinessPool.js';
 import { computeRemnantDerivatives } from './motorPastoreoAuto/recomendacionPastoreoFormulas.js';
 import { resolvePasturaDescansoBaseline } from './motorDescansoAuto/pasturaDescansoBaselineEngine.js';
@@ -29,6 +34,7 @@ import {
 } from './motorDescansoAuto/descansoFormulas.js';
 import { ESTADO_DESCANSO, WINDOW_CONDITION } from './motorDescansoAuto/estadosDescanso.js';
 import { MOTOR_VERSION } from './motorDescansoAuto/motorVersion.js';
+import { resolveFechaHoyNegocio } from './motorDescansoAuto/businessTimezone.js';
 
 const HISTORIAL_LIMIT = 10;
 const MS_POR_DIA = 24 * 60 * 60 * 1000;
@@ -66,12 +72,14 @@ async function assertPotreroBelongsToPredio(client, predioId, potreroId) {
  */
 async function fetchRecomendacionPastoreoMasReciente(client, potreroId) {
   const result = await client.query(
-    `select recomendacion_id, ficha_id, contexto_id,
-            materia_seca_total_kg, materia_seca_utilizable_kg,
-            demanda_diaria_lote_kg_ms, dias_ocupacion_estimados, created_at
-       from agx.potrero_recomendaciones_pastoreo
-      where potrero_id = $1
-      order by created_at desc
+    `select r.recomendacion_id, r.ficha_id, r.contexto_id,
+            r.materia_seca_total_kg, r.materia_seca_utilizable_kg,
+            r.demanda_diaria_lote_kg_ms, r.dias_ocupacion_estimados, r.created_at,
+            r.numero_animales, r.peso_promedio_kg, c.nombre as categoria_nombre
+       from agx.potrero_recomendaciones_pastoreo r
+       join agx.catalogo_categorias_productivas c on c.categoria_id = r.categoria_id
+      where r.potrero_id = $1
+      order by r.created_at desc
       limit 1`,
     [potreroId],
   );
@@ -226,6 +234,7 @@ function extractClimatologiaMensual(climatologiaRow, mes) {
 async function fetchDescansoMasReciente(client, potreroId) {
   const result = await client.query(
     `select descanso_id, agroclimate_status,
+            to_char(fecha_inicio_pastoreo, 'YYYY-MM-DD') as fecha_inicio_pastoreo,
             to_char(fecha_reingreso_recomendada, 'YYYY-MM-DD') as fecha_reingreso_recomendada,
             dias_descanso_recomendado
        from agx.potrero_recomendaciones_descanso
@@ -247,9 +256,15 @@ function num(valor) {
   return valor === null || valor === undefined ? null : Number(valor);
 }
 
-function validateFechaInicioPastoreo(rawValue) {
+/**
+ * HOTFIX 3D8.1: valida el formato de una fecha YYYY-MM-DD -- ya NO se usa
+ * para `fechaInicioPastoreo` (el cliente nunca la envía; ver
+ * `resolveFechaHoyNegocio`), solo para `confirmedFechaInicioPastoreo`
+ * (eco opcional del cliente en `create`, §14 del hotfix).
+ */
+function validateFechaIsoFormat(rawValue, code) {
   if (typeof rawValue !== 'string' || !FECHA_ISO_PATTERN.test(rawValue)) {
-    throw semanticError('INVALID_FECHA_INICIO_PASTOREO', 400, 'fechaInicioPastoreo debe tener formato YYYY-MM-DD.');
+    throw semanticError(code, 400, 'La fecha debe tener formato YYYY-MM-DD.');
   }
   const [anio, mes, dia] = rawValue.split('-').map(Number);
   const timestamp = Date.UTC(anio, mes - 1, dia);
@@ -258,7 +273,7 @@ function validateFechaInicioPastoreo(rawValue) {
     && reconstruida.getUTCMonth() === mes - 1
     && reconstruida.getUTCDate() === dia;
   if (!valido) {
-    throw semanticError('INVALID_FECHA_INICIO_PASTOREO', 400, 'fechaInicioPastoreo no es una fecha válida.');
+    throw semanticError(code, 400, 'La fecha no es una fecha de calendario válida.');
   }
   return rawValue;
 }
@@ -267,16 +282,35 @@ function validateFechaInicioPastoreo(rawValue) {
  * Resuelve toda la trazabilidad + resultado DINÁMICO del motor de
  * descanso -- única fuente de verdad de cálculo, compartida entre preview
  * y create.
+ *
+ * HOTFIX 3D8.1: `fechaInicioPastoreo` YA NO es un input -- AgroGenomaX
+ * asume que el pastoreo inicia HOY (fecha local del negocio,
+ * America/Bogota, ver `businessTimezone.js`). `now` es SOLO para
+ * inyección determinística en tests (default: `new Date()` real). El
+ * cliente NUNCA puede fijar esta fecha.
+ *
+ * §15 del hotfix: "Actualizar estimación" (`anclarAFechaExistente: true`)
+ * es una operación DISTINTA de "Calcular descanso" -- refresca el
+ * descanso/reentrada con el clima ACTUAL sin pretender que el lote entra
+ * de nuevo hoy. Si ya existe una recomendación de descanso guardada, su
+ * `fecha_inicio_pastoreo` original se usa como ancla (nunca hoy); si no
+ * existe ninguna todavía, no hay nada que anclar y se degrada a una
+ * primera estimación normal (hoy).
  */
-async function resolveDescanso(client, { organizacionId, predioId, potreroId, fechaInicioPastoreo, climatologyFetchImpl }) {
+async function resolveDescanso(client, {
+  organizacionId, predioId, potreroId, climatologyFetchImpl, now, anclarAFechaExistente = false,
+}) {
   await assertPotreroBelongsToPredio(client, predioId, potreroId);
-  validateFechaInicioPastoreo(fechaInicioPastoreo);
 
   const recomendacionRow = await fetchRecomendacionPastoreoMasReciente(client, potreroId);
   const fichaRow = await fetchFichaPorId(client, recomendacionRow.ficha_id, potreroId);
   const nombresPastura = await resolveNombresPastura(client, fichaRow);
   const contextoRow = await fetchContextoMasReciente(client, potreroId);
   const descansoAnteriorRow = await fetchDescansoMasReciente(client, potreroId);
+
+  const fechaInicioPastoreo = (anclarAFechaExistente && descansoAnteriorRow)
+    ? descansoAnteriorRow.fecha_inicio_pastoreo
+    : resolveFechaHoyNegocio(now);
   // HARDENING OPERACIONAL §1/§2: auto-genera la climatología local si no
   // existe o quedó invalidada -- el cliente NUNCA ejecuta un paso
   // adicional. Preview Y create se autogeneran por igual (nunca asumen
@@ -401,6 +435,8 @@ async function resolveDescanso(client, { organizacionId, predioId, potreroId, fe
     freshnessResult,
     ajustePresion,
     rango,
+    remnant,
+    fechaInicioPastoreo,
     fechaSalidaEstimada,
     fechasReingreso,
     condicionesReentrada,
@@ -414,10 +450,25 @@ async function resolveDescanso(client, { organizacionId, predioId, potreroId, fe
 }
 
 function buildParametrosFuenteJson({
-  recomendacionRow, fichaRow, contextoRow, baseline, assessment, freshnessResult, ajustePresion, recomendacionEdadDias, climatologyGenerated,
+  recomendacionRow, fichaRow, contextoRow, baseline, assessment, freshnessResult, ajustePresion, remnant, recomendacionEdadDias, climatologyGenerated,
 }) {
   return {
     climatologyGenerated,
+    // HOTFIX 3D8.1: lote + disponibilidad persistidos en la provenance --
+    // el reporte integrado de una recomendación YA GUARDADA (`actual`) se
+    // reconstruye desde aquí, sin volver a consultar la recomendación de
+    // pastoreo original.
+    lote: {
+      categoria: recomendacionRow.categoria_nombre,
+      numeroAnimales: Number(recomendacionRow.numero_animales),
+      pesoPromedioKg: Number(recomendacionRow.peso_promedio_kg),
+    },
+    disponibilidad: {
+      materiaSecaUtilizableKg: Number(recomendacionRow.materia_seca_utilizable_kg),
+      consumoProyectadoKg: remnant.consumoProyectadoKg,
+      remanenteProyectadoKg: remnant.remanenteProyectadoKg,
+      remanenteObjetivoKg: remnant.remanenteObjetivoKg,
+    },
     pastura: {
       sourceType: baseline.sourceType,
       fuenteTecnica: baseline.fuenteTecnica,
@@ -455,7 +506,7 @@ function buildParametrosFuenteJson({
 }
 
 function buildResponsePayload({
-  recomendacionRow, fichaRow, contextoRow, baseline, assessment, freshnessResult, rango, fechaSalidaEstimada,
+  recomendacionRow, fichaRow, contextoRow, baseline, assessment, freshnessResult, rango, remnant, fechaInicioPastoreo, fechaSalidaEstimada,
   fechasReingreso, condicionesReentrada, nivelConfianza, estado, windowConditions, inputs, climatologyGenerated,
 }) {
   return {
@@ -470,8 +521,27 @@ function buildResponsePayload({
     recomendacionPastoreoId: String(recomendacionRow.recomendacion_id),
     fichaId: String(fichaRow.ficha_id),
     contextoId: contextoRow ? String(contextoRow.contexto_id) : null,
+    // HOTFIX 3D8.1: fechaInicioPastoreo ya NO es un input del cliente --
+    // se expone aquí como el valor RESUELTO server-side (hoy, o el ancla
+    // existente en modo "Actualizar estimación"), para que el reporte
+    // integrado lo muestre sin que el cliente lo haya aportado nunca.
+    fechaInicioPastoreo,
     inputs: {
       fechaInicioPastoreo: inputs.fechaInicioPastoreo,
+    },
+    // HOTFIX 3D8.1 §8/§10: reporte integrado -- lote + disponibilidad,
+    // consumidos de la recomendación de pastoreo YA GUARDADA (§11: nunca
+    // se vuelven a pedir categoría/cantidad/peso).
+    lote: {
+      categoria: recomendacionRow.categoria_nombre,
+      numeroAnimales: Number(recomendacionRow.numero_animales),
+      pesoPromedioKg: Number(recomendacionRow.peso_promedio_kg),
+    },
+    disponibilidad: {
+      materiaSecaUtilizableKg: Number(recomendacionRow.materia_seca_utilizable_kg),
+      consumoProyectadoKg: remnant.consumoProyectadoKg,
+      remanenteProyectadoKg: remnant.remanenteProyectadoKg,
+      remanenteObjetivoKg: remnant.remanenteObjetivoKg,
     },
     fechaSalidaEstimada,
     resultado: {
@@ -507,19 +577,27 @@ function buildResponsePayload({
 
 /**
  * Preview: calcula server-side, NUNCA persiste.
+ *
+ * HOTFIX 3D8.1: sin input de fecha -- `fechaInicioPastoreo` se resuelve
+ * SIEMPRE server-side (hoy, hora del negocio, o el ancla existente en
+ * modo `anclarAFechaExistente`). `{ climatologyFetchImpl, now }` -- SOLO
+ * para tests (inyección determinística, mismo patrón que
+ * potreroClimatologiaRepositoryIntegration.test.js). La ruta HTTP pública
+ * NUNCA pasa `climatologyFetchImpl`/`now` -- en producción siempre usa el
+ * `fetch`/reloj reales.
+ *
+ * `anclarAFechaExistente` (§15 del hotfix -- "Actualizar estimación"): si
+ * true y ya existe una recomendación de descanso guardada, ancla
+ * `fechaInicioPastoreo` a la de esa recomendación (nunca hoy) -- el
+ * refresh climático NUNCA hace que el plan "entre de nuevo hoy".
  */
-// `{ climatologyFetchImpl }` -- SOLO para tests (inyecta un fetchImpl
-// determinístico para era5HistoricalClimatologyProvider.js, mismo patrón
-// que potreroClimatologiaRepositoryIntegration.test.js). La ruta HTTP
-// pública NUNCA pasa este parámetro -- en producción siempre usa el
-// `fetch` real por defecto del proveedor.
-export async function previewDescansoReentrada(organizacionId, predioId, potreroId, params, { climatologyFetchImpl } = {}) {
+export async function previewDescansoReentrada(organizacionId, predioId, potreroId, { climatologyFetchImpl, now, anclarAFechaExistente } = {}) {
   assertPredioIdFormat(predioId);
   assertPotreroIdFormat(potreroId);
 
   return withOrganizacionTransaction(organizacionId, async (client) => {
-    const resolved = await resolveDescanso(client, { organizacionId, predioId, potreroId, ...params, climatologyFetchImpl });
-    return buildResponsePayload({ ...resolved, inputs: params });
+    const resolved = await resolveDescanso(client, { organizacionId, predioId, potreroId, climatologyFetchImpl, now, anclarAFechaExistente });
+    return buildResponsePayload({ ...resolved, inputs: { fechaInicioPastoreo: resolved.fechaInicioPastoreo } });
   });
 }
 
@@ -552,21 +630,40 @@ function serializeDescansoRow(row) {
  * Create: recalcula server-side (SIEMPRE con las condiciones actuales) y
  * persiste una fila NUEVA, histórica -- nunca edita una recomendación de
  * descanso previa (§19 del hardening: recalcular es crear una fila nueva).
+ *
+ * HOTFIX 3D8.1 §14: `confirmedFechaInicioPastoreo` es un eco OPCIONAL del
+ * cliente (la fecha que vio en su último preview) -- NUNCA se usa para
+ * FIJAR el cálculo, solo para detectar que el día cambió entre el preview
+ * y el guardado (p.ej. preview a las 23:50, guardado ya al día
+ * siguiente). Si difiere de la fecha real resuelta server-side, se
+ * rechaza con STALE_PREVIEW_DATE_CHANGED en vez de guardar silenciosamente
+ * bajo una fecha distinta a la que el usuario confirmó ver.
  */
-export async function createDescansoReentrada(organizacionId, predioId, potreroId, params, { climatologyFetchImpl } = {}) {
+export async function createDescansoReentrada(organizacionId, predioId, potreroId, { confirmedFechaInicioPastoreo, anclarAFechaExistente, climatologyFetchImpl, now } = {}) {
   assertPredioIdFormat(predioId);
   assertPotreroIdFormat(potreroId);
+  if (confirmedFechaInicioPastoreo !== undefined) {
+    validateFechaIsoFormat(confirmedFechaInicioPastoreo, 'INVALID_CONFIRMED_FECHA_INICIO_PASTOREO');
+  }
 
   return withOrganizacionTransaction(organizacionId, async (client) => {
-    const resolved = await resolveDescanso(client, { organizacionId, predioId, potreroId, ...params, climatologyFetchImpl });
+    const resolved = await resolveDescanso(client, { organizacionId, predioId, potreroId, climatologyFetchImpl, now, anclarAFechaExistente });
     const {
       recomendacionRow, fichaRow, contextoRow, descansoAnteriorRow, baseline, assessment, freshnessResult,
-      ajustePresion, rango, fechaSalidaEstimada, fechasReingreso, condicionesReentrada, nivelConfianza,
+      ajustePresion, rango, remnant, fechaInicioPastoreo, fechaSalidaEstimada, fechasReingreso, condicionesReentrada, nivelConfianza,
       recomendacionEdadDias, climatologyGenerated,
     } = resolved;
 
+    if (confirmedFechaInicioPastoreo !== undefined && confirmedFechaInicioPastoreo !== fechaInicioPastoreo) {
+      throw semanticError(
+        'STALE_PREVIEW_DATE_CHANGED',
+        409,
+        'La fecha de ingreso cambió desde la última vista previa. Vuelve a calcular antes de guardar.',
+      );
+    }
+
     const parametrosFuenteJson = buildParametrosFuenteJson({
-      recomendacionRow, fichaRow, contextoRow, baseline, assessment, freshnessResult, ajustePresion, recomendacionEdadDias, climatologyGenerated,
+      recomendacionRow, fichaRow, contextoRow, baseline, assessment, freshnessResult, ajustePresion, remnant, recomendacionEdadDias, climatologyGenerated,
     });
 
     const insertResult = await client.query(
@@ -595,7 +692,7 @@ export async function createDescansoReentrada(organizacionId, predioId, potreroI
         contextoRow ? contextoRow.contexto_id : null,
         recomendacionRow.recomendacion_id,
         descansoAnteriorRow ? descansoAnteriorRow.descanso_id : null,
-        params.fechaInicioPastoreo,
+        fechaInicioPastoreo,
         fechaSalidaEstimada,
         rango.diasDescansoMin,
         rango.diasDescansoMax,

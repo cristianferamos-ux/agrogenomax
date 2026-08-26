@@ -67,12 +67,21 @@ function randomOrgId() {
 // climatologyFetchImpl, así que inyectarlo aquí también es inofensivo.
 const SIN_RED_FETCH_IMPL = async () => ({ ok: false, status: 503, json: async () => ({}) });
 
-function callPreview(...args) {
-  return repo.previewDescansoReentrada(...args, { climatologyFetchImpl: SIN_RED_FETCH_IMPL });
+// HOTFIX 3D8.1 (AUTOMATIC GRAZING START): fechaInicioPastoreo YA NO es un
+// parámetro de preview/create -- se resuelve SIEMPRE server-side (hoy,
+// hora del negocio America/Bogota) vía `now` (inyección determinística
+// SOLO para tests, ver businessTimezone.js). Se fija a mediodía Bogotá
+// del mismo día usado en todos los fixtures preexistentes de esta ronda
+// (2026-09-01) para que las aserciones de fecha existentes (fechaSalida/
+// fechaReingreso...) seguirían siendo válidas sin recalcular nada.
+const FECHA_FIJA_TEST = new Date('2026-09-01T12:00:00-05:00');
+
+function callPreview(org, predioId, potreroId, options = {}) {
+  return repo.previewDescansoReentrada(org, predioId, potreroId, { ...options, climatologyFetchImpl: SIN_RED_FETCH_IMPL });
 }
 
-function callCreate(...args) {
-  return repo.createDescansoReentrada(...args, { climatologyFetchImpl: SIN_RED_FETCH_IMPL });
+function callCreate(org, predioId, potreroId, options = {}) {
+  return repo.createDescansoReentrada(org, predioId, potreroId, { ...options, climatologyFetchImpl: SIN_RED_FETCH_IMPL });
 }
 
 const SQUARE_WKT = 'POLYGON((-75.5 1.3, -75.4 1.3, -75.4 1.4, -75.5 1.4, -75.5 1.3))';
@@ -224,7 +233,7 @@ describe('SPRINT-3D8 (hardening dinámico): potreroDescansoRepository contra Pos
     const potreroId = await seedPotrero(org, predioId, 'Potrero Sprint3D8R NOREC');
 
     await assert.rejects(
-      () => callPreview(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' }),
+      () => callPreview(org, predioId, potreroId, { now: FECHA_FIJA_TEST }),
       (error) => error.status === 404 && error.code === 'NO_GRAZING_RECOMMENDATION',
     );
   });
@@ -239,7 +248,7 @@ describe('SPRINT-3D8 (hardening dinámico): potreroDescansoRepository contra Pos
     await seedRecomendacionPastoreo(org, predioId, potreroId, fichaId);
 
     await assert.rejects(
-      () => callPreview(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' }),
+      () => callPreview(org, predioId, potreroId, { now: FECHA_FIJA_TEST }),
       (error) => error.status === 404 && error.code === 'NO_PASTURE_PROFILE',
     );
   });
@@ -259,7 +268,7 @@ describe('SPRINT-3D8 (hardening dinámico): potreroDescansoRepository contra Pos
     await seedContexto(org, predioId, potreroId, { precipitacion7dMm: 8, precipitacion15dMm: 25, precipitacion30dMm: 45 });
     await seedRecomendacionPastoreo(org, predioId, potreroId, fichaId);
 
-    const preview = await callPreview(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' });
+    const preview = await callPreview(org, predioId, potreroId, { now: FECHA_FIJA_TEST });
     assert.equal(preview.estado, 'READY');
     assert.equal(preview.provenance.pasturaSourceType, 'PASTURE_SPECIFIC_REGIONAL');
     assert.equal(preview.agroClimate.status, 'NORMAL');
@@ -287,11 +296,11 @@ describe('SPRINT-3D8 (hardening dinámico): potreroDescansoRepository contra Pos
     // FAVORABLE -- si 7d/15d/30d estuvieran TODAS por encima del umbral,
     // dispararía RULE_SUSTAINED_MOISTURE -> FAVORABLE).
     await seedContexto(org, predioId, potreroId, { precipitacion7dMm: 8, precipitacion15dMm: 25, precipitacion30dMm: 45 });
-    const previewNormal = await callPreview(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' });
+    const previewNormal = await callPreview(org, predioId, potreroId, { now: FECHA_FIJA_TEST });
 
     // Nuevo snapshot (más reciente) -- déficit persistente real.
     await seedContexto(org, predioId, potreroId, { precipitacion7dMm: 2, precipitacion15dMm: 5, precipitacion30dMm: 10 });
-    const previewDeficit = await callPreview(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' });
+    const previewDeficit = await callPreview(org, predioId, potreroId, { now: FECHA_FIJA_TEST });
 
     assert.equal(previewNormal.agroClimate.status, 'NORMAL');
     assert.equal(previewDeficit.agroClimate.status, 'RESTRICTIVE');
@@ -308,7 +317,7 @@ describe('SPRINT-3D8 (hardening dinámico): potreroDescansoRepository contra Pos
     await seedContexto(org, predioId, potreroId, { precipitacion7dMm: 200, precipitacion15dMm: 200, precipitacion30dMm: 10 });
     await seedRecomendacionPastoreo(org, predioId, potreroId, fichaId);
 
-    const preview = await callPreview(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' });
+    const preview = await callPreview(org, predioId, potreroId, { now: FECHA_FIJA_TEST });
     assert.notEqual(preview.agroClimate.status, 'FAVORABLE');
     assert.equal(preview.resultado.diasDescansoMin, 25);
   });
@@ -325,7 +334,7 @@ describe('SPRINT-3D8 (hardening dinámico): potreroDescansoRepository contra Pos
     });
     await seedRecomendacionPastoreo(org, predioId, potreroId, fichaId);
 
-    const preview = await callPreview(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' });
+    const preview = await callPreview(org, predioId, potreroId, { now: FECHA_FIJA_TEST });
     assert.notEqual(preview.agroClimate.status, 'FAVORABLE');
     assert.equal(preview.agroClimate.soilMoistureSignal, 'RESTRICTIVE');
   });
@@ -342,7 +351,7 @@ describe('SPRINT-3D8 (hardening dinámico): potreroDescansoRepository contra Pos
     });
     await seedRecomendacionPastoreo(org, predioId, potreroId, fichaId);
 
-    const preview = await callPreview(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' });
+    const preview = await callPreview(org, predioId, potreroId, { now: FECHA_FIJA_TEST });
     assert.equal(preview.agroClimate.status, 'FAVORABLE');
     assert.equal(preview.resultado.diasDescansoMin, 25);
     assert.equal(preview.resultado.diasDescansoMax, 35);
@@ -358,7 +367,7 @@ describe('SPRINT-3D8 (hardening dinámico): potreroDescansoRepository contra Pos
     const fichaId = await seedFicha(org, potreroId, pasturaId);
     await seedRecomendacionPastoreo(org, predioId, potreroId, fichaId);
 
-    const preview = await callPreview(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' });
+    const preview = await callPreview(org, predioId, potreroId, { now: FECHA_FIJA_TEST });
     assert.equal(preview.estado, 'NO_AGROCLIMATE_CONTEXT');
     assert.equal(preview.nivelConfianza, 'BAJA');
   });
@@ -373,7 +382,7 @@ describe('SPRINT-3D8 (hardening dinámico): potreroDescansoRepository contra Pos
     await seedContexto(org, predioId, potreroId, { sourceObservedUntil: fechaVieja });
     await seedRecomendacionPastoreo(org, predioId, potreroId, fichaId);
 
-    const preview = await callPreview(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' });
+    const preview = await callPreview(org, predioId, potreroId, { now: FECHA_FIJA_TEST });
     assert.equal(preview.estado, 'STALE_AGROCLIMATE_CONTEXT');
     assert.notEqual(preview.nivelConfianza, 'ALTA');
   });
@@ -390,7 +399,7 @@ describe('SPRINT-3D8 (hardening dinámico): potreroDescansoRepository contra Pos
     });
     await seedRecomendacionPastoreo(org, predioId, potreroId, fichaId);
 
-    const preview = await callPreview(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' });
+    const preview = await callPreview(org, predioId, potreroId, { now: FECHA_FIJA_TEST });
     assert.equal(preview.estado, 'PARTIAL_CONTEXT');
     assert.equal(preview.agroClimate.status, 'INSUFFICIENT_DATA');
   });
@@ -409,7 +418,7 @@ describe('SPRINT-3D8 (hardening dinámico): potreroDescansoRepository contra Pos
     // diasOcupacionEstimados por defecto (4.96) -> floor = 4.
     await seedRecomendacionPastoreo(org, predioId, potreroId, fichaId);
 
-    const preview = await callPreview(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' });
+    const preview = await callPreview(org, predioId, potreroId, { now: FECHA_FIJA_TEST });
     assert.equal(preview.fechaSalidaEstimada, '2026-09-05');
     assert.equal(preview.resultado.fechaReingresoMin, '2026-09-30');
     assert.equal(preview.resultado.fechaReingresoMax, '2026-10-10');
@@ -429,17 +438,17 @@ describe('SPRINT-3D8 (hardening dinámico): potreroDescansoRepository contra Pos
     await seedContexto(org, predioId, potreroId, { precipitacion7dMm: 8, precipitacion15dMm: 25, precipitacion30dMm: 45 });
     await seedRecomendacionPastoreo(org, predioId, potreroId, fichaId);
 
-    await callPreview(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' });
+    await callPreview(org, predioId, potreroId, { now: FECHA_FIJA_TEST });
     const antes = await adminPool.query('select count(*) from agx.potrero_recomendaciones_descanso where potrero_id = $1', [potreroId]);
     assert.equal(Number(antes.rows[0].count), 0);
 
-    const primero = await callCreate(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' });
+    const primero = await callCreate(org, predioId, potreroId, { now: FECHA_FIJA_TEST });
     assert.equal(primero.motorVersion, 'descanso-v1');
     assert.equal(primero.previousDescansoId, null, 'la primera recomendación de este potrero no tiene predecesora');
 
     // Nuevo contexto (déficit persistente) llega -> recálculo real.
     await seedContexto(org, predioId, potreroId, { precipitacion7dMm: 2, precipitacion15dMm: 5, precipitacion30dMm: 10 });
-    const segundo = await callCreate(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' });
+    const segundo = await callCreate(org, predioId, potreroId, { now: FECHA_FIJA_TEST });
     assert.equal(segundo.previousDescansoId, primero.descansoId, '§19/§24: el recálculo encadena la fila anterior, nunca la edita');
     assert.notEqual(segundo.agroclimateStatus, primero.agroclimateStatus);
 
@@ -464,15 +473,15 @@ describe('SPRINT-3D8 (hardening dinámico): potreroDescansoRepository contra Pos
     // dispararía RULE_SUSTAINED_MOISTURE -> FAVORABLE).
     await seedContexto(org, predioId, potreroId, { precipitacion7dMm: 8, precipitacion15dMm: 25, precipitacion30dMm: 45 });
     await seedRecomendacionPastoreo(org, predioId, potreroId, fichaId);
-    await callCreate(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' });
+    await callCreate(org, predioId, potreroId, { now: FECHA_FIJA_TEST });
 
     // Sin cambios -> no debería recomendar reevaluación.
-    const previewSinCambios = await callPreview(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' });
+    const previewSinCambios = await callPreview(org, predioId, potreroId, { now: FECHA_FIJA_TEST });
     assert.ok(!previewSinCambios.windowConditions.includes('REASSESSMENT_RECOMMENDED'));
 
     // Llega un nuevo snapshot con déficit persistente -> las condiciones cambiaron.
     await seedContexto(org, predioId, potreroId, { precipitacion7dMm: 2, precipitacion15dMm: 5, precipitacion30dMm: 10 });
-    const previewConCambios = await callPreview(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' });
+    const previewConCambios = await callPreview(org, predioId, potreroId, { now: FECHA_FIJA_TEST });
     assert.ok(previewConCambios.windowConditions.includes('REASSESSMENT_RECOMMENDED'));
   });
 
@@ -485,7 +494,7 @@ describe('SPRINT-3D8 (hardening dinámico): potreroDescansoRepository contra Pos
     const fichaId = await seedFicha(orgA, potreroA, pasturaId);
     await seedContexto(orgA, predioA, potreroA);
     await seedRecomendacionPastoreo(orgA, predioA, potreroA, fichaId);
-    await callCreate(orgA, predioA, potreroA, { fechaInicioPastoreo: '2026-09-01' });
+    await callCreate(orgA, predioA, potreroA, { now: FECHA_FIJA_TEST });
 
     await assert.rejects(
       () => repo.getDescansoReentradaByPotrero(orgB, predioA, potreroA),
@@ -506,7 +515,7 @@ describe('SPRINT-3D8 (hardening dinámico): potreroDescansoRepository contra Pos
     await seedContexto(org, predioId, potreroId, { precipitacion7dMm: 8, precipitacion15dMm: 25, precipitacion30dMm: 45 });
     await seedRecomendacionPastoreo(org, predioId, potreroId, fichaId);
 
-    const preview = await callPreview(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' });
+    const preview = await callPreview(org, predioId, potreroId, { now: FECHA_FIJA_TEST });
     assert.equal(preview.provenance.pasturaSourceType, 'PASTURE_SPECIFIC_REGIONAL');
     assert.ok(Array.isArray(preview.provenance.pasturaMetadata.limitaciones));
     assert.ok(preview.provenance.pasturaMetadata.limitaciones.length > 0);
@@ -564,8 +573,8 @@ describe('SPRINT-3D8 (hardening dinámico): potreroDescansoRepository contra Pos
       soilValues: [0.02, 0.05, 0.08, 0.10, 0.12, 0.16], precip7dValues: [15, 18, 20, 22, 25, 28], precip30dValues: [70, 80, 90, 100, 110, 120],
     });
 
-    const previewHumedo = await callPreview(org, predioId, potreroHumedo, { fechaInicioPastoreo: '2026-09-01' });
-    const previewSeco = await callPreview(org, predioId, potreroSeco, { fechaInicioPastoreo: '2026-09-01' });
+    const previewHumedo = await callPreview(org, predioId, potreroHumedo, { now: FECHA_FIJA_TEST });
+    const previewSeco = await callPreview(org, predioId, potreroSeco, { now: FECHA_FIJA_TEST });
 
     assert.equal(previewHumedo.agroClimate.localClimatologyStatus, 'AVAILABLE');
     assert.equal(previewHumedo.agroClimate.soilMoistureSignal, 'RESTRICTIVE');
@@ -584,7 +593,7 @@ describe('SPRINT-3D8 (hardening dinámico): potreroDescansoRepository contra Pos
     await seedContexto(org, predioId, potreroId, { precipitacion7dMm: 60, precipitacion15dMm: 90, precipitacion30dMm: 150 });
     await seedRecomendacionPastoreo(org, predioId, potreroId, fichaId);
 
-    const preview = await callPreview(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' });
+    const preview = await callPreview(org, predioId, potreroId, { now: FECHA_FIJA_TEST });
     assert.equal(preview.agroClimate.localClimatologyStatus, 'INSUFFICIENT_LOCAL_CLIMATOLOGY');
     assert.notEqual(preview.nivelConfianza, 'ALTA');
     // §11 test G: el motor SÍ intentó auto-generar (nunca omite el intento),
@@ -602,6 +611,13 @@ describe('SPRINT-3D8 (hardening dinámico): potreroDescansoRepository contra Pos
   // cierre (adminPool.end()), que corre DESPUÉS de este bloque anidado.
   // -----------------------------------------------------------------------
   describeAutogenTests();
+
+  // -----------------------------------------------------------------------
+  // HOTFIX 3D8.1 (AUTOMATIC GRAZING START): fechaInicioPastoreo resuelta
+  // SIEMPRE server-side -- tests A-I nombrados exactamente como en el
+  // hotfix. Nested por el mismo motivo que describeAutogenTests().
+  // -----------------------------------------------------------------------
+  describeAutoStartHotfixTests();
 });
 
 // fetchImpl mockeado que SIEMPRE responde con éxito (mismo patrón que
@@ -669,8 +685,8 @@ describe('SPRINT-3D8 (hardening operacional final) §11: auto-generación de cli
     const fetchImplB = buildAutoGenMockFetchImpl();
 
     const [previewA, previewB] = await Promise.all([
-      repo.previewDescansoReentrada(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' }, { climatologyFetchImpl: fetchImplA }),
-      repo.previewDescansoReentrada(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' }, { climatologyFetchImpl: fetchImplB }),
+      repo.previewDescansoReentrada(org, predioId, potreroId, { now: FECHA_FIJA_TEST, climatologyFetchImpl: fetchImplA }),
+      repo.previewDescansoReentrada(org, predioId, potreroId, { now: FECHA_FIJA_TEST, climatologyFetchImpl: fetchImplB }),
     ]);
 
     assert.equal(previewA.agroClimate.localClimatologyStatus, 'AVAILABLE');
@@ -691,10 +707,10 @@ describe('SPRINT-3D8 (hardening operacional final) §11: auto-generación de cli
     const { predioId, potreroId } = await seedEscenarioAutogen(org, 'CONFIDENCE-CACHE');
     const fetchImpl = buildAutoGenMockFetchImpl();
 
-    const previewGenerada = await repo.previewDescansoReentrada(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' }, { climatologyFetchImpl: fetchImpl });
+    const previewGenerada = await repo.previewDescansoReentrada(org, predioId, potreroId, { now: FECHA_FIJA_TEST, climatologyFetchImpl: fetchImpl });
     assert.equal(previewGenerada.climatologyGenerated, true);
 
-    const previewDesdeCache = await repo.previewDescansoReentrada(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' }, { climatologyFetchImpl: buildFallaSiSeLlamaFetchImpl() });
+    const previewDesdeCache = await repo.previewDescansoReentrada(org, predioId, potreroId, { now: FECHA_FIJA_TEST, climatologyFetchImpl: buildFallaSiSeLlamaFetchImpl() });
     assert.equal(previewDesdeCache.climatologyGenerated, false);
 
     assert.equal(
@@ -714,7 +730,7 @@ describe('SPRINT-3D8 (hardening operacional final) §11: auto-generación de cli
     const { predioId, potreroId } = await seedEscenarioAutogen(org, 'A');
     const fetchImpl = buildAutoGenMockFetchImpl();
 
-    const preview = await repo.previewDescansoReentrada(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' }, { climatologyFetchImpl: fetchImpl });
+    const preview = await repo.previewDescansoReentrada(org, predioId, potreroId, { now: FECHA_FIJA_TEST, climatologyFetchImpl: fetchImpl });
 
     assert.equal(preview.climatologyGenerated, true);
     assert.equal(preview.estado, 'READY');
@@ -729,9 +745,9 @@ describe('SPRINT-3D8 (hardening operacional final) §11: auto-generación de cli
     const org = randomOrgId();
     const { predioId, potreroId } = await seedEscenarioAutogen(org, 'B');
 
-    await repo.previewDescansoReentrada(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' }, { climatologyFetchImpl: buildAutoGenMockFetchImpl() });
+    await repo.previewDescansoReentrada(org, predioId, potreroId, { now: FECHA_FIJA_TEST, climatologyFetchImpl: buildAutoGenMockFetchImpl() });
 
-    const segundo = await repo.previewDescansoReentrada(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' }, { climatologyFetchImpl: buildFallaSiSeLlamaFetchImpl() });
+    const segundo = await repo.previewDescansoReentrada(org, predioId, potreroId, { now: FECHA_FIJA_TEST, climatologyFetchImpl: buildFallaSiSeLlamaFetchImpl() });
 
     assert.equal(segundo.climatologyGenerated, false);
     assert.equal(segundo.agroClimate.localClimatologyStatus, 'AVAILABLE');
@@ -744,7 +760,7 @@ describe('SPRINT-3D8 (hardening operacional final) §11: auto-generación de cli
     const { predioId, potreroId } = await seedEscenarioAutogen(org, 'C');
     const fetchImpl = buildAutoGenMockFetchImpl();
 
-    const descanso = await repo.createDescansoReentrada(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' }, { climatologyFetchImpl: fetchImpl });
+    const descanso = await repo.createDescansoReentrada(org, predioId, potreroId, { now: FECHA_FIJA_TEST, climatologyFetchImpl: fetchImpl });
 
     assert.equal(descanso.parametrosFuente.climatologyGenerated, true);
     assert.ok(fetchImpl.contarLlamadas() > 0);
@@ -756,10 +772,10 @@ describe('SPRINT-3D8 (hardening operacional final) §11: auto-generación de cli
     const org = randomOrgId();
     const { predioId, potreroId } = await seedEscenarioAutogen(org, 'D');
 
-    await repo.createDescansoReentrada(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' }, { climatologyFetchImpl: buildAutoGenMockFetchImpl() });
+    await repo.createDescansoReentrada(org, predioId, potreroId, { now: FECHA_FIJA_TEST, climatologyFetchImpl: buildAutoGenMockFetchImpl() });
 
-    const segundoPreview = await repo.previewDescansoReentrada(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' }, { climatologyFetchImpl: buildFallaSiSeLlamaFetchImpl() });
-    const segundoCreate = await repo.createDescansoReentrada(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' }, { climatologyFetchImpl: buildFallaSiSeLlamaFetchImpl() });
+    const segundoPreview = await repo.previewDescansoReentrada(org, predioId, potreroId, { now: FECHA_FIJA_TEST, climatologyFetchImpl: buildFallaSiSeLlamaFetchImpl() });
+    const segundoCreate = await repo.createDescansoReentrada(org, predioId, potreroId, { now: FECHA_FIJA_TEST, climatologyFetchImpl: buildFallaSiSeLlamaFetchImpl() });
 
     assert.equal(segundoPreview.climatologyGenerated, false);
     assert.equal(segundoCreate.parametrosFuente.climatologyGenerated, false);
@@ -780,7 +796,7 @@ describe('SPRINT-3D8 (hardening operacional final) §11: auto-generación de cli
       [org, predioId, potreroId],
     );
 
-    const preview = await repo.previewDescansoReentrada(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' }, { climatologyFetchImpl: buildAutoGenMockFetchImpl() });
+    const preview = await repo.previewDescansoReentrada(org, predioId, potreroId, { now: FECHA_FIJA_TEST, climatologyFetchImpl: buildAutoGenMockFetchImpl() });
     assert.equal(preview.climatologyGenerated, true, 'method_version obsoleto invalida la caché -- debe regenerar');
 
     const filas = await adminPool.query(
@@ -816,7 +832,7 @@ describe('SPRINT-3D8 (hardening operacional final) §11: auto-generación de cli
       throw new Error(`URL inesperada: ${u}`);
     };
 
-    const preview = await repo.previewDescansoReentrada(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' }, { climatologyFetchImpl: fetchImpl });
+    const preview = await repo.previewDescansoReentrada(org, predioId, potreroId, { now: FECHA_FIJA_TEST, climatologyFetchImpl: fetchImpl });
 
     assert.equal(preview.climatologyGenerated, true);
     assert.equal(preview.estado, 'READY');
@@ -827,7 +843,7 @@ describe('SPRINT-3D8 (hardening operacional final) §11: auto-generación de cli
     const org = randomOrgId();
     const { predioId, potreroId } = await seedEscenarioAutogen(org, 'G');
 
-    const preview = await repo.previewDescansoReentrada(org, predioId, potreroId, { fechaInicioPastoreo: '2026-09-01' }, { climatologyFetchImpl: async () => ({ ok: false, status: 503, json: async () => ({}) }) });
+    const preview = await repo.previewDescansoReentrada(org, predioId, potreroId, { now: FECHA_FIJA_TEST, climatologyFetchImpl: async () => ({ ok: false, status: 503, json: async () => ({}) }) });
 
     assert.equal(preview.climatologyGenerated, false, 'el intento se hizo, pero el proveedor no devolvió cobertura utilizable');
     assert.equal(preview.agroClimate.localClimatologyStatus, 'INSUFFICIENT_LOCAL_CLIMATOLOGY');
@@ -844,6 +860,137 @@ describe('SPRINT-3D8 (hardening operacional final) §11: auto-generación de cli
     assert.deepEqual(resultado, { actual: null, historial: [] });
     const conteo = await adminPool.query('select count(*) from agx.potrero_climatologias_agroclimaticas where potrero_id = $1', [potreroId]);
     assert.equal(Number(conteo.rows[0].count), 0, 'GET jamás genera climatología -- getDescansoReentradaByPotrero no acepta climatologyFetchImpl ni invoca resolveDescanso');
+  });
+});
+}
+
+// -----------------------------------------------------------------------
+// HOTFIX 3D8.1 (AUTOMATIC GRAZING START) §18: tests A-I nombrados
+// exactamente como en el hotfix. fechaInicioPastoreo YA NO es un
+// parámetro -- se resuelve SIEMPRE server-side vía `now` (inyección
+// determinística SOLO para tests).
+// -----------------------------------------------------------------------
+function describeAutoStartHotfixTests() {
+describe('HOTFIX 3D8.1: fechaInicioPastoreo resuelta server-side (America/Bogota) -- tests A-I', { skip: !dbAvailable }, () => {
+  after(async () => {
+    if (!adminPool) return;
+    await adminPool.query(`delete from agx.potrero_climatologias_agroclimaticas where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D8R AUTOGEN-HOTFIX%')`);
+    await adminPool.query(`delete from agx.potrero_recomendaciones_descanso where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D8R AUTOGEN-HOTFIX%')`);
+    await adminPool.query(`delete from agx.potrero_recomendaciones_pastoreo where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D8R AUTOGEN-HOTFIX%')`);
+    await adminPool.query(`delete from agx.potrero_contextos_agroclimaticos where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D8R AUTOGEN-HOTFIX%')`);
+    await adminPool.query(`delete from agx.potrero_ficha_pasturas where ficha_id in (select ficha_id from agx.potrero_fichas_productivas where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D8R AUTOGEN-HOTFIX%'))`);
+    await adminPool.query(`delete from agx.potrero_fichas_productivas where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D8R AUTOGEN-HOTFIX%')`);
+    await adminPool.query(`delete from agx.potreros where nombre like 'Potrero Sprint3D8R AUTOGEN-HOTFIX%'`);
+    await adminPool.query(`delete from agx.predios where nombre_predio like 'Predio Sprint3D8R AUTOGEN-HOTFIX%'`);
+  });
+
+  test('test A: fecha resuelta server-side usa America/Bogota -- un instante UTC de madrugada NUNCA se adelanta un día', async () => {
+    const org = randomOrgId();
+    const { predioId, potreroId } = await seedEscenarioAutogen(org, 'HOTFIX-A');
+    // 2026-08-26T02:00:00Z = 2026-08-25 21:00 hora Bogotá -- si el motor
+    // usara UTC directo, resolvería 2026-08-26 (un día adelantado).
+    const preview = await repo.previewDescansoReentrada(org, predioId, potreroId, {
+      now: new Date('2026-08-26T02:00:00Z'), climatologyFetchImpl: SIN_RED_FETCH_IMPL,
+    });
+    assert.equal(preview.fechaInicioPastoreo, '2026-08-25');
+  });
+
+  test('test D: preview SIN ningún dato de fecha (el cliente nunca lo aporta) -- funciona igual, resuelve hoy', async () => {
+    const org = randomOrgId();
+    const { predioId, potreroId } = await seedEscenarioAutogen(org, 'HOTFIX-D');
+    const preview = await repo.previewDescansoReentrada(org, predioId, potreroId, { climatologyFetchImpl: SIN_RED_FETCH_IMPL });
+    assert.match(preview.fechaInicioPastoreo, /^\d{4}-\d{2}-\d{2}$/);
+    assert.equal(preview.estado, 'READY');
+  });
+
+  test('test E: un intento de "spoof" de fechaInicioPastoreo (campo desconocido) se IGNORA -- el servidor sigue resolviendo su propia fecha', async () => {
+    const org = randomOrgId();
+    const { predioId, potreroId } = await seedEscenarioAutogen(org, 'HOTFIX-E');
+    const preview = await repo.previewDescansoReentrada(org, predioId, potreroId, {
+      fechaInicioPastoreo: '2099-01-01', // ya no es un parámetro reconocido
+      now: FECHA_FIJA_TEST,
+      climatologyFetchImpl: SIN_RED_FETCH_IMPL,
+    });
+    assert.notEqual(preview.fechaInicioPastoreo, '2099-01-01');
+    assert.equal(preview.fechaInicioPastoreo, '2026-09-01');
+  });
+
+  test('test F: create funciona SIN preview previo y SIN ningún dato de fecha del cliente (autosuficiente)', async () => {
+    const org = randomOrgId();
+    const { predioId, potreroId } = await seedEscenarioAutogen(org, 'HOTFIX-F');
+    const descanso = await repo.createDescansoReentrada(org, predioId, potreroId, { climatologyFetchImpl: SIN_RED_FETCH_IMPL });
+    assert.match(descanso.fechaInicioPastoreo, /^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  test('test G: preview visto un día, guardado al día siguiente -> STALE_PREVIEW_DATE_CHANGED, NUNCA guarda silenciosamente bajo la fecha nueva', async () => {
+    const org = randomOrgId();
+    const { predioId, potreroId } = await seedEscenarioAutogen(org, 'HOTFIX-G');
+
+    const diaUno = new Date('2026-08-25T15:00:00Z');
+    const diaDos = new Date('2026-08-26T15:00:00Z');
+
+    const preview = await repo.previewDescansoReentrada(org, predioId, potreroId, { now: diaUno, climatologyFetchImpl: SIN_RED_FETCH_IMPL });
+    assert.equal(preview.fechaInicioPastoreo, '2026-08-25');
+
+    await assert.rejects(
+      () => repo.createDescansoReentrada(org, predioId, potreroId, {
+        now: diaDos,
+        confirmedFechaInicioPastoreo: preview.fechaInicioPastoreo,
+        climatologyFetchImpl: SIN_RED_FETCH_IMPL,
+      }),
+      (error) => error.status === 409 && error.code === 'STALE_PREVIEW_DATE_CHANGED',
+    );
+
+    const conteo = await adminPool.query('select count(*) from agx.potrero_recomendaciones_descanso where potrero_id = $1', [potreroId]);
+    assert.equal(Number(conteo.rows[0].count), 0, 'un cambio de día detectado NUNCA debe guardar silenciosamente bajo la fecha nueva');
+  });
+
+  test('test H: "Actualizar estimación" (anclarAFechaExistente) conserva la fecha de ingreso/salida ORIGINAL -- un refresh climático posterior NUNCA la mueve', async () => {
+    const org = randomOrgId();
+    const { predioId, potreroId } = await seedEscenarioAutogen(org, 'HOTFIX-H');
+
+    const diaUno = new Date('2026-08-25T15:00:00Z');
+    const diaMuchoDespues = new Date('2026-09-20T15:00:00Z');
+
+    const primero = await repo.createDescansoReentrada(org, predioId, potreroId, { now: diaUno, climatologyFetchImpl: SIN_RED_FETCH_IMPL });
+    assert.equal(primero.fechaInicioPastoreo, '2026-08-25');
+
+    // Nuevo contexto (condiciones cambiaron) + "Actualizar estimación"
+    // varios días después -- la fecha de ingreso/salida NUNCA debe
+    // moverse a diaMuchoDespues, solo el descanso/reentrada/confianza.
+    await seedContexto(org, predioId, potreroId, { precipitacion7dMm: 2, precipitacion15dMm: 5, precipitacion30dMm: 10 });
+    const actualizado = await repo.previewDescansoReentrada(org, predioId, potreroId, {
+      anclarAFechaExistente: true, now: diaMuchoDespues, climatologyFetchImpl: SIN_RED_FETCH_IMPL,
+    });
+
+    assert.equal(actualizado.fechaInicioPastoreo, primero.fechaInicioPastoreo, 'la fecha de ingreso original NUNCA cambia por un refresh climático');
+    assert.equal(actualizado.fechaSalidaEstimada, primero.fechaSalidaEstimada, 'la fecha de salida original NUNCA cambia por un refresh climático');
+    assert.notEqual(actualizado.agroClimate.status, primero.parametrosFuente.agroClimate.status, 'el status agroclimático SÍ se actualiza con las condiciones nuevas');
+  });
+
+  test('test I: el reporte integrado (preview) contiene lote, disponibilidad, pastoreo (ingreso/salida), descanso y reentrada en una sola respuesta', async () => {
+    const org = randomOrgId();
+    const { predioId, potreroId } = await seedEscenarioAutogen(org, 'HOTFIX-I');
+    const preview = await repo.previewDescansoReentrada(org, predioId, potreroId, { now: FECHA_FIJA_TEST, climatologyFetchImpl: SIN_RED_FETCH_IMPL });
+
+    assert.equal(preview.lote.numeroAnimales, 10);
+    assert.equal(preview.lote.pesoPromedioKg, 420);
+    assert.equal(typeof preview.lote.categoria, 'string');
+    assert.ok(preview.lote.categoria.length > 0);
+
+    assert.equal(preview.disponibilidad.materiaSecaUtilizableKg, 500);
+    assert.ok(Number.isFinite(preview.disponibilidad.consumoProyectadoKg));
+    assert.ok(Number.isFinite(preview.disponibilidad.remanenteObjetivoKg));
+    assert.ok(Number.isFinite(preview.disponibilidad.remanenteProyectadoKg));
+
+    assert.match(preview.fechaInicioPastoreo, /^\d{4}-\d{2}-\d{2}$/);
+    assert.match(preview.fechaSalidaEstimada, /^\d{4}-\d{2}-\d{2}$/);
+    assert.ok(Number.isFinite(preview.resultado.diasDescansoMin));
+    assert.ok(Number.isFinite(preview.resultado.diasDescansoMax));
+    assert.match(preview.resultado.fechaReingresoRecomendada, /^\d{4}-\d{2}-\d{2}$/);
+    assert.ok(typeof preview.nivelConfianza === 'string');
+    assert.ok(Array.isArray(preview.agroClimate.appliedRules));
+    assert.ok(Array.isArray(preview.condicionesReentrada));
   });
 });
 }

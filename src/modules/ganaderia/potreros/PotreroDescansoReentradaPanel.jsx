@@ -1,17 +1,23 @@
-// SPRINT-3D8-DESCANSO-REENTRADA (hardening dinámico): "Calcular descanso"
-// -- se muestra dentro del flujo de recomendación automática de pastoreo,
-// después de que exista una recomendación de pastoreo guardada (`actual`
-// en PotreroRecomendacionPastoreoPanel.jsx). Único input del cliente:
-// fecha prevista de ingreso -- el resto (ficha, contexto, recomendación de
-// pastoreo, pastura, ajuste agroclimático) se resuelve SIEMPRE
-// server-side.
+// SPRINT-3D8-DESCANSO-REENTRADA (hardening dinámico) + HOTFIX 3D8.1
+// (AUTOMATIC GRAZING START): "Calcular descanso" -- se muestra dentro del
+// flujo de recomendación automática de pastoreo, después de que exista
+// una recomendación de pastoreo guardada (`actual` en
+// PotreroRecomendacionPastoreoPanel.jsx).
 //
-// §21/§28 del hardening: el motor es RECALCULABLE -- "Actualizar
-// estimación" reutiliza la MISMA fecha de ingreso ya registrada y vuelve a
-// consultar las condiciones agroclimáticas actuales, nunca edita
-// silenciosamente el histórico (siempre crea una fila nueva al guardar).
+// HOTFIX 3D8.1: YA NO existe un input de "fecha prevista de ingreso" --
+// UN CLIC en "Calcular descanso" construye el plan completo asumiendo que
+// el pastoreo inicia HOY (fecha del negocio, resuelta server-side --
+// nunca la fecha del navegador). Ficha, contexto, recomendación de
+// pastoreo, pastura y ajuste agroclimático se resuelven SIEMPRE
+// server-side, igual que antes.
+//
+// §21/§28 del hardening (preservado): el motor es RECALCULABLE --
+// "Actualizar estimación" refresca el descanso/reentrada con el clima
+// ACTUAL sin pretender que el lote entra de nuevo hoy (ancla a la fecha
+// de ingreso YA GUARDADA, §15 del hotfix) -- nunca edita silenciosamente
+// el histórico (siempre crea una fila nueva al guardar).
 import { useState } from 'react';
-import { FormField, StatusMessage } from '../components/FormField.jsx';
+import { StatusMessage } from '../components/FormField.jsx';
 import { formatDateDisplay } from '../utils/dateFormat.js';
 import {
   getDescansoReentrada,
@@ -26,7 +32,6 @@ const DESCANSO_ERROR_MESSAGES = {
   NO_PASTURE_PROFILE: 'Esta pastura todavía no tiene un perfil de descanso con evidencia técnica suficiente. Preferimos no recomendar automáticamente antes que inventar un descanso genérico.',
   REST_UNAVAILABLE: 'No fue posible completar el cálculo de descanso con los datos disponibles.',
   POTRERO_NOT_FOUND: 'Este potrero ya no está disponible.',
-  INVALID_FECHA_INICIO_PASTOREO: 'Ingresa una fecha de ingreso válida.',
 };
 
 function resolveErrorMessage(code) {
@@ -39,7 +44,22 @@ function formatDiasRango(min, max) {
   return `${min}–${max} días`;
 }
 
-const NIVEL_CONFIANZA_LABELS = { ALTA: 'ALTA', MEDIA: 'MEDIA', BAJA: 'BAJA' };
+// HOTFIX 3D8.1 §3/§4: permanencia recomendada -- derivada de las dos
+// fechas YA RESUELTAS server-side (nunca un nuevo campo persistido), para
+// que tanto el preview/create recién calculado como una recomendación YA
+// GUARDADA (`actual`, que solo trae fechaInicioPastoreo/fechaSalidaEstimada
+// como columnas) puedan mostrar la misma fila "Permanencia recomendada".
+function diffDiasIso(fechaFinIso, fechaInicioIso) {
+  if (typeof fechaFinIso !== 'string' || typeof fechaInicioIso !== 'string') return null;
+  const [a1, m1, d1] = fechaInicioIso.split('-').map(Number);
+  const [a2, m2, d2] = fechaFinIso.split('-').map(Number);
+  const inicio = Date.UTC(a1, m1 - 1, d1);
+  const fin = Date.UTC(a2, m2 - 1, d2);
+  if (!Number.isFinite(inicio) || !Number.isFinite(fin)) return null;
+  return Math.round((fin - inicio) / (24 * 60 * 60 * 1000));
+}
+
+const NIVEL_CONFIANZA_LABELS = { ALTA: 'Alta', MEDIA: 'Media', BAJA: 'Baja' };
 
 // Condición agroclimática -- copy legible del status determinístico
 // (agroClimateAssessment.js). Nunca "listo/no listo", siempre una
@@ -96,7 +116,7 @@ const STATUS_INTRO_BULLET = {
   SEVERELY_RESTRICTIVE: 'Las condiciones actuales pueden limitar de forma importante la recuperación porque:',
 };
 
-const NORMAL_BASELINE_BULLET = 'Las condiciones generales se mantienen dentro del comportamiento esperado para este potrero.';
+const NORMAL_BASELINE_BULLET = 'Las condiciones generales se mantienen dentro del comportamiento esperado para este potrero y esta época del año.';
 
 function resolveWhyBullets(appliedRules, status) {
   const codigos = new Set(appliedRules || []);
@@ -159,35 +179,62 @@ function DetalleTecnico({ agroClimate }) {
   );
 }
 
-function ResultadoDescansoBlock({ payload }) {
-  const { resultado, fechaSalidaEstimada, nivelConfianza, estado, condicionesReentrada, agroClimate, windowConditions } = payload;
+// HOTFIX 3D8.1 §8/§9/§10: "PLAN DE PASTOREO AGROGENOMAX" -- reporte
+// integrado único (lote -> pastoreo -> disponibilidad -> descanso ->
+// reentrada -> condiciones -> por qué -> condición de reingreso), nunca
+// bloques separados que obliguen a releer. Recibe la MISMA `payload` para
+// un preview recién calculado o para `actual` (recomendación guardada).
+function PlanPastoreoReport({ payload }) {
+  const {
+    lote, fechaInicioPastoreo, fechaSalidaEstimada, resultado, nivelConfianza, estado,
+    condicionesReentrada, agroClimate, windowConditions,
+  } = payload;
   const reassessment = (windowConditions || []).includes('REASSESSMENT_RECOMMENDED');
   const whyBullets = resolveWhyBullets(agroClimate?.appliedRules, agroClimate?.status);
+  const permanenciaDias = diffDiasIso(fechaSalidaEstimada, fechaInicioPastoreo);
 
   return (
     <div className="gan-ficha-preview gan-recomendacion-resultado">
-      <p className="gan-capacidad-section-label">Descanso estimado</p>
+      <p className="gan-capacidad-section-label">Plan de pastoreo AgroGenomaX</p>
 
       {reassessment ? (
         <StatusMessage type="warning">Las condiciones agroclimáticas han cambiado desde la última estimación.</StatusMessage>
       ) : null}
 
+      {/* LOTE + PASTOREO -- entro hoy, cuántos animales, cuántos días. */}
+      {lote ? (
+        <div className="gan-ficha-row"><span>Lote</span><strong>{lote.numeroAnimales} {lote.categoria} ({lote.pesoPromedioKg} kg prom.)</strong></div>
+      ) : null}
+      <div className="gan-ficha-row">
+        <span>Ingreso</span>
+        <strong>{formatDateDisplay(fechaInicioPastoreo)}</strong>
+      </div>
+      {Number.isFinite(permanenciaDias) ? (
+        <div className="gan-ficha-row">
+          <span>Permanencia recomendada</span>
+          <strong>{permanenciaDias} días</strong>
+        </div>
+      ) : null}
+      <div className="gan-ficha-row">
+        <span>Salida estimada</span>
+        <strong>{formatDateDisplay(fechaSalidaEstimada)}</strong>
+      </div>
+
+      {/* DESCANSO + REENTRADA -- cuánto descansa, cuándo puedo volver. */}
       <div className="gan-ficha-row">
         <span>Descanso estimado</span>
         <strong>{formatDiasRango(resultado.diasDescansoMin, resultado.diasDescansoMax)}</strong>
       </div>
       <div className="gan-ficha-row">
-        <span>Salida estimada</span>
-        <strong>{formatDateDisplay(fechaSalidaEstimada)}</strong>
-      </div>
-      <div className="gan-ficha-row">
-        <span>Ventana estimada de reentrada</span>
+        <span>Próxima ventana estimada de ingreso</span>
         <strong>{formatDateDisplay(resultado.fechaReingresoMin)} – {formatDateDisplay(resultado.fechaReingresoMax)}</strong>
       </div>
       <div className="gan-ficha-row">
-        <span>Recomendación central</span>
+        <span>Fecha central recomendada</span>
         <strong>{formatDateDisplay(resultado.fechaReingresoRecomendada)}</strong>
       </div>
+
+      {/* CONDICIONES */}
       {agroClimate ? (
         <div className="gan-ficha-row">
           <span>Condiciones actuales</span>
@@ -208,6 +255,7 @@ function ResultadoDescansoBlock({ payload }) {
         </div>
       ) : null}
 
+      {/* CONDICIÓN DE REINGRESO */}
       {(condicionesReentrada || []).map((condicion) => (
         <StatusMessage type="info" key={condicion.codigo}>{condicionReentradaLabel(condicion)}</StatusMessage>
       ))}
@@ -236,9 +284,8 @@ export default function PotreroDescansoReentradaPanel({ predioId, potreroId }) {
   const [actual, setActual] = useState(null);
   const [loaded, setLoaded] = useState(false);
 
-  const [showForm, setShowForm] = useState(false);
-  const [fechaInicioPastoreo, setFechaInicioPastoreo] = useState('');
   const [preview, setPreview] = useState(null);
+  const [previewAnclado, setPreviewAnclado] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -277,54 +324,70 @@ export default function PotreroDescansoReentradaPanel({ predioId, potreroId }) {
     if (!loaded) loadDescanso();
   }
 
-  function handleNuevoCalculo() {
-    setFechaInicioPastoreo('');
-    setPreview(null);
-    setPreviewError('');
-    setSaveError('');
-    setShowForm(true);
-  }
-
-  async function calcularPreview(fecha) {
+  // HOTFIX 3D8.1 §1/§7: UN CLIC -- "Calcular descanso" ejecuta el preview
+  // DIRECTAMENTE, sin pedir ninguna fecha. `anclado=true` es el modo
+  // "Actualizar estimación" (§15): ancla a la fecha de ingreso YA
+  // GUARDADA en vez de asumir que el lote entra hoy.
+  async function calcularPreview(anclado) {
     setPreviewLoading(true);
     setPreviewError('');
     setClimatologiaRecienGenerada(false);
-    const { ok, data } = await previewDescansoReentrada(predioId, potreroId, { fechaInicioPastoreo: fecha });
+    const { ok, data } = await previewDescansoReentrada(predioId, potreroId, { anclarAFechaExistente: anclado });
     setPreviewLoading(false);
     if (!ok) {
       setPreviewError(resolveErrorMessage(data?.error));
       return;
     }
-    setFechaInicioPastoreo(fecha);
+    setPreviewAnclado(anclado);
     setPreview(data.preview);
     setClimatologiaRecienGenerada(Boolean(data.preview?.climatologyGenerated));
+    // HOTFIX 3D8.1 §14: si este recálculo vino de un intento de guardado
+    // con día vencido (STALE_PREVIEW_DATE_CHANGED), el mensaje ya cumplió
+    // su propósito -- el nuevo preview reemplaza al anterior.
+    setSaveError('');
   }
 
   function handleCalcular() {
-    if (previewLoading || !fechaInicioPastoreo) return;
-    calcularPreview(fechaInicioPastoreo);
+    if (previewLoading) return;
+    setSaveError('');
+    calcularPreview(false);
   }
 
-  // §21/§28 del hardening: reutiliza la MISMA fecha de ingreso ya
-  // registrada -- vuelve a consultar las condiciones agroclimáticas
-  // actuales, nunca pide de nuevo un dato que el cliente ya aportó.
   function handleActualizarEstimacion() {
     if (!actual || previewLoading) return;
-    setShowForm(true);
-    calcularPreview(actual.fechaInicioPastoreo);
+    setSaveError('');
+    calcularPreview(true);
   }
 
+  function handleCancelar() {
+    setPreview(null);
+    setPreviewError('');
+    setSaveError('');
+  }
+
+  // HOTFIX 3D8.1 §14: envía `confirmedFechaInicioPastoreo` (la fecha que
+  // el usuario VIO en este preview) como eco -- si el servidor resuelve
+  // una fecha distinta (cambió el día), rechaza con
+  // STALE_PREVIEW_DATE_CHANGED en vez de guardar bajo otra fecha; en ese
+  // caso se recalcula automáticamente y se muestra el preview nuevo.
   async function handleGuardar() {
     if (saving || !preview) return;
     setSaving(true);
     setSaveError('');
-    const { ok, data } = await createDescansoReentrada(predioId, potreroId, { fechaInicioPastoreo });
+    const { ok, data } = await createDescansoReentrada(predioId, potreroId, {
+      anclarAFechaExistente: previewAnclado,
+      confirmedFechaInicioPastoreo: preview.fechaInicioPastoreo,
+    });
     setSaving(false);
     if (!ok) {
+      if (data?.error === 'STALE_PREVIEW_DATE_CHANGED') {
+        setSaveError('Las condiciones cambiaron de día desde el último cálculo -- recalculando...');
+        calcularPreview(previewAnclado);
+        return;
+      }
       setSaveError(resolveErrorMessage(data?.error));
       return;
     }
-    setShowForm(false);
     setPreview(null);
     loadDescanso();
   }
@@ -344,10 +407,12 @@ export default function PotreroDescansoReentradaPanel({ predioId, potreroId }) {
       {loading ? <p className="gan-potrero-points-hint">Cargando descanso estimado...</p> : null}
       {loadError ? <StatusMessage type="error">{loadError}</StatusMessage> : null}
 
-      {!loading && !loadError && !showForm && actual ? (
+      {!loading && !loadError && !preview && actual ? (
         <>
-          <ResultadoDescansoBlock
+          <PlanPastoreoReport
             payload={{
+              lote: actual.parametrosFuente?.lote ?? null,
+              fechaInicioPastoreo: actual.fechaInicioPastoreo,
               resultado: actual,
               fechaSalidaEstimada: actual.fechaSalidaEstimada,
               nivelConfianza: actual.nivelConfianza,
@@ -361,61 +426,42 @@ export default function PotreroDescansoReentradaPanel({ predioId, potreroId }) {
             <button type="button" className="gan-secondary-button" onClick={handleActualizarEstimacion} disabled={previewLoading}>
               {previewLoading ? 'Actualizando...' : 'Actualizar estimación'}
             </button>
-            <button type="button" className="gan-back-inline" onClick={handleNuevoCalculo}>
+            <button type="button" className="gan-back-inline" onClick={handleCalcular} disabled={previewLoading}>
               Nuevo cálculo de descanso
             </button>
           </div>
         </>
       ) : null}
 
-      {!loading && !loadError && !showForm && !actual ? (
+      {!loading && !loadError && !preview && !actual ? (
         <div className="gan-ficha-productiva-empty">
-          <button type="button" className="gan-secondary-button" onClick={handleNuevoCalculo}>
-            Calcular descanso
+          <button type="button" className="gan-secondary-button" onClick={handleCalcular} disabled={previewLoading}>
+            {previewLoading ? 'Construyendo referencia climática local...' : 'Calcular descanso'}
           </button>
+          <StatusMessage type="error">{previewError}</StatusMessage>
         </div>
       ) : null}
 
-      {showForm ? (
+      {!loading && !loadError && previewLoading && actual ? (
+        <p className="gan-potrero-points-hint">Calculando...</p>
+      ) : null}
+
+      {!loading && !loadError && preview ? (
         <div className="gan-stack">
-          <FormField label="Fecha prevista de ingreso" required>
-            <input
-              type="date"
-              value={fechaInicioPastoreo}
-              onChange={(event) => { setFechaInicioPastoreo(event.target.value); setPreview(null); }}
-            />
-          </FormField>
-
           <StatusMessage type="error">{previewError}</StatusMessage>
-
+          {climatologiaRecienGenerada ? (
+            <StatusMessage type="info">Referencia climática local disponible.</StatusMessage>
+          ) : null}
+          <PlanPastoreoReport payload={preview} />
+          <StatusMessage type="error">{saveError}</StatusMessage>
           <div className="gan-potrero-actions">
-            <button
-              type="button"
-              className="gan-secondary-button"
-              onClick={handleCalcular}
-              disabled={previewLoading || !fechaInicioPastoreo}
-            >
-              {previewLoading ? (actual ? 'Calculando...' : 'Construyendo referencia climática local...') : 'Calcular'}
+            <button type="button" className="gan-submit" onClick={handleGuardar} disabled={saving}>
+              {saving ? 'Guardando...' : 'Guardar esta estimación'}
             </button>
-            <button type="button" className="gan-back-inline" onClick={() => setShowForm(false)} disabled={saving}>
+            <button type="button" className="gan-back-inline" onClick={handleCancelar} disabled={saving}>
               Cancelar
             </button>
           </div>
-
-          {preview ? (
-            <>
-              {climatologiaRecienGenerada ? (
-                <StatusMessage type="info">Referencia climática local disponible.</StatusMessage>
-              ) : null}
-              <ResultadoDescansoBlock payload={preview} />
-              <StatusMessage type="error">{saveError}</StatusMessage>
-              <div className="gan-potrero-actions">
-                <button type="button" className="gan-submit" onClick={handleGuardar} disabled={saving}>
-                  {saving ? 'Guardando...' : 'Guardar esta estimación'}
-                </button>
-              </div>
-            </>
-          ) : null}
         </div>
       ) : null}
     </div>
