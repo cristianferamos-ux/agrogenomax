@@ -9,8 +9,23 @@
 // contexto_id/recomendacion_pastoreo_id/resultados/organizacionId como
 // valores autoritativos -- el repositorio siempre recalcula server-side
 // sobre la última recomendación de pastoreo guardada + la ficha real +
-// el contexto agroclimático más reciente. El ÚNICO input del cliente es
-// fechaInicioPastoreo (§11/§12/§19 del sprint).
+// el contexto agroclimático más reciente.
+//
+// HOTFIX 3D8.1 (AUTOMATIC GRAZING START): fechaInicioPastoreo YA NO es un
+// input del cliente -- AgroGenomaX asume que "Calcular descanso" =
+// pastoreo inicia HOY (fecha local del negocio, America/Bogota,
+// resuelta en potreroDescansoRepository.js/businessTimezone.js). El
+// cliente puede aportar, como MUCHO:
+//   - `anclarAFechaExistente` (boolean, preview y create): "Actualizar
+//     estimación" -- le pide al servidor usar la fecha de la
+//     recomendación de descanso YA GUARDADA en vez de hoy (§15 del
+//     hotfix). Nunca fija una fecha, solo selecciona el modo de anclaje.
+//   - `confirmedFechaInicioPastoreo` (create únicamente): eco OPCIONAL de
+//     la fecha que el cliente vio en su último preview -- NUNCA se usa
+//     para fijar el cálculo, solo para que el servidor detecte que el
+//     día cambió entre el preview y el guardado y rechace con
+//     STALE_PREVIEW_DATE_CHANGED en vez de guardar silenciosamente bajo
+//     una fecha distinta (§14 del hotfix).
 import { Router } from 'express';
 import {
   createRequireGanaderiaSession,
@@ -51,26 +66,49 @@ function validationError(code, message) {
   return Object.assign(new Error(message), { status: 400, code });
 }
 
-const ALLOWED_KEYS = new Set(['fechaInicioPastoreo']);
+const ALLOWED_KEYS_PREVIEW = new Set(['anclarAFechaExistente']);
+const ALLOWED_KEYS_CREATE = new Set(['anclarAFechaExistente', 'confirmedFechaInicioPastoreo']);
 
-// §11/§12 del sprint: ÚNICO input del cliente -- nunca ficha_id/
-// contexto_id/recomendacion_pastoreo_id/resultados (siempre derivados
-// server-side).
-export function validateDescansoReentradaBody(body) {
-  const unknownKeys = Object.keys(body || {}).filter((key) => !ALLOWED_KEYS.has(key));
+function validateAnclarAFechaExistente(body) {
+  const valor = body?.anclarAFechaExistente;
+  if (valor !== undefined && typeof valor !== 'boolean') {
+    throw validationError('INVALID_ANCLAR_A_FECHA_EXISTENTE', 'anclarAFechaExistente debe ser booleano.');
+  }
+  return Boolean(valor);
+}
+
+// HOTFIX 3D8.1: preview YA NO acepta fechaInicioPastoreo -- el ÚNICO
+// campo permitido es `anclarAFechaExistente` (modo "Actualizar
+// estimación", §15). El body normal ("Calcular descanso") es {}.
+export function validatePreviewBody(body) {
+  const unknownKeys = Object.keys(body || {}).filter((key) => !ALLOWED_KEYS_PREVIEW.has(key));
   if (unknownKeys.length > 0) {
     throw validationError('FORBIDDEN_FIELDS', `Campos no permitidos: ${unknownKeys.join(', ')}`);
   }
+  return { anclarAFechaExistente: validateAnclarAFechaExistente(body) };
+}
 
-  const fechaInicioPastoreo = body?.fechaInicioPastoreo;
-  if (typeof fechaInicioPastoreo !== 'string' || !FECHA_ISO_PATTERN.test(fechaInicioPastoreo)) {
-    throw validationError('INVALID_FECHA_INICIO_PASTOREO', 'fechaInicioPastoreo debe tener formato YYYY-MM-DD.');
+// HOTFIX 3D8.1: create acepta además `confirmedFechaInicioPastoreo`
+// (opcional) -- eco de la fecha vista en el último preview, SOLO para
+// detectar cambio de día (§14), NUNCA para fijar el cálculo.
+export function validateCreateBody(body) {
+  const unknownKeys = Object.keys(body || {}).filter((key) => !ALLOWED_KEYS_CREATE.has(key));
+  if (unknownKeys.length > 0) {
+    throw validationError('FORBIDDEN_FIELDS', `Campos no permitidos: ${unknownKeys.join(', ')}`);
   }
-  if (!esFechaIsoCalendarioValido(fechaInicioPastoreo)) {
-    throw validationError('INVALID_FECHA_INICIO_PASTOREO', 'fechaInicioPastoreo no es una fecha válida.');
+  const anclarAFechaExistente = validateAnclarAFechaExistente(body);
+
+  const confirmedFechaInicioPastoreo = body?.confirmedFechaInicioPastoreo;
+  if (confirmedFechaInicioPastoreo !== undefined) {
+    if (typeof confirmedFechaInicioPastoreo !== 'string' || !FECHA_ISO_PATTERN.test(confirmedFechaInicioPastoreo)) {
+      throw validationError('INVALID_CONFIRMED_FECHA_INICIO_PASTOREO', 'confirmedFechaInicioPastoreo debe tener formato YYYY-MM-DD.');
+    }
+    if (!esFechaIsoCalendarioValido(confirmedFechaInicioPastoreo)) {
+      throw validationError('INVALID_CONFIRMED_FECHA_INICIO_PASTOREO', 'confirmedFechaInicioPastoreo no es una fecha válida.');
+    }
   }
 
-  return { fechaInicioPastoreo };
+  return { anclarAFechaExistente, confirmedFechaInicioPastoreo };
 }
 
 function sendSemanticError(res, error) {
@@ -125,10 +163,12 @@ export default function createGanaderiaPotreroDescansoReentradaRouter({ appEnv, 
         return;
       }
 
-      const payload = validateDescansoReentradaBody(req.body);
+      const payload = validatePreviewBody(req.body);
       const { organizacionId } = req.ganaderiaAuth;
 
-      const preview = await previewDescansoReentrada(organizacionId, predioId, potreroId, payload);
+      const preview = await previewDescansoReentrada(organizacionId, predioId, potreroId, {
+        anclarAFechaExistente: payload.anclarAFechaExistente,
+      });
       res.json({ ok: true, preview });
     } catch (error) {
       if (sendSemanticError(res, error)) return;
@@ -147,10 +187,13 @@ export default function createGanaderiaPotreroDescansoReentradaRouter({ appEnv, 
         return;
       }
 
-      const payload = validateDescansoReentradaBody(req.body);
+      const payload = validateCreateBody(req.body);
       const { organizacionId } = req.ganaderiaAuth;
 
-      const descanso = await createDescansoReentrada(organizacionId, predioId, potreroId, payload);
+      const descanso = await createDescansoReentrada(organizacionId, predioId, potreroId, {
+        anclarAFechaExistente: payload.anclarAFechaExistente,
+        confirmedFechaInicioPastoreo: payload.confirmedFechaInicioPastoreo,
+      });
       res.status(201).json({ ok: true, descanso });
     } catch (error) {
       if (sendSemanticError(res, error)) return;

@@ -288,3 +288,54 @@ Tests: `descansoFormulas.test.js` (confidence vs cache, prueba pura),
 regla propios por variable), `potreroDescansoRepositoryIntegration.test.js`
 (confidence vs cache, integración real), `potreroDescansoReentradaArchitecture.test.js`
 (copy del generador de "por qué", detalle técnico con 15d).
+
+## HOTFIX 3D8.1 -- AUTOMATIC GRAZING START (fechaInicioPastoreo server-side)
+
+El smoke real reveló fricción de producto: pedirle al productor una
+"fecha prevista de ingreso" para calcular el descanso es innecesario --
+AgroGenomaX ya conoce todo lo demás; cuando el productor pulsa "Calcular
+descanso", el pastoreo empieza HOY.
+
+**Fecha resuelta server-side (`businessTimezone.js`)**. `resolveFechaHoyNegocio(now)`
+usa `Intl.DateTimeFormat(...).formatToParts` con timezone `America/Bogota`
+(UTC-5 todo el año, sin horario de verano) -- NUNCA `toISOString().slice(0,10)`
+directo, que se adelanta un día completo entre las 19:00 y las 23:59 hora
+Bogotá (verificado con test: un instante UTC de madrugada resuelve el día
+Bogotá anterior). `now` es un parámetro de inyección SOLO para tests
+(default `new Date()` real) -- el cliente nunca lo aporta.
+
+**Contrato preview/create simplificado**. `fechaInicioPastoreo` desaparece
+de `ALLOWED_KEYS` en ambas rutas -- un cliente que lo envíe recibe
+`FORBIDDEN_FIELDS` (rechazo explícito, nunca "ignorado en silencio"). El
+único input opcional restante:
+- `anclarAFechaExistente` (boolean, preview y create): modo "Actualizar
+  estimación" -- ancla `fechaInicioPastoreo` a la de la recomendación de
+  descanso YA GUARDADA en vez de hoy. Un refresh climático NUNCA mueve la
+  fecha de ingreso/salida original (verificado: crear con `now=díaA`,
+  luego "actualizar" con `now=díaB` muy posterior conserva
+  `fechaInicioPastoreo`/`fechaSalidaEstimada` idénticas, solo cambia
+  descanso/reentrada/confianza).
+- `confirmedFechaInicioPastoreo` (create únicamente): eco OPCIONAL de la
+  fecha vista en el último preview -- NUNCA fija el cálculo. Si el día
+  cambió entre el preview y el guardado, `create` rechaza con
+  `STALE_PREVIEW_DATE_CHANGED` (409) en vez de persistir silenciosamente
+  bajo una fecha distinta a la que el usuario confirmó ver; el frontend
+  recalcula automáticamente y muestra el preview nuevo.
+
+**Reporte integrado ("Plan de pastoreo AgroGenomaX")**. `buildResponsePayload`/
+`buildParametrosFuenteJson` ahora incluyen `lote` (categoría, número de
+animales, peso promedio -- de la recomendación de pastoreo YA GUARDADA,
+vía JOIN a `catalogo_categorias_productivas`) y `disponibilidad` (MS
+utilizable, consumo proyectado, remanente proyectado/objetivo, de
+`computeRemnantDerivatives`). El frontend (`PlanPastoreoReport`) combina
+lote + pastoreo + descanso + reentrada + condiciones + por qué + condición
+de reingreso en una sola lectura -- reutilizado tanto para un preview
+recién calculado como para `actual` (recomendación ya guardada).
+
+Tests: `businessTimezone.test.js` (timezone, incluida la franja
+madrugada UTC/Bogotá), `ganaderiaPotreroDescansoReentradaValidation.test.js`
+(fechaInicioPastoreo rechazada, anclarAFechaExistente/confirmedFechaInicioPastoreo),
+`potreroDescansoRepositoryIntegration.test.js` (bloque "HOTFIX 3D8.1 tests
+A-I": timezone, sin input, anti-spoof, autosuficiencia, día-cambiado,
+ancla-preserva-fechas, reporte integrado), `potreroDescansoReentradaArchitecture.test.js`
+(sin selector de fecha, reporte integrado, STALE_PREVIEW_DATE_CHANGED).
