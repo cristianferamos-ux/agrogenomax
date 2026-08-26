@@ -40,8 +40,10 @@ const MATERIA_SECA_BASE_PCT = {
 const UTILIZACION_BASE_PCT = 50;
 
 // Ajuste conservador único por déficit hídrico reciente (§8: nunca un
-// ajuste que incremente la utilización por clima favorable).
-const PRECIPITACION_7D_UMBRAL_DEFICIT_MM = 10;
+// ajuste que incremente la utilización por clima favorable). Exportado
+// (SPRINT-3D8) para que el motor de descanso reutilice EL MISMO umbral --
+// nunca un segundo número inventado para "lo mismo" en otro motor.
+export const PRECIPITACION_7D_UMBRAL_DEFICIT_MM = 10;
 const UTILIZACION_AJUSTE_DEFICIT_PCT = 5;
 
 const TIPOS_PASTURA_VALIDOS = new Set(['graminea', 'leguminosa', 'mezcla', 'otra']);
