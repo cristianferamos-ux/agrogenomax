@@ -66,7 +66,11 @@ function formatDate(date) {
   return date.toISOString().slice(0, 10);
 }
 
-function resolveBaseUrl() {
+// Exportada (hardening territorial, SPRINT-3D8) -- resuelve la MISMA base
+// URL allowlisted por env que el resto de este proveedor, reutilizada por
+// era5HistoricalClimatologyProvider.js para no duplicar la política de
+// allowlist (evita SSRF).
+export function resolveBaseUrl() {
   // Lazy, allowlisted por env -- nunca una URL aportada por el
   // cliente/request (evita SSRF).
   return process.env.ERA5_LAND_BASE_URL || DEFAULT_BASE_URL;
@@ -120,7 +124,10 @@ async function fetchJsonWithTimeout(url, { timeoutMs, fetchImpl }) {
   }
 }
 
-async function fetchJsonWithRetry(url, { timeoutMs, retries, retryDelayMs, fetchImpl }) {
+// Exportada (hardening territorial, SPRINT-3D8) -- timeout/retry genérico
+// reutilizado por era5HistoricalClimatologyProvider.js, nunca una segunda
+// implementación divergente de la política de reintentos.
+export async function fetchJsonWithRetry(url, { timeoutMs, retries, retryDelayMs, fetchImpl }) {
   let lastError;
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     try {
@@ -146,13 +153,17 @@ function sliceWindow(values, endIndexInclusive, windowSize) {
   return values.slice(start, endIndexInclusive + 1);
 }
 
-function sumIgnoringNulls(values) {
+// Exportadas (hardening territorial, SPRINT-3D8): reutilizadas por
+// era5HistoricalClimatologyProvider.js para agregar horario->diario sobre
+// un histórico de años -- mismo criterio de agregación, nunca una segunda
+// implementación divergente de "sumar ignorando nulls".
+export function sumIgnoringNulls(values) {
   const finite = values.filter((v) => Number.isFinite(v));
   if (finite.length === 0) return null;
   return finite.reduce((acc, v) => acc + v, 0);
 }
 
-function meanIgnoringNulls(values) {
+export function meanIgnoringNulls(values) {
   const finite = values.filter((v) => Number.isFinite(v));
   if (finite.length === 0) return null;
   return finite.reduce((acc, v) => acc + v, 0) / finite.length;

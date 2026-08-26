@@ -27,6 +27,7 @@ import {
   previewRecomendacionPastoreo,
   createRecomendacionPastoreo,
 } from './ganaderiaRecomendacionPastoreoApi.js';
+import PotreroDescansoReentradaPanel from './PotreroDescansoReentradaPanel.jsx';
 
 const GENERIC_ERROR = 'No fue posible completar la operación en este momento. Intenta nuevamente.';
 
@@ -401,6 +402,12 @@ export default function PotreroRecomendacionPastoreoPanel({ predioId, potreroId,
               </button>
             ) : null}
           </div>
+
+          {/* SPRINT-3D8-DESCANSO-REENTRADA §19: "Calcular descanso" se
+              muestra únicamente después de una recomendación de pastoreo
+              guardada -- nunca antes. */}
+          <PotreroDescansoReentradaPanel predioId={predioId} potreroId={potreroId} />
+
           {showHistorial && historial.length > 0 ? (
             <div className="gan-ficha-historial-list">
               {historial.map((item) => (

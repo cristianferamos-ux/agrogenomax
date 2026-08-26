@@ -25,6 +25,7 @@ import createGanaderiaPotreroFichaProductivaRouter from './routes/ganaderiaPotre
 import createGanaderiaPotreroCapacidadPastoreoRouter from './routes/ganaderiaPotreroCapacidadPastoreo.js';
 import createGanaderiaPotreroContextoAgroclimaticoRouter from './routes/ganaderiaPotreroContextoAgroclimatico.js';
 import createGanaderiaPotreroRecomendacionPastoreoRouter from './routes/ganaderiaPotreroRecomendacionPastoreo.js';
+import createGanaderiaPotreroDescansoReentradaRouter from './routes/ganaderiaPotreroDescansoReentrada.js';
 import createGanaderiaCatalogoPasturasRouter from './routes/ganaderiaCatalogoPasturas.js';
 import createGanaderiaCategoriasProductivasRouter from './routes/ganaderiaCategoriasProductivas.js';
 import createHealthRouter from './routes/health.js';
@@ -227,6 +228,22 @@ app.use(
 app.use(
   '/api/ganaderia/predios/:predioId/potreros/:potreroId/recomendacion-pastoreo',
   createGanaderiaPotreroRecomendacionPastoreoRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
+
+// SPRINT-3D8-DESCANSO-REENTRADA: subordinado a
+// /api/ganaderia/predios/:predioId/potreros/:potreroId -- regla de
+// dominio ORGANIZACIÓN -> PREDIO -> POTRERO -> FICHA PRODUCTIVA (+
+// CONTEXTO AGROCLIMÁTICO opcional) -> RECOMENDACIÓN DE PASTOREO GUARDADA
+// -> RECOMENDACIÓN DE DESCANSO. Mismo criterio de aislamiento (sesión con
+// organización + CSRF) que el resto de routers Ganadería sobre
+// Postgres-AGX-Business.
+app.use(
+  '/api/ganaderia/predios/:predioId/potreros/:potreroId/descanso-reentrada',
+  createGanaderiaPotreroDescansoReentradaRouter({
     appEnv: appConfig.appEnv,
     csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
     allowedOrigins: appConfig.cors.allowedOrigins,
