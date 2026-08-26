@@ -276,3 +276,34 @@ test('HOTFIX 3D8.1: el reporte integrado se usa TANTO para el preview recién ca
   const usosPlanPastoreoReport = panelSource.match(/<PlanPastoreoReport/g) ?? [];
   assert.ok(usosPlanPastoreoReport.length >= 2, 'debe reutilizarse para `actual` y para `preview`, nunca duplicar el layout');
 });
+
+// ---------------------------------------------------------------------
+// HOTFIX 3D8.2 (SINGLE CLICK REST CALCULATION): causa raíz real -- el
+// botón "Calcular descanso" del estado COLAPSADO (`handleAbrir`) solo
+// expandía el panel + hacía un GET, dejando un SEGUNDO botón "Calcular
+// descanso" que recién ahí disparaba el preview real. `loadDescanso`
+// ahora encadena el preview AUTOMÁTICAMENTE dentro de la MISMA acción
+// cuando el GET confirma que no hay ninguna recomendación previa --
+// nunca requiere un segundo clic.
+// ---------------------------------------------------------------------
+
+test('HOTFIX 3D8.2 test 9: un solo clic (handleAbrir) encadena loadDescanso -> calcularPreview automáticamente cuando no hay `actual` -- nunca dos acciones separadas', () => {
+  assert.match(panelSource, /function handleAbrir\(\)\s*\{\s*setExpanded\(true\);\s*if \(!loaded\) loadDescanso\(\{\s*autoCalcularSiVacio:\s*true\s*\}\);\s*\}/);
+  assert.match(panelSource, /if \(autoCalcularSiVacio && !actualCargado\)\s*\{\s*calcularPreview\(false\);\s*\}/);
+});
+
+test('HOTFIX 3D8.2 test 10: loadDescanso NUNCA auto-calcula en el refresh posterior a un guardado exitoso (evita una request extra no solicitada)', () => {
+  const bloqueHandleGuardar = panelSource.match(/async function handleGuardar\(\)[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(bloqueHandleGuardar, /loadDescanso\(\);/);
+  assert.doesNotMatch(bloqueHandleGuardar, /autoCalcularSiVacio/);
+});
+
+test('HOTFIX 3D8.2: previewDescansoReentrada se invoca UNA sola vez por cálculo -- ninguna función del panel hace una llamada de "generar climatología" separada antes del preview', () => {
+  assert.doesNotMatch(panelSource, /generarClimatologia|refreshClimatologia|climatologia.*Api|\/climatologia/i);
+  const llamadasPreview = panelSource.match(/previewDescansoReentrada\(/g) ?? [];
+  assert.equal(llamadasPreview.length, 1, 'previewDescansoReentrada debe invocarse desde un único punto (calcularPreview) -- nunca un paso de climatología aparte');
+});
+
+test('HOTFIX 3D8.2 test 7: el botón queda deshabilitado durante TODA la request (previewLoading), evitando double-submit', () => {
+  assert.match(panelSource, /disabled=\{previewLoading\}/);
+});
