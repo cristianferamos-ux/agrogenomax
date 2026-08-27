@@ -26,6 +26,7 @@ import createGanaderiaPotreroCapacidadPastoreoRouter from './routes/ganaderiaPot
 import createGanaderiaPotreroContextoAgroclimaticoRouter from './routes/ganaderiaPotreroContextoAgroclimatico.js';
 import createGanaderiaPotreroRecomendacionPastoreoRouter from './routes/ganaderiaPotreroRecomendacionPastoreo.js';
 import createGanaderiaPotreroDescansoReentradaRouter from './routes/ganaderiaPotreroDescansoReentrada.js';
+import createGanaderiaPotreroCicloPastoreoRouter from './routes/ganaderiaPotreroCicloPastoreo.js';
 import createGanaderiaCatalogoPasturasRouter from './routes/ganaderiaCatalogoPasturas.js';
 import createGanaderiaCategoriasProductivasRouter from './routes/ganaderiaCategoriasProductivas.js';
 import createHealthRouter from './routes/health.js';
@@ -244,6 +245,18 @@ app.use(
 app.use(
   '/api/ganaderia/predios/:predioId/potreros/:potreroId/descanso-reentrada',
   createGanaderiaPotreroDescansoReentradaRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
+
+// SPRINT-3D9.1: ciclo REAL de pastoreo -- separado estrictamente de la
+// planificación (recomendacion-pastoreo/descanso-reentrada arriba).
+// Mismo criterio de aislamiento (sesión con organización + CSRF).
+app.use(
+  '/api/ganaderia/predios/:predioId/potreros/:potreroId/ciclos-pastoreo',
+  createGanaderiaPotreroCicloPastoreoRouter({
     appEnv: appConfig.appEnv,
     csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
     allowedOrigins: appConfig.cors.allowedOrigins,

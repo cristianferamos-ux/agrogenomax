@@ -28,6 +28,7 @@ import {
   createRecomendacionPastoreo,
 } from './ganaderiaRecomendacionPastoreoApi.js';
 import PotreroDescansoReentradaPanel from './PotreroDescansoReentradaPanel.jsx';
+import PotreroCicloPastoreoPanel from './PotreroCicloPastoreoPanel.jsx';
 
 const GENERIC_ERROR = 'No fue posible completar la operación en este momento. Intenta nuevamente.';
 
@@ -407,6 +408,23 @@ export default function PotreroRecomendacionPastoreoPanel({ predioId, potreroId,
               muestra únicamente después de una recomendación de pastoreo
               guardada -- nunca antes. */}
           <PotreroDescansoReentradaPanel predioId={predioId} potreroId={potreroId} />
+
+          {/* SPRINT-3D9.1: "Pastoreo real" -- ciclo REALMENTE ejecutado,
+              distinto del plan de arriba. También depende de que exista una
+              recomendación de pastoreo guardada (misma precondición).
+              `planLote`/`categorias` reutilizan el `actual` y el catálogo ya
+              cargados aquí -- nunca un fetch/catálogo duplicado. */}
+          <PotreroCicloPastoreoPanel
+            predioId={predioId}
+            potreroId={potreroId}
+            planLote={{
+              categoriaCodigo: actual.categoriaCodigo,
+              categoriaNombre: actual.categoriaNombre,
+              numeroAnimales: actual.numeroAnimales,
+              pesoPromedioKg: actual.pesoPromedioKg,
+            }}
+            categorias={categorias}
+          />
 
           {showHistorial && historial.length > 0 ? (
             <div className="gan-ficha-historial-list">
