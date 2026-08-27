@@ -154,6 +154,8 @@ describe('SPRINT-3D3: potrerosRepository contra Postgres-AGX-Business real', { s
     if (!adminPool) return;
     await adminPool.query(`delete from agx.potreros where nombre like 'Potrero Sprint3D3%'`);
     await adminPool.query(`delete from agx.predios where nombre_predio like 'Predio Sprint3D3%'`);
+    await adminPool.query(`delete from agx.potreros where nombre like 'Potrero Sprint3D92%'`);
+    await adminPool.query(`delete from agx.predios where nombre_predio like 'Predio Sprint3D92%'`);
     // adminPool/businessDb se cierran UNA sola vez, en el after() de nivel
     // de archivo al final -- este pool se reutiliza en el describe
     // SPRINT-3D5.2 más abajo (mismo módulo, mismo proceso node --test).
@@ -177,6 +179,27 @@ describe('SPRINT-3D3: potrerosRepository contra Postgres-AGX-Business real', { s
     const rowsB = await repo.listPotrerosByPredio(org, predioB);
     assert.equal(rowsB.length, 1);
     assert.equal(rowsB[0].nombre, 'Potrero Sprint3D3 B1');
+  });
+
+  // SPRINT-3D9.2 (PRE-COMMIT FINAL ROUND, punto 3): por defecto el
+  // listado excluye ARCHIVADO; incluirArchivados=true es el único opt-in.
+  test('SPRINT-3D9.2: listPotrerosByPredio excluye ARCHIVADO por defecto; incluirArchivados=true los incluye', async () => {
+    const org = randomOrgId();
+    const predioId = await seedPredio(org, { nombre: 'Predio Sprint3D92 ARCH' });
+    await seedPotrero(org, predioId, { nombre: 'Potrero Sprint3D92 ARCH activo' });
+    const archivadoId = await seedPotrero(org, predioId, { nombre: 'Potrero Sprint3D92 ARCH archivado' });
+    await adminPool.query(
+      `update agx.potreros set estado = 'ARCHIVADO', archivado_at = now(), motivo_archivado = 'test' where potrero_id = $1`,
+      [archivadoId],
+    );
+
+    const soloActivos = await repo.listPotrerosByPredio(org, predioId);
+    assert.equal(soloActivos.length, 1);
+    assert.equal(soloActivos[0].nombre, 'Potrero Sprint3D92 ARCH activo');
+
+    const todos = await repo.listPotrerosByPredio(org, predioId, { incluirArchivados: true });
+    assert.equal(todos.length, 2);
+    assert.ok(todos.some((r) => r.nombre === 'Potrero Sprint3D92 ARCH archivado' && r.estado === 'ARCHIVADO'));
   });
 
   // I/J: el listado no expone organizacion_id ni geometry completa.

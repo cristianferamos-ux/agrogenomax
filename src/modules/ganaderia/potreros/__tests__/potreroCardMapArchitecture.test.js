@@ -194,13 +194,26 @@ test('§2: el fetch de geometry del predio vive en su propio useEffect con depen
   assert.match(fn, /fetch\(`\/api\/ganaderia\/predios\/\$\{predioId\}`, \{ credentials: 'include' \}\)/);
 });
 
-test('§2: predioGeometry se pasa como PROP compartida a cada GanaderiaPotreroCardMap dentro del .map() de potreros -- una sola fuente de verdad, nunca recalculada/refetcheada por card', () => {
+// SPRINT-3D9.2: el .map() de potreros ahora delega el render de cada
+// tarjeta a PotreroCard (extraído para hospedar el state de
+// archivar/restaurar, ver predioPotreroUiArchitecture.test.js) -- la
+// garantía de "una sola fuente de verdad para predioGeometry" se sostiene
+// igual: el .map() pasa predioGeometry a CADA PotreroCard, y PotreroCard
+// la reenvía sin recalcularla a GanaderiaPotreroCardMap.
+test('§2: predioGeometry se pasa como PROP compartida a cada PotreroCard dentro del .map() de potreros -- una sola fuente de verdad, nunca recalculada/refetcheada por card', () => {
   const mapBlock = listPanelCode.match(/\{potreros\.map\(\(potrero\) => \([\s\S]*?\)\)\}/)?.[0] ?? '';
   assert.match(mapBlock, /predioGeometry=\{predioGeometry\}/);
-  // Un único componente GanaderiaPotreroCardMap dentro del loop -- N potreros
-  // producen N instancias (N GET detalle potrero), pero comparten la misma
-  // prop predioGeometry (1 GET detalle predio total).
-  assert.equal((mapBlock.match(/<GanaderiaPotreroCardMap/g) || []).length, 1);
+  // Un único componente PotreroCard dentro del loop -- N potreros producen
+  // N instancias (N GET detalle potrero), pero comparten la misma prop
+  // predioGeometry (1 GET detalle predio total).
+  assert.equal((mapBlock.match(/<PotreroCard/g) || []).length, 1);
+});
+
+test('§2: PotreroCard reenvía predioGeometry sin recalcularla a GanaderiaPotreroCardMap (una única instancia por card)', () => {
+  const cardFn = listPanelCode.match(/function PotreroCard\([\s\S]*\n\}/)?.[0] ?? '';
+  assert.notEqual(cardFn, '');
+  assert.match(cardFn, /<GanaderiaPotreroCardMap[\s\S]*?predioGeometry=\{predioGeometry\}/);
+  assert.equal((cardFn.match(/<GanaderiaPotreroCardMap/g) || []).length, 1);
 });
 
 test('§4: predioGeometry ausente/null (aún no cargó o el GET falló) nunca oculta la card ni el mapa del potrero -- solo se omite el layer verde de contexto', () => {

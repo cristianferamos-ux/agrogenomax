@@ -35,6 +35,15 @@ import {
   createManualPredio,
   createCatastroxPredio,
 } from '../services/ganaderia/prediosRepository.js';
+import { archivarPredio, restaurarPredio } from '../services/ganaderia/potreroArchivoRepository.js';
+
+function sendSemanticError(res, error) {
+  if (typeof error?.status === 'number' && typeof error?.code === 'string') {
+    res.status(error.status).json({ error: error.code, message: error.message });
+    return true;
+  }
+  return false;
+}
 
 const MAX_NOMBRE_PREDIO_LENGTH = 200;
 const MAX_TEXT_FIELD_LENGTH = 120;
@@ -238,6 +247,8 @@ function serializePredioListItem(row) {
     longitud: row.longitud === null ? null : Number(row.longitud),
     tieneGeometria: Boolean(row.tiene_geometria),
     fechaCreacion: row.fecha_creacion,
+    // SPRINT-3D9.2
+    estado: row.estado,
   };
 }
 
@@ -331,7 +342,8 @@ export default function createGanaderiaPrediosRouter({ appEnv, csrfServerSecret,
     res.setHeader('Cache-Control', 'no-store');
     try {
       const { organizacionId } = req.ganaderiaAuth;
-      const rows = await listPredios(organizacionId);
+      const incluirArchivados = req.query.incluirArchivados === 'true';
+      const rows = await listPredios(organizacionId, { incluirArchivados });
       res.json({ predios: rows.map(serializePredioListItem) });
     } catch (error) {
       next(error);
@@ -499,6 +511,43 @@ export default function createGanaderiaPrediosRouter({ appEnv, csrfServerSecret,
         res.status(400).json({ error: error.code, message: error.message });
         return;
       }
+      next(error);
+    }
+  });
+
+  // SPRINT-3D9.2: archivar/restaurar -- reemplaza el hard DELETE
+  // (revocado en 0010) por un estado reversible. "Eliminar predio" en la
+  // UI internamente llama a este endpoint.
+  router.post('/:predioId/archivar', async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      if (!/^\d+$/.test(String(req.params.predioId))) {
+        res.status(400).json({ error: 'INVALID_PREDIO_ID' });
+        return;
+      }
+      const { organizacionId, cuentaId } = req.ganaderiaAuth;
+      const predio = await archivarPredio(organizacionId, req.params.predioId, {
+        motivo: req.body?.motivo, actorCuentaId: cuentaId,
+      });
+      res.json({ ok: true, predio });
+    } catch (error) {
+      if (sendSemanticError(res, error)) return;
+      next(error);
+    }
+  });
+
+  router.post('/:predioId/restaurar', async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      if (!/^\d+$/.test(String(req.params.predioId))) {
+        res.status(400).json({ error: 'INVALID_PREDIO_ID' });
+        return;
+      }
+      const { organizacionId, cuentaId } = req.ganaderiaAuth;
+      const predio = await restaurarPredio(organizacionId, req.params.predioId, { actorCuentaId: cuentaId });
+      res.json({ ok: true, predio });
+    } catch (error) {
+      if (sendSemanticError(res, error)) return;
       next(error);
     }
   });

@@ -39,8 +39,20 @@ async function postJson(path, body) {
 // (nunca de un selector global) -- ver PotreroRegistrationPanel.jsx /
 // PotrerosByPredioPanel.jsx.
 
-export function listPotrerosByPredio(predioId) {
-  return getJson(`/api/ganaderia/predios/${predioId}/potreros`);
+// SPRINT-3D9.2: incluirArchivados=true es el único opt-in explícito para
+// ver potreros ARCHIVADO -- por defecto (sin el parámetro) el backend ya
+// filtra a estado=ACTIVO (potrerosRepository.js).
+export function listPotrerosByPredio(predioId, { incluirArchivados = false } = {}) {
+  const query = incluirArchivados ? '?incluirArchivados=true' : '';
+  return getJson(`/api/ganaderia/predios/${predioId}/potreros${query}`);
+}
+
+export function archivarPotrero(predioId, potreroId, motivo) {
+  return postJson(`/api/ganaderia/predios/${predioId}/potreros/${potreroId}/archivar`, { motivo });
+}
+
+export function restaurarPotrero(predioId, potreroId) {
+  return postJson(`/api/ganaderia/predios/${predioId}/potreros/${potreroId}/restaurar`, {});
 }
 
 export function getPotreroByPredio(predioId, potreroId) {

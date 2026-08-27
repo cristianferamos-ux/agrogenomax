@@ -3,8 +3,8 @@
 // predioId viene fijo desde la tarjeta del predio que monta este panel --
 // nunca mezcla potreros de otros predios, nunca selector global.
 import { useEffect, useState } from 'react';
-import { StatusMessage } from '../components/FormField.jsx';
-import { listPotrerosByPredio } from './ganaderiaPotrerosApi.js';
+import { FormField, StatusMessage } from '../components/FormField.jsx';
+import { listPotrerosByPredio, archivarPotrero, restaurarPotrero } from './ganaderiaPotrerosApi.js';
 import { formatDateDisplay } from '../utils/dateFormat.js';
 import GanaderiaPotreroCardMap from './GanaderiaPotreroCardMap.jsx';
 import PotreroFichaProductivaPanel from './PotreroFichaProductivaPanel.jsx';
@@ -61,13 +61,23 @@ export default function PotrerosByPredioPanel({ predioId, refreshKey = 0, succes
   // la vez, independiente de la ficha productiva -- se resuelve
   // directamente de la geometry del potrero (§1 del sprint).
   const [openAgroClimaPotreroId, setOpenAgroClimaPotreroId] = useState(null);
+  // SPRINT-3D9.2: "Ver archivados" -- único punto de acceso explícito para
+  // ver potreros ARCHIVADO en este predio; internalRefreshKey se
+  // incrementa tras un archivar/restaurar exitoso (mismo criterio que
+  // refreshKey, pero interno a este panel -- el padre no necesita saberlo).
+  const [mostrarArchivados, setMostrarArchivados] = useState(false);
+  const [internalRefreshKey, setInternalRefreshKey] = useState(0);
+
+  function handleArchivoChanged() {
+    setInternalRefreshKey((key) => key + 1);
+  }
 
   useEffect(() => {
     let active = true;
     setLoading(true);
     setError('');
 
-    listPotrerosByPredio(predioId)
+    listPotrerosByPredio(predioId, { incluirArchivados: mostrarArchivados })
       .then(({ ok, data }) => {
         if (!active) return;
         if (!ok || !Array.isArray(data?.potreros)) {
@@ -88,7 +98,7 @@ export default function PotrerosByPredioPanel({ predioId, refreshKey = 0, succes
     return () => {
       active = false;
     };
-  }, [predioId, refreshKey]);
+  }, [predioId, refreshKey, mostrarArchivados, internalRefreshKey]);
 
   useEffect(() => {
     let active = true;
@@ -108,11 +118,25 @@ export default function PotrerosByPredioPanel({ predioId, refreshKey = 0, succes
   }, [predioId]);
 
   const successBanner = successMessage ? <StatusMessage type="success">{successMessage}</StatusMessage> : null;
+  // SPRINT-3D9.2: visible en todo estado (loading/error/vacío/lista) --
+  // el usuario siempre puede alternar activos<->archivados, incluso si la
+  // vista activa está vacía (p.ej. todos los potreros de este predio están
+  // archivados).
+  const toggleArchivadosButton = (
+    <button
+      type="button"
+      className="gan-back-inline"
+      onClick={() => setMostrarArchivados((current) => !current)}
+    >
+      {mostrarArchivados ? 'Ver activos' : 'Ver archivados'}
+    </button>
+  );
 
   if (loading) {
     return (
       <>
         {successBanner}
+        {toggleArchivadosButton}
         <StatusMessage>Cargando potreros de este predio...</StatusMessage>
       </>
     );
@@ -122,6 +146,7 @@ export default function PotrerosByPredioPanel({ predioId, refreshKey = 0, succes
     return (
       <>
         {successBanner}
+        {toggleArchivadosButton}
         <StatusMessage type="error">{error}</StatusMessage>
       </>
     );
@@ -131,6 +156,7 @@ export default function PotrerosByPredioPanel({ predioId, refreshKey = 0, succes
     return (
       <>
         {successBanner}
+        {toggleArchivadosButton}
         <p className="gan-empty-text">{LIST_EMPTY_MESSAGE}</p>
       </>
     );
@@ -139,74 +165,180 @@ export default function PotrerosByPredioPanel({ predioId, refreshKey = 0, succes
   return (
     <div className="gan-potrero-list">
       {successBanner}
+      {toggleArchivadosButton}
       {potreros.map((potrero) => (
-        <div className="gan-potrero-card" key={potrero.potreroId}>
-          <strong className="gan-potrero-card-name">{potrero.nombre}</strong>
-          <div className="gan-potrero-card-body">
-            <div className="gan-potrero-data">
-              <div className="gan-ficha-row">
-                <span>Área</span>
-                <strong>{formatAreaHa(potrero.areaHa)}</strong>
-                <strong>{formatAreaM2(potrero.areaHa)}</strong>
-              </div>
-              <div className="gan-ficha-row">
-                <span>Capacidad de animales</span>
-                <strong>{potrero.capacidadAnimales === null ? '—' : potrero.capacidadAnimales}</strong>
-              </div>
-              <div className="gan-ficha-row">
-                <span>Método de delimitación</span>
-                <strong>{METODO_LABELS[potrero.metodoDelimitacion] || potrero.metodoDelimitacion}</strong>
-              </div>
-              <div className="gan-ficha-row">
-                <span>Fecha de creación</span>
-                <strong>{formatDateDisplay(potrero.fechaCreacion)}</strong>
-              </div>
-              {potrero.observaciones ? (
-                <div className="gan-ficha-row">
-                  <span>Observaciones</span>
-                  <strong>{potrero.observaciones}</strong>
-                </div>
-              ) : null}
-            </div>
-            <div className="gan-potrero-map-wrap">
-              <GanaderiaPotreroCardMap
-                predioId={predioId}
-                potreroId={potrero.potreroId}
-                predioGeometry={predioGeometry}
-              />
-            </div>
+        <PotreroCard
+          key={potrero.potreroId}
+          potrero={potrero}
+          predioId={predioId}
+          predioGeometry={predioGeometry}
+          openFichaPotreroId={openFichaPotreroId}
+          setOpenFichaPotreroId={setOpenFichaPotreroId}
+          openAgroClimaPotreroId={openAgroClimaPotreroId}
+          setOpenAgroClimaPotreroId={setOpenAgroClimaPotreroId}
+          onArchivoChanged={handleArchivoChanged}
+        />
+      ))}
+    </div>
+  );
+}
+
+// SPRINT-3D9.2: archivar/restaurar -- reemplaza el hard DELETE de potrero
+// (revocado en 0010, nunca existió un botón de borrado definitivo). "Eliminar
+// potrero" en la UI internamente archiva -- el historial (fichas,
+// recomendaciones, ciclos) se conserva. Mismo patrón que PredioCard en
+// PrediosPage.jsx (motivo obligatorio, confirmación inline, refetch tras
+// éxito, manejo explícito de PREDIO_ARCHIVADO al restaurar).
+function PotreroCard({
+  potrero,
+  predioId,
+  predioGeometry,
+  openFichaPotreroId,
+  setOpenFichaPotreroId,
+  openAgroClimaPotreroId,
+  setOpenAgroClimaPotreroId,
+  onArchivoChanged,
+}) {
+  const [mostrarArchivar, setMostrarArchivar] = useState(false);
+  const [motivoArchivar, setMotivoArchivar] = useState('');
+  const [archivoEnCurso, setArchivoEnCurso] = useState(false);
+  const [archivoError, setArchivoError] = useState('');
+  const archivado = potrero.estado === 'ARCHIVADO';
+
+  async function handleConfirmarArchivar() {
+    if (archivoEnCurso) return;
+    if (motivoArchivar.trim() === '') {
+      setArchivoError('Escribe el motivo.');
+      return;
+    }
+    setArchivoEnCurso(true);
+    setArchivoError('');
+    const { ok, data } = await archivarPotrero(predioId, potrero.potreroId, motivoArchivar.trim());
+    setArchivoEnCurso(false);
+    if (!ok) {
+      setArchivoError(data?.error === 'POTRERO_CON_CICLO_EN_CURSO'
+        ? 'No se puede archivar: este potrero tiene un pastoreo en curso.'
+        : 'No fue posible completar la operación en este momento. Intenta nuevamente.');
+      return;
+    }
+    setMostrarArchivar(false);
+    onArchivoChanged?.();
+  }
+
+  async function handleRestaurar() {
+    if (archivoEnCurso) return;
+    setArchivoEnCurso(true);
+    setArchivoError('');
+    const { ok, data } = await restaurarPotrero(predioId, potrero.potreroId);
+    setArchivoEnCurso(false);
+    if (!ok) {
+      setArchivoError(data?.error === 'PREDIO_ARCHIVADO'
+        ? 'No se puede restaurar: el predio de este potrero sigue archivado. Restaura primero el predio.'
+        : 'No fue posible completar la operación en este momento. Intenta nuevamente.');
+      return;
+    }
+    onArchivoChanged?.();
+  }
+
+  return (
+    <div className="gan-potrero-card">
+      <strong className="gan-potrero-card-name">{potrero.nombre}</strong>
+      {archivado ? <StatusMessage type="warning">Este potrero está archivado -- su historial se conserva.</StatusMessage> : null}
+      <div className="gan-potrero-card-body">
+        <div className="gan-potrero-data">
+          <div className="gan-ficha-row">
+            <span>Área</span>
+            <strong>{formatAreaHa(potrero.areaHa)}</strong>
+            <strong>{formatAreaM2(potrero.areaHa)}</strong>
           </div>
-
-          <div className="gan-potrero-card-actions">
-            <button
-              type="button"
-              className="gan-secondary-button"
-              onClick={() => setOpenFichaPotreroId((current) => (current === potrero.potreroId ? null : potrero.potreroId))}
-            >
-              Ficha productiva
-            </button>
-            <button
-              type="button"
-              className="gan-secondary-button"
-              onClick={() => setOpenAgroClimaPotreroId((current) => (current === potrero.potreroId ? null : potrero.potreroId))}
-            >
-              Contexto agroclimático
-            </button>
+          <div className="gan-ficha-row">
+            <span>Capacidad de animales</span>
+            <strong>{potrero.capacidadAnimales === null ? '—' : potrero.capacidadAnimales}</strong>
           </div>
-
-          {openFichaPotreroId === potrero.potreroId ? (
-            <PotreroFichaProductivaPanel
-              predioId={predioId}
-              potreroId={potrero.potreroId}
-              areaHa={potrero.areaHa}
-            />
-          ) : null}
-
-          {openAgroClimaPotreroId === potrero.potreroId ? (
-            <PotreroAgroClimaPanel predioId={predioId} potreroId={potrero.potreroId} />
+          <div className="gan-ficha-row">
+            <span>Método de delimitación</span>
+            <strong>{METODO_LABELS[potrero.metodoDelimitacion] || potrero.metodoDelimitacion}</strong>
+          </div>
+          <div className="gan-ficha-row">
+            <span>Fecha de creación</span>
+            <strong>{formatDateDisplay(potrero.fechaCreacion)}</strong>
+          </div>
+          {potrero.observaciones ? (
+            <div className="gan-ficha-row">
+              <span>Observaciones</span>
+              <strong>{potrero.observaciones}</strong>
+            </div>
           ) : null}
         </div>
-      ))}
+        <div className="gan-potrero-map-wrap">
+          <GanaderiaPotreroCardMap
+            predioId={predioId}
+            potreroId={potrero.potreroId}
+            predioGeometry={predioGeometry}
+          />
+        </div>
+      </div>
+
+      <div className="gan-potrero-card-actions">
+        <button
+          type="button"
+          className="gan-secondary-button"
+          onClick={() => setOpenFichaPotreroId((current) => (current === potrero.potreroId ? null : potrero.potreroId))}
+        >
+          Ficha productiva
+        </button>
+        <button
+          type="button"
+          className="gan-secondary-button"
+          onClick={() => setOpenAgroClimaPotreroId((current) => (current === potrero.potreroId ? null : potrero.potreroId))}
+        >
+          Contexto agroclimático
+        </button>
+        {!archivado ? (
+          <button
+            type="button"
+            className="gan-back-inline"
+            onClick={() => { setMostrarArchivar(true); setMotivoArchivar(''); setArchivoError(''); }}
+          >
+            Eliminar potrero
+          </button>
+        ) : (
+          <button type="button" className="gan-back-inline" onClick={handleRestaurar} disabled={archivoEnCurso}>
+            {archivoEnCurso ? 'Restaurando...' : 'Restaurar potrero'}
+          </button>
+        )}
+      </div>
+
+      {mostrarArchivar ? (
+        <div className="gan-stack">
+          <StatusMessage type="info">El potrero dejará de aparecer entre los activos. Su historial se conservará.</StatusMessage>
+          <FormField label="Motivo" required>
+            <input type="text" value={motivoArchivar} onChange={(event) => setMotivoArchivar(event.target.value)} />
+          </FormField>
+          <StatusMessage type="error">{archivoError}</StatusMessage>
+          <div className="gan-potrero-actions">
+            <button type="button" className="gan-secondary-button" onClick={handleConfirmarArchivar} disabled={archivoEnCurso}>
+              {archivoEnCurso ? 'Eliminando...' : 'Confirmar'}
+            </button>
+            <button type="button" className="gan-back-inline" onClick={() => setMostrarArchivar(false)} disabled={archivoEnCurso}>
+              Volver
+            </button>
+          </div>
+        </div>
+      ) : null}
+      <StatusMessage type="error">{!mostrarArchivar ? archivoError : ''}</StatusMessage>
+
+      {openFichaPotreroId === potrero.potreroId ? (
+        <PotreroFichaProductivaPanel
+          predioId={predioId}
+          potreroId={potrero.potreroId}
+          areaHa={potrero.areaHa}
+        />
+      ) : null}
+
+      {openAgroClimaPotreroId === potrero.potreroId ? (
+        <PotreroAgroClimaPanel predioId={predioId} potreroId={potrero.potreroId} />
+      ) : null}
     </div>
   );
 }

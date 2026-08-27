@@ -67,9 +67,27 @@ test('los tres botones de acción existen: Iniciar pastoreo / Finalizar pastoreo
   assert.match(panelSource, /Cancelar/);
 });
 
-test('NO existe ningún selector de fecha en el panel -- el cliente nunca aporta fechaIngresoReal/fechaSalidaReal', () => {
-  assert.doesNotMatch(panelSource, /type="date"/);
-  assert.doesNotMatch(panelSource, /fechaIngresoReal:\s*[a-zA-Z]/);
+test('Iniciar/Ajustar lote NUNCA piden una fecha -- fechaIngresoReal se resuelve server-side (la corrección SÍ puede leerla, para precargar el formulario, ver test dedicado más abajo)', () => {
+  const bloqueIniciar = panelSource.match(/async function handleIniciar\(\)[\s\S]*?\n  \}/)?.[0] ?? '';
+  const bloqueAjuste = panelSource.match(/async function handleConfirmarIniciarConAjuste\(\)[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.notEqual(bloqueIniciar, '');
+  assert.notEqual(bloqueAjuste, '');
+  assert.doesNotMatch(bloqueIniciar, /fechaIngresoReal/);
+  assert.doesNotMatch(bloqueAjuste, /fechaIngresoReal/);
+});
+
+// SPRINT-3D9.2: "Corregir información" SÍ introduce selectores de fecha
+// -- deliberado, distinto de "Iniciar" (que nunca los tuvo ni los tiene).
+// Corregir es una corrección explícita y motivada de un hecho YA
+// ocurrido (el usuario dice qué fecha fue realmente), nunca un input de
+// "cuándo entra hoy". Se verifica que los ÚNICOS `type="date"` del
+// archivo vivan dentro del bloque de corrección.
+test('SPRINT-3D9.2: los únicos selectores de fecha del panel viven dentro del formulario de "Corregir información" -- nunca en Iniciar/Ajustar lote', () => {
+  const ocurrencias = panelSource.match(/type="date"/g) || [];
+  assert.equal(ocurrencias.length, 2, 'exactamente 2: fecha de ingreso real y fecha de salida real, ambas en el formulario de corrección');
+  const bloqueCorregir = panelSource.match(/accionTipo === 'corregir' \? \([\s\S]*?\)\s*: null/)?.[0] ?? '';
+  const dateEnCorregir = (bloqueCorregir.match(/type="date"/g) || []).length;
+  assert.equal(dateEnCorregir, 2, 'los 2 selectores de fecha deben estar DENTRO del bloque de corrección');
 });
 
 test('el cliente de API nunca envía fechaIngresoReal/fechaSalidaReal/organizacionId (campos derivados server-side)', () => {
@@ -240,4 +258,80 @@ test('re-iniciar otro ciclo arranca siempre del plan vigente: handleAbrirAjuste 
   assert.doesNotMatch(bloque, /setAjusteNumeroAnimales\([^)]*ajusteNumeroAnimales/);
   assert.doesNotMatch(bloque, /setAjustePesoPromedioKg\([^)]*ajustePesoPromedioKg/);
   assert.doesNotMatch(bloque, /setAjusteCategoriaCodigo\([^)]*ajusteCategoriaCodigo/);
+});
+
+// ---------------------------------------------------------------------
+// SPRINT-3D9.2: reentry guard visible -- el backend es la autoridad
+// (ya cubierto en el repositorio), el panel solo REFLEJA el estado
+// operativo derivado, nunca decide por su cuenta.
+// ---------------------------------------------------------------------
+
+test('el panel consulta getEstadoOperativoPotrero junto con getCicloActual en la misma carga', () => {
+  assert.match(apiSource, /export function getEstadoOperativoPotrero/);
+  const bloque = panelSource.match(/function loadActual\(\)[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(bloque, /getEstadoOperativoPotrero\(predioId, potreroId\)/);
+});
+
+test('"Iniciar pastoreo" (modo simple) solo se renderiza cuando el estado NO es ARCHIVADO/EN_DESCANSO/EVALUACION_REINGRESO', () => {
+  assert.match(panelSource, /!actual && !bloqueadoPorArchivo && !enDescanso && !enEvaluacion/);
+});
+
+test('en EN_DESCANSO/EVALUACION_REINGRESO se muestra la ventana completa (mínima/recomendada/máxima), nunca solo una fecha suelta', () => {
+  assert.match(panelSource, /Ventana mínima de reingreso/);
+  assert.match(panelSource, /Ventana recomendada/);
+  assert.match(panelSource, /Ventana máxima/);
+});
+
+test('evaluar reingreso: NUNCA se decide automáticamente -- requiere un aforo con fecha posterior a fecha_reingreso_min, verificado en el cliente antes de ofrecer los botones', () => {
+  const bloque = panelSource.match(/\{!actual && enEvaluacion \? \([\s\S]*?\n      \) : null\}/)?.[0] ?? '';
+  assert.notEqual(bloque, '');
+  assert.match(bloque, /fichaEvaluacion\.fechaAforo >= ventana\.fechaReingresoMin/);
+  assert.match(bloque, /Registra un aforo nuevo/);
+});
+
+test('evaluar reingreso: NO_APTO exige observación (confirmación en dos pasos), APTO no la exige', () => {
+  const bloque = panelSource.match(/async function handleEvaluar\(resultado\)[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(bloque, /mostrarObservacionNoApto/);
+  assert.match(bloque, /INVALID_OBSERVACION_EVALUACION/);
+});
+
+// ---------------------------------------------------------------------
+// SPRINT-3D9.2: historial -- Anular/Corregir, nunca eliminación
+// definitiva de historia.
+// ---------------------------------------------------------------------
+
+test('historial: "Anular registro" está disponible para FINALIZADO/CANCELADO, nunca para ANULADO (ya terminal)', () => {
+  assert.match(panelSource, /ciclo\.estado !== 'ANULADO' && accionCicloId !== ciclo\.cicloId/);
+  assert.match(panelSource, /Anular registro/);
+});
+
+test('historial: "Corregir información" solo se ofrece sobre ciclos FINALIZADO', () => {
+  const bloque = panelSource.match(/\{ciclo\.estado === 'FINALIZADO' \? \([\s\S]*?\) : null\}/)?.[0] ?? '';
+  assert.match(bloque, /Corregir información/);
+});
+
+test('anular exige motivo -- el botón de confirmación llama anularCicloPastoreo con el motivo escrito', () => {
+  assert.match(apiSource, /export function anularCicloPastoreo/);
+  const bloque = panelSource.match(/async function handleConfirmarAnular\(\)[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(bloque, /INVALID_MOTIVO_ANULACION/);
+  assert.match(bloque, /anularCicloPastoreo\(predioId, potreroId, accionCicloId, motivoAccion\.trim\(\)\)/);
+});
+
+test('corregir exige motivo Y al menos un cambio -- nunca envía un objeto de cambios vacío', () => {
+  const bloque = panelSource.match(/async function handleConfirmarCorregir\(\)[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(bloque, /INVALID_MOTIVO_CORRECCION/);
+  assert.match(bloque, /SIN_CAMBIOS_SOLICITADOS/);
+  assert.match(bloque, /Object\.keys\(cambios\)\.length === 0/);
+});
+
+test('corregir precarga los valores ACTUALES del ciclo -- el usuario solo edita lo que estaba mal, nunca reescribe todo a ciegas', () => {
+  const bloque = panelSource.match(/function handleAbrirCorregir\(ciclo\)[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(bloque, /fechaIngresoReal: ciclo\.fechaIngresoReal/);
+  assert.match(bloque, /fechaSalidaReal: ciclo\.fechaSalidaReal/);
+  assert.match(bloque, /numeroAnimales: String\(ciclo\.numeroAnimalesReal/);
+  assert.match(bloque, /pesoPromedioKg: String\(ciclo\.pesoPromedioRealKg/);
+});
+
+test('el panel nunca muestra "Eliminar" como acción sobre historia operacional -- solo Anular/Corregir/Cancelar', () => {
+  assert.doesNotMatch(panelSource, />\s*Eliminar\s*</i);
 });

@@ -144,6 +144,36 @@ describe('SPRINT-3C1-MIS-PREDIOS-API: prediosRepository contra Postgres-AGX-Busi
     await adminPool.query('delete from agx.predios where predio_id = $1', [predioId]);
   });
 
+  // SPRINT-3D9.2 (PRE-COMMIT FINAL ROUND, punto 3): por defecto el
+  // listado excluye ARCHIVADO; incluirArchivados=true los incluye.
+  test('SPRINT-3D9.2: listPredios excluye ARCHIVADO por defecto; incluirArchivados=true los incluye', async () => {
+    const org = randomOrgId();
+    const predioActivo = predioFixture({ nombrePredio: 'Finca Sprint3D92 activa' });
+    const predioArchivado = predioFixture({ nombrePredio: 'Finca Sprint3D92 archivada' });
+
+    const activoId = await repo.createCatastroxPredio(org, {
+      nombreFinal: predioActivo.nombrePredio, predio: predioActivo, geometryJson: JSON.stringify(predioActivo.geometry),
+    });
+    const archivadoId = await repo.createCatastroxPredio(org, {
+      nombreFinal: predioArchivado.nombrePredio, predio: predioArchivado, geometryJson: JSON.stringify(predioArchivado.geometry),
+    });
+    await adminPool.query(
+      `update agx.predios set estado = 'ARCHIVADO', archivado_at = now(), motivo_archivado = 'test' where predio_id = $1`,
+      [archivadoId],
+    );
+
+    const soloActivos = await repo.listPredios(org);
+    assert.equal(soloActivos.length, 1);
+    assert.equal(String(soloActivos[0].predio_id), String(activoId));
+
+    const todos = await repo.listPredios(org, { incluirArchivados: true });
+    assert.equal(todos.length, 2);
+    assert.ok(todos.some((r) => String(r.predio_id) === String(archivadoId) && r.estado === 'ARCHIVADO'));
+
+    await adminPool.query('delete from agx.predio_snapshots_catastrales where predio_id = any($1)', [[activoId, archivadoId]]);
+    await adminPool.query('delete from agx.predios where predio_id = any($1)', [[activoId, archivadoId]]);
+  });
+
   test('§22 C: ORG B pide el detalle de un predio de ORG A -> null (equivalente a 404, nunca revela que existe)', async () => {
     const orgA = randomOrgId();
     const orgB = randomOrgId();

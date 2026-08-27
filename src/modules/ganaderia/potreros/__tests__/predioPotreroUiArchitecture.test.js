@@ -73,12 +73,13 @@ test('Y: activePanel (registrar/ver) es state LOCAL de cada PredioCard -- no viv
 // ---------------------------------------------------------------------
 
 test('E: PotrerosByPredioPanel.jsx consulta GET /api/ganaderia/predios/:predioId/potreros (subordinado, nunca /api/potreros plano)', () => {
-  assert.match(apiCode, /export function listPotrerosByPredio\(predioId\) \{\s*return getJson\(`\/api\/ganaderia\/predios\/\$\{predioId\}\/potreros`\);/);
-  assert.match(listPanelCode, /listPotrerosByPredio\(predioId\)/);
+  assert.match(apiCode, /export function listPotrerosByPredio\(predioId, \{ incluirArchivados = false \} = \{\}\) \{/);
+  assert.match(apiCode, /getJson\(`\/api\/ganaderia\/predios\/\$\{predioId\}\/potreros\$\{query\}`\)/);
+  assert.match(listPanelCode, /listPotrerosByPredio\(predioId, \{ incluirArchivados: mostrarArchivados \}\)/);
 });
 
 test('F: el useEffect de PotrerosByPredioPanel refetch al cambiar predioId (predioId es parte de la dependencia) -- nunca mezcla potreros entre predios', () => {
-  assert.match(listPanelCode, /useEffect\(\(\) => \{[\s\S]*?\n {2}\}, \[predioId, refreshKey\]\);/);
+  assert.match(listPanelCode, /useEffect\(\(\) => \{[\s\S]*?\n {2}\}, \[predioId, refreshKey, mostrarArchivados, internalRefreshKey\]\);/);
 });
 
 // ---------------------------------------------------------------------
@@ -311,7 +312,7 @@ test('R.5: PotrerosByPredioPanel recibe refreshKey={potrerosRefreshKey} desde la
 });
 
 test('R.6: el useEffect de PotrerosByPredioPanel que hace el GET depende explícitamente de [predioId, refreshKey] -- el refetch NO depende únicamente de que predioId cambie ni de que el componente se desmonte/remonte', () => {
-  assert.match(listPanelCode, /useEffect\(\(\) => \{[\s\S]*?\n {2}\}, \[predioId, refreshKey\]\);/);
+  assert.match(listPanelCode, /useEffect\(\(\) => \{[\s\S]*?\n {2}\}, \[predioId, refreshKey, mostrarArchivados, internalRefreshKey\]\);/);
 });
 
 test('R.7: setPotreros SOLO recibe el resultado del GET real (data.potreros) -- nunca un spread/insert optimista sobre el state previo ni sobre el body enviado al crear', () => {
@@ -506,5 +507,83 @@ test('Regla crítica del sprint: PotreroRegistrationPanel/GanaderiaPotreroPrevie
     assert.doesNotMatch(code, /\bbuffer\(/i);
     assert.doesNotMatch(code, /\bsnap\(/i);
     assert.doesNotMatch(code, /ST_(Buffer|Snap|Clip|Intersection|MakeValid|Union|Difference)/);
+  }
+});
+
+// ---------------------------------------------------------------------
+// SPRINT-3D9.2 (PRE-COMMIT FINAL ROUND, punto 2/3/4): archivar/restaurar
+// potrero -- reemplaza el hard DELETE (nunca existió). "Eliminar potrero"
+// archiva (motivo obligatorio); "Restaurar potrero" reactiva y maneja
+// explícitamente el 409 PREDIO_ARCHIVADO (predio padre aún archivado).
+// Listado por defecto solo ACTIVO, con "Ver archivados" como único
+// punto de acceso explícito.
+// ---------------------------------------------------------------------
+
+function extractPotreroCardFn() {
+  // Greedy (no "?") a propósito: la firma de PotreroCard desestructura
+  // props en múltiples líneas (`}) {` cierra esa desestructuración antes
+  // del cuerpo real) -- un match no-greedy se detendría ahí. PotreroCard
+  // es la última función del archivo, así que greedy captura hasta el
+  // cierre real de la función (fin de archivo), sin sobrepasarlo.
+  return listPanelCode.match(/function PotreroCard\([\s\S]*\n\}/)?.[0] ?? '';
+}
+
+test('PotreroCard: "Eliminar potrero" solo se muestra cuando el potrero NO está archivado; "Restaurar potrero" solo cuando SÍ lo está', () => {
+  const fn = extractPotreroCardFn();
+  assert.notEqual(fn, '');
+  assert.match(fn, /const archivado = potrero\.estado === 'ARCHIVADO';/);
+  assert.match(fn, /\{!archivado \? \(/);
+  assert.match(fn, /Eliminar potrero/);
+  assert.match(fn, /\) : \(/);
+  assert.match(fn, /Restaurar potrero/);
+});
+
+test('PotreroCard: archivar exige motivo no vacío antes de llamar al endpoint', () => {
+  const fn = extractPotreroCardFn();
+  const handler = fn.match(/async function handleConfirmarArchivar\(\)\s*\{[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(handler, /if \(motivoArchivar\.trim\(\) === ''\)/);
+  assert.match(handler, /setArchivoError\('Escribe el motivo\.'\)/);
+  assert.match(handler, /return;/);
+});
+
+test('PotreroCard: archivar/restaurar usan archivarPotrero/restaurarPotrero de ganaderiaPotrerosApi.js (endpoints POST .../archivar y .../restaurar ya probados server-side)', () => {
+  const fn = extractPotreroCardFn();
+  assert.match(fn, /archivarPotrero\(predioId, potrero\.potreroId, motivoArchivar\.trim\(\)\)/);
+  assert.match(fn, /restaurarPotrero\(predioId, potrero\.potreroId\)/);
+  assert.match(apiCode, /export function archivarPotrero\(predioId, potreroId, motivo\) \{\s*return postJson\(`\/api\/ganaderia\/predios\/\$\{predioId\}\/potreros\/\$\{potreroId\}\/archivar`, \{ motivo \}\);/);
+  assert.match(apiCode, /export function restaurarPotrero\(predioId, potreroId\) \{\s*return postJson\(`\/api\/ganaderia\/predios\/\$\{predioId\}\/potreros\/\$\{potreroId\}\/restaurar`, \{\}\);/);
+});
+
+test('PotreroCard: restaurarPotrero maneja explícitamente el 409 PREDIO_ARCHIVADO -- mensaje claro, nunca un error genérico ni un código expuesto sin traducir', () => {
+  const fn = extractPotreroCardFn();
+  const handler = fn.match(/async function handleRestaurar\(\)\s*\{[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(handler, /data\?\.error === 'PREDIO_ARCHIVADO'/);
+  assert.match(handler, /No se puede restaurar: el predio de este potrero sigue archivado/);
+});
+
+test('PotreroCard: tras archivar/restaurar exitoso invoca onArchivoChanged() -- refetch real, nunca insert optimista', () => {
+  const fn = extractPotreroCardFn();
+  const archivarFn = fn.match(/async function handleConfirmarArchivar\(\)\s*\{[\s\S]*?\n  \}/)?.[0] ?? '';
+  const restaurarFn = fn.match(/async function handleRestaurar\(\)\s*\{[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(archivarFn, /onArchivoChanged\?\.\(\);/);
+  assert.match(restaurarFn, /onArchivoChanged\?\.\(\);/);
+});
+
+test('PotrosByPredioPanel: "Ver archivados" es el único punto de acceso explícito para ver potreros ARCHIVADO -- alterna mostrarArchivados, dispara refetch vía el useEffect', () => {
+  assert.match(listPanelCode, /const \[mostrarArchivados, setMostrarArchivados\] = useState\(false\)/);
+  assert.match(listPanelCode, /setMostrarArchivados\(\(current\) => !current\)/);
+  assert.match(listPanelCode, /\{mostrarArchivados \? 'Ver activos' : 'Ver archivados'\}/);
+});
+
+test('PotrerosByPredioPanel: el botón "Ver archivados" se renderiza en TODOS los estados (loading/error/vacío/lista) -- el usuario puede alternar incluso si la vista activa está vacía', () => {
+  assert.match(listPanelCode, /const toggleArchivadosButton = \(/);
+  const occurrences = (listPanelCode.match(/\{toggleArchivadosButton\}/g) || []).length;
+  assert.equal(occurrences, 4, `se esperaban 4 usos de toggleArchivadosButton (loading/error/vacío/lista), se encontraron ${occurrences}`);
+});
+
+test('Ninguno de los archivos de Potreros/Predios declara o llama un hard DELETE (sin fetch method DELETE, sin ruta /eliminar-definitivamente)', () => {
+  for (const code of [apiCode, listPanelCode, prediosPageCode]) {
+    assert.doesNotMatch(code, /method:\s*'DELETE'/);
+    assert.doesNotMatch(code, /eliminar-definitivamente/i);
   }
 });

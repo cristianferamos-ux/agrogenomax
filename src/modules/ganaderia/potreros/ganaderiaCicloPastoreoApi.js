@@ -57,3 +57,23 @@ export function finalizarCicloPastoreo(predioId, potreroId, cicloId) {
 export function cancelarCicloPastoreo(predioId, potreroId, cicloId, motivo) {
   return postJson(`${base(predioId, potreroId)}/${cicloId}/cancelar`, { motivo });
 }
+
+// SPRINT-3D9.2
+export function getEstadoOperativoPotrero(predioId, potreroId) {
+  return getJson(`${base(predioId, potreroId)}/estado-operativo`);
+}
+
+export function anularCicloPastoreo(predioId, potreroId, cicloId, motivo) {
+  return postJson(`${base(predioId, potreroId)}/${cicloId}/anular`, { motivo });
+}
+
+// `cambios` es el objeto de campos a corregir (fechaIngresoReal/
+// fechaSalidaReal/categoriaCodigo/numeroAnimales/pesoPromedioKg) -- solo
+// se envían los que el usuario efectivamente editó.
+export function corregirCicloPastoreo(predioId, potreroId, cicloId, cambios, motivo) {
+  return postJson(`${base(predioId, potreroId)}/${cicloId}/corregir`, { ...cambios, motivo });
+}
+
+export function evaluarReingreso(predioId, potreroId, { fichaId, resultado, observacion }) {
+  return postJson(`${base(predioId, potreroId)}/evaluar-reingreso`, { fichaId, resultado, observacion });
+}

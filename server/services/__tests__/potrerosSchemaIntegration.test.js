@@ -335,14 +335,17 @@ describe('SPRINT-3D2: agx.potreros contra Postgres-AGX-Business real', { skip: !
   // -----------------------------------------------------------------
   // Q/R: grants.
   // -----------------------------------------------------------------
-  test('Q: grants mínimos de agx_app -- SELECT/INSERT/UPDATE/DELETE, nada más', async () => {
+  // SPRINT-3D9.2: DELETE fue revocado explícitamente (0010) -- el hard
+  // DELETE nunca tuvo un endpoint que lo usara, y quedó reemplazado por
+  // el archivado reversible (ARCHIVE_ONLY, ver potreroArchivoRepository.js).
+  test('Q: grants mínimos de agx_app -- SELECT/INSERT/UPDATE, NUNCA DELETE (revocado en 3D9.2)', async () => {
     const result = await adminPool.query(
       `select privilege_type from information_schema.role_table_grants
        where table_schema = 'agx' and table_name = 'potreros' and grantee = 'agx_app'
        order by privilege_type`,
     );
     const privileges = result.rows.map((r) => r.privilege_type).sort();
-    assert.deepEqual(privileges, ['DELETE', 'INSERT', 'SELECT', 'UPDATE']);
+    assert.deepEqual(privileges, ['INSERT', 'SELECT', 'UPDATE']);
   });
 
   test('R: agx_app puede usar la sequence del bigserial', async () => {

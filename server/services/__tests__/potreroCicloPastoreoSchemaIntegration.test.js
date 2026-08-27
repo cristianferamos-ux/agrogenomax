@@ -116,14 +116,20 @@ describe('SPRINT-3D9.1: esquema real -- agx.potrero_ciclos_pastoreo / agx.potrer
     }
   });
 
-  test('grants: agx_app tiene SELECT/INSERT en potrero_ciclos_pastoreo, UPDATE SOLO en estado/fecha_salida_real/motivo_cancelacion, NUNCA DELETE', async () => {
+  test('grants: agx_app tiene SELECT/INSERT en potrero_ciclos_pastoreo, UPDATE SOLO en las columnas explícitamente ampliadas por 3D9.2, NUNCA DELETE', async () => {
     const result = await adminPool.query(
       `select privilege_type, column_name from information_schema.column_privileges
         where table_schema='agx' and table_name='potrero_ciclos_pastoreo' and grantee='agx_app' and privilege_type='UPDATE'
         order by column_name`,
     );
     const columnasConUpdate = result.rows.map((r) => r.column_name).sort();
-    assert.deepEqual(columnasConUpdate, ['estado', 'fecha_salida_real', 'motivo_cancelacion']);
+    // SPRINT-3D9.2: amplía el grant original (estado/fecha_salida_real/
+    // motivo_cancelacion) con las columnas de "corregir ciclo" -- cada una
+    // justificada individualmente (ver 0011_potrero_ciclo_anulacion_correccion.sql).
+    assert.deepEqual(columnasConUpdate, [
+      'categoria_id', 'estado', 'fecha_ingreso_real', 'fecha_salida_real',
+      'motivo_anulacion', 'motivo_cancelacion', 'numero_animales_real', 'peso_promedio_real_kg',
+    ]);
 
     const tablePriv = await adminPool.query(
       `select privilege_type from information_schema.table_privileges
@@ -265,7 +271,7 @@ describe('SPRINT-3D9.1: esquema real -- agx.potrero_ciclos_pastoreo / agx.potrer
     );
   });
 
-  test('GUARDRAIL 2: idempotencia estructural -- máximo UN descanso con el mismo ciclo_pastoreo_id', async () => {
+  test('GUARDRAIL 2: idempotencia estructural -- máximo UN descanso por (ciclo_pastoreo_id, version) -- SPRINT-3D9.2 ver potreroArchivoAnulacionVersionSchemaIntegration.test.js para el versionado completo', async () => {
     const org = randomOrgId();
     const predioId = await seedPredio(org, 'Predio Sprint3D9S GR2');
     const potreroId = await seedPotrero(org, predioId, 'Potrero Sprint3D9S GR2');
@@ -291,7 +297,7 @@ describe('SPRINT-3D9.1: esquema real -- agx.potrero_ciclos_pastoreo / agx.potrer
     await insertDescanso('descanso-v1-a');
     await assert.rejects(
       () => insertDescanso('descanso-v1-b'),
-      (error) => error.code === '23505' && /potrero_recomendaciones_descanso_un_ciclo_idx/.test(error.message),
+      (error) => error.code === '23505' && /potrero_recomendaciones_descanso_un_ciclo_version_idx/.test(error.message),
     );
   });
 });

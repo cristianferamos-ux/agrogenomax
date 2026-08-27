@@ -24,16 +24,16 @@ const codeOnly = stripComments(source);
 // 1. GET al montar
 // ---------------------------------------------------------------------
 
-test('PrediosPage.jsx: useEffect con deps [] llama a reloadRegisteredPredios al montar', () => {
+test('PrediosPage.jsx: useEffect llama a reloadRegisteredPredios al montar (y cuando cambia el toggle "Ver archivados", SPRINT-3D9.2)', () => {
   assert.match(
     codeOnly,
-    /useEffect\(\(\) => \{\s*reloadRegisteredPredios\(\);\s*\}, \[\]\);/,
+    /useEffect\(\(\) => \{\s*reloadRegisteredPredios\(\);\s*\}, \[mostrarArchivadosPredios\]\);/,
   );
 });
 
 test('fetchRegisteredPrediosList: hace GET a /api/ganaderia/predios con credentials include, nunca al router legacy /api/predios', () => {
-  const fn = codeOnly.match(/async function fetchRegisteredPrediosList\(\)\s*\{[\s\S]*?\n\}/)?.[0] ?? '';
-  assert.match(fn, /fetch\('\/api\/ganaderia\/predios',\s*\{\s*credentials:\s*'include'\s*\}\)/);
+  const fn = codeOnly.match(/async function fetchRegisteredPrediosList\([\s\S]*?\n\}/)?.[0] ?? '';
+  assert.match(fn, /fetch\(`\/api\/ganaderia\/predios\$\{query\}`,\s*\{\s*credentials:\s*'include'\s*\}\)/);
 });
 
 // ---------------------------------------------------------------------
