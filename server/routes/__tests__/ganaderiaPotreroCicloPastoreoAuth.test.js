@@ -92,6 +92,23 @@ describe('SPRINT-3D9.1: ciclos-pastoreo exige sesión con organización', () => 
     await assertAnonymousRejected('POST', '/101/potreros/5/ciclos-pastoreo/1/cancelar', { motivo: 'x' });
   });
 
+  // SPRINT-3D9.2
+  test('POST .../ciclos-pastoreo/:cicloId/anular sin sesión -> 401', async () => {
+    await assertAnonymousRejected('POST', '/101/potreros/5/ciclos-pastoreo/1/anular', { motivo: 'x' });
+  });
+
+  test('POST .../ciclos-pastoreo/:cicloId/corregir sin sesión -> 401', async () => {
+    await assertAnonymousRejected('POST', '/101/potreros/5/ciclos-pastoreo/1/corregir', { motivo: 'x', numeroAnimales: 10 });
+  });
+
+  test('POST .../ciclos-pastoreo/evaluar-reingreso sin sesión -> 401', async () => {
+    await assertAnonymousRejected('POST', '/101/potreros/5/ciclos-pastoreo/evaluar-reingreso', { fichaId: '9', resultado: 'APTO' });
+  });
+
+  test('GET .../ciclos-pastoreo/estado-operativo sin sesión -> 401', async () => {
+    await assertAnonymousRejected('GET', '/101/potreros/5/ciclos-pastoreo/estado-operativo');
+  });
+
   test('nunca toca Postgres-AGX-Business en una solicitud anónima', async () => {
     const ctx = await startApp();
     try {

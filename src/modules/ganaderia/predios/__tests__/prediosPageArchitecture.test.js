@@ -389,3 +389,69 @@ test('SearchScreen: "Buscar predio" sigue siendo un submit explícito -- la bús
   assert.doesNotMatch(fn, /geoStatus[\s\S]{0,40}onSubmit\(/);
   assert.match(fn, /\{searching \? 'Buscando\.\.\.' : 'Buscar predio'\}/);
 });
+
+// ---------------------------------------------------------------------
+// SPRINT-3D9.2 (PRE-COMMIT FINAL ROUND, punto 2/3/4): archivar/restaurar
+// predio -- reemplaza el hard DELETE (nunca existió). "Eliminar predio"
+// archiva (motivo obligatorio); "Restaurar" reactiva. Listado por defecto
+// solo ACTIVO, con un punto de acceso explícito "Ver archivados".
+// ---------------------------------------------------------------------
+
+function extractPredioCardFn() {
+  return source.match(/function PredioCard\([\s\S]*?\n\}/)?.[0] ?? '';
+}
+
+test('PredioCard: "Eliminar predio" solo se muestra cuando el predio NO está archivado; "Restaurar" solo cuando SÍ lo está', () => {
+  const fn = extractPredioCardFn();
+  assert.match(fn, /const archivado = predio\.estado === 'ARCHIVADO';/);
+  assert.match(fn, /\{!archivado \? \(/);
+  assert.match(fn, /Eliminar predio/);
+  assert.match(fn, /\) : \(/);
+  assert.match(fn, /Restaurar/);
+});
+
+test('PredioCard: archivar exige motivo no vacío antes de llamar al endpoint (nunca se archiva con motivo vacío)', () => {
+  const fn = extractPredioCardFn();
+  const handler = fn.match(/async function handleConfirmarArchivar\(\)\s*\{[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(handler, /if \(motivoArchivar\.trim\(\) === ''\)/);
+  assert.match(handler, /setArchivoError\('Escribe el motivo\.'\)/);
+  assert.match(handler, /return;/);
+});
+
+test('PredioCard: archivar llama POST /api/ganaderia/predios/:predioId/archivar; restaurar llama POST .../restaurar', () => {
+  const fn = extractPredioCardFn();
+  assert.match(fn, /postGanaderiaPredios\(`\/api\/ganaderia\/predios\/\$\{predio\.predioId\}\/archivar`, \{ motivo: motivoArchivar\.trim\(\) \}\)/);
+  assert.match(fn, /postGanaderiaPredios\(`\/api\/ganaderia\/predios\/\$\{predio\.predioId\}\/restaurar`, \{\}\)/);
+});
+
+test('PredioCard: tras archivar/restaurar exitoso invoca onArchivoChanged() -- el refetch real, nunca un insert optimista local', () => {
+  const fn = extractPredioCardFn();
+  const archivarFn = fn.match(/async function handleConfirmarArchivar\(\)\s*\{[\s\S]*?\n  \}/)?.[0] ?? '';
+  const restaurarFn = fn.match(/async function handleRestaurar\(\)\s*\{[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(archivarFn, /onArchivoChanged\?\.\(\);/);
+  assert.match(restaurarFn, /onArchivoChanged\?\.\(\);/);
+});
+
+test('PredioCard: restaurar nunca requiere motivo (body vacío {}) -- solo archivar lo exige', () => {
+  const fn = extractPredioCardFn();
+  const restaurarFn = fn.match(/async function handleRestaurar\(\)\s*\{[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.doesNotMatch(restaurarFn, /motivo/);
+});
+
+test('PrediosPage.jsx nunca declara ni llama un hard DELETE para predios (sin fetch method DELETE, sin /eliminar-definitivamente)', () => {
+  assert.doesNotMatch(codeOnly, /method:\s*'DELETE'/);
+  assert.doesNotMatch(codeOnly, /eliminar-definitivamente/i);
+});
+
+test('PrediosPage: "Ver archivados" es el único punto de acceso explícito para ver predios ARCHIVADO -- alterna mostrarArchivadosPredios y lo pasa a fetchRegisteredPrediosList', () => {
+  assert.match(codeOnly, /const \[mostrarArchivadosPredios, setMostrarArchivadosPredios\] = useState\(false\)/);
+  assert.match(codeOnly, /fetchRegisteredPrediosList\(mostrarArchivadosPredios\)/);
+  assert.match(codeOnly, /setMostrarArchivadosPredios\(\(current\) => !current\)/);
+  assert.match(codeOnly, /\{mostrarArchivadosPredios \? 'Ver activos' : 'Ver archivados'\}/);
+});
+
+test('fetchRegisteredPrediosList: incluirArchivados=true agrega ?incluirArchivados=true al GET; por defecto (false) no agrega query (backend ya filtra a ACTIVO)', () => {
+  const fn = codeOnly.match(/async function fetchRegisteredPrediosList\([\s\S]*?\n\}/)?.[0] ?? '';
+  assert.match(fn, /const query = incluirArchivados \? '\?incluirArchivados=true' : '';/);
+  assert.match(fn, /fetch\(`\/api\/ganaderia\/predios\$\{query\}`/);
+});

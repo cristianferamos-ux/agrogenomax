@@ -101,8 +101,12 @@ function buildMapPredio(predio) {
 
 // §2 del sprint 3C4: GET simple, sin CSRF (no es mutación) --
 // credentials:'include' para que la sesión viaje igual que en los POST.
-async function fetchRegisteredPrediosList() {
-  const response = await fetch('/api/ganaderia/predios', { credentials: 'include' });
+// SPRINT-3D9.2 (PRE-COMMIT FINAL ROUND, punto 3): incluirArchivados=true
+// es el único opt-in explícito -- sin él, el backend ya filtra a
+// estado=ACTIVO (prediosRepository.js).
+async function fetchRegisteredPrediosList(incluirArchivados = false) {
+  const query = incluirArchivados ? '?incluirArchivados=true' : '';
+  const response = await fetch(`/api/ganaderia/predios${query}`, { credentials: 'include' });
   if (!response.ok) throw new Error('LIST_FAILED');
   const data = await response.json();
   return Array.isArray(data?.predios) ? data.predios : [];
@@ -144,12 +148,15 @@ export default function PrediosPage() {
   const [registeredPredios, setRegisteredPredios] = useState([]);
   const [prediosListLoading, setPrediosListLoading] = useState(true);
   const [prediosListError, setPrediosListError] = useState('');
+  // SPRINT-3D9.2: "Ver archivados" -- único punto de acceso explícito para
+  // ver predios ARCHIVADO; la vista normal (false) siempre queda activa.
+  const [mostrarArchivadosPredios, setMostrarArchivadosPredios] = useState(false);
 
   async function reloadRegisteredPredios() {
     setPrediosListLoading(true);
     setPrediosListError('');
     try {
-      const predios = await fetchRegisteredPrediosList();
+      const predios = await fetchRegisteredPrediosList(mostrarArchivadosPredios);
       setRegisteredPredios(predios);
     } catch {
       setPrediosListError(LIST_ERROR_MESSAGE);
@@ -160,7 +167,7 @@ export default function PrediosPage() {
 
   useEffect(() => {
     reloadRegisteredPredios();
-  }, []);
+  }, [mostrarArchivadosPredios]);
 
   // 'search' | 'manual' | 'result' | 'saved'
   const [screen, setScreen] = useState('search');
@@ -415,12 +422,20 @@ export default function PrediosPage() {
         <div className="gan-section-heading">
           <span className="gan-eyebrow">Predios</span>
           <h2>Mis predios registrados</h2>
+          <button
+            type="button"
+            className="gan-back-inline"
+            onClick={() => setMostrarArchivadosPredios((current) => !current)}
+          >
+            {mostrarArchivadosPredios ? 'Ver activos' : 'Ver archivados'}
+          </button>
         </div>
 
         <MisPrediosSection
           loading={prediosListLoading}
           error={prediosListError}
           predios={registeredPredios}
+          onArchivoChanged={reloadRegisteredPredios}
         />
       </div>
 
@@ -504,7 +519,7 @@ export default function PrediosPage() {
 // card usa EXCLUSIVAMENTE campos que el GET realmente entrega -- nunca
 // predioId, organizacionId ni geometry cruda como texto.
 // ---------------------------------------------------------------------
-function MisPrediosSection({ loading, error, predios }) {
+function MisPrediosSection({ loading, error, predios, onArchivoChanged }) {
   if (loading) {
     return <StatusMessage>Cargando tus predios registrados...</StatusMessage>;
   }
@@ -520,7 +535,7 @@ function MisPrediosSection({ loading, error, predios }) {
   return (
     <div className="gan-card-grid gan-predios-grid">
       {predios.map((item) => (
-        <PredioCard key={item.predioId} predio={item} />
+        <PredioCard key={item.predioId} predio={item} onArchivoChanged={onArchivoChanged} />
       ))}
     </div>
   );
@@ -535,10 +550,52 @@ function MisPrediosSection({ loading, error, predios }) {
 // SPRINT-3D4 §2/§3: cada card fija su propio predioId -- "Registrar
 // potrero"/"Ver potreros" actúan EXCLUSIVAMENTE sobre el predio de ESTA
 // card (nunca un selector global, nunca estado compartido entre cards).
-function PredioCard({ predio }) {
+function PredioCard({ predio, onArchivoChanged }) {
   // null | 'registrar' | 'ver' -- expansión inline dentro de la MISMA
   // tarjeta, nunca una lista plana que mezcle potreros de otros predios.
   const [activePanel, setActivePanel] = useState(null);
+
+  // SPRINT-3D9.2: archivar/restaurar -- reemplaza el hard DELETE (nunca
+  // existió un botón "Eliminar definitivamente" para un predio). "Eliminar
+  // predio" en la UI internamente ARCHIVA -- el historial se conserva.
+  const [mostrarArchivar, setMostrarArchivar] = useState(false);
+  const [motivoArchivar, setMotivoArchivar] = useState('');
+  const [archivoEnCurso, setArchivoEnCurso] = useState(false);
+  const [archivoError, setArchivoError] = useState('');
+  const archivado = predio.estado === 'ARCHIVADO';
+
+  async function handleConfirmarArchivar() {
+    if (archivoEnCurso) return;
+    if (motivoArchivar.trim() === '') {
+      setArchivoError('Escribe el motivo.');
+      return;
+    }
+    setArchivoEnCurso(true);
+    setArchivoError('');
+    const { ok, data } = await postGanaderiaPredios(`/api/ganaderia/predios/${predio.predioId}/archivar`, { motivo: motivoArchivar.trim() });
+    setArchivoEnCurso(false);
+    if (!ok) {
+      setArchivoError(data?.error === 'PREDIO_CON_CICLO_EN_CURSO'
+        ? 'No se puede archivar: al menos un potrero de este predio tiene un pastoreo en curso.'
+        : 'No fue posible completar la operación en este momento. Intenta nuevamente.');
+      return;
+    }
+    setMostrarArchivar(false);
+    onArchivoChanged?.();
+  }
+
+  async function handleRestaurar() {
+    if (archivoEnCurso) return;
+    setArchivoEnCurso(true);
+    setArchivoError('');
+    const { ok } = await postGanaderiaPredios(`/api/ganaderia/predios/${predio.predioId}/restaurar`, {});
+    setArchivoEnCurso(false);
+    if (!ok) {
+      setArchivoError('No fue posible completar la operación en este momento. Intenta nuevamente.');
+      return;
+    }
+    onArchivoChanged?.();
+  }
 
   // SPRINT-3D4 (cierre): mecanismo EXPLÍCITO y determinístico de refetch
   // post-save -- potrerosRefreshKey es un contador que PotrerosByPredioPanel
@@ -571,6 +628,7 @@ function PredioCard({ predio }) {
   return (
     <div className="gan-predio-card">
       <strong className="gan-predio-card-name">{displayOrDash(predio.nombrePredio)}</strong>
+      {archivado ? <StatusMessage type="warning">Este predio está archivado -- su historial se conserva.</StatusMessage> : null}
       <div className="gan-predio-card-body">
         <div className="gan-predio-data">
           <div className="gan-ficha-row">
@@ -604,13 +662,41 @@ function PredioCard({ predio }) {
       </div>
 
       <div className="gan-predio-card-actions">
-        <button type="button" className="gan-secondary-button" onClick={toggleRegistrar}>
+        <button type="button" className="gan-secondary-button" onClick={toggleRegistrar} disabled={archivado}>
           Registrar potrero
         </button>
         <button type="button" className="gan-secondary-button" onClick={toggleVer}>
           Ver potreros
         </button>
+        {!archivado ? (
+          <button type="button" className="gan-back-inline" onClick={() => { setMostrarArchivar(true); setMotivoArchivar(''); setArchivoError(''); }}>
+            Eliminar predio
+          </button>
+        ) : (
+          <button type="button" className="gan-back-inline" onClick={handleRestaurar} disabled={archivoEnCurso}>
+            {archivoEnCurso ? 'Restaurando...' : 'Restaurar'}
+          </button>
+        )}
       </div>
+
+      {mostrarArchivar ? (
+        <div className="gan-stack">
+          <StatusMessage type="info">El predio dejará de aparecer entre los activos. Su historial se conservará.</StatusMessage>
+          <FormField label="Motivo" required>
+            <input type="text" value={motivoArchivar} onChange={(event) => setMotivoArchivar(event.target.value)} />
+          </FormField>
+          <StatusMessage type="error">{archivoError}</StatusMessage>
+          <div className="gan-potrero-actions">
+            <button type="button" className="gan-secondary-button" onClick={handleConfirmarArchivar} disabled={archivoEnCurso}>
+              {archivoEnCurso ? 'Eliminando...' : 'Confirmar'}
+            </button>
+            <button type="button" className="gan-back-inline" onClick={() => setMostrarArchivar(false)} disabled={archivoEnCurso}>
+              Volver
+            </button>
+          </div>
+        </div>
+      ) : null}
+      <StatusMessage type="error">{!mostrarArchivar ? archivoError : ''}</StatusMessage>
 
       {activePanel === 'registrar' ? (
         <PotreroRegistrationPanel

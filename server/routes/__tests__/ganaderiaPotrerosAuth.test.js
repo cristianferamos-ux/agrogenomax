@@ -93,6 +93,15 @@ describe('SPRINT-3D3-POTREROS-API-FOUNDATION: exige sesión con organización', 
     await assertAnonymousRejected('POST', '/101/potreros', { candidateId: 'x', nombre: 'Potrero 1' });
   });
 
+  // SPRINT-3D9.2
+  test('POST /:predioId/potreros/:potreroId/archivar sin sesión -> 401', async () => {
+    await assertAnonymousRejected('POST', '/101/potreros/5/archivar', { motivo: 'x' });
+  });
+
+  test('POST /:predioId/potreros/:potreroId/restaurar sin sesión -> 401', async () => {
+    await assertAnonymousRejected('POST', '/101/potreros/5/restaurar', {});
+  });
+
   // SPRINT-3D5: requireSession se monta vía router.use() ANTES de
   // cualquier ruta -- corre para preview-file igual que para el resto,
   // sin importar que esta ruta use un body-parser distinto (raw()) más

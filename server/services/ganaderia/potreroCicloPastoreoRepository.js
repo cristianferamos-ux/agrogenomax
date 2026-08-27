@@ -17,9 +17,16 @@
 // Un fallo de FASE B NUNCA revierte FASE A.
 import { withOrganizacionTransaction } from '../../db/agxBusinessPool.js';
 import { resolveFechaHoyNegocio } from './motorDescansoAuto/businessTimezone.js';
-import { generarDescansoPostCicloReal } from './potreroDescansoRepository.js';
+import {
+  generarDescansoPostCicloReal,
+  generarDescansoPostCicloRealSiguienteVersion,
+  fetchDescansoVigentePorCiclo,
+  invalidarDescansoVersion,
+} from './potreroDescansoRepository.js';
+import { assertPuedeIniciarCiclo, resolveEstadoOperativoPotrero } from './potreroEstadoOperativoRepository.js';
 
 const HISTORIAL_LIMIT = 10;
+const FECHA_ISO_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 // Códigos Postgres transitorios/reintentables (Design Revision 1,
 // Guardrail 2) -- serialization_failure, deadlock_detected, excepciones
@@ -115,7 +122,7 @@ const CICLO_SELECT = `ciclo_id, organizacion_id, predio_id, potrero_id, recomend
             recomendacion_descanso_plan_id, categoria_id, numero_animales_real, peso_promedio_real_kg,
             to_char(fecha_ingreso_real, 'YYYY-MM-DD') as fecha_ingreso_real,
             to_char(fecha_salida_real, 'YYYY-MM-DD') as fecha_salida_real,
-            estado, motivo_cancelacion, contexto_id, created_at`;
+            estado, motivo_cancelacion, motivo_anulacion, contexto_id, created_at`;
 
 function serializeCiclo(row) {
   return {
@@ -131,6 +138,7 @@ function serializeCiclo(row) {
     fechaSalidaReal: row.fecha_salida_real,
     estado: row.estado,
     motivoCancelacion: row.motivo_cancelacion,
+    motivoAnulacion: row.motivo_anulacion,
     contextoId: row.contexto_id === null ? null : String(row.contexto_id),
     createdAt: row.created_at,
   };
@@ -165,6 +173,13 @@ export async function iniciarCicloPastoreo(organizacionId, predioId, potreroId, 
 
   return withOrganizacionTransaction(organizacionId, async (client) => {
     await assertPotreroBelongsToPredio(client, predioId, potreroId);
+    // SPRINT-3D9.2: reentry guard -- backend es la autoridad, nunca solo
+    // frontend. Orden: archivado (predio/potrero) -> descanso vigente
+    // (POTRERO_IN_REST_PERIOD/POTRERO_REST_ASSESSMENT_PENDING) ->
+    // evaluación de reingreso pendiente (POTRERO_REINGRESO_NO_CONFIRMADO).
+    // CICLO_ALREADY_IN_PROGRESS sigue siendo la última defensa, vía el
+    // índice único parcial más abajo (23505).
+    await assertPuedeIniciarCiclo(client, { predioId, potreroId, now });
 
     const recomendacionRow = await fetchRecomendacionPastoreoMasReciente(client, potreroId);
     const recomendacionDescansoPlanId = await fetchDescansoPlanMasReciente(client, potreroId);
@@ -289,6 +304,10 @@ export async function finalizarCicloPastoreo(organizacionId, predioId, potreroId
       predioId,
       potreroId,
       cicloId: Number(ciclo.ciclo_id),
+      // SPRINT-3D9.2 (FIX BUG_LATEST_RECOMMENDATION): la recomendación
+      // EXACTA que originó este ciclo -- nunca "la más reciente del
+      // potrero" en el momento de finalizar.
+      recomendacionPastoreoId: Number(ciclo.recomendacion_pastoreo_id),
       fechaIngresoReal: ciclo.fecha_ingreso_real,
       fechaSalidaReal: ciclo.fecha_salida_real,
       recomendacionDescansoPlanId: ciclo.recomendacion_descanso_plan_id,
@@ -378,7 +397,7 @@ export async function getCicloActual(organizacionId, predioId, potreroId) {
   });
 }
 
-/** Historial de ciclos FINALIZADO/CANCELADO -- lectura pura. */
+/** Historial de ciclos FINALIZADO/CANCELADO/ANULADO -- lectura pura. */
 export async function getCicloHistorial(organizacionId, predioId, potreroId) {
   assertPredioIdFormat(predioId);
   assertPotreroIdFormat(potreroId);
@@ -393,5 +412,337 @@ export async function getCicloHistorial(organizacionId, predioId, potreroId) {
       [potreroId, HISTORIAL_LIMIT],
     );
     return result.rows.map(serializeCiclo);
+  });
+}
+
+/**
+ * SPRINT-3D9.2 -- Anular ciclo histórico (FINALIZADO/CANCELADO) que
+ * nunca debió contar. NUNCA sobre EN_CURSO -- para eso existe Cancelar.
+ * Transacción única (nunca FASE A/B separadas): invalidar el descanso
+ * derivado es un INSERT puramente local sin dependencia externa (nunca
+ * llama al proveedor climático), así que puede -- y debe -- ir en la
+ * MISMA transacción que la transición de estado. Nunca queda un ciclo
+ * ANULADO cuyo descanso anterior siga vigente por error.
+ */
+export async function anularCicloPastoreo(organizacionId, predioId, potreroId, cicloId, { motivo, actorCuentaId, now } = {}) {
+  assertPredioIdFormat(predioId);
+  assertPotreroIdFormat(potreroId);
+
+  const motivoLimpio = typeof motivo === 'string' ? motivo.trim() : '';
+  if (motivoLimpio === '') {
+    throw semanticError('INVALID_MOTIVO_ANULACION', 400, 'motivo es obligatorio para anular un ciclo.');
+  }
+
+  return withOrganizacionTransaction(organizacionId, async (client) => {
+    const actual = await client.query(
+      `select ${CICLO_SELECT} from agx.potrero_ciclos_pastoreo
+        where ciclo_id = $1 and potrero_id = $2 and predio_id = $3
+        for update`,
+      [cicloId, potreroId, predioId],
+    );
+    if (actual.rows.length === 0) {
+      throw semanticError('CICLO_NOT_FOUND', 404, 'El ciclo de pastoreo no existe o no pertenece a este potrero.');
+    }
+    const cicloActual = actual.rows[0];
+
+    if (cicloActual.estado === 'ANULADO') {
+      return serializeCiclo(cicloActual); // idempotente
+    }
+    if (cicloActual.estado === 'EN_CURSO') {
+      throw semanticError('CICLO_EN_CURSO_USE_CANCELAR', 409, 'Este ciclo está en curso -- usa "Cancelar" en vez de "Anular".');
+    }
+    // FINALIZADO o CANCELADO -- ambos anulables.
+
+    const actualizado = await client.query(
+      `update agx.potrero_ciclos_pastoreo
+          set estado = 'ANULADO', motivo_anulacion = $1
+        where ciclo_id = $2
+        returning ${CICLO_SELECT}`,
+      [motivoLimpio, cicloId],
+    );
+    const cicloAnulado = actualizado.rows[0];
+
+    await insertEvento(client, {
+      organizacionId, potreroId, cicloId, tipoEvento: 'PASTOREO_ANULADO', actorCuentaId, now,
+      payload: { motivo: motivoLimpio, estadoAnterior: cicloActual.estado },
+    });
+
+    if (cicloActual.estado === 'FINALIZADO') {
+      const vigente = await fetchDescansoVigentePorCiclo(client, cicloId);
+      if (vigente) {
+        await invalidarDescansoVersion(client, {
+          descansoId: Number(vigente.descansoId),
+          cicloPastoreoId: cicloId,
+          potreroId,
+          organizacionId,
+          motivo: 'ciclo_anulado',
+          actorCuentaId,
+        });
+      }
+    }
+
+    return serializeCiclo(cicloAnulado);
+  });
+}
+
+/**
+ * SPRINT-3D9.2 -- Corregir un ciclo FINALIZADO (dato real capturado
+ * incorrectamente). Distinto de Cancelar (EN_CURSO por error) y de
+ * Anular (ciclo histórico que nunca debió contar) -- aquí el ciclo SÍ
+ * ocurrió, solo se corrige un dato.
+ *
+ * FASE A' (atómica): valida, aplica el UPDATE, inserta el evento
+ * PASTOREO_CORREGIDO, e INVALIDA el descanso vigente derivado (si la
+ * corrección toca fecha_ingreso_real/fecha_salida_real y existía uno) --
+ * TODO en la misma transacción. Desde el COMMIT, el descanso viejo YA no
+ * es vigente, sin importar si FASE B' (recalcular) tiene éxito o falla.
+ *
+ * FASE B' (best-effort, transacción separada): solo si se corrigió una
+ * fecha -- genera la siguiente versión del descanso con las fechas ya
+ * corregidas. Un fallo aquí NUNCA revierte la corrección ni restaura el
+ * descanso viejo -- "sin recomendación vigente" es preferible a
+ * "recomendación conocida como incorrecta".
+ */
+export async function corregirCicloPastoreo(organizacionId, predioId, potreroId, cicloId, {
+  fechaIngresoReal, fechaSalidaReal, categoriaCodigo, numeroAnimales, pesoPromedioKg, motivo, actorCuentaId, now, climatologyFetchImpl,
+} = {}) {
+  assertPredioIdFormat(predioId);
+  assertPotreroIdFormat(potreroId);
+
+  const motivoLimpio = typeof motivo === 'string' ? motivo.trim() : '';
+  if (motivoLimpio === '') {
+    throw semanticError('INVALID_MOTIVO_CORRECCION', 400, 'motivo es obligatorio para corregir un ciclo.');
+  }
+
+  const algunCampoSolicitado = [fechaIngresoReal, fechaSalidaReal, categoriaCodigo, numeroAnimales, pesoPromedioKg]
+    .some((valor) => valor !== undefined);
+  if (!algunCampoSolicitado) {
+    throw semanticError('SIN_CAMBIOS_SOLICITADOS', 400, 'Debes indicar al menos un campo a corregir.');
+  }
+
+  if (fechaIngresoReal !== undefined && !FECHA_ISO_PATTERN.test(fechaIngresoReal)) {
+    throw semanticError('INVALID_FECHA_INGRESO_REAL', 400, 'fechaIngresoReal debe tener formato YYYY-MM-DD.');
+  }
+  if (fechaSalidaReal !== undefined && !FECHA_ISO_PATTERN.test(fechaSalidaReal)) {
+    throw semanticError('INVALID_FECHA_SALIDA_REAL', 400, 'fechaSalidaReal debe tener formato YYYY-MM-DD.');
+  }
+  if (numeroAnimales !== undefined && (!Number.isInteger(numeroAnimales) || numeroAnimales < 1 || numeroAnimales > 100000)) {
+    throw semanticError('INVALID_NUMERO_ANIMALES_REAL', 400, 'numeroAnimales debe ser un entero entre 1 y 100000.');
+  }
+  if (pesoPromedioKg !== undefined && (!Number.isFinite(pesoPromedioKg) || pesoPromedioKg <= 0 || pesoPromedioKg > 2000)) {
+    throw semanticError('INVALID_PESO_PROMEDIO_REAL', 400, 'pesoPromedioKg debe ser mayor que 0 y menor o igual a 2000.');
+  }
+
+  // Solo estos dos campos disparan el recálculo de descanso (FASE B') --
+  // categoría/numeroAnimales/pesoPromedio no alimentan el motor de
+  // descanso (que usa la recomendación de pastoreo, no el snapshot real).
+  const debeRegenerarDescanso = fechaIngresoReal !== undefined || fechaSalidaReal !== undefined;
+
+  const { ciclo, huboCambios } = await withOrganizacionTransaction(organizacionId, async (client) => {
+    const actual = await client.query(
+      `select ${CICLO_SELECT} from agx.potrero_ciclos_pastoreo
+        where ciclo_id = $1 and potrero_id = $2 and predio_id = $3
+        for update`,
+      [cicloId, potreroId, predioId],
+    );
+    if (actual.rows.length === 0) {
+      throw semanticError('CICLO_NOT_FOUND', 404, 'El ciclo de pastoreo no existe o no pertenece a este potrero.');
+    }
+    const cicloActual = actual.rows[0];
+    if (cicloActual.estado !== 'FINALIZADO') {
+      throw semanticError('CICLO_NOT_FINALIZADO', 409, 'Solo un ciclo finalizado puede corregirse.');
+    }
+
+    const categoriaAjustadaId = categoriaCodigo !== undefined ? await resolveCategoriaId(client, categoriaCodigo) : undefined;
+
+    const cambios = [];
+    if (fechaIngresoReal !== undefined && fechaIngresoReal !== cicloActual.fecha_ingreso_real) {
+      cambios.push({ campo: 'fechaIngresoReal', valorAnterior: cicloActual.fecha_ingreso_real, valorNuevo: fechaIngresoReal });
+    }
+    if (fechaSalidaReal !== undefined && fechaSalidaReal !== cicloActual.fecha_salida_real) {
+      cambios.push({ campo: 'fechaSalidaReal', valorAnterior: cicloActual.fecha_salida_real, valorNuevo: fechaSalidaReal });
+    }
+    if (categoriaAjustadaId !== undefined && String(categoriaAjustadaId) !== String(cicloActual.categoria_id)) {
+      cambios.push({ campo: 'categoriaId', valorAnterior: String(cicloActual.categoria_id), valorNuevo: String(categoriaAjustadaId) });
+    }
+    if (numeroAnimales !== undefined && numeroAnimales !== Number(cicloActual.numero_animales_real)) {
+      cambios.push({ campo: 'numeroAnimalesReal', valorAnterior: Number(cicloActual.numero_animales_real), valorNuevo: numeroAnimales });
+    }
+    if (pesoPromedioKg !== undefined && pesoPromedioKg !== Number(cicloActual.peso_promedio_real_kg)) {
+      cambios.push({ campo: 'pesoPromedioRealKg', valorAnterior: Number(cicloActual.peso_promedio_real_kg), valorNuevo: pesoPromedioKg });
+    }
+
+    if (cambios.length === 0) {
+      // Idempotente: retry con el mismo payload ya aplicado -- sin
+      // evento nuevo, sin invalidar nada. El llamador igual intenta
+      // FASE B' más abajo (mismo criterio que finalizar/FASE B).
+      return { ciclo: cicloActual, huboCambios: false };
+    }
+
+    const actualizado = await client.query(
+      `update agx.potrero_ciclos_pastoreo
+          set fecha_ingreso_real = $1, fecha_salida_real = $2, categoria_id = $3,
+              numero_animales_real = $4, peso_promedio_real_kg = $5
+        where ciclo_id = $6
+        returning ${CICLO_SELECT}`,
+      [
+        fechaIngresoReal !== undefined ? fechaIngresoReal : cicloActual.fecha_ingreso_real,
+        fechaSalidaReal !== undefined ? fechaSalidaReal : cicloActual.fecha_salida_real,
+        categoriaAjustadaId !== undefined ? categoriaAjustadaId : cicloActual.categoria_id,
+        numeroAnimales !== undefined ? numeroAnimales : Number(cicloActual.numero_animales_real),
+        pesoPromedioKg !== undefined ? pesoPromedioKg : Number(cicloActual.peso_promedio_real_kg),
+        cicloId,
+      ],
+    );
+    const cicloCorregido = actualizado.rows[0];
+
+    await insertEvento(client, {
+      organizacionId, potreroId, cicloId, tipoEvento: 'PASTOREO_CORREGIDO', actorCuentaId, now,
+      payload: { motivo: motivoLimpio, cambios },
+    });
+
+    if (debeRegenerarDescanso) {
+      const vigente = await fetchDescansoVigentePorCiclo(client, cicloId);
+      if (vigente) {
+        await invalidarDescansoVersion(client, {
+          descansoId: Number(vigente.descansoId),
+          cicloPastoreoId: cicloId,
+          potreroId,
+          organizacionId,
+          motivo: 'correccion_fecha',
+          actorCuentaId,
+        });
+      }
+    }
+
+    return { ciclo: cicloCorregido, huboCambios: true };
+  });
+
+  if (!debeRegenerarDescanso) {
+    return { ciclo: serializeCiclo(ciclo), descansoEstado: null, descanso: null, huboCambios };
+  }
+
+  // ---- FASE B': best-effort, transacción SEPARADA -- un fallo aquí
+  // NUNCA restaura el descanso viejo (ya invalidado en FASE A'). ----
+  try {
+    const { descanso } = await generarDescansoPostCicloRealSiguienteVersion(organizacionId, {
+      predioId,
+      potreroId,
+      cicloId: Number(ciclo.ciclo_id),
+      recomendacionPastoreoId: Number(ciclo.recomendacion_pastoreo_id),
+      fechaIngresoReal: ciclo.fecha_ingreso_real,
+      fechaSalidaReal: ciclo.fecha_salida_real,
+      recomendacionDescansoPlanId: ciclo.recomendacion_descanso_plan_id,
+      climatologyFetchImpl,
+    });
+    return { ciclo: serializeCiclo(ciclo), descansoEstado: 'GENERADO', descanso, huboCambios };
+  } catch (error) {
+    const descansoEstado = classifyFaseBError(error);
+    if (descansoEstado === 'PENDIENTE') {
+      // eslint-disable-next-line no-console
+      console.warn('[ciclo-pastoreo] FASE B\' pendiente (condición transitoria/reintentable):', { cicloId, code: error?.code, message: error?.message });
+    } else {
+      // eslint-disable-next-line no-console
+      console.error('[ciclo-pastoreo] FASE B\' error técnico inesperado:', { cicloId, code: error?.code, message: error?.message, stack: error?.stack });
+    }
+    return { ciclo: serializeCiclo(ciclo), descansoEstado, descanso: null, huboCambios };
+  }
+}
+
+function serializeEvaluacionReingreso(row) {
+  return {
+    evaluacionId: String(row.evaluacion_id),
+    potreroId: String(row.potrero_id),
+    cicloOrigenId: String(row.ciclo_origen_id),
+    descansoId: String(row.descanso_id),
+    fichaId: String(row.ficha_id),
+    resultado: row.resultado,
+    observacion: row.observacion,
+    createdAt: row.created_at,
+  };
+}
+
+/**
+ * SPRINT-3D9.2 -- Evaluar reingreso. El sistema NUNCA decide
+ * automáticamente APTO/NO_APTO -- solo registra el juicio humano,
+ * siempre respaldado por un aforo NUEVO (fichaId) posterior a la
+ * apertura de la ventana (fecha_reingreso_min). Solo aplica cuando el
+ * estado operativo derivado es EVALUACION_REINGRESO.
+ */
+export async function evaluarReingreso(organizacionId, predioId, potreroId, { fichaId, resultado, observacion, actorCuentaId, now } = {}) {
+  assertPredioIdFormat(predioId);
+  assertPotreroIdFormat(potreroId);
+
+  if (resultado !== 'APTO' && resultado !== 'NO_APTO') {
+    throw semanticError('INVALID_RESULTADO_EVALUACION', 400, 'resultado debe ser APTO o NO_APTO.');
+  }
+  const observacionLimpia = typeof observacion === 'string' ? observacion.trim() : '';
+  if (resultado === 'NO_APTO' && observacionLimpia === '') {
+    throw semanticError('INVALID_OBSERVACION_EVALUACION', 400, 'observacion es obligatoria cuando el resultado es NO_APTO.');
+  }
+  if (!/^\d+$/.test(String(fichaId))) {
+    throw semanticError('INVALID_FICHA_ID', 400, 'fichaId inválido.');
+  }
+
+  return withOrganizacionTransaction(organizacionId, async (client) => {
+    await assertPotreroBelongsToPredio(client, predioId, potreroId);
+
+    const estadoActual = await resolveEstadoOperativoPotrero(client, { predioId, potreroId, now });
+    if (estadoActual.estado !== 'EVALUACION_REINGRESO') {
+      throw semanticError('POTRERO_SIN_VENTANA_REINGRESO_ABIERTA', 409, 'Este potrero no tiene una ventana de reingreso abierta para evaluar.');
+    }
+    const { cicloOrigenId, descanso } = estadoActual;
+
+    const fichaResult = await client.query(
+      `select ficha_id, to_char(fecha_aforo, 'YYYY-MM-DD') as fecha_aforo
+         from agx.potrero_fichas_productivas
+        where ficha_id = $1 and potrero_id = $2`,
+      [fichaId, potreroId],
+    );
+    if (fichaResult.rows.length === 0) {
+      throw semanticError('FICHA_NOT_FOUND', 404, 'La ficha/aforo indicada no existe o no pertenece a este potrero.');
+    }
+    const ficha = fichaResult.rows[0];
+    if (!ficha.fecha_aforo || ficha.fecha_aforo < descanso.fechaReingresoMin) {
+      throw semanticError('AFORO_ANTERIOR_A_VENTANA_REINGRESO', 400, 'El aforo debe ser posterior a la apertura de la ventana de reingreso -- registra un aforo nuevo antes de evaluar.');
+    }
+
+    // SPRINT-3D9.2 (PRE-COMMIT FINAL ROUND, punto 5): "no aceptar un aforo
+    // viejo silenciosamente" -- no basta con que el fichaId enviado sea
+    // válido dentro de la ventana; debe ser el aforo válido MÁS RECIENTE
+    // de este potrero. Sin este chequeo, un caller que se salte el
+    // frontend (que siempre usa el más reciente vía getFichaProductiva)
+    // podría reutilizar un aforo antiguo-pero-todavía-dentro-de-ventana en
+    // vez del último registrado.
+    const masRecienteResult = await client.query(
+      `select ficha_id
+         from agx.potrero_fichas_productivas
+        where potrero_id = $1 and fecha_aforo >= $2
+        order by created_at desc
+        limit 1`,
+      [potreroId, descanso.fechaReingresoMin],
+    );
+    if (Number(masRecienteResult.rows[0]?.ficha_id) !== Number(fichaId)) {
+      throw semanticError('AFORO_NO_ES_EL_MAS_RECIENTE', 409, 'Existe un aforo más reciente para este potrero -- usa el último registrado para evaluar el reingreso.');
+    }
+
+    try {
+      const result = await client.query(
+        `insert into agx.potrero_evaluaciones_reingreso
+           (organizacion_id, potrero_id, ciclo_origen_id, descanso_id, ficha_id, resultado, criterios_json, observacion, actor_cuenta_id)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         returning evaluacion_id, potrero_id, ciclo_origen_id, descanso_id, ficha_id, resultado, observacion, created_at`,
+        [
+          organizacionId, potreroId, Number(cicloOrigenId), Number(descanso.descansoId), Number(fichaId),
+          resultado, JSON.stringify({}), observacionLimpia || null, actorCuentaId ?? null,
+        ],
+      );
+      return serializeEvaluacionReingreso(result.rows[0]);
+    } catch (error) {
+      if (error.code === '23505') {
+        throw semanticError('EVALUACION_APTO_YA_REGISTRADA', 409, 'Ya existe una evaluación APTO registrada para este descanso.');
+      }
+      throw error;
+    }
   });
 }

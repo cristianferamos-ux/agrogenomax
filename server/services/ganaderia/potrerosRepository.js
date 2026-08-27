@@ -42,16 +42,20 @@ async function assertPredioBelongsToOrg(client, predioId) {
   }
 }
 
-export async function listPotrerosByPredio(organizacionId, predioId) {
+// SPRINT-3D9.2 (PRE-COMMIT FINAL ROUND, punto 3): por defecto solo se
+// listan potreros ACTIVO -- mismo criterio que listPredios
+// (prediosRepository.js). `incluirArchivados` es el único opt-in.
+export async function listPotrerosByPredio(organizacionId, predioId, { incluirArchivados = false } = {}) {
   assertPredioIdFormat(predioId);
   return withOrganizacionTransaction(organizacionId, async (client) => {
     await assertPredioBelongsToOrg(client, predioId);
 
     const result = await client.query(
       `select potrero_id, nombre, area_ha, capacidad_animales, observaciones,
-              metodo_delimitacion, created_at, updated_at
+              metodo_delimitacion, created_at, updated_at, estado
          from agx.potreros
         where predio_id = $1
+        ${incluirArchivados ? '' : "and estado = 'ACTIVO'"}
         order by created_at desc`,
       [predioId],
     );

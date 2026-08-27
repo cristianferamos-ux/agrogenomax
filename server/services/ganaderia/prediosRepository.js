@@ -12,13 +12,20 @@
 // sin filtros WHERE organizacion_id redundantes.
 import { withOrganizacionTransaction } from '../../db/agxBusinessPool.js';
 
-export async function listPredios(organizacionId) {
+// SPRINT-3D9.2 (PRE-COMMIT FINAL ROUND, punto 3): por defecto solo se
+// listan predios ACTIVO -- un predio ARCHIVADO nunca aparece en la
+// operación normal. `incluirArchivados` es el único mecanismo explícito
+// de opt-in (usado por la vista "Ver archivados"); nunca se infiere de
+// otro parámetro ni se activa implícitamente.
+export async function listPredios(organizacionId, { incluirArchivados = false } = {}) {
   return withOrganizacionTransaction(organizacionId, async (client) => {
     const result = await client.query(
       `select predio_id, nombre_predio, departamento, municipio, vereda,
               area_total_ha, observaciones, codigo_predial, latitud, longitud,
-              (geometry is not null) as tiene_geometria, fecha_creacion
+              (geometry is not null) as tiene_geometria, fecha_creacion,
+              estado
          from agx.predios
+        ${incluirArchivados ? '' : "where estado = 'ACTIVO'"}
         order by fecha_creacion desc`,
     );
     return result.rows;

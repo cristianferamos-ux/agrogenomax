@@ -95,6 +95,15 @@ describe('SPRINT-3C1-MIS-PREDIOS-API: /api/ganaderia/predios exige sesión con o
     await assertAnonymousRejected('POST', '', { mode: 'manual', nombrePredio: 'X', departamento: 'D', municipio: 'M' });
   });
 
+  // SPRINT-3D9.2
+  test('POST /:predioId/archivar sin sesión -> 401', async () => {
+    await assertAnonymousRejected('POST', '/1/archivar', { motivo: 'x' });
+  });
+
+  test('POST /:predioId/restaurar sin sesión -> 401', async () => {
+    await assertAnonymousRejected('POST', '/1/restaurar', {});
+  });
+
   test('nunca toca Postgres (ni legacy ni AGX-Business) en una solicitud anónima', async () => {
     // Confirma que el 401 ocurre ANTES de cualquier intento de conexión --
     // si algún handler tocara agxBusinessPool sin sesión válida, la

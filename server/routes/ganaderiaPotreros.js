@@ -38,6 +38,7 @@ import {
   releasePotreroCandidate,
 } from '../services/ganaderia/potrerosCandidateStore.js';
 import { parseKmlOrKmzUpload, FILE_MAX_BYTES } from '../services/ganaderia/potreroKmlImport.js';
+import { archivarPotrero, restaurarPotrero } from '../services/ganaderia/potreroArchivoRepository.js';
 import { validateGpsAccuracyList } from '../services/ganaderia/potreroSpatialTolerance.js';
 
 const MAX_NOMBRE_LENGTH = 120;
@@ -148,6 +149,8 @@ function serializePotreroListItem(predioId, row) {
     tieneGeometria: true,
     fechaCreacion: row.created_at,
     fechaActualizacion: row.updated_at,
+    // SPRINT-3D9.2
+    estado: row.estado,
   };
 }
 
@@ -218,7 +221,8 @@ export default function createGanaderiaPotrerosRouter({ appEnv, csrfServerSecret
       }
 
       const { organizacionId } = req.ganaderiaAuth;
-      const rows = await listPotrerosByPredio(organizacionId, predioId);
+      const incluirArchivados = req.query.incluirArchivados === 'true';
+      const rows = await listPotrerosByPredio(organizacionId, predioId, { incluirArchivados });
       res.json({ predioId: String(predioId), potreros: rows.map((row) => serializePotreroListItem(predioId, row)) });
     } catch (error) {
       if (sendSemanticError(res, error)) return;
@@ -510,6 +514,43 @@ export default function createGanaderiaPotrerosRouter({ appEnv, csrfServerSecret
       commitPotreroCandidate(candidateId);
 
       res.status(201).json({ ok: true, potreroId: String(potreroId), predioId: String(predioId) });
+    } catch (error) {
+      if (sendSemanticError(res, error)) return;
+      next(error);
+    }
+  });
+
+  // SPRINT-3D9.2: archivar/restaurar -- "Eliminar potrero" en la UI
+  // internamente llama a este endpoint (reemplaza el hard DELETE,
+  // revocado en 0010).
+  router.post('/:potreroId/archivar', async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      if (!/^\d+$/.test(String(req.params.potreroId))) {
+        res.status(400).json({ error: 'INVALID_POTRERO_ID' });
+        return;
+      }
+      const { organizacionId, cuentaId } = req.ganaderiaAuth;
+      const potrero = await archivarPotrero(organizacionId, req.params.predioId, req.params.potreroId, {
+        motivo: req.body?.motivo, actorCuentaId: cuentaId,
+      });
+      res.json({ ok: true, potrero });
+    } catch (error) {
+      if (sendSemanticError(res, error)) return;
+      next(error);
+    }
+  });
+
+  router.post('/:potreroId/restaurar', async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      if (!/^\d+$/.test(String(req.params.potreroId))) {
+        res.status(400).json({ error: 'INVALID_POTRERO_ID' });
+        return;
+      }
+      const { organizacionId, cuentaId } = req.ganaderiaAuth;
+      const potrero = await restaurarPotrero(organizacionId, req.params.predioId, req.params.potreroId, { actorCuentaId: cuentaId });
+      res.json({ ok: true, potrero });
     } catch (error) {
       if (sendSemanticError(res, error)) return;
       next(error);

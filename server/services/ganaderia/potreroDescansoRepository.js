@@ -93,6 +93,36 @@ async function fetchRecomendacionPastoreoMasReciente(client, potreroId) {
   return result.rows[0];
 }
 
+// SPRINT-3D9.2 (FIX BUG_LATEST_RECOMMENDATION): el descanso post-real de
+// un ciclo debe usar EXACTAMENTE la recomendación de pastoreo que ese
+// ciclo capturó al iniciar (ciclo.recomendacion_pastoreo_id) -- NUNCA "la
+// más reciente del potrero" en el momento de finalizar. Si entre
+// "Iniciar" y "Finalizar" se guarda una recomendación NUEVA (para otro
+// fin, sin relación con este ciclo), esa recomendación nunca debe
+// contaminar retroactivamente el descanso de un ciclo ya en curso.
+// Tenant-safe vía potrero_id (RLS ya acota organizacion_id) -- mismo
+// patrón que fetchFichaPorId.
+async function fetchRecomendacionPastoreoPorId(client, recomendacionPastoreoId, potreroId) {
+  const result = await client.query(
+    `select r.recomendacion_id, r.ficha_id, r.contexto_id,
+            r.materia_seca_total_kg, r.materia_seca_utilizable_kg,
+            r.demanda_diaria_lote_kg_ms, r.dias_ocupacion_estimados, r.created_at,
+            r.numero_animales, r.peso_promedio_kg, c.nombre as categoria_nombre
+       from agx.potrero_recomendaciones_pastoreo r
+       join agx.catalogo_categorias_productivas c on c.categoria_id = r.categoria_id
+      where r.recomendacion_id = $1 and r.potrero_id = $2`,
+    [recomendacionPastoreoId, potreroId],
+  );
+  if (result.rows.length === 0) {
+    throw semanticError(
+      ESTADO_DESCANSO.NO_GRAZING_RECOMMENDATION,
+      404,
+      'La recomendación de pastoreo que originó este ciclo ya no está disponible.',
+    );
+  }
+  return result.rows[0];
+}
+
 async function fetchFichaPorId(client, fichaId, potreroId) {
   const result = await client.query(
     `select ficha_id, biomasa_total_kg, tipo_cobertura,
@@ -627,6 +657,9 @@ function serializeDescansoRow(row) {
     // de la salida REAL de un ciclo (FASE B de "Finalizar pastoreo") --
     // null para descansos planificados (la inmensa mayoría del histórico).
     cicloPastoreoId: row.ciclo_pastoreo_id === null || row.ciclo_pastoreo_id === undefined ? null : String(row.ciclo_pastoreo_id),
+    // SPRINT-3D9.2: versión dentro del mismo ciclo_pastoreo_id (1 en la
+    // generación automática; 2, 3... solo tras una corrección de fecha).
+    version: row.version === null || row.version === undefined ? 1 : Number(row.version),
   };
 }
 
@@ -725,174 +758,307 @@ const DESCANSO_POST_CICLO_SELECT = `descanso_id, previous_descanso_id, recomenda
             to_char(fecha_reingreso_max, 'YYYY-MM-DD') as fecha_reingreso_max,
             to_char(fecha_reingreso_recomendada, 'YYYY-MM-DD') as fecha_reingreso_recomendada,
             nivel_confianza, agroclimate_status, condiciones_reentrada_json, applied_rules_json,
-            parametros_fuente_json, motor_version, created_at, ciclo_pastoreo_id`;
+            parametros_fuente_json, motor_version, created_at, ciclo_pastoreo_id, version`;
+
+/**
+ * SPRINT-3D9.1/3D9.2: cálculo compartido del descanso post-real -- usado
+ * TANTO por la generación automática (FASE B de "Finalizar pastoreo")
+ * COMO por el recálculo tras una corrección de fecha (FASE B' de
+ * "Corregir ciclo"). Única diferencia entre ambos llamadores: qué
+ * versión/previous_descanso_id se persiste alrededor de este cálculo --
+ * el cálculo científico en sí (baseline, climatología, assessment,
+ * rango, ventana de reingreso) es IDÉNTICO, nunca se modifica NRC/
+ * fórmulas/perfiles (DESIGN REVISION 1 y SPRINT-3D9.2: "NO modificar
+ * motor científico").
+ *
+ * SPRINT-3D9.2 (FIX BUG_LATEST_RECOMMENDATION): usa `recomendacionPastoreoId`
+ * -- la recomendación EXACTA que originó el ciclo -- nunca "la más
+ * reciente del potrero" (eso permitía que una recomendación nueva,
+ * guardada después de iniciar el ciclo, contaminara retroactivamente su
+ * descanso).
+ */
+async function computeDescansoPostCicloRealCore(client, organizacionId, {
+  predioId, potreroId, cicloId, recomendacionPastoreoId, fechaSalidaReal, climatologyFetchImpl,
+}) {
+  await assertPotreroBelongsToPredio(client, predioId, potreroId);
+  const recomendacionRow = await fetchRecomendacionPastoreoPorId(client, recomendacionPastoreoId, potreroId);
+  const fichaRow = await fetchFichaPorId(client, recomendacionRow.ficha_id, potreroId);
+  const nombresPastura = await resolveNombresPastura(client, fichaRow);
+  const contextoRow = await fetchContextoMasReciente(client, potreroId);
+
+  const { row: climatologiaRow, generated: climatologyGenerated } = await getOrGenerateClimatologia(client, organizacionId, predioId, potreroId, { fetchImpl: climatologyFetchImpl });
+
+  const baseline = resolvePasturaDescansoBaseline(nombresPastura);
+  if (!baseline) {
+    throw semanticError(
+      ESTADO_DESCANSO.NO_PASTURE_PROFILE,
+      404,
+      'Esta pastura todavía no tiene un perfil de descanso con evidencia técnica suficiente. AgroGenomaX prefiere no recomendar automáticamente antes que inventar un descanso genérico.',
+    );
+  }
+
+  const materiaSecaTotalKg = Number(recomendacionRow.materia_seca_total_kg);
+  const materiaSecaUtilizableKg = Number(recomendacionRow.materia_seca_utilizable_kg);
+  const demandaDiariaLoteKgMs = Number(recomendacionRow.demanda_diaria_lote_kg_ms);
+  const diasOcupacionEstimados = Number(recomendacionRow.dias_ocupacion_estimados);
+  if (!Number.isFinite(diasOcupacionEstimados) || diasOcupacionEstimados < 0) {
+    throw semanticError(ESTADO_DESCANSO.REST_UNAVAILABLE, 500, 'No fue posible completar el cálculo de descanso con los datos disponibles.');
+  }
+  const remnant = computeRemnantDerivatives({
+    materiaSecaTotalKg, materiaSecaUtilizableKg, demandaDiariaLoteKgMs, diasOcupacionEstimados,
+  });
+
+  const freshnessResult = assessAgroClimateFreshness({
+    createdAt: contextoRow?.created_at ?? null,
+    sourceObservedUntil: contextoRow?.source_observed_until ?? null,
+    fuentePrincipal: contextoRow?.fuente_principal ?? null,
+  });
+
+  const mesActual = new Date().getUTCMonth() + 1;
+  const climatologiaMensual = extractClimatologiaMensual(climatologiaRow, mesActual);
+  const assessment = assessAgroClimate({
+    precipitacion7dMm: num(contextoRow?.precipitacion_7d_mm),
+    precipitacion15dMm: num(contextoRow?.precipitacion_15d_mm),
+    precipitacion30dMm: num(contextoRow?.precipitacion_30d_mm),
+    temperaturaMediaC: num(contextoRow?.temperatura_media_c),
+    temperaturaMaxC: num(contextoRow?.temperatura_max_c),
+    humedadSueloSuperficial: num(contextoRow?.humedad_suelo_superficial),
+    humedadSueloSubsuperficial: num(contextoRow?.humedad_suelo_subsuperficial),
+    radiacionSolar: num(contextoRow?.radiacion_solar),
+    humedadRelativaMediaPct: num(contextoRow?.humedad_relativa_media_pct),
+    climatologiaMensual,
+  });
+
+  const ajustePresion = computeAjustePresionDias({
+    remanenteProyectadoKg: remnant.remanenteProyectadoKg,
+    remanenteObjetivoKg: remnant.remanenteObjetivoKg,
+  });
+  const rango = computeRangoDescansoDias({
+    baseline, agroClimateStatus: assessment.status, deltaPresionDias: ajustePresion.deltaDias,
+  });
+
+  // CLAVE: la salida NUNCA se recalcula desde días de ocupación
+  // estimados -- viene DADA por el ciclo real (Design Revision 1 §F).
+  const fechasReingreso = computeFechasReingreso(fechaSalidaReal, rango);
+
+  const recomendacionEdadDias = edadEnDias(recomendacionRow.created_at);
+  const nivelConfianza = resolveNivelConfianzaDescanso({
+    agroClimateFreshness: freshnessResult.freshness,
+    agroClimateConfidenceImpact: assessment.confidenceImpact,
+    recomendacionEdadDias,
+    ajustePresionAplicado: ajustePresion.aplicado,
+  });
+  const condicionesReentrada = resolveCondicionesReentrada({ referenceEntryHeightCm: baseline.referenceEntryHeightCm });
+
+  const parametrosFuenteJson = buildParametrosFuenteJson({
+    recomendacionRow, fichaRow, contextoRow, baseline, assessment, freshnessResult, ajustePresion, remnant, recomendacionEdadDias, climatologyGenerated,
+  });
+  // Marca de origen -- distingue en la provenance que esta fila proviene
+  // de la salida REAL de un ciclo, nunca de una planificación pura.
+  parametrosFuenteJson.origenCicloRealId = String(cicloId);
+
+  return {
+    fichaRow, contextoRow, recomendacionRow, rango, fechasReingreso, nivelConfianza, assessment, condicionesReentrada, parametrosFuenteJson,
+  };
+}
+
+async function insertDescansoPostCicloRealVersion(client, organizacionId, {
+  predioId, potreroId, cicloId, fechaIngresoReal, fechaSalidaReal, recomendacionDescansoPlanId, previousDescansoId, version, core,
+}) {
+  const {
+    fichaRow, contextoRow, recomendacionRow, rango, fechasReingreso, nivelConfianza, assessment, condicionesReentrada, parametrosFuenteJson,
+  } = core;
+
+  // SAVEPOINT: si el INSERT choca con la unique (ciclo_pastoreo_id,
+  // version) (23505, carrera concurrente), Postgres aborta el resto de
+  // la transacción hasta un ROLLBACK -- sin este savepoint, releer la
+  // fila ganadora fallaría con 25P02.
+  await client.query('SAVEPOINT descanso_post_ciclo_insert');
+  try {
+    const insertResult = await client.query(
+      `insert into agx.potrero_recomendaciones_descanso
+         (organizacion_id, predio_id, potrero_id, ficha_id, contexto_id, recomendacion_pastoreo_id, previous_descanso_id,
+          fecha_inicio_pastoreo, fecha_salida_estimada,
+          dias_descanso_min, dias_descanso_max, dias_descanso_recomendado,
+          fecha_reingreso_min, fecha_reingreso_max, fecha_reingreso_recomendada,
+          nivel_confianza, agroclimate_status, condiciones_reentrada_json, applied_rules_json,
+          parametros_fuente_json, motor_version, ciclo_pastoreo_id, version)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+       returning ${DESCANSO_POST_CICLO_SELECT}`,
+      [
+        organizacionId,
+        predioId,
+        potreroId,
+        fichaRow.ficha_id,
+        contextoRow ? contextoRow.contexto_id : null,
+        recomendacionRow.recomendacion_id,
+        previousDescansoId ?? recomendacionDescansoPlanId ?? null,
+        fechaIngresoReal,
+        fechaSalidaReal,
+        rango.diasDescansoMin,
+        rango.diasDescansoMax,
+        rango.diasDescansoRecomendado,
+        fechasReingreso.fechaReingresoMin,
+        fechasReingreso.fechaReingresoMax,
+        fechasReingreso.fechaReingresoRecomendada,
+        nivelConfianza,
+        assessment.status,
+        JSON.stringify(condicionesReentrada),
+        JSON.stringify(assessment.appliedRules),
+        JSON.stringify(parametrosFuenteJson),
+        MOTOR_VERSION,
+        cicloId,
+        version,
+      ],
+    );
+    return { descanso: serializeDescansoRow(insertResult.rows[0]), yaExistia: false };
+  } catch (error) {
+    // Idempotencia bajo carrera: dos intentos concurrentes generando la
+    // MISMA versión -- el perdedor por 23505 relee la fila ganadora en
+    // vez de propagar el error al usuario.
+    if (error.code === '23505') {
+      await client.query('ROLLBACK TO SAVEPOINT descanso_post_ciclo_insert');
+      const ganadora = await client.query(
+        `select ${DESCANSO_POST_CICLO_SELECT} from agx.potrero_recomendaciones_descanso where ciclo_pastoreo_id = $1 and version = $2`,
+        [cicloId, version],
+      );
+      return { descanso: serializeDescansoRow(ganadora.rows[0]), yaExistia: true };
+    }
+    throw error;
+  }
+}
 
 /**
  * SPRINT-3D9.1 (CICLO REAL DE PASTOREO) -- FASE B de "Finalizar
  * pastoreo" (ver potreroCicloPastoreoRepository.js). Genera -- o relee,
- * si ya existe (idempotencia estructural vía el índice único parcial
- * sobre `ciclo_pastoreo_id`, 0009) -- la recomendación de descanso
- * POST-salida-REAL de un ciclo ya FINALIZADO.
- *
- * DIFERENCIA CLAVE con `resolveDescanso`: la fecha de salida NUNCA se
- * recalcula desde días de ocupación estimados -- viene DADA
- * (`fechaSalidaReal`, la real del ciclo). Todo lo demás (baseline,
- * climatología, assessment agroclimático, rango de descanso, ventana de
- * reingreso) reutiliza EXACTAMENTE el mismo motor científico, sin
- * modificar ninguna fórmula (DESIGN REVISION 1: "NO modificar motor
- * científico/fórmulas/provenance").
+ * si ya existe (idempotencia estructural, cualquier versión) -- la
+ * recomendación de descanso POST-salida-REAL de un ciclo ya FINALIZADO.
+ * SIEMPRE produce version=1 -- esta función NUNCA crea version=2+ (eso
+ * es exclusivo de `generarDescansoPostCicloRealSiguienteVersion`, ver
+ * abajo, disparada solo por una corrección de fecha).
  *
  * Corre en SU PROPIA transacción -- nunca en la misma transacción que la
  * transición crítica del ciclo (FASE A), por diseño (un hecho real nunca
  * puede fallar porque el clima falle).
  */
 export async function generarDescansoPostCicloReal(organizacionId, {
-  predioId, potreroId, cicloId, fechaIngresoReal, fechaSalidaReal, recomendacionDescansoPlanId, climatologyFetchImpl,
+  predioId, potreroId, cicloId, recomendacionPastoreoId, fechaIngresoReal, fechaSalidaReal, recomendacionDescansoPlanId, climatologyFetchImpl,
 }) {
   return withOrganizacionTransaction(organizacionId, async (client) => {
+    // Idempotencia ORIGINAL: si YA existe cualquier fila para este ciclo
+    // (cualquier versión, invalidada o no), nunca reinsertar desde aquí
+    // -- crear una versión nueva es responsabilidad EXCLUSIVA del flujo
+    // de corrección.
     const existente = await client.query(
       `select ${DESCANSO_POST_CICLO_SELECT}
          from agx.potrero_recomendaciones_descanso
-        where ciclo_pastoreo_id = $1`,
+        where ciclo_pastoreo_id = $1
+        order by version desc
+        limit 1`,
       [cicloId],
     );
     if (existente.rows.length > 0) {
       return { descanso: serializeDescansoRow(existente.rows[0]), yaExistia: true };
     }
 
-    await assertPotreroBelongsToPredio(client, predioId, potreroId);
-    const recomendacionRow = await fetchRecomendacionPastoreoMasReciente(client, potreroId);
-    const fichaRow = await fetchFichaPorId(client, recomendacionRow.ficha_id, potreroId);
-    const nombresPastura = await resolveNombresPastura(client, fichaRow);
-    const contextoRow = await fetchContextoMasReciente(client, potreroId);
+    const core = await computeDescansoPostCicloRealCore(client, organizacionId, {
+      predioId, potreroId, cicloId, recomendacionPastoreoId, fechaSalidaReal, climatologyFetchImpl,
+    });
+    return insertDescansoPostCicloRealVersion(client, organizacionId, {
+      predioId, potreroId, cicloId, fechaIngresoReal, fechaSalidaReal, recomendacionDescansoPlanId, version: 1, core,
+    });
+  });
+}
 
-    const { row: climatologiaRow, generated: climatologyGenerated } = await getOrGenerateClimatologia(client, organizacionId, predioId, potreroId, { fetchImpl: climatologyFetchImpl });
+// SPRINT-3D9.2: descanso VIGENTE de un ciclo -- la versión de mayor
+// número que NO tiene fila en agx.potrero_descanso_invalidaciones. Por
+// construcción, cada corrección invalida la versión anterior en la MISMA
+// transacción en que crea la siguiente (nunca dos versiones vigentes
+// simultáneas) -- el NOT EXISTS es defensa en profundidad adicional
+// (cubre anular un ciclo sin generar reemplazo: la versión queda
+// invalidada, sin ninguna vigente).
+export async function fetchDescansoVigentePorCiclo(client, cicloId) {
+  const result = await client.query(
+    `select ${DESCANSO_POST_CICLO_SELECT}
+       from agx.potrero_recomendaciones_descanso d
+      where d.ciclo_pastoreo_id = $1
+        and not exists (select 1 from agx.potrero_descanso_invalidaciones i where i.descanso_id = d.descanso_id)
+      order by d.version desc
+      limit 1`,
+    [cicloId],
+  );
+  return result.rows.length > 0 ? serializeDescansoRow(result.rows[0]) : null;
+}
 
-    const baseline = resolvePasturaDescansoBaseline(nombresPastura);
-    if (!baseline) {
-      throw semanticError(
-        ESTADO_DESCANSO.NO_PASTURE_PROFILE,
-        404,
-        'Esta pastura todavía no tiene un perfil de descanso con evidencia técnica suficiente. AgroGenomaX prefiere no recomendar automáticamente antes que inventar un descanso genérico.',
-      );
+// SPRINT-3D9.2: invalida la versión vigente de un descanso -- tolerante
+// a reintento (si ya estaba invalidada, 23505 sobre el unique(descanso_id)
+// se trata como no-op, nunca un error hacia el usuario).
+export async function invalidarDescansoVersion(client, {
+  descansoId, cicloPastoreoId, potreroId, organizacionId, motivo, actorCuentaId,
+}) {
+  try {
+    await client.query(
+      `insert into agx.potrero_descanso_invalidaciones
+         (organizacion_id, potrero_id, descanso_id, ciclo_pastoreo_id, motivo, actor_cuenta_id)
+       values ($1, $2, $3, $4, $5, $6)`,
+      [organizacionId, potreroId, descansoId, cicloPastoreoId, motivo, actorCuentaId ?? null],
+    );
+  } catch (error) {
+    if (error.code === '23505') return; // ya invalidada -- idempotente
+    throw error;
+  }
+}
+
+/**
+ * SPRINT-3D9.2 -- FASE B' de "Corregir ciclo" (ver
+ * potreroCicloPastoreoRepository.js/corregirCicloPastoreo). Genera la
+ * SIGUIENTE versión del descanso, usando las fechas YA CORREGIDAS
+ * (persistidas por FASE A' antes de llamar aquí). La invalidación de la
+ * versión anterior NO ocurre en esta función -- ya ocurrió en FASE A',
+ * en la MISMA transacción atómica que la corrección (nunca queda un
+ * descanso "conocido como incorrecto" vigente, incluso si esta función
+ * falla o nunca se ejecuta).
+ *
+ * Idempotente: si la versión vigente actual YA refleja las fechas
+ * corregidas (un reintento de la misma corrección, después de que FASE
+ * B' ya tuvo éxito una vez), es un no-op -- nunca crea una versión
+ * redundante.
+ */
+export async function generarDescansoPostCicloRealSiguienteVersion(organizacionId, {
+  predioId, potreroId, cicloId, recomendacionPastoreoId, fechaIngresoReal, fechaSalidaReal, recomendacionDescansoPlanId, climatologyFetchImpl,
+}) {
+  return withOrganizacionTransaction(organizacionId, async (client) => {
+    // Lock sobre el ciclo -- serializa cualquier llamada concurrente a
+    // esta función para el MISMO ciclo (retry de corrección, doble clic).
+    await client.query('select ciclo_id from agx.potrero_ciclos_pastoreo where ciclo_id = $1 for update', [cicloId]);
+
+    const vigente = await fetchDescansoVigentePorCiclo(client, cicloId);
+    if (vigente && vigente.fechaInicioPastoreo === fechaIngresoReal && vigente.fechaSalidaEstimada === fechaSalidaReal) {
+      // La versión vigente YA se generó con estas fechas -- nada que
+      // recalcular (retry idempotente de la misma corrección).
+      return { descanso: vigente, yaExistia: true };
     }
 
-    const materiaSecaTotalKg = Number(recomendacionRow.materia_seca_total_kg);
-    const materiaSecaUtilizableKg = Number(recomendacionRow.materia_seca_utilizable_kg);
-    const demandaDiariaLoteKgMs = Number(recomendacionRow.demanda_diaria_lote_kg_ms);
-    const diasOcupacionEstimados = Number(recomendacionRow.dias_ocupacion_estimados);
-    if (!Number.isFinite(diasOcupacionEstimados) || diasOcupacionEstimados < 0) {
-      throw semanticError(ESTADO_DESCANSO.REST_UNAVAILABLE, 500, 'No fue posible completar el cálculo de descanso con los datos disponibles.');
-    }
-    const remnant = computeRemnantDerivatives({
-      materiaSecaTotalKg, materiaSecaUtilizableKg, demandaDiariaLoteKgMs, diasOcupacionEstimados,
-    });
+    const maxVersionResult = await client.query(
+      'select coalesce(max(version), 0) as max_version from agx.potrero_recomendaciones_descanso where ciclo_pastoreo_id = $1',
+      [cicloId],
+    );
+    const nextVersion = Number(maxVersionResult.rows[0].max_version) + 1;
 
-    const freshnessResult = assessAgroClimateFreshness({
-      createdAt: contextoRow?.created_at ?? null,
-      sourceObservedUntil: contextoRow?.source_observed_until ?? null,
-      fuentePrincipal: contextoRow?.fuente_principal ?? null,
+    const core = await computeDescansoPostCicloRealCore(client, organizacionId, {
+      predioId, potreroId, cicloId, recomendacionPastoreoId, fechaSalidaReal, climatologyFetchImpl,
     });
-
-    const mesActual = new Date().getUTCMonth() + 1;
-    const climatologiaMensual = extractClimatologiaMensual(climatologiaRow, mesActual);
-    const assessment = assessAgroClimate({
-      precipitacion7dMm: num(contextoRow?.precipitacion_7d_mm),
-      precipitacion15dMm: num(contextoRow?.precipitacion_15d_mm),
-      precipitacion30dMm: num(contextoRow?.precipitacion_30d_mm),
-      temperaturaMediaC: num(contextoRow?.temperatura_media_c),
-      temperaturaMaxC: num(contextoRow?.temperatura_max_c),
-      humedadSueloSuperficial: num(contextoRow?.humedad_suelo_superficial),
-      humedadSueloSubsuperficial: num(contextoRow?.humedad_suelo_subsuperficial),
-      radiacionSolar: num(contextoRow?.radiacion_solar),
-      humedadRelativaMediaPct: num(contextoRow?.humedad_relativa_media_pct),
-      climatologiaMensual,
+    return insertDescansoPostCicloRealVersion(client, organizacionId, {
+      predioId,
+      potreroId,
+      cicloId,
+      fechaIngresoReal,
+      fechaSalidaReal,
+      recomendacionDescansoPlanId,
+      previousDescansoId: vigente ? Number(vigente.descansoId) : (recomendacionDescansoPlanId ?? null),
+      version: nextVersion,
+      core,
     });
-
-    const ajustePresion = computeAjustePresionDias({
-      remanenteProyectadoKg: remnant.remanenteProyectadoKg,
-      remanenteObjetivoKg: remnant.remanenteObjetivoKg,
-    });
-    const rango = computeRangoDescansoDias({
-      baseline, agroClimateStatus: assessment.status, deltaPresionDias: ajustePresion.deltaDias,
-    });
-
-    // CLAVE: la salida NUNCA se recalcula desde días de ocupación
-    // estimados -- viene DADA por el ciclo real (Design Revision 1 §F).
-    const fechasReingreso = computeFechasReingreso(fechaSalidaReal, rango);
-
-    const recomendacionEdadDias = edadEnDias(recomendacionRow.created_at);
-    const nivelConfianza = resolveNivelConfianzaDescanso({
-      agroClimateFreshness: freshnessResult.freshness,
-      agroClimateConfidenceImpact: assessment.confidenceImpact,
-      recomendacionEdadDias,
-      ajustePresionAplicado: ajustePresion.aplicado,
-    });
-    const condicionesReentrada = resolveCondicionesReentrada({ referenceEntryHeightCm: baseline.referenceEntryHeightCm });
-
-    const parametrosFuenteJson = buildParametrosFuenteJson({
-      recomendacionRow, fichaRow, contextoRow, baseline, assessment, freshnessResult, ajustePresion, remnant, recomendacionEdadDias, climatologyGenerated,
-    });
-    // Marca de origen -- distingue en la provenance que esta fila proviene
-    // de la salida REAL de un ciclo, nunca de una planificación pura.
-    parametrosFuenteJson.origenCicloRealId = String(cicloId);
-
-    // SAVEPOINT: si el INSERT choca con la unique parcial (23505, carrera
-    // concurrente de FASE B), Postgres aborta el resto de la transacción
-    // hasta un ROLLBACK -- sin este savepoint, el SELECT de "releer la fila
-    // ganadora" fallaría con 25P02 (current transaction is aborted).
-    await client.query('SAVEPOINT descanso_post_ciclo_insert');
-    try {
-      const insertResult = await client.query(
-        `insert into agx.potrero_recomendaciones_descanso
-           (organizacion_id, predio_id, potrero_id, ficha_id, contexto_id, recomendacion_pastoreo_id, previous_descanso_id,
-            fecha_inicio_pastoreo, fecha_salida_estimada,
-            dias_descanso_min, dias_descanso_max, dias_descanso_recomendado,
-            fecha_reingreso_min, fecha_reingreso_max, fecha_reingreso_recomendada,
-            nivel_confianza, agroclimate_status, condiciones_reentrada_json, applied_rules_json,
-            parametros_fuente_json, motor_version, ciclo_pastoreo_id)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
-         returning ${DESCANSO_POST_CICLO_SELECT}`,
-        [
-          organizacionId,
-          predioId,
-          potreroId,
-          fichaRow.ficha_id,
-          contextoRow ? contextoRow.contexto_id : null,
-          recomendacionRow.recomendacion_id,
-          recomendacionDescansoPlanId ?? null,
-          fechaIngresoReal,
-          fechaSalidaReal,
-          rango.diasDescansoMin,
-          rango.diasDescansoMax,
-          rango.diasDescansoRecomendado,
-          fechasReingreso.fechaReingresoMin,
-          fechasReingreso.fechaReingresoMax,
-          fechasReingreso.fechaReingresoRecomendada,
-          nivelConfianza,
-          assessment.status,
-          JSON.stringify(condicionesReentrada),
-          JSON.stringify(assessment.appliedRules),
-          JSON.stringify(parametrosFuenteJson),
-          MOTOR_VERSION,
-          cicloId,
-        ],
-      );
-      return { descanso: serializeDescansoRow(insertResult.rows[0]), yaExistia: false };
-    } catch (error) {
-      // Idempotencia bajo carrera (Design Revision 1 §C/§D): dos intentos
-      // concurrentes de FASE B -- el perdedor por 23505 relee la fila
-      // ganadora en vez de propagar el error al usuario.
-      if (error.code === '23505') {
-        await client.query('ROLLBACK TO SAVEPOINT descanso_post_ciclo_insert');
-        const ganadora = await client.query(
-          `select ${DESCANSO_POST_CICLO_SELECT} from agx.potrero_recomendaciones_descanso where ciclo_pastoreo_id = $1`,
-          [cicloId],
-        );
-        return { descanso: serializeDescansoRow(ganadora.rows[0]), yaExistia: true };
-      }
-      throw error;
-    }
   });
 }
 

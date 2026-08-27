@@ -1,19 +1,36 @@
-// SPRINT-3D9.1: "PASTOREO REAL" -- registra el ciclo REALMENTE ejecutado
-// (distinto del plan de PotreroDescansoReentradaPanel.jsx). Un clic para
-// "Iniciar pastoreo" (precarga el lote desde la recomendación de pastoreo
-// vigente) y un clic para "Finalizar pastoreo" (FASE A crítica + FASE B
-// best-effort -- genera el descanso post-real anclado a la salida REAL).
-// El cliente NUNCA aporta fechas -- se resuelven server-side
-// (businessTimezone.js). "Cancelar" exige un motivo no vacío.
+// SPRINT-3D9.1/3D9.2: "PASTOREO REAL" -- registra el ciclo REALMENTE
+// ejecutado (distinto del plan de PotreroDescansoReentradaPanel.jsx). Un
+// clic para "Iniciar pastoreo" (precarga el lote desde la recomendación
+// de pastoreo vigente) y un clic para "Finalizar pastoreo" (FASE A
+// crítica + FASE B best-effort -- genera el descanso post-real anclado a
+// la salida REAL). El cliente NUNCA aporta fechas -- se resuelven
+// server-side (businessTimezone.js). "Cancelar" exige un motivo no
+// vacío.
+//
+// SPRINT-3D9.2: el backend es la autoridad del reentry guard -- este
+// panel consulta el estado operativo derivado (DISPONIBLE/EN_PASTOREO/
+// EN_DESCANSO/EVALUACION_REINGRESO/ARCHIVADO) y refleja el bloqueo, pero
+// NUNCA decide por su cuenta -- "Iniciar pastoreo" solo se muestra
+// habilitado cuando el estado es DISPONIBLE; en cualquier otro caso el
+// propio backend rechazaría el intento igual. También agrega, sobre el
+// historial, "Anular registro" (ciclo histórico que nunca debió contar)
+// y "Corregir información" (dato real capturado mal) -- ninguno borra
+// permanentemente historia.
 import { useEffect, useState } from 'react';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
 import { formatDateDisplay } from '../utils/dateFormat.js';
 import {
   getCicloActual,
+  getCicloHistorial,
+  getEstadoOperativoPotrero,
   iniciarCicloPastoreo,
   finalizarCicloPastoreo,
   cancelarCicloPastoreo,
+  anularCicloPastoreo,
+  corregirCicloPastoreo,
+  evaluarReingreso,
 } from './ganaderiaCicloPastoreoApi.js';
+import { getFichaProductiva } from './ganaderiaFichaProductivaApi.js';
 
 const GENERIC_ERROR = 'No fue posible completar la operación en este momento. Intenta nuevamente.';
 
@@ -28,6 +45,20 @@ const CICLO_ERROR_MESSAGES = {
   INVALID_NUMERO_ANIMALES_REAL: 'El número de animales debe ser un entero entre 1 y 100.000.',
   INVALID_PESO_PROMEDIO_REAL: 'El peso promedio debe ser mayor que 0 y menor o igual a 2.000 kg.',
   INVALID_CATEGORIA_CODIGO: 'Selecciona una categoría productiva válida.',
+  PREDIO_ARCHIVADO: 'Este predio está archivado -- no se pueden iniciar nuevos ciclos.',
+  POTRERO_ARCHIVADO: 'Este potrero está archivado -- no se pueden iniciar nuevos ciclos.',
+  POTRERO_IN_REST_PERIOD: 'Este potrero está en descanso -- todavía no puede reingresar.',
+  POTRERO_REST_ASSESSMENT_PENDING: 'Todavía no se pudo calcular el descanso del último pastoreo.',
+  POTRERO_REINGRESO_NO_CONFIRMADO: 'La ventana de reingreso ya se abrió, pero todavía no se confirmó con un nuevo aforo.',
+  INVALID_MOTIVO_ANULACION: 'Escribe el motivo de la anulación.',
+  CICLO_EN_CURSO_USE_CANCELAR: 'Este ciclo está en curso -- usa "Cancelar" en vez de "Anular".',
+  INVALID_MOTIVO_CORRECCION: 'Escribe el motivo de la corrección.',
+  SIN_CAMBIOS_SOLICITADOS: 'Cambia al menos un dato antes de guardar la corrección.',
+  CICLO_NOT_FINALIZADO: 'Solo un ciclo finalizado puede corregirse.',
+  AFORO_ANTERIOR_A_VENTANA_REINGRESO: 'El aforo debe ser posterior a la apertura de la ventana de reingreso -- registra un aforo nuevo antes de evaluar.',
+  AFORO_NO_ES_EL_MAS_RECIENTE: 'Existe un aforo más reciente para este potrero. Recarga la página y evalúa con el último registrado.',
+  INVALID_OBSERVACION_EVALUACION: 'Escribe una observación.',
+  EVALUACION_APTO_YA_REGISTRADA: 'Ya se confirmó el reingreso de este potrero.',
 };
 
 function resolveErrorMessage(code) {
@@ -61,10 +92,29 @@ const DESCANSO_ESTADO_MESSAGES = {
   ERROR_TECNICO: { type: 'warning', text: 'El pastoreo quedó registrado, pero no fue posible calcular el descanso automáticamente.' },
 };
 
+// SPRINT-3D9.2: copy simple por estado operativo derivado -- nunca jerga
+// técnica (nunca "409", nunca el código del reason).
+const ESTADO_OPERATIVO_LABELS = {
+  DISPONIBLE: 'Disponible',
+  EN_PASTOREO: 'En pastoreo',
+  EN_DESCANSO: 'En descanso',
+  EVALUACION_REINGRESO: 'Evaluar reingreso',
+  ARCHIVADO: 'Archivado',
+};
+
+const HISTORIAL_ESTADO_LABELS = {
+  FINALIZADO: 'Finalizado',
+  CANCELADO: 'Cancelado',
+  ANULADO: 'Anulado',
+};
+
+const CORREGIBLE_FIELDS_INICIALES = { fechaIngresoReal: '', fechaSalidaReal: '', categoriaCodigo: '', numeroAnimales: '', pesoPromedioKg: '' };
+
 export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLote, categorias }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [actual, setActual] = useState(null);
+  const [estadoOperativo, setEstadoOperativo] = useState(null);
 
   const [iniciando, setIniciando] = useState(false);
   const [iniciarError, setIniciarError] = useState('');
@@ -90,17 +140,35 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
   const [mostrarCancelar, setMostrarCancelar] = useState(false);
   const [motivoCancelacion, setMotivoCancelacion] = useState('');
 
+  // SPRINT-3D9.2: evaluar reingreso.
+  const [fichaEvaluacion, setFichaEvaluacion] = useState(null);
+  const [evaluando, setEvaluando] = useState(false);
+  const [evaluarError, setEvaluarError] = useState('');
+  const [observacionEvaluacion, setObservacionEvaluacion] = useState('');
+  const [mostrarObservacionNoApto, setMostrarObservacionNoApto] = useState(false);
+
+  // SPRINT-3D9.2: historial + anular/corregir.
+  const [historial, setHistorial] = useState([]);
+  const [mostrarHistorial, setMostrarHistorial] = useState(false);
+  const [accionCicloId, setAccionCicloId] = useState(null);
+  const [accionTipo, setAccionTipo] = useState(null); // 'anular' | 'corregir'
+  const [motivoAccion, setMotivoAccion] = useState('');
+  const [corregirCampos, setCorregirCampos] = useState(CORREGIBLE_FIELDS_INICIALES);
+  const [accionEnCurso, setAccionEnCurso] = useState(false);
+  const [accionError, setAccionError] = useState('');
+
   function loadActual() {
     setLoading(true);
     setLoadError('');
-    getCicloActual(predioId, potreroId)
-      .then(({ ok, data }) => {
-        if (!ok) {
+    Promise.all([getCicloActual(predioId, potreroId), getEstadoOperativoPotrero(predioId, potreroId)])
+      .then(([actualRes, estadoRes]) => {
+        if (!actualRes.ok || !estadoRes.ok) {
           setLoadError(GENERIC_ERROR);
           setLoading(false);
           return;
         }
-        setActual(data?.actual ?? null);
+        setActual(actualRes.data?.actual ?? null);
+        setEstadoOperativo(estadoRes.data?.estadoOperativo ?? null);
         setLoading(false);
       })
       .catch(() => {
@@ -109,10 +177,27 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
       });
   }
 
+  function loadHistorial() {
+    getCicloHistorial(predioId, potreroId).then(({ ok, data }) => {
+      if (ok) setHistorial(Array.isArray(data?.historial) ? data.historial : []);
+    });
+  }
+
   useEffect(() => {
     loadActual();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [predioId, potreroId]);
+
+  // El aforo más reciente se consulta SOLO cuando hace falta evaluar
+  // reingreso -- nunca de entrada, para no pedir un dato que no se va a
+  // usar en el caso normal (DISPONIBLE/EN_PASTOREO).
+  useEffect(() => {
+    if (estadoOperativo?.estado !== 'EVALUACION_REINGRESO') return;
+    getFichaProductiva(predioId, potreroId).then(({ ok, data }) => {
+      if (ok) setFichaEvaluacion(data?.actual ?? null);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [estadoOperativo?.estado, predioId, potreroId]);
 
   async function handleIniciar() {
     if (iniciando) return;
@@ -212,6 +297,116 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
     loadActual();
   }
 
+  // SPRINT-3D9.2 -- Evaluar reingreso: el sistema NUNCA decide, solo
+  // registra el juicio humano respaldado por el aforo más reciente.
+  async function handleEvaluar(resultado) {
+    if (evaluando || !fichaEvaluacion) return;
+    if (resultado === 'NO_APTO' && !mostrarObservacionNoApto) {
+      setMostrarObservacionNoApto(true);
+      return;
+    }
+    if (resultado === 'NO_APTO' && observacionEvaluacion.trim() === '') {
+      setEvaluarError(resolveErrorMessage('INVALID_OBSERVACION_EVALUACION'));
+      return;
+    }
+    setEvaluando(true);
+    setEvaluarError('');
+    const { ok, data } = await evaluarReingreso(predioId, potreroId, {
+      fichaId: fichaEvaluacion.fichaId, resultado, observacion: resultado === 'NO_APTO' ? observacionEvaluacion.trim() : undefined,
+    });
+    setEvaluando(false);
+    if (!ok) {
+      setEvaluarError(resolveErrorMessage(data?.error));
+      return;
+    }
+    setMostrarObservacionNoApto(false);
+    setObservacionEvaluacion('');
+    loadActual();
+  }
+
+  function handleAbrirHistorial() {
+    const abrir = !mostrarHistorial;
+    setMostrarHistorial(abrir);
+    if (abrir && historial.length === 0) loadHistorial();
+  }
+
+  function handleAbrirAnular(cicloId) {
+    setAccionCicloId(cicloId);
+    setAccionTipo('anular');
+    setMotivoAccion('');
+    setAccionError('');
+  }
+
+  function handleAbrirCorregir(ciclo) {
+    setAccionCicloId(ciclo.cicloId);
+    setAccionTipo('corregir');
+    setMotivoAccion('');
+    setAccionError('');
+    // Precarga con los valores ACTUALES del ciclo -- el usuario solo
+    // edita el campo que estaba mal, nunca reescribe todo a ciegas.
+    setCorregirCampos({
+      fechaIngresoReal: ciclo.fechaIngresoReal || '',
+      fechaSalidaReal: ciclo.fechaSalidaReal || '',
+      categoriaCodigo: '',
+      numeroAnimales: String(ciclo.numeroAnimalesReal ?? ''),
+      pesoPromedioKg: String(ciclo.pesoPromedioRealKg ?? ''),
+    });
+  }
+
+  function handleCerrarAccion() {
+    setAccionCicloId(null);
+    setAccionTipo(null);
+    setAccionError('');
+  }
+
+  async function handleConfirmarAnular() {
+    if (accionEnCurso) return;
+    if (motivoAccion.trim() === '') {
+      setAccionError(resolveErrorMessage('INVALID_MOTIVO_ANULACION'));
+      return;
+    }
+    setAccionEnCurso(true);
+    setAccionError('');
+    const { ok, data } = await anularCicloPastoreo(predioId, potreroId, accionCicloId, motivoAccion.trim());
+    setAccionEnCurso(false);
+    if (!ok) {
+      setAccionError(resolveErrorMessage(data?.error));
+      return;
+    }
+    handleCerrarAccion();
+    loadHistorial();
+    loadActual();
+  }
+
+  async function handleConfirmarCorregir() {
+    if (accionEnCurso) return;
+    if (motivoAccion.trim() === '') {
+      setAccionError(resolveErrorMessage('INVALID_MOTIVO_CORRECCION'));
+      return;
+    }
+    const cambios = {};
+    if (corregirCampos.fechaIngresoReal) cambios.fechaIngresoReal = corregirCampos.fechaIngresoReal;
+    if (corregirCampos.fechaSalidaReal) cambios.fechaSalidaReal = corregirCampos.fechaSalidaReal;
+    if (corregirCampos.categoriaCodigo) cambios.categoriaCodigo = corregirCampos.categoriaCodigo;
+    if (corregirCampos.numeroAnimales !== '') cambios.numeroAnimales = Number(corregirCampos.numeroAnimales);
+    if (corregirCampos.pesoPromedioKg !== '') cambios.pesoPromedioKg = Number(corregirCampos.pesoPromedioKg);
+    if (Object.keys(cambios).length === 0) {
+      setAccionError(resolveErrorMessage('SIN_CAMBIOS_SOLICITADOS'));
+      return;
+    }
+    setAccionEnCurso(true);
+    setAccionError('');
+    const { ok, data } = await corregirCicloPastoreo(predioId, potreroId, accionCicloId, cambios, motivoAccion.trim());
+    setAccionEnCurso(false);
+    if (!ok) {
+      setAccionError(resolveErrorMessage(data?.error));
+      return;
+    }
+    handleCerrarAccion();
+    loadHistorial();
+    loadActual();
+  }
+
   if (loading) {
     return <p className="gan-potrero-points-hint">Cargando pastoreo real...</p>;
   }
@@ -220,9 +415,21 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
     return <StatusMessage type="error">{loadError}</StatusMessage>;
   }
 
+  const estado = estadoOperativo?.estado;
+  const bloqueadoPorArchivo = estado === 'ARCHIVADO';
+  const enDescanso = estado === 'EN_DESCANSO';
+  const enEvaluacion = estado === 'EVALUACION_REINGRESO';
+  const ventana = estadoOperativo?.descanso;
+
   return (
     <div className="gan-ficha-productiva-panel gan-ciclo-pastoreo-panel">
       <p className="gan-capacidad-section-label">Pastoreo real</p>
+
+      {estado && estado !== 'DISPONIBLE' ? (
+        <StatusMessage type={bloqueadoPorArchivo ? 'error' : 'info'}>
+          {ESTADO_OPERATIVO_LABELS[estado] || estado}
+        </StatusMessage>
+      ) : null}
 
       {/* El resultado del descanso post-real (FASE B) se muestra sin
           importar si el ciclo recién finalizado ya desapareció de
@@ -234,7 +441,58 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
         </StatusMessage>
       ) : null}
 
-      {!actual ? (
+      {!actual && !bloqueadoPorArchivo && (enDescanso || enEvaluacion) && ventana ? (
+        <div className="gan-ficha-preview">
+          <div className="gan-ficha-row"><span>Ventana mínima de reingreso</span><strong>{formatDateDisplay(ventana.fechaReingresoMin)}</strong></div>
+          <div className="gan-ficha-row"><span>Ventana recomendada</span><strong>{formatDateDisplay(ventana.fechaReingresoRecomendada)}</strong></div>
+          <div className="gan-ficha-row"><span>Ventana máxima</span><strong>{formatDateDisplay(ventana.fechaReingresoMax)}</strong></div>
+        </div>
+      ) : null}
+
+      {!actual && enEvaluacion ? (
+        <div className="gan-stack">
+          {!fichaEvaluacion ? (
+            <p className="gan-potrero-points-hint">Cargando último aforo...</p>
+          ) : fichaEvaluacion.fechaAforo && ventana && fichaEvaluacion.fechaAforo >= ventana.fechaReingresoMin ? (
+            <>
+              <p className="gan-potrero-points-hint">Aforo más reciente: {formatDateDisplay(fichaEvaluacion.fechaAforo)}.</p>
+              <StatusMessage type="error">{evaluarError}</StatusMessage>
+              {!mostrarObservacionNoApto ? (
+                <div className="gan-potrero-actions">
+                  <button type="button" className="gan-submit" onClick={() => handleEvaluar('APTO')} disabled={evaluando}>
+                    {evaluando ? 'Guardando...' : 'Apto -- reingresar'}
+                  </button>
+                  <button type="button" className="gan-back-inline" onClick={() => handleEvaluar('NO_APTO')} disabled={evaluando}>
+                    No apto todavía
+                  </button>
+                </div>
+              ) : (
+                <div className="gan-stack">
+                  <FormField label="Observación" required>
+                    <input
+                      type="text"
+                      value={observacionEvaluacion}
+                      onChange={(event) => setObservacionEvaluacion(event.target.value)}
+                    />
+                  </FormField>
+                  <div className="gan-potrero-actions">
+                    <button type="button" className="gan-secondary-button" onClick={() => handleEvaluar('NO_APTO')} disabled={evaluando}>
+                      {evaluando ? 'Guardando...' : 'Confirmar no apto'}
+                    </button>
+                    <button type="button" className="gan-back-inline" onClick={() => setMostrarObservacionNoApto(false)} disabled={evaluando}>
+                      Volver
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="gan-potrero-points-hint">Registra un aforo nuevo (ficha productiva) para este potrero, fechado desde hoy en adelante, y vuelve aquí para evaluar el reingreso.</p>
+          )}
+        </div>
+      ) : null}
+
+      {!actual && !bloqueadoPorArchivo && !enDescanso && !enEvaluacion ? (
         <div className="gan-ficha-productiva-empty">
           {planLote ? (
             <div className="gan-ficha-row"><span>Lote</span><strong>{planLote.numeroAnimales} animales ({planLote.pesoPromedioKg} kg prom.)</strong></div>
@@ -314,7 +572,7 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
                 {finalizando ? 'Finalizando...' : 'Finalizar pastoreo'}
               </button>
               <button type="button" className="gan-back-inline" onClick={handleAbrirCancelar} disabled={finalizando || cancelando}>
-                Cancelar
+                Cancelar registro
               </button>
             </div>
           ) : (
@@ -337,6 +595,113 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
               </div>
             </div>
           )}
+        </div>
+      ) : null}
+
+      {/* SPRINT-3D9.2: historial -- "Anular registro" (ciclo histórico que
+          nunca debió contar) y "Corregir información" (dato real
+          capturado mal). Nunca una eliminación definitiva para historia. */}
+      <button type="button" className="gan-back-inline" onClick={handleAbrirHistorial}>
+        {mostrarHistorial ? 'Ocultar historial' : 'Ver historial'}
+      </button>
+
+      {mostrarHistorial ? (
+        <div className="gan-ficha-historial-list">
+          {historial.length === 0 ? <p className="gan-potrero-points-hint">Sin ciclos anteriores.</p> : null}
+          {historial.map((ciclo) => (
+            <div className="gan-ficha-historial-item" key={ciclo.cicloId}>
+              <strong>{HISTORIAL_ESTADO_LABELS[ciclo.estado] || ciclo.estado}</strong>
+              <span>{ciclo.numeroAnimalesReal} animales, {ciclo.pesoPromedioRealKg} kg prom.</span>
+              <span>Ingreso: {formatDateDisplay(ciclo.fechaIngresoReal)}</span>
+              {ciclo.fechaSalidaReal ? <span>Salida: {formatDateDisplay(ciclo.fechaSalidaReal)}</span> : null}
+
+              {ciclo.estado !== 'ANULADO' && accionCicloId !== ciclo.cicloId ? (
+                <div className="gan-potrero-actions">
+                  <button type="button" className="gan-back-inline" onClick={() => handleAbrirAnular(ciclo.cicloId)}>
+                    Anular registro
+                  </button>
+                  {ciclo.estado === 'FINALIZADO' ? (
+                    <button type="button" className="gan-back-inline" onClick={() => handleAbrirCorregir(ciclo)}>
+                      Corregir información
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {accionCicloId === ciclo.cicloId && accionTipo === 'anular' ? (
+                <div className="gan-stack">
+                  <FormField label="Motivo de la anulación" required>
+                    <input type="text" value={motivoAccion} onChange={(event) => setMotivoAccion(event.target.value)} />
+                  </FormField>
+                  <StatusMessage type="error">{accionError}</StatusMessage>
+                  <div className="gan-potrero-actions">
+                    <button type="button" className="gan-secondary-button" onClick={handleConfirmarAnular} disabled={accionEnCurso}>
+                      {accionEnCurso ? 'Anulando...' : 'Confirmar anulación'}
+                    </button>
+                    <button type="button" className="gan-back-inline" onClick={handleCerrarAccion} disabled={accionEnCurso}>
+                      Volver
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              {accionCicloId === ciclo.cicloId && accionTipo === 'corregir' ? (
+                <div className="gan-stack">
+                  <FormField label="Fecha de ingreso real">
+                    <input
+                      type="date"
+                      value={corregirCampos.fechaIngresoReal}
+                      onChange={(event) => setCorregirCampos((c) => ({ ...c, fechaIngresoReal: event.target.value }))}
+                    />
+                  </FormField>
+                  <FormField label="Fecha de salida real">
+                    <input
+                      type="date"
+                      value={corregirCampos.fechaSalidaReal}
+                      onChange={(event) => setCorregirCampos((c) => ({ ...c, fechaSalidaReal: event.target.value }))}
+                    />
+                  </FormField>
+                  <FormField label="Categoría">
+                    <select
+                      value={corregirCampos.categoriaCodigo}
+                      onChange={(event) => setCorregirCampos((c) => ({ ...c, categoriaCodigo: event.target.value }))}
+                    >
+                      <option value="">Sin cambio</option>
+                      {(categorias || []).map((categoria) => (
+                        <option key={categoria.codigo} value={categoria.codigo}>{categoria.nombre}</option>
+                      ))}
+                    </select>
+                  </FormField>
+                  <FormField label="Número de animales">
+                    <input
+                      type="number" min="1" max="100000" step="1"
+                      value={corregirCampos.numeroAnimales}
+                      onChange={(event) => setCorregirCampos((c) => ({ ...c, numeroAnimales: event.target.value }))}
+                    />
+                  </FormField>
+                  <FormField label="Peso promedio (kg)">
+                    <input
+                      type="number" min="0" max="2000" step="any"
+                      value={corregirCampos.pesoPromedioKg}
+                      onChange={(event) => setCorregirCampos((c) => ({ ...c, pesoPromedioKg: event.target.value }))}
+                    />
+                  </FormField>
+                  <FormField label="Motivo de la corrección" required>
+                    <input type="text" value={motivoAccion} onChange={(event) => setMotivoAccion(event.target.value)} />
+                  </FormField>
+                  <StatusMessage type="error">{accionError}</StatusMessage>
+                  <div className="gan-potrero-actions">
+                    <button type="button" className="gan-secondary-button" onClick={handleConfirmarCorregir} disabled={accionEnCurso}>
+                      {accionEnCurso ? 'Guardando...' : 'Guardar corrección'}
+                    </button>
+                    <button type="button" className="gan-back-inline" onClick={handleCerrarAccion} disabled={accionEnCurso}>
+                      Volver
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ))}
         </div>
       ) : null}
     </div>
