@@ -422,6 +422,12 @@ export default function PotreroRecomendacionPastoreoPanel({ predioId, potreroId,
               categoriaNombre: actual.categoriaNombre,
               numeroAnimales: actual.numeroAnimales,
               pesoPromedioKg: actual.pesoPromedioKg,
+              // SPRINT-3D9.3: campos condicionales REAL heredan del PLAN
+              // vigente por defecto, igual que numeroAnimales/pesoPromedioKg.
+              produccionLecheLDia: actual.produccionLecheLDia,
+              diasEnLeche: actual.diasEnLeche,
+              grasaLechePct: actual.grasaLechePct,
+              terneroAlPie: actual.terneroAlPie,
             }}
             categorias={categorias}
           />

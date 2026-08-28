@@ -129,19 +129,51 @@ export function computeDemandaIndividualLecheNrc2001({ pesoPromedioKg, litrosPro
 //                                    igual salvo que diasOcupacionEstimados
 //                                    sea un entero exacto).
 // -----------------------------------------------------------------------
-export function computeRemnantDerivatives({
-  materiaSecaTotalKg, materiaSecaUtilizableKg, demandaDiariaLoteKgMs, diasOcupacionEstimados,
+// SPRINT-3D9.3 -- núcleo compartido PLAN/REAL: la ecuación física en sí
+// (consumo = demanda x días; remanente = total - consumo) es IDÉNTICA en
+// ambos casos -- lo único que difiere es CÓMO se resuelve `diasConsumo`
+// (floor de un entero-objetivo para PLAN, fracción exacta de exposición
+// real para REAL). Extraído para que ninguno de los dos sea una fórmula
+// paralela -- ver computeRemnantDerivatives (PLAN, sin cambios de
+// comportamiento) y computeConsumoYRemanenteReal (REAL, nuevo) más abajo.
+function computeConsumoYRemanenteCore({
+  materiaSecaTotalKg, materiaSecaUtilizableKg, demandaDiariaLoteKgMs, diasConsumo,
 }) {
-  const diasOcupacionRecomendados = Math.floor(diasOcupacionEstimados);
-  const consumoProyectadoKg = demandaDiariaLoteKgMs * diasOcupacionRecomendados;
+  const consumoProyectadoKg = demandaDiariaLoteKgMs * diasConsumo;
   const remanenteObjetivoKg = materiaSecaTotalKg - materiaSecaUtilizableKg;
   const remanenteProyectadoKg = materiaSecaTotalKg - consumoProyectadoKg;
   return {
-    diasOcupacionRecomendados,
     consumoProyectadoKg,
     remanenteObjetivoKg,
     remanenteProyectadoKg,
   };
+}
+
+export function computeRemnantDerivatives({
+  materiaSecaTotalKg, materiaSecaUtilizableKg, demandaDiariaLoteKgMs, diasOcupacionEstimados,
+}) {
+  const diasOcupacionRecomendados = Math.floor(diasOcupacionEstimados);
+  const derivados = computeConsumoYRemanenteCore({
+    materiaSecaTotalKg, materiaSecaUtilizableKg, demandaDiariaLoteKgMs, diasConsumo: diasOcupacionRecomendados,
+  });
+  return {
+    diasOcupacionRecomendados,
+    ...derivados,
+  };
+}
+
+// SPRINT-3D9.3 -- REAL pressure: `fraccionDiaReal` (permanencia real en
+// horas / 24) se usa EXACTA, nunca floor -- un ciclo de pocas horas debe
+// producir un consumo estimado proporcional a esa fracción, nunca 0 (que
+// sería el resultado de reutilizar computeRemnantDerivatives sin
+// cambios) ni 1 día completo inventado. Mismo núcleo que PLAN
+// (computeConsumoYRemanenteCore) -- misma ecuación, entrada distinta.
+export function computeConsumoYRemanenteReal({
+  materiaSecaTotalKg, materiaSecaUtilizableKg, demandaDiariaLoteKgMs, fraccionDiaReal,
+}) {
+  return computeConsumoYRemanenteCore({
+    materiaSecaTotalKg, materiaSecaUtilizableKg, demandaDiariaLoteKgMs, diasConsumo: fraccionDiaReal,
+  });
 }
 
 /**

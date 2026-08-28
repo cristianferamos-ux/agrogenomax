@@ -23,6 +23,7 @@ import {
   getCicloActual,
   getCicloHistorial,
   getEstadoOperativoPotrero,
+  getAforoBasePreview,
   iniciarCicloPastoreo,
   finalizarCicloPastoreo,
   cancelarCicloPastoreo,
@@ -59,6 +60,11 @@ const CICLO_ERROR_MESSAGES = {
   AFORO_NO_ES_EL_MAS_RECIENTE: 'Existe un aforo más reciente para este potrero. Recarga la página y evalúa con el último registrado.',
   INVALID_OBSERVACION_EVALUACION: 'Escribe una observación.',
   EVALUACION_APTO_YA_REGISTRADA: 'Ya se confirmó el reingreso de este potrero.',
+  // SPRINT-3D9.3
+  INVALID_PRODUCCION_LECHE_REAL: 'El promedio de litros/vaca/día debe ser numérico.',
+  INVALID_DIAS_EN_LECHE_REAL: 'Los días en leche deben ser numéricos.',
+  INVALID_GRASA_LECHE_REAL: 'El %grasa de la leche debe ser numérico.',
+  INVALID_TERNERO_AL_PIE_REAL: 'Indica si hay ternero al pie.',
 };
 
 function resolveErrorMessage(code) {
@@ -69,6 +75,14 @@ function resolveErrorMessage(code) {
 // espejo EXACTO de los rangos que ya enforca potreroCicloPastoreoRepository.js
 // (iniciarCicloPastoreo) -- nunca una fuente de verdad nueva, solo evita un
 // round-trip obvio. El backend sigue siendo la autoridad final.
+// SPRINT-3D9.3: resuelve la categoría seleccionada (ajuste o plan
+// vigente) para decidir qué campos condicionales mostrar -- mismo
+// criterio que categoriaSeleccionada en PotreroRecomendacionPastoreoPanel.jsx,
+// nunca un catálogo/lógica paralela.
+function resolveCategoriaSeleccionada(codigo, categorias) {
+  return (categorias || []).find((c) => c.codigo === codigo) || null;
+}
+
 function validateAjusteLote({ numeroAnimales, pesoPromedioKg, categoriaCodigo, categorias }) {
   if (!Number.isInteger(numeroAnimales) || numeroAnimales < 1 || numeroAnimales > 100000) {
     return 'INVALID_NUMERO_ANIMALES_REAL';
@@ -129,7 +143,18 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
   const [ajusteNumeroAnimales, setAjusteNumeroAnimales] = useState('');
   const [ajustePesoPromedioKg, setAjustePesoPromedioKg] = useState('');
   const [ajusteCategoriaCodigo, setAjusteCategoriaCodigo] = useState('');
+  // SPRINT-3D9.3: campos condicionales REAL -- mismo patrón que el resto
+  // del ajuste (precargados desde planLote al abrir, nunca obligatorios
+  // para iniciar).
+  const [ajusteProduccionLecheLDia, setAjusteProduccionLecheLDia] = useState('');
+  const [ajusteDiasEnLeche, setAjusteDiasEnLeche] = useState('');
+  const [ajusteGrasaLechePct, setAjusteGrasaLechePct] = useState('');
+  const [ajusteTerneroAlPie, setAjusteTerneroAlPie] = useState(false);
   const [ajusteError, setAjusteError] = useState('');
+
+  // SPRINT-3D9.3: aforo base real -- se muestra ANTES de confirmar
+  // "Iniciar pastoreo", nunca bloquea el inicio si no hay ninguno válido.
+  const [aforoPreview, setAforoPreview] = useState(null);
 
   const [finalizando, setFinalizando] = useState(false);
   const [finalizarError, setFinalizarError] = useState('');
@@ -188,6 +213,21 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [predioId, potreroId]);
 
+  // SPRINT-3D9.3: muestra el aforo que se usaría como base real ANTES de
+  // confirmar "Iniciar pastoreo" -- solo se consulta cuando el potrero
+  // realmente está por iniciar (nunca de entrada, mismo criterio que
+  // fichaEvaluacion más abajo). Read-only, nunca bloquea el inicio.
+  useEffect(() => {
+    if (actual || estadoOperativo?.estado !== 'DISPONIBLE') {
+      setAforoPreview(null);
+      return;
+    }
+    getAforoBasePreview(predioId, potreroId).then(({ ok, data }) => {
+      if (ok) setAforoPreview(data ?? null);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actual, estadoOperativo?.estado, predioId, potreroId]);
+
   // El aforo más reciente se consulta SOLO cuando hace falta evaluar
   // reingreso -- nunca de entrada, para no pedir un dato que no se va a
   // usar en el caso normal (DISPONIBLE/EN_PASTOREO).
@@ -219,6 +259,12 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
     setAjusteNumeroAnimales(planLote?.numeroAnimales != null ? String(planLote.numeroAnimales) : '');
     setAjustePesoPromedioKg(planLote?.pesoPromedioKg != null ? String(planLote.pesoPromedioKg) : '');
     setAjusteCategoriaCodigo(planLote?.categoriaCodigo || '');
+    // SPRINT-3D9.3: mismo criterio -- precarga SIEMPRE desde el plan
+    // vigente en ese instante, nunca desde un ajuste previo.
+    setAjusteProduccionLecheLDia(planLote?.produccionLecheLDia != null ? String(planLote.produccionLecheLDia) : '');
+    setAjusteDiasEnLeche(planLote?.diasEnLeche != null ? String(planLote.diasEnLeche) : '');
+    setAjusteGrasaLechePct(planLote?.grasaLechePct != null ? String(planLote.grasaLechePct) : '');
+    setAjusteTerneroAlPie(planLote?.terneroAlPie === true);
     setAjusteError('');
     setAjustando(true);
   }
@@ -243,8 +289,19 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
     }
     setIniciando(true);
     setAjusteError('');
+    const categoriaAjustada = resolveCategoriaSeleccionada(ajusteCategoriaCodigo, categorias);
     const { ok, data } = await iniciarCicloPastoreo(predioId, potreroId, {
-      numeroAnimales, pesoPromedioKg, categoriaCodigo: ajusteCategoriaCodigo,
+      numeroAnimales,
+      pesoPromedioKg,
+      categoriaCodigo: ajusteCategoriaCodigo,
+      // SPRINT-3D9.3: solo se envían cuando la categoría los usa -- nunca
+      // campos irrelevantes (mismo criterio que PotreroRecomendacionPastoreoPanel).
+      ...(categoriaAjustada?.requiereProduccionLeche ? {
+        produccionLecheLDia: ajusteProduccionLecheLDia !== '' ? Number(ajusteProduccionLecheLDia) : null,
+        grasaLechePct: ajusteGrasaLechePct !== '' ? Number(ajusteGrasaLechePct) : null,
+        diasEnLeche: ajusteDiasEnLeche !== '' ? Number(ajusteDiasEnLeche) : null,
+      } : {}),
+      ...(categoriaAjustada?.requiereTerneroAlPie ? { terneroAlPie: ajusteTerneroAlPie } : {}),
     });
     setIniciando(false);
     if (!ok) {
@@ -498,6 +555,16 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
             <div className="gan-ficha-row"><span>Lote</span><strong>{planLote.numeroAnimales} animales ({planLote.pesoPromedioKg} kg prom.)</strong></div>
           ) : null}
 
+          {/* SPRINT-3D9.3, diseño punto 12: aforo base real -- se muestra
+              ANTES de confirmar, nunca bloquea el inicio. */}
+          {aforoPreview ? (
+            aforoPreview.fichaIdBaseReal ? (
+              <p className="gan-potrero-points-hint">Aforo base real: {formatDateDisplay(aforoPreview.fechaAforo)}.</p>
+            ) : (
+              <p className="gan-potrero-points-hint">No hay un aforo registrado antes del inicio. El descanso usará temporalmente la estimación planificada.</p>
+            )
+          ) : null}
+
           {!ajustando ? (
             <>
               <button type="button" className="gan-secondary-button" onClick={handleIniciar} disabled={iniciando}>
@@ -545,6 +612,51 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
                   disabled={iniciando}
                 />
               </FormField>
+
+              {/* SPRINT-3D9.3: campos condicionales REAL -- mismo criterio
+                  que PotreroRecomendacionPastoreoPanel.jsx (11/13
+                  categorías no muestran nada de esto). */}
+              {resolveCategoriaSeleccionada(ajusteCategoriaCodigo, categorias)?.requiereProduccionLeche ? (
+                <>
+                  <FormField label="Producción de leche (L/vaca/día)">
+                    <input
+                      type="number" min="0" step="any"
+                      value={ajusteProduccionLecheLDia}
+                      onChange={(event) => setAjusteProduccionLecheLDia(event.target.value)}
+                      disabled={iniciando}
+                    />
+                  </FormField>
+                  <FormField label="%grasa de la leche (opcional)">
+                    <input
+                      type="number" min="0" max="10" step="any"
+                      value={ajusteGrasaLechePct}
+                      onChange={(event) => setAjusteGrasaLechePct(event.target.value)}
+                      disabled={iniciando}
+                    />
+                  </FormField>
+                  <FormField label="Días en leche (solo si aportas %grasa)">
+                    <input
+                      type="number" min="0" max="500" step="1"
+                      value={ajusteDiasEnLeche}
+                      onChange={(event) => setAjusteDiasEnLeche(event.target.value)}
+                      disabled={iniciando}
+                    />
+                  </FormField>
+                </>
+              ) : null}
+              {resolveCategoriaSeleccionada(ajusteCategoriaCodigo, categorias)?.requiereTerneroAlPie ? (
+                <FormField label="Ternero al pie">
+                  <select
+                    value={ajusteTerneroAlPie ? 'true' : 'false'}
+                    onChange={(event) => setAjusteTerneroAlPie(event.target.value === 'true')}
+                    disabled={iniciando}
+                  >
+                    <option value="false">No</option>
+                    <option value="true">Sí</option>
+                  </select>
+                </FormField>
+              ) : null}
+
               <StatusMessage type="error">{ajusteError}</StatusMessage>
               <div className="gan-potrero-actions">
                 <button type="button" className="gan-submit" onClick={handleConfirmarIniciarConAjuste} disabled={iniciando}>

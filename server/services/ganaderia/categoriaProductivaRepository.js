@@ -75,3 +75,16 @@ export async function fetchCategoriaByCodigo(client, categoriaCodigo) {
   }
   return serializeCategoriaRow(result.rows[0]);
 }
+
+// SPRINT-3D9.3: resuelve por categoria_id (no por código) -- necesario
+// porque el snapshot real de lote persiste categoria_id, igual que
+// agx.potrero_ciclos_pastoreo/agx.potrero_recomendaciones_pastoreo.
+// Nunca lanza NO_PRODUCTIVE_PROFILE -- un categoria_id ya persistido
+// siempre existe (FK), a diferencia de un código crudo del cliente.
+export async function fetchCategoriaById(client, categoriaId) {
+  const result = await client.query(
+    `select ${CATEGORIA_COLUMNS} from agx.catalogo_categorias_productivas where categoria_id = $1`,
+    [categoriaId],
+  );
+  return result.rows.length > 0 ? serializeCategoriaRow(result.rows[0]) : null;
+}

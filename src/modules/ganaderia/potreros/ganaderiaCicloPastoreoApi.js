@@ -63,6 +63,13 @@ export function getEstadoOperativoPotrero(predioId, potreroId) {
   return getJson(`${base(predioId, potreroId)}/estado-operativo`);
 }
 
+// SPRINT-3D9.3 -- read-only, muestra antes de confirmar "Iniciar
+// pastoreo" qué aforo se usaría como base real (o null si ninguno es
+// elegible). Nunca bloquea el inicio.
+export function getAforoBasePreview(predioId, potreroId) {
+  return getJson(`${base(predioId, potreroId)}/aforo-base-preview`);
+}
+
 export function anularCicloPastoreo(predioId, potreroId, cicloId, motivo) {
   return postJson(`${base(predioId, potreroId)}/${cicloId}/anular`, { motivo });
 }

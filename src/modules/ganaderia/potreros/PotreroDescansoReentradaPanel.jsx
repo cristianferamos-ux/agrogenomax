@@ -187,7 +187,7 @@ function DetalleTecnico({ agroClimate }) {
 function PlanPastoreoReport({ payload }) {
   const {
     lote, fechaInicioPastoreo, fechaSalidaEstimada, resultado, nivelConfianza, estado,
-    condicionesReentrada, agroClimate, windowConditions,
+    condicionesReentrada, agroClimate, windowConditions, fuentePresion, planVsReal,
   } = payload;
   const reassessment = (windowConditions || []).includes('REASSESSMENT_RECOMMENDED');
   const whyBullets = resolveWhyBullets(agroClimate?.appliedRules, agroClimate?.status);
@@ -268,6 +268,35 @@ function PlanPastoreoReport({ payload }) {
       ) : null}
       {estado === 'STALE_AGROCLIMATE_CONTEXT' ? (
         <StatusMessage type="warning">El contexto agroclimático de este potrero ya no es reciente -- la estimación no sostiene confianza alta.</StatusMessage>
+      ) : null}
+
+      {/* SPRINT-3D9.3 -- REAL PRESSURE: fuentePresion/planVsReal solo
+          existen en descansos generados post-real de un ciclo (ver
+          potreroCicloRealPressureRepository.js). Ausente en descansos
+          PLANIFICADOS puros -- nunca se infiere/inventa. */}
+      {fuentePresion === 'REAL' ? (
+        <StatusMessage type="info">Este descanso se calculó con la presión REAL del pastoreo -- consumo estimado según exposición temporal, nunca medido directamente.</StatusMessage>
+      ) : null}
+      {fuentePresion === 'PLAN_FALLBACK' ? (
+        <StatusMessage type="warning">El descanso se calculó con la estimación planificada porque no había evidencia real suficiente.</StatusMessage>
+      ) : null}
+
+      {planVsReal ? (
+        <div className="gan-descanso-plan-vs-real">
+          <p className="gan-capacidad-section-label">Plan vs. real</p>
+          <div className="gan-ficha-row">
+            <span>Planeado</span>
+            <strong>{planVsReal.plan.numeroAnimales} {planVsReal.plan.categoria} ({planVsReal.plan.pesoPromedioKg} kg prom.) -- {planVsReal.plan.diasOcupacionRecomendados} días</strong>
+          </div>
+          {planVsReal.real ? (
+            <div className="gan-ficha-row">
+              <span>Real</span>
+              <strong>{planVsReal.real.numeroAnimales} {planVsReal.real.categoria} ({planVsReal.real.pesoPromedioKg} kg prom.) -- {(planVsReal.real.permanenciaHoras / 24).toFixed(2)} días ({Math.round(planVsReal.real.permanenciaHoras)} horas)</strong>
+            </div>
+          ) : (
+            <p className="gan-potrero-points-hint">Sin evidencia real suficiente para este ciclo -- se muestra solo lo planeado.</p>
+          )}
+        </div>
       ) : null}
 
       <DetalleTecnico agroClimate={agroClimate} />
@@ -437,6 +466,8 @@ export default function PotreroDescansoReentradaPanel({ predioId, potreroId }) {
               condicionesReentrada: actual.condicionesReentrada,
               agroClimate: { status: actual.agroclimateStatus, ...actual.parametrosFuente?.agroClimate },
               windowConditions: [],
+              fuentePresion: actual.fuentePresion,
+              planVsReal: actual.planVsReal,
             }}
           />
           <div className="gan-potrero-actions">

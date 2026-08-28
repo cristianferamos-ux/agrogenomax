@@ -24,6 +24,12 @@ import {
   invalidarDescansoVersion,
 } from './potreroDescansoRepository.js';
 import { assertPuedeIniciarCiclo, resolveEstadoOperativoPotrero } from './potreroEstadoOperativoRepository.js';
+import {
+  resolveFichaIdBaseReal,
+  crearSnapshotLoteReal,
+  invalidarSnapshotLoteReal,
+  fetchSnapshotLoteRealVigente,
+} from './potreroCicloRealPressureRepository.js';
 
 const HISTORIAL_LIMIT = 10;
 const FECHA_ISO_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -73,7 +79,8 @@ async function assertPotreroBelongsToPredio(client, predioId, potreroId) {
 
 async function fetchRecomendacionPastoreoMasReciente(client, potreroId) {
   const result = await client.query(
-    `select recomendacion_id, ficha_id, contexto_id, categoria_id, numero_animales, peso_promedio_kg
+    `select recomendacion_id, ficha_id, contexto_id, categoria_id, numero_animales, peso_promedio_kg,
+            produccion_leche_l_dia, dias_en_leche, grasa_leche_pct, ternero_al_pie
        from agx.potrero_recomendaciones_pastoreo
       where potrero_id = $1
       order by created_at desc
@@ -122,6 +129,7 @@ const CICLO_SELECT = `ciclo_id, organizacion_id, predio_id, potrero_id, recomend
             recomendacion_descanso_plan_id, categoria_id, numero_animales_real, peso_promedio_real_kg,
             to_char(fecha_ingreso_real, 'YYYY-MM-DD') as fecha_ingreso_real,
             to_char(fecha_salida_real, 'YYYY-MM-DD') as fecha_salida_real,
+            ingreso_real_at, salida_real_at,
             estado, motivo_cancelacion, motivo_anulacion, contexto_id, created_at`;
 
 function serializeCiclo(row) {
@@ -136,6 +144,10 @@ function serializeCiclo(row) {
     pesoPromedioRealKg: Number(row.peso_promedio_real_kg),
     fechaIngresoReal: row.fecha_ingreso_real,
     fechaSalidaReal: row.fecha_salida_real,
+    // SPRINT-3D9.3: timestamps operacionales precisos -- NULL en ciclos
+    // creados antes de 3D9.3, nunca inferidos.
+    ingresoRealAt: row.ingreso_real_at ?? null,
+    salidaRealAt: row.salida_real_at ?? null,
     estado: row.estado,
     motivoCancelacion: row.motivo_cancelacion,
     motivoAnulacion: row.motivo_anulacion,
@@ -166,7 +178,9 @@ async function insertEvento(client, { organizacionId, potreroId, cicloId, tipoEv
  * carrera silenciosa.
  */
 export async function iniciarCicloPastoreo(organizacionId, predioId, potreroId, {
-  numeroAnimales, pesoPromedioKg, categoriaCodigo, actorCuentaId, now,
+  numeroAnimales, pesoPromedioKg, categoriaCodigo,
+  produccionLecheLDia, diasEnLeche, grasaLechePct, terneroAlPie,
+  actorCuentaId, now,
 } = {}) {
   assertPredioIdFormat(predioId);
   assertPotreroIdFormat(potreroId);
@@ -201,19 +215,52 @@ export async function iniciarCicloPastoreo(organizacionId, predioId, potreroId, 
       throw semanticError('INVALID_PESO_PROMEDIO_REAL', 400, 'pesoPromedioKg debe ser mayor que 0 y menor o igual a 2000.');
     }
 
-    const fechaIngresoReal = resolveFechaHoyNegocio(now);
+    // SPRINT-3D9.3 -- campos condicionales REAL (leche/ternero): mismo
+    // criterio que numeroAnimales/pesoPromedioKg/categoriaCodigo -- si el
+    // cliente no aporta un ajuste, se hereda del PLAN vigente (puede ser
+    // null si el PLAN tampoco los tenía). NUNCA se exige su presencia
+    // aquí -- iniciar el ciclo nunca se bloquea por evidencia científica
+    // incompleta (eso degrada a PLAN_FALLBACK más adelante, al calcular
+    // presión real). Solo se valida el TIPO cuando el cliente sí envía un
+    // valor.
+    const produccionLecheLDiaReal = produccionLecheLDia !== undefined
+      ? produccionLecheLDia
+      : (recomendacionRow.produccion_leche_l_dia === null ? null : Number(recomendacionRow.produccion_leche_l_dia));
+    const diasEnLecheReal = diasEnLeche !== undefined
+      ? diasEnLeche
+      : (recomendacionRow.dias_en_leche === null ? null : Number(recomendacionRow.dias_en_leche));
+    const grasaLechePctReal = grasaLechePct !== undefined
+      ? grasaLechePct
+      : (recomendacionRow.grasa_leche_pct === null ? null : Number(recomendacionRow.grasa_leche_pct));
+    const terneroAlPieReal = terneroAlPie !== undefined ? terneroAlPie : recomendacionRow.ternero_al_pie;
+
+    if (produccionLecheLDiaReal !== null && !Number.isFinite(produccionLecheLDiaReal)) {
+      throw semanticError('INVALID_PRODUCCION_LECHE_REAL', 400, 'produccionLecheLDia debe ser numérico.');
+    }
+    if (diasEnLecheReal !== null && !Number.isFinite(diasEnLecheReal)) {
+      throw semanticError('INVALID_DIAS_EN_LECHE_REAL', 400, 'diasEnLeche debe ser numérico.');
+    }
+    if (grasaLechePctReal !== null && !Number.isFinite(grasaLechePctReal)) {
+      throw semanticError('INVALID_GRASA_LECHE_REAL', 400, 'grasaLechePct debe ser numérico.');
+    }
+    if (terneroAlPieReal !== null && terneroAlPieReal !== undefined && typeof terneroAlPieReal !== 'boolean') {
+      throw semanticError('INVALID_TERNERO_AL_PIE_REAL', 400, 'terneroAlPie debe ser verdadero o falso.');
+    }
+
+    const ingresoRealAt = now ?? new Date();
+    const fechaIngresoReal = resolveFechaHoyNegocio(ingresoRealAt);
 
     let insertResult;
     try {
       insertResult = await client.query(
         `insert into agx.potrero_ciclos_pastoreo
            (organizacion_id, predio_id, potrero_id, recomendacion_pastoreo_id, recomendacion_descanso_plan_id,
-            categoria_id, numero_animales_real, peso_promedio_real_kg, fecha_ingreso_real, contexto_id, estado)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'EN_CURSO')
+            categoria_id, numero_animales_real, peso_promedio_real_kg, fecha_ingreso_real, ingreso_real_at, contexto_id, estado)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'EN_CURSO')
          returning ${CICLO_SELECT}`,
         [
           organizacionId, predioId, potreroId, recomendacionRow.recomendacion_id, recomendacionDescansoPlanId,
-          categoriaId, numeroAnimalesReal, pesoPromedioRealKg, fechaIngresoReal, contextoId,
+          categoriaId, numeroAnimalesReal, pesoPromedioRealKg, fechaIngresoReal, ingresoRealAt, contextoId,
         ],
       );
     } catch (error) {
@@ -227,6 +274,18 @@ export async function iniciarCicloPastoreo(organizacionId, predioId, potreroId, 
     await insertEvento(client, {
       organizacionId, potreroId, cicloId: ciclo.ciclo_id, tipoEvento: 'PASTOREO_INICIADO', actorCuentaId,
       payload: { categoriaId, numeroAnimalesReal, pesoPromedioRealKg },
+    });
+
+    // SPRINT-3D9.3 -- snapshot v1 SIEMPRE, incluso si no hay ficha
+    // elegible (fichaIdBaseReal queda null -- el ciclo igual inicia con
+    // normalidad, ver diseño 3D9.3 punto 3). Fuente científica
+    // autoritativa desde este momento en adelante para este ciclo.
+    const fichaIdBaseReal = await resolveFichaIdBaseReal(client, { potreroId, ingresoRealAt });
+    await crearSnapshotLoteReal(client, {
+      organizacionId, predioId, potreroId, cicloId: ciclo.ciclo_id, version: 1,
+      categoriaId, numeroAnimales: numeroAnimalesReal, pesoPromedioKg: pesoPromedioRealKg,
+      produccionLecheLDia: produccionLecheLDiaReal, diasEnLeche: diasEnLecheReal, grasaLechePct: grasaLechePctReal,
+      terneroAlPie: terneroAlPieReal, fichaIdBaseReal, ingresoRealAt, salidaRealAt: null, actorCuentaId,
     });
 
     return serializeCiclo(ciclo);
@@ -267,18 +326,20 @@ export async function finalizarCicloPastoreo(organizacionId, predioId, potreroId
       return cicloActual;
     }
 
-    const fechaSalidaReal = resolveFechaHoyNegocio(now);
+    const salidaRealAt = now ?? new Date();
+    const fechaSalidaReal = resolveFechaHoyNegocio(salidaRealAt);
     const actualizado = await client.query(
       `update agx.potrero_ciclos_pastoreo
-          set estado = 'FINALIZADO', fecha_salida_real = $1
-        where ciclo_id = $2 and estado = 'EN_CURSO'
+          set estado = 'FINALIZADO', fecha_salida_real = $1, salida_real_at = $2
+        where ciclo_id = $3 and estado = 'EN_CURSO'
         returning ${CICLO_SELECT}`,
-      [fechaSalidaReal, cicloId],
+      [fechaSalidaReal, salidaRealAt, cicloId],
     );
     if (actualizado.rows.length === 0) {
       // Perdió la carrera contra otra transacción concurrente (no debería
       // ocurrir gracias al FOR UPDATE, pero es la garantía de última
-      // línea) -- releer el estado real en vez de asumir.
+      // línea) -- releer el estado real en vez de asumir. Nunca crea un
+      // snapshot nuevo aquí -- el ganador de la carrera ya lo hizo.
       const releido = await client.query(`select ${CICLO_SELECT} from agx.potrero_ciclos_pastoreo where ciclo_id = $1`, [cicloId]);
       return releido.rows[0];
     }
@@ -288,6 +349,28 @@ export async function finalizarCicloPastoreo(organizacionId, predioId, potreroId
       organizacionId, potreroId, cicloId, tipoEvento: 'PASTOREO_FINALIZADO', actorCuentaId,
       payload: { fechaSalidaReal },
     });
+
+    // SPRINT-3D9.3 -- versiona el snapshot real: v1 (solo ingreso) -> vN+1
+    // (copia TODOS los campos científicos + agrega salida_real_at),
+    // invalida vN. Nunca UPDATE científico. Solo ocurre en esta rama
+    // (transición EN_CURSO -> FINALIZADO real, nunca en un retry
+    // idempotente ni en el release-de-carrera de arriba). Ciclos sin
+    // snapshot vigente (creados antes de 3D9.3) simplemente no tienen
+    // nada que versionar -- comportamiento legacy intacto.
+    const vigente = await fetchSnapshotLoteRealVigente(client, cicloId);
+    if (vigente) {
+      await crearSnapshotLoteReal(client, {
+        organizacionId, predioId, potreroId, cicloId, version: vigente.version + 1,
+        categoriaId: vigente.categoriaId, numeroAnimales: vigente.numeroAnimales, pesoPromedioKg: vigente.pesoPromedioKg,
+        produccionLecheLDia: vigente.produccionLecheLDia, diasEnLeche: vigente.diasEnLeche, grasaLechePct: vigente.grasaLechePct,
+        terneroAlPie: vigente.terneroAlPie, fichaIdBaseReal: vigente.fichaIdBaseReal,
+        ingresoRealAt: vigente.ingresoRealAt, salidaRealAt, actorCuentaId,
+      });
+      await invalidarSnapshotLoteReal(client, {
+        snapshotId: vigente.snapshotId, cicloId, potreroId, organizacionId, motivo: 'ciclo_finalizado', actorCuentaId,
+      });
+    }
+
     return cicloFinalizado;
   });
 
@@ -503,8 +586,56 @@ export async function anularCicloPastoreo(organizacionId, predioId, potreroId, c
  * descanso viejo -- "sin recomendación vigente" es preferible a
  * "recomendación conocida como incorrecta".
  */
+// =========================================================================
+// SPRINT-3D9.3 -- REGLA FORMAL DE CORRECCIÓN TEMPORAL (PRE-COMMIT FIX
+// ROUND, punto 2). No existe UI para capturar una hora nueva exacta --
+// "corregir fecha_ingreso_real/fecha_salida_real" solo recibe una FECHA
+// (YYYY-MM-DD), nunca una hora. Ninguna corrección de fecha puede
+// entonces INVENTAR una hora nueva -- la regla es:
+//
+//   nuevoTimestamp = timestampOriginal + (fechaNueva - fechaAnterior)
+//
+// es decir, se PRESERVA la hora-del-día original y se desplaza el
+// timestamp completo por el delta EXACTO de días de calendario entre la
+// fecha anterior y la nueva. Ejemplo (America/Bogota, UTC-5):
+//   ingreso_real_at original = 2026-08-28 08:37 America/Bogota
+//   corrección: fechaIngresoReal 2026-08-28 -> 2026-08-27
+//   resultado  = 2026-08-27 08:37 America/Bogota (misma hora, un día antes)
+//
+// Aritmética en milisegundos UTC (Date.parse con sufijo 'T00:00:00Z',
+// NUNCA Date#setFullYear/local) -- el delta de calendario es el mismo
+// número de milisegundos sin importar timezone (América/Bogotá no tiene
+// DST, así que un delta de N días de calendario es exactamente N*86400000
+// ms, sin ambigüedad ni salto de huso horario).
+//
+// Esta MISMA función se usa para sincronizar, en la misma transacción
+// (FASE A'):
+//   1. el timestamp OPERACIONAL de agx.potrero_ciclos_pastoreo
+//      (ingreso_real_at/salida_real_at, UPDATE-able desde 0014), y
+//   2. el timestamp CONGELADO de la nueva versión del snapshot
+//      (agx.potrero_ciclo_lote_real_versiones.ingreso_real_at/salida_real_at)
+// -- ambos reciben EXACTAMENTE el mismo valor calculado una sola vez, por
+// lo que nunca pueden divergir (ver corregirCicloPastoreo más abajo).
+// Corregir ingreso_real_at SIEMPRE re-resuelve ficha_id_base_real (la
+// evidencia elegible puede cambiar con el ingreso); corregir
+// salida_real_at nunca lo hace (la base real se fija al ingreso, no a la
+// salida).
+// =========================================================================
+function shiftTimestampPorDeltaFechas(timestampOriginal, fechaAnteriorIso, fechaNuevaIso) {
+  const deltaMs = Date.parse(`${fechaNuevaIso}T00:00:00Z`) - Date.parse(`${fechaAnteriorIso}T00:00:00Z`);
+  return new Date(new Date(timestampOriginal).getTime() + deltaMs);
+}
+
+function sameInstant(a, b) {
+  const aMs = a === null || a === undefined ? null : new Date(a).getTime();
+  const bMs = b === null || b === undefined ? null : new Date(b).getTime();
+  return aMs === bMs;
+}
+
 export async function corregirCicloPastoreo(organizacionId, predioId, potreroId, cicloId, {
-  fechaIngresoReal, fechaSalidaReal, categoriaCodigo, numeroAnimales, pesoPromedioKg, motivo, actorCuentaId, now, climatologyFetchImpl,
+  fechaIngresoReal, fechaSalidaReal, categoriaCodigo, numeroAnimales, pesoPromedioKg,
+  produccionLecheLDia, diasEnLeche, grasaLechePct, terneroAlPie,
+  motivo, actorCuentaId, now, climatologyFetchImpl,
 } = {}) {
   assertPredioIdFormat(predioId);
   assertPotreroIdFormat(potreroId);
@@ -514,8 +645,10 @@ export async function corregirCicloPastoreo(organizacionId, predioId, potreroId,
     throw semanticError('INVALID_MOTIVO_CORRECCION', 400, 'motivo es obligatorio para corregir un ciclo.');
   }
 
-  const algunCampoSolicitado = [fechaIngresoReal, fechaSalidaReal, categoriaCodigo, numeroAnimales, pesoPromedioKg]
-    .some((valor) => valor !== undefined);
+  const algunCampoSolicitado = [
+    fechaIngresoReal, fechaSalidaReal, categoriaCodigo, numeroAnimales, pesoPromedioKg,
+    produccionLecheLDia, diasEnLeche, grasaLechePct, terneroAlPie,
+  ].some((valor) => valor !== undefined);
   if (!algunCampoSolicitado) {
     throw semanticError('SIN_CAMBIOS_SOLICITADOS', 400, 'Debes indicar al menos un campo a corregir.');
   }
@@ -532,13 +665,25 @@ export async function corregirCicloPastoreo(organizacionId, predioId, potreroId,
   if (pesoPromedioKg !== undefined && (!Number.isFinite(pesoPromedioKg) || pesoPromedioKg <= 0 || pesoPromedioKg > 2000)) {
     throw semanticError('INVALID_PESO_PROMEDIO_REAL', 400, 'pesoPromedioKg debe ser mayor que 0 y menor o igual a 2000.');
   }
+  if (produccionLecheLDia !== undefined && produccionLecheLDia !== null && !Number.isFinite(produccionLecheLDia)) {
+    throw semanticError('INVALID_PRODUCCION_LECHE_REAL', 400, 'produccionLecheLDia debe ser numérico.');
+  }
+  if (diasEnLeche !== undefined && diasEnLeche !== null && !Number.isFinite(diasEnLeche)) {
+    throw semanticError('INVALID_DIAS_EN_LECHE_REAL', 400, 'diasEnLeche debe ser numérico.');
+  }
+  if (grasaLechePct !== undefined && grasaLechePct !== null && !Number.isFinite(grasaLechePct)) {
+    throw semanticError('INVALID_GRASA_LECHE_REAL', 400, 'grasaLechePct debe ser numérico.');
+  }
+  if (terneroAlPie !== undefined && terneroAlPie !== null && typeof terneroAlPie !== 'boolean') {
+    throw semanticError('INVALID_TERNERO_AL_PIE_REAL', 400, 'terneroAlPie debe ser verdadero o falso.');
+  }
 
-  // Solo estos dos campos disparan el recálculo de descanso (FASE B') --
-  // categoría/numeroAnimales/pesoPromedio no alimentan el motor de
-  // descanso (que usa la recomendación de pastoreo, no el snapshot real).
-  const debeRegenerarDescanso = fechaIngresoReal !== undefined || fechaSalidaReal !== undefined;
+  // Legacy (ciclos SIN snapshot -- comportamiento 3D9.2 intacto): solo
+  // fecha dispara regeneración, porque categoría/numeroAnimales/peso
+  // nunca alimentaban el motor de descanso PLAN.
+  const debeRegenerarDescansoLegacy = fechaIngresoReal !== undefined || fechaSalidaReal !== undefined;
 
-  const { ciclo, huboCambios } = await withOrganizacionTransaction(organizacionId, async (client) => {
+  const { ciclo, huboCambios, huboCambiosSnapshot } = await withOrganizacionTransaction(organizacionId, async (client) => {
     const actual = await client.query(
       `select ${CICLO_SELECT} from agx.potrero_ciclos_pastoreo
         where ciclo_id = $1 and potrero_id = $2 and predio_id = $3
@@ -572,18 +717,82 @@ export async function corregirCicloPastoreo(organizacionId, predioId, potreroId,
       cambios.push({ campo: 'pesoPromedioRealKg', valorAnterior: Number(cicloActual.peso_promedio_real_kg), valorNuevo: pesoPromedioKg });
     }
 
-    if (cambios.length === 0) {
+    // SPRINT-3D9.3 FINAL IMPLEMENTATION GATE, punto 1 -- fuente única de
+    // verdad: si el ciclo tiene snapshot vigente, categoría/numeroAnimales/
+    // pesoPromedioKg/fechas NUNCA se corrigen como UPDATE científico
+    // independiente -- el UPDATE de abajo sobre potrero_ciclos_pastoreo
+    // pasa a ser exclusivamente el espejo de sincronización de la nueva
+    // versión del snapshot (mismo valor, mismo motivo, misma transacción).
+    const vigenteSnapshot = await fetchSnapshotLoteRealVigente(client, cicloId);
+
+    let huboCambiosSnapshotLocal = false;
+    let ingresoRealAtEfectivo = vigenteSnapshot ? vigenteSnapshot.ingresoRealAt : null;
+    let salidaRealAtEfectivo = vigenteSnapshot ? vigenteSnapshot.salidaRealAt : null;
+    let fichaIdBaseRealEfectiva = vigenteSnapshot ? vigenteSnapshot.fichaIdBaseReal : null;
+
+    if (vigenteSnapshot) {
+      const categoriaIdEfectiva = categoriaAjustadaId !== undefined ? String(categoriaAjustadaId) : vigenteSnapshot.categoriaId;
+      const numeroAnimalesEfectivo = numeroAnimales !== undefined ? numeroAnimales : vigenteSnapshot.numeroAnimales;
+      const pesoPromedioEfectivo = pesoPromedioKg !== undefined ? pesoPromedioKg : vigenteSnapshot.pesoPromedioKg;
+      const produccionLecheEfectiva = produccionLecheLDia !== undefined ? produccionLecheLDia : vigenteSnapshot.produccionLecheLDia;
+      const diasEnLecheEfectivo = diasEnLeche !== undefined ? diasEnLeche : vigenteSnapshot.diasEnLeche;
+      const grasaLecheEfectiva = grasaLechePct !== undefined ? grasaLechePct : vigenteSnapshot.grasaLechePct;
+      const terneroAlPieEfectivo = terneroAlPie !== undefined ? terneroAlPie : vigenteSnapshot.terneroAlPie;
+
+      if (fechaIngresoReal !== undefined && fechaIngresoReal !== cicloActual.fecha_ingreso_real) {
+        ingresoRealAtEfectivo = shiftTimestampPorDeltaFechas(vigenteSnapshot.ingresoRealAt, cicloActual.fecha_ingreso_real, fechaIngresoReal);
+        // El ingreso cambió -> la evidencia elegible como base real puede
+        // cambiar -- SIEMPRE se re-resuelve, nunca se conserva a ciegas.
+        fichaIdBaseRealEfectiva = await resolveFichaIdBaseReal(client, { potreroId, ingresoRealAt: ingresoRealAtEfectivo });
+      }
+      if (fechaSalidaReal !== undefined && fechaSalidaReal !== cicloActual.fecha_salida_real && vigenteSnapshot.salidaRealAt) {
+        salidaRealAtEfectivo = shiftTimestampPorDeltaFechas(vigenteSnapshot.salidaRealAt, cicloActual.fecha_salida_real, fechaSalidaReal);
+      }
+
+      huboCambiosSnapshotLocal = (
+        categoriaIdEfectiva !== vigenteSnapshot.categoriaId
+        || numeroAnimalesEfectivo !== vigenteSnapshot.numeroAnimales
+        || pesoPromedioEfectivo !== vigenteSnapshot.pesoPromedioKg
+        || produccionLecheEfectiva !== vigenteSnapshot.produccionLecheLDia
+        || diasEnLecheEfectivo !== vigenteSnapshot.diasEnLeche
+        || grasaLecheEfectiva !== vigenteSnapshot.grasaLechePct
+        || terneroAlPieEfectivo !== vigenteSnapshot.terneroAlPie
+        || !sameInstant(ingresoRealAtEfectivo, vigenteSnapshot.ingresoRealAt)
+        || !sameInstant(salidaRealAtEfectivo, vigenteSnapshot.salidaRealAt)
+        || String(fichaIdBaseRealEfectiva) !== String(vigenteSnapshot.fichaIdBaseReal)
+      );
+
+      if (huboCambiosSnapshotLocal) {
+        await crearSnapshotLoteReal(client, {
+          organizacionId, predioId, potreroId, cicloId, version: vigenteSnapshot.version + 1,
+          categoriaId: categoriaIdEfectiva, numeroAnimales: numeroAnimalesEfectivo, pesoPromedioKg: pesoPromedioEfectivo,
+          produccionLecheLDia: produccionLecheEfectiva, diasEnLeche: diasEnLecheEfectivo, grasaLechePct: grasaLecheEfectiva,
+          terneroAlPie: terneroAlPieEfectivo, fichaIdBaseReal: fichaIdBaseRealEfectiva,
+          ingresoRealAt: ingresoRealAtEfectivo, salidaRealAt: salidaRealAtEfectivo, actorCuentaId,
+        });
+        await invalidarSnapshotLoteReal(client, {
+          snapshotId: vigenteSnapshot.snapshotId, cicloId, potreroId, organizacionId, motivo: 'correccion_lote_real', actorCuentaId,
+        });
+      }
+    }
+
+    if (cambios.length === 0 && !huboCambiosSnapshotLocal) {
       // Idempotente: retry con el mismo payload ya aplicado -- sin
       // evento nuevo, sin invalidar nada. El llamador igual intenta
       // FASE B' más abajo (mismo criterio que finalizar/FASE B).
-      return { ciclo: cicloActual, huboCambios: false };
+      return { ciclo: cicloActual, huboCambios: false, huboCambiosSnapshot: false };
     }
 
+    // UPDATE del ciclo -- para un ciclo CON snapshot, este UPDATE es
+    // EXCLUSIVAMENTE el espejo de sincronización (mismos valores que la
+    // nueva versión del snapshot recién creada arriba), nunca un segundo
+    // camino de corrección independiente.
     const actualizado = await client.query(
       `update agx.potrero_ciclos_pastoreo
           set fecha_ingreso_real = $1, fecha_salida_real = $2, categoria_id = $3,
-              numero_animales_real = $4, peso_promedio_real_kg = $5
-        where ciclo_id = $6
+              numero_animales_real = $4, peso_promedio_real_kg = $5,
+              ingreso_real_at = $6, salida_real_at = $7
+        where ciclo_id = $8
         returning ${CICLO_SELECT}`,
       [
         fechaIngresoReal !== undefined ? fechaIngresoReal : cicloActual.fecha_ingreso_real,
@@ -591,6 +800,8 @@ export async function corregirCicloPastoreo(organizacionId, predioId, potreroId,
         categoriaAjustadaId !== undefined ? categoriaAjustadaId : cicloActual.categoria_id,
         numeroAnimales !== undefined ? numeroAnimales : Number(cicloActual.numero_animales_real),
         pesoPromedioKg !== undefined ? pesoPromedioKg : Number(cicloActual.peso_promedio_real_kg),
+        ingresoRealAtEfectivo ?? cicloActual.ingreso_real_at,
+        salidaRealAtEfectivo ?? cicloActual.salida_real_at,
         cicloId,
       ],
     );
@@ -601,23 +812,25 @@ export async function corregirCicloPastoreo(organizacionId, predioId, potreroId,
       payload: { motivo: motivoLimpio, cambios },
     });
 
-    if (debeRegenerarDescanso) {
-      const vigente = await fetchDescansoVigentePorCiclo(client, cicloId);
-      if (vigente) {
+    const debeInvalidarDescanso = debeRegenerarDescansoLegacy || huboCambiosSnapshotLocal;
+    if (debeInvalidarDescanso) {
+      const vigenteDescanso = await fetchDescansoVigentePorCiclo(client, cicloId);
+      if (vigenteDescanso) {
         await invalidarDescansoVersion(client, {
-          descansoId: Number(vigente.descansoId),
+          descansoId: Number(vigenteDescanso.descansoId),
           cicloPastoreoId: cicloId,
           potreroId,
           organizacionId,
-          motivo: 'correccion_fecha',
+          motivo: 'correccion_lote_real',
           actorCuentaId,
         });
       }
     }
 
-    return { ciclo: cicloCorregido, huboCambios: true };
+    return { ciclo: cicloCorregido, huboCambios: true, huboCambiosSnapshot: huboCambiosSnapshotLocal };
   });
 
+  const debeRegenerarDescanso = debeRegenerarDescansoLegacy || huboCambiosSnapshot;
   if (!debeRegenerarDescanso) {
     return { ciclo: serializeCiclo(ciclo), descansoEstado: null, descanso: null, huboCambios };
   }

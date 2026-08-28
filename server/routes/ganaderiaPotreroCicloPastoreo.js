@@ -25,6 +25,7 @@ import {
   getCicloHistorial,
 } from '../services/ganaderia/potreroCicloPastoreoRepository.js';
 import { getEstadoOperativoPotrero } from '../services/ganaderia/potreroEstadoOperativoRepository.js';
+import { previewFichaBaseReal } from '../services/ganaderia/potreroCicloRealPressureRepository.js';
 
 function isPredioIdValid(predioId) {
   return /^\d+$/.test(String(predioId));
@@ -42,7 +43,16 @@ function validationError(code, message) {
   return Object.assign(new Error(message), { status: 400, code });
 }
 
-const ALLOWED_KEYS_INICIAR = new Set(['numeroAnimales', 'pesoPromedioKg', 'categoriaCodigo']);
+// SPRINT-3D9.3: campos condicionales REAL (leche/ternero) -- mismo
+// criterio de validación type-check-únicamente que el resto de este
+// archivo (el repositorio decide requeridad exacta por categoría; aquí
+// solo se garantiza que, si el cliente los envía, tienen el tipo
+// correcto -- nunca se exige su presencia, iniciar nunca se bloquea por
+// evidencia científica incompleta).
+const ALLOWED_KEYS_INICIAR = new Set([
+  'numeroAnimales', 'pesoPromedioKg', 'categoriaCodigo',
+  'produccionLecheLDia', 'diasEnLeche', 'grasaLechePct', 'terneroAlPie',
+]);
 const ALLOWED_KEYS_CANCELAR = new Set(['motivo']);
 
 // Nunca fechas del cliente -- solo el ajuste opcional del lote real.
@@ -51,7 +61,10 @@ export function validateIniciarBody(body) {
   if (unknownKeys.length > 0) {
     throw validationError('FORBIDDEN_FIELDS', `Campos no permitidos: ${unknownKeys.join(', ')}`);
   }
-  const { numeroAnimales, pesoPromedioKg, categoriaCodigo } = body || {};
+  const {
+    numeroAnimales, pesoPromedioKg, categoriaCodigo,
+    produccionLecheLDia, diasEnLeche, grasaLechePct, terneroAlPie,
+  } = body || {};
   if (numeroAnimales !== undefined && typeof numeroAnimales !== 'number') {
     throw validationError('INVALID_NUMERO_ANIMALES_REAL', 'numeroAnimales debe ser numérico.');
   }
@@ -61,7 +74,22 @@ export function validateIniciarBody(body) {
   if (categoriaCodigo !== undefined && typeof categoriaCodigo !== 'string') {
     throw validationError('INVALID_CATEGORIA_CODIGO', 'categoriaCodigo debe ser texto.');
   }
-  return { numeroAnimales, pesoPromedioKg, categoriaCodigo };
+  if (produccionLecheLDia !== undefined && produccionLecheLDia !== null && typeof produccionLecheLDia !== 'number') {
+    throw validationError('INVALID_PRODUCCION_LECHE_REAL', 'produccionLecheLDia debe ser numérico.');
+  }
+  if (diasEnLeche !== undefined && diasEnLeche !== null && typeof diasEnLeche !== 'number') {
+    throw validationError('INVALID_DIAS_EN_LECHE_REAL', 'diasEnLeche debe ser numérico.');
+  }
+  if (grasaLechePct !== undefined && grasaLechePct !== null && typeof grasaLechePct !== 'number') {
+    throw validationError('INVALID_GRASA_LECHE_REAL', 'grasaLechePct debe ser numérico.');
+  }
+  if (terneroAlPie !== undefined && terneroAlPie !== null && typeof terneroAlPie !== 'boolean') {
+    throw validationError('INVALID_TERNERO_AL_PIE_REAL', 'terneroAlPie debe ser verdadero o falso.');
+  }
+  return {
+    numeroAnimales, pesoPromedioKg, categoriaCodigo,
+    produccionLecheLDia, diasEnLeche, grasaLechePct, terneroAlPie,
+  };
 }
 
 export function validateCancelarBody(body) {
@@ -90,16 +118,22 @@ export function validateAnularBody(body) {
   return { motivo };
 }
 
-const ALLOWED_KEYS_CORREGIR = new Set(['fechaIngresoReal', 'fechaSalidaReal', 'categoriaCodigo', 'numeroAnimales', 'pesoPromedioKg', 'motivo']);
+const ALLOWED_KEYS_CORREGIR = new Set([
+  'fechaIngresoReal', 'fechaSalidaReal', 'categoriaCodigo', 'numeroAnimales', 'pesoPromedioKg', 'motivo',
+  'produccionLecheLDia', 'diasEnLeche', 'grasaLechePct', 'terneroAlPie',
+]);
 
-// SPRINT-3D9.2: type-check únicamente -- el repositorio valida
+// SPRINT-3D9.2/3D9.3: type-check únicamente -- el repositorio valida
 // formato/rango exacto (mismo criterio que validateIniciarBody).
 export function validateCorregirBody(body) {
   const unknownKeys = Object.keys(body || {}).filter((key) => !ALLOWED_KEYS_CORREGIR.has(key));
   if (unknownKeys.length > 0) {
     throw validationError('FORBIDDEN_FIELDS', `Campos no permitidos: ${unknownKeys.join(', ')}`);
   }
-  const { fechaIngresoReal, fechaSalidaReal, categoriaCodigo, numeroAnimales, pesoPromedioKg, motivo } = body || {};
+  const {
+    fechaIngresoReal, fechaSalidaReal, categoriaCodigo, numeroAnimales, pesoPromedioKg,
+    produccionLecheLDia, diasEnLeche, grasaLechePct, terneroAlPie, motivo,
+  } = body || {};
   if (typeof motivo !== 'string' || motivo.trim() === '') {
     throw validationError('INVALID_MOTIVO_CORRECCION', 'motivo es obligatorio para corregir un ciclo.');
   }
@@ -118,11 +152,29 @@ export function validateCorregirBody(body) {
   if (pesoPromedioKg !== undefined && typeof pesoPromedioKg !== 'number') {
     throw validationError('INVALID_PESO_PROMEDIO_REAL', 'pesoPromedioKg debe ser numérico.');
   }
-  const algunCampo = [fechaIngresoReal, fechaSalidaReal, categoriaCodigo, numeroAnimales, pesoPromedioKg].some((v) => v !== undefined);
+  if (produccionLecheLDia !== undefined && produccionLecheLDia !== null && typeof produccionLecheLDia !== 'number') {
+    throw validationError('INVALID_PRODUCCION_LECHE_REAL', 'produccionLecheLDia debe ser numérico.');
+  }
+  if (diasEnLeche !== undefined && diasEnLeche !== null && typeof diasEnLeche !== 'number') {
+    throw validationError('INVALID_DIAS_EN_LECHE_REAL', 'diasEnLeche debe ser numérico.');
+  }
+  if (grasaLechePct !== undefined && grasaLechePct !== null && typeof grasaLechePct !== 'number') {
+    throw validationError('INVALID_GRASA_LECHE_REAL', 'grasaLechePct debe ser numérico.');
+  }
+  if (terneroAlPie !== undefined && terneroAlPie !== null && typeof terneroAlPie !== 'boolean') {
+    throw validationError('INVALID_TERNERO_AL_PIE_REAL', 'terneroAlPie debe ser verdadero o falso.');
+  }
+  const algunCampo = [
+    fechaIngresoReal, fechaSalidaReal, categoriaCodigo, numeroAnimales, pesoPromedioKg,
+    produccionLecheLDia, diasEnLeche, grasaLechePct, terneroAlPie,
+  ].some((v) => v !== undefined);
   if (!algunCampo) {
     throw validationError('SIN_CAMBIOS_SOLICITADOS', 'Debes indicar al menos un campo a corregir.');
   }
-  return { fechaIngresoReal, fechaSalidaReal, categoriaCodigo, numeroAnimales, pesoPromedioKg, motivo };
+  return {
+    fechaIngresoReal, fechaSalidaReal, categoriaCodigo, numeroAnimales, pesoPromedioKg,
+    produccionLecheLDia, diasEnLeche, grasaLechePct, terneroAlPie, motivo,
+  };
 }
 
 const ALLOWED_KEYS_EVALUAR_REINGRESO = new Set(['fichaId', 'resultado', 'observacion']);
@@ -196,6 +248,27 @@ export default function createGanaderiaPotreroCicloPastoreoRouter({ appEnv, csrf
       const { organizacionId } = req.ganaderiaAuth;
       const historial = await getCicloHistorial(organizacionId, predioId, potreroId);
       res.json({ historial });
+    } catch (error) {
+      if (sendSemanticError(res, error)) return;
+      next(error);
+    }
+  });
+
+  // SPRINT-3D9.3 -- GET .../ciclos-pastoreo/aforo-base-preview -- muestra
+  // ANTES de confirmar "Iniciar pastoreo" qué aforo se usaría como base
+  // real (mismo doble guardrail que la resolución real al iniciar).
+  // Read-only, nunca bloquea el inicio.
+  router.get('/aforo-base-preview', async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const { predioId, potreroId } = req.params;
+      if (!isPredioIdValid(predioId) || !isPotreroIdValid(potreroId)) {
+        res.status(400).json({ error: 'INVALID_POTRERO_ID' });
+        return;
+      }
+      const { organizacionId } = req.ganaderiaAuth;
+      const preview = await previewFichaBaseReal(organizacionId, predioId, potreroId);
+      res.json(preview);
     } catch (error) {
       if (sendSemanticError(res, error)) return;
       next(error);

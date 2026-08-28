@@ -116,7 +116,7 @@ describe('SPRINT-3D9.1: esquema real -- agx.potrero_ciclos_pastoreo / agx.potrer
     }
   });
 
-  test('grants: agx_app tiene SELECT/INSERT en potrero_ciclos_pastoreo, UPDATE SOLO en las columnas explícitamente ampliadas por 3D9.2, NUNCA DELETE', async () => {
+  test('grants: agx_app tiene SELECT/INSERT en potrero_ciclos_pastoreo, UPDATE SOLO en las columnas explícitamente ampliadas por 3D9.2/3D9.3, NUNCA DELETE', async () => {
     const result = await adminPool.query(
       `select privilege_type, column_name from information_schema.column_privileges
         where table_schema='agx' and table_name='potrero_ciclos_pastoreo' and grantee='agx_app' and privilege_type='UPDATE'
@@ -126,9 +126,13 @@ describe('SPRINT-3D9.1: esquema real -- agx.potrero_ciclos_pastoreo / agx.potrer
     // SPRINT-3D9.2: amplía el grant original (estado/fecha_salida_real/
     // motivo_cancelacion) con las columnas de "corregir ciclo" -- cada una
     // justificada individualmente (ver 0011_potrero_ciclo_anulacion_correccion.sql).
+    // SPRINT-3D9.3: agrega ingreso_real_at/salida_real_at (0014) --
+    // necesarias para que FASE A/A' puedan fijar/sincronizar el timestamp
+    // operacional junto con la fecha DATE derivada.
     assert.deepEqual(columnasConUpdate, [
       'categoria_id', 'estado', 'fecha_ingreso_real', 'fecha_salida_real',
-      'motivo_anulacion', 'motivo_cancelacion', 'numero_animales_real', 'peso_promedio_real_kg',
+      'ingreso_real_at', 'motivo_anulacion', 'motivo_cancelacion', 'numero_animales_real',
+      'peso_promedio_real_kg', 'salida_real_at',
     ]);
 
     const tablePriv = await adminPool.query(

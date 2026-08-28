@@ -16,6 +16,7 @@ import {
   computeDemandaIndividualLecheNrc2001,
   computeFcmKgDia,
   computeRemnantDerivatives,
+  computeConsumoYRemanenteReal,
   resolveNivelConfianza,
   FICHA_STALE_DIAS,
   DENSIDAD_LECHE_KG_POR_LITRO,
@@ -278,4 +279,43 @@ test('computeRecomendacionPastoreo expone los 4 campos derivados del remanente e
     assert.ok(campo in resultado, `falta el campo ${campo}`);
     assert.ok(Number.isFinite(resultado[campo]), `${campo} debe ser un número finito`);
   }
+});
+
+// ---------------------------------------------------------------------
+// SPRINT-3D9.3 -- computeConsumoYRemanenteReal: núcleo compartido con
+// computeRemnantDerivatives (PLAN), SIN floor -- una fracción de día real
+// nunca colapsa a 0 consumo.
+// ---------------------------------------------------------------------
+
+test('computeConsumoYRemanenteReal: regresión CERO en computeRemnantDerivatives (PLAN) -- mismos inputs, mismos resultados que antes del refactor', () => {
+  const inputs = { materiaSecaTotalKg: 1000, materiaSecaUtilizableKg: 500, demandaDiariaLoteKgMs: 225 };
+  const resultado = computeRemnantDerivatives({ ...inputs, diasOcupacionEstimados: 3.7 });
+  assert.equal(resultado.diasOcupacionRecomendados, 3);
+  assert.equal(resultado.consumoProyectadoKg, 225 * 3);
+  assert.equal(resultado.remanenteObjetivoKg, 500);
+  assert.equal(resultado.remanenteProyectadoKg, 1000 - 225 * 3);
+});
+
+test('computeConsumoYRemanenteReal: fracción de día real NUNCA colapsa a 0 -- 7 horas (0.29 días aprox) produce consumo proporcional, no 0 ni 1 día completo', () => {
+  const fraccionDiaReal = 7 / 24;
+  const resultado = computeConsumoYRemanenteReal({
+    materiaSecaTotalKg: 1000, materiaSecaUtilizableKg: 500, demandaDiariaLoteKgMs: 225, fraccionDiaReal,
+  });
+  const consumoEsperado = 225 * fraccionDiaReal;
+  assert.equal(resultado.consumoProyectadoKg, consumoEsperado);
+  assert.ok(resultado.consumoProyectadoKg > 0, 'el consumo real nunca debe ser 0 para una duración positiva');
+  assert.notEqual(resultado.consumoProyectadoKg, 225, 'nunca debe tratarse como si fuera 1 día completo');
+  assert.equal(resultado.remanenteProyectadoKg, 1000 - consumoEsperado);
+});
+
+test('computeConsumoYRemanenteReal: equivalencia PLAN=REAL cuando el "días de consumo" efectivo es el mismo número (misma ecuación, mismo núcleo)', () => {
+  const inputs = { materiaSecaTotalKg: 2828.69, materiaSecaUtilizableKg: 1414.345, demandaDiariaLoteKgMs: 225 };
+  // diasOcupacionEstimados ya es un entero exacto -> floor() es un no-op,
+  // así que el "diasConsumo" efectivo que llega al núcleo compartido es
+  // idéntico en ambas rutas.
+  const plan = computeRemnantDerivatives({ ...inputs, diasOcupacionEstimados: 6 });
+  const real = computeConsumoYRemanenteReal({ ...inputs, fraccionDiaReal: 6 });
+  assert.equal(real.consumoProyectadoKg, plan.consumoProyectadoKg);
+  assert.equal(real.remanenteObjetivoKg, plan.remanenteObjetivoKg);
+  assert.equal(real.remanenteProyectadoKg, plan.remanenteProyectadoKg);
 });
