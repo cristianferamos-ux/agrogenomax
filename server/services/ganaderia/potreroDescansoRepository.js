@@ -665,6 +665,13 @@ function serializeDescansoRow(row) {
     // como fuente científica -- null para descansos PLANIFICADOS o
     // generados en PLAN_FALLBACK.
     loteRealVersionId: row.lote_real_version_id === null || row.lote_real_version_id === undefined ? null : String(row.lote_real_version_id),
+    // SPRINT-3D9.4: versión EXACTA de agx.potrero_ciclo_residuales_reales_versiones
+    // aplicada -- null si fuenteRemanente es ESTIMADO o histórico anterior
+    // a 3D9.4 (sin backfill).
+    residualRealVersionId: row.residual_real_version_id === null || row.residual_real_version_id === undefined ? null : String(row.residual_real_version_id),
+    // SPRINT-3D9.4: 'ESTIMADO' | 'MEDIDO' | null (null = histórico anterior
+    // a 3D9.4, nunca inferido retroactivamente).
+    fuenteRemanente: row.fuente_remanente ?? null,
     // SPRINT-3D9.3: 'REAL' | 'PLAN_FALLBACK' | null (null = ciclo sin
     // snapshot -- ni siquiera aplica la distinción, comportamiento
     // anterior a 3D9.3 o descanso PLANIFICADO puro). Nunca inferido
@@ -772,7 +779,8 @@ const DESCANSO_POST_CICLO_SELECT = `descanso_id, previous_descanso_id, recomenda
             to_char(fecha_reingreso_max, 'YYYY-MM-DD') as fecha_reingreso_max,
             to_char(fecha_reingreso_recomendada, 'YYYY-MM-DD') as fecha_reingreso_recomendada,
             nivel_confianza, agroclimate_status, condiciones_reentrada_json, applied_rules_json,
-            parametros_fuente_json, motor_version, created_at, ciclo_pastoreo_id, version, lote_real_version_id`;
+            parametros_fuente_json, motor_version, created_at, ciclo_pastoreo_id, version, lote_real_version_id,
+            residual_real_version_id, fuente_remanente`;
 
 /**
  * SPRINT-3D9.1/3D9.2: cálculo compartido del descanso post-real -- usado
@@ -940,8 +948,17 @@ async function computeDescansoPostCicloRealCore(client, organizacionId, {
   };
 }
 
-async function insertDescansoPostCicloRealVersion(client, organizacionId, {
+// SPRINT-3D9.4: exportada -- potreroCicloResidualRealRepository.js la
+// reutiliza tal cual para "aplicar-a-descanso" (fuenteRemanente=MEDIDO),
+// construyendo `core` a partir de contexto CONGELADO del descanso origen
+// (nunca un nuevo fetch climático/NRC/baseline, ver ese repositorio).
+// fuenteRemanente default 'ESTIMADO'/residualRealVersionId default null
+// preservan el comportamiento de los dos llamadores existentes
+// (generarDescansoPostCicloReal/generarDescansoPostCicloRealSiguienteVersion)
+// sin tocarlos.
+export async function insertDescansoPostCicloRealVersion(client, organizacionId, {
   predioId, potreroId, cicloId, fechaIngresoReal, fechaSalidaReal, recomendacionDescansoPlanId, previousDescansoId, version, core,
+  fuenteRemanente = 'ESTIMADO', residualRealVersionId = null,
 }) {
   const {
     fichaRow, contextoRow, recomendacionRow, rango, fechasReingreso, nivelConfianza, assessment, condicionesReentrada, parametrosFuenteJson,
@@ -961,8 +978,9 @@ async function insertDescansoPostCicloRealVersion(client, organizacionId, {
           dias_descanso_min, dias_descanso_max, dias_descanso_recomendado,
           fecha_reingreso_min, fecha_reingreso_max, fecha_reingreso_recomendada,
           nivel_confianza, agroclimate_status, condiciones_reentrada_json, applied_rules_json,
-          parametros_fuente_json, motor_version, ciclo_pastoreo_id, version, lote_real_version_id)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+          parametros_fuente_json, motor_version, ciclo_pastoreo_id, version, lote_real_version_id,
+          residual_real_version_id, fuente_remanente)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
        returning ${DESCANSO_POST_CICLO_SELECT}`,
       [
         organizacionId,
@@ -989,6 +1007,8 @@ async function insertDescansoPostCicloRealVersion(client, organizacionId, {
         cicloId,
         version,
         loteRealVersionId ?? null,
+        residualRealVersionId,
+        fuenteRemanente,
       ],
     );
     return { descanso: serializeDescansoRow(insertResult.rows[0]), yaExistia: false };

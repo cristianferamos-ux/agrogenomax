@@ -26,6 +26,14 @@ import {
 } from '../services/ganaderia/potreroCicloPastoreoRepository.js';
 import { getEstadoOperativoPotrero } from '../services/ganaderia/potreroEstadoOperativoRepository.js';
 import { previewFichaBaseReal } from '../services/ganaderia/potreroCicloRealPressureRepository.js';
+import {
+  registrarResidualReal,
+  actualizarComparativoResidualReal,
+  corregirResidualReal,
+  aplicarResidualRealADescanso,
+  anularResidualReal,
+  getResidualReal,
+} from '../services/ganaderia/potreroCicloResidualRealRepository.js';
 
 function isPredioIdValid(predioId) {
   return /^\d+$/.test(String(predioId));
@@ -198,6 +206,70 @@ export function validateEvaluarReingresoBody(body) {
     throw validationError('INVALID_OBSERVACION_EVALUACION', 'observacion es obligatoria cuando el resultado es NO_APTO.');
   }
   return { fichaId, resultado, observacion };
+}
+
+const ALLOWED_KEYS_RESIDUAL_REAL = new Set(['numeroMuestras', 'aforoPromedioGM2', 'medicionRealAt', 'observacion']);
+
+// SPRINT-3D9.4: type-check únicamente -- el repositorio valida
+// formato/rango/temporalidad exacta (mismo criterio que validateIniciarBody).
+export function validateResidualRealBody(body) {
+  const unknownKeys = Object.keys(body || {}).filter((key) => !ALLOWED_KEYS_RESIDUAL_REAL.has(key));
+  if (unknownKeys.length > 0) {
+    throw validationError('FORBIDDEN_FIELDS', `Campos no permitidos: ${unknownKeys.join(', ')}`);
+  }
+  const { numeroMuestras, aforoPromedioGM2, medicionRealAt, observacion } = body || {};
+  if (typeof numeroMuestras !== 'number') {
+    throw validationError('INVALID_NUMERO_MUESTRAS', 'numeroMuestras es obligatorio y debe ser numérico.');
+  }
+  if (typeof aforoPromedioGM2 !== 'number') {
+    throw validationError('INVALID_AFORO_PROMEDIO', 'aforoPromedioGM2 es obligatorio y debe ser numérico.');
+  }
+  if (typeof medicionRealAt !== 'string' || medicionRealAt.trim() === '') {
+    throw validationError('INVALID_MEDICION_REAL_AT', 'medicionRealAt es obligatorio.');
+  }
+  if (observacion !== undefined && observacion !== null && typeof observacion !== 'string') {
+    throw validationError('INVALID_OBSERVACION', 'observacion debe ser texto.');
+  }
+  return { numeroMuestras, aforoPromedioGM2, medicionRealAt, observacion };
+}
+
+const ALLOWED_KEYS_CORREGIR_RESIDUAL = new Set(['numeroMuestras', 'aforoPromedioGM2', 'medicionRealAt', 'observacion']);
+
+// SPRINT-3D9.4: type-check únicamente -- el repositorio valida
+// formato/rango/temporalidad exacta y exige al menos un campo.
+export function validateCorregirResidualRealBody(body) {
+  const unknownKeys = Object.keys(body || {}).filter((key) => !ALLOWED_KEYS_CORREGIR_RESIDUAL.has(key));
+  if (unknownKeys.length > 0) {
+    throw validationError('FORBIDDEN_FIELDS', `Campos no permitidos: ${unknownKeys.join(', ')}`);
+  }
+  const { numeroMuestras, aforoPromedioGM2, medicionRealAt, observacion } = body || {};
+  if (numeroMuestras !== undefined && typeof numeroMuestras !== 'number') {
+    throw validationError('INVALID_NUMERO_MUESTRAS', 'numeroMuestras debe ser numérico.');
+  }
+  if (aforoPromedioGM2 !== undefined && typeof aforoPromedioGM2 !== 'number') {
+    throw validationError('INVALID_AFORO_PROMEDIO', 'aforoPromedioGM2 debe ser numérico.');
+  }
+  if (medicionRealAt !== undefined && (typeof medicionRealAt !== 'string' || medicionRealAt.trim() === '')) {
+    throw validationError('INVALID_MEDICION_REAL_AT', 'medicionRealAt debe ser texto.');
+  }
+  if (observacion !== undefined && observacion !== null && typeof observacion !== 'string') {
+    throw validationError('INVALID_OBSERVACION', 'observacion debe ser texto.');
+  }
+  return { numeroMuestras, aforoPromedioGM2, medicionRealAt, observacion };
+}
+
+const ALLOWED_KEYS_ANULAR_RESIDUAL = new Set(['motivo']);
+
+export function validateAnularResidualRealBody(body) {
+  const unknownKeys = Object.keys(body || {}).filter((key) => !ALLOWED_KEYS_ANULAR_RESIDUAL.has(key));
+  if (unknownKeys.length > 0) {
+    throw validationError('FORBIDDEN_FIELDS', `Campos no permitidos: ${unknownKeys.join(', ')}`);
+  }
+  const motivo = body?.motivo;
+  if (typeof motivo !== 'string' || motivo.trim() === '') {
+    throw validationError('INVALID_MOTIVO_ANULACION', 'motivo es obligatorio para anular un residual real.');
+  }
+  return { motivo };
 }
 
 function sendSemanticError(res, error) {
@@ -438,6 +510,143 @@ export default function createGanaderiaPotreroCicloPastoreoRouter({ appEnv, csrf
       const { organizacionId } = req.ganaderiaAuth;
       const estadoOperativo = await getEstadoOperativoPotrero(organizacionId, predioId, potreroId);
       res.json({ estadoOperativo });
+    } catch (error) {
+      if (sendSemanticError(res, error)) return;
+      next(error);
+    }
+  });
+
+  // SPRINT-3D9.4 -- POST .../ciclos-pastoreo/:cicloId/residual-real --
+  // captura el hecho físico de campo. SIEMPRE persiste aunque falte
+  // evidencia científica (clima caído, descanso REAL pendiente) -- nunca
+  // rechaza por eso, solo por invalidez temporal del hecho mismo.
+  router.post('/:cicloId/residual-real', async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const { predioId, potreroId, cicloId } = req.params;
+      if (!isPredioIdValid(predioId) || !isPotreroIdValid(potreroId) || !isCicloIdValid(cicloId)) {
+        res.status(400).json({ error: 'INVALID_POTRERO_ID' });
+        return;
+      }
+      const payload = validateResidualRealBody(req.body);
+      const { organizacionId, cuentaId } = req.ganaderiaAuth;
+
+      const resultado = await registrarResidualReal(organizacionId, predioId, potreroId, cicloId, {
+        ...payload, actorCuentaId: cuentaId,
+      });
+      res.status(201).json({ ok: true, ...resultado });
+    } catch (error) {
+      if (sendSemanticError(res, error)) return;
+      next(error);
+    }
+  });
+
+  // SPRINT-3D9.4 -- GET .../ciclos-pastoreo/:cicloId/residual-real --
+  // residual vigente + historial, cada uno con comparativoEstado derivado
+  // en lectura. Read-only.
+  router.get('/:cicloId/residual-real', async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const { predioId, potreroId, cicloId } = req.params;
+      if (!isPredioIdValid(predioId) || !isPotreroIdValid(potreroId) || !isCicloIdValid(cicloId)) {
+        res.status(400).json({ error: 'INVALID_POTRERO_ID' });
+        return;
+      }
+      const { organizacionId } = req.ganaderiaAuth;
+      const resultado = await getResidualReal(organizacionId, predioId, potreroId, cicloId);
+      res.json(resultado);
+    } catch (error) {
+      if (sendSemanticError(res, error)) return;
+      next(error);
+    }
+  });
+
+  // SPRINT-3D9.4 -- POST .../ciclos-pastoreo/:cicloId/residual-real/actualizar-comparativo
+  // -- completa progresivamente %MS/estimado contra el estado vigente
+  // actual. Nueva versión append-only, nunca UPDATE.
+  router.post('/:cicloId/residual-real/actualizar-comparativo', async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const { predioId, potreroId, cicloId } = req.params;
+      if (!isPredioIdValid(predioId) || !isPotreroIdValid(potreroId) || !isCicloIdValid(cicloId)) {
+        res.status(400).json({ error: 'INVALID_POTRERO_ID' });
+        return;
+      }
+      const { organizacionId, cuentaId } = req.ganaderiaAuth;
+      const resultado = await actualizarComparativoResidualReal(organizacionId, predioId, potreroId, cicloId, {
+        actorCuentaId: cuentaId,
+      });
+      res.status(201).json({ ok: true, ...resultado });
+    } catch (error) {
+      if (sendSemanticError(res, error)) return;
+      next(error);
+    }
+  });
+
+  // SPRINT-3D9.4 -- POST .../ciclos-pastoreo/:cicloId/residual-real/corregir
+  // -- corrige el hecho físico (numeroMuestras/aforoPromedioGM2/
+  // medicionRealAt/observacion) de un residual mal digitado. Nueva
+  // versión completa, nunca UPDATE.
+  router.post('/:cicloId/residual-real/corregir', async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const { predioId, potreroId, cicloId } = req.params;
+      if (!isPredioIdValid(predioId) || !isPotreroIdValid(potreroId) || !isCicloIdValid(cicloId)) {
+        res.status(400).json({ error: 'INVALID_POTRERO_ID' });
+        return;
+      }
+      const payload = validateCorregirResidualRealBody(req.body);
+      const { organizacionId, cuentaId } = req.ganaderiaAuth;
+      const resultado = await corregirResidualReal(organizacionId, predioId, potreroId, cicloId, {
+        ...payload, actorCuentaId: cuentaId,
+      });
+      res.status(201).json({ ok: true, ...resultado });
+    } catch (error) {
+      if (sendSemanticError(res, error)) return;
+      next(error);
+    }
+  });
+
+  // SPRINT-3D9.4 -- POST .../ciclos-pastoreo/:cicloId/residual-real/aplicar-a-descanso
+  // -- exige comparativoEstado COMPLETO. Sin fetch climático, sin NRC, sin
+  // recompute del estimado -- contexto congelado del descanso origen.
+  router.post('/:cicloId/residual-real/aplicar-a-descanso', async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const { predioId, potreroId, cicloId } = req.params;
+      if (!isPredioIdValid(predioId) || !isPotreroIdValid(potreroId) || !isCicloIdValid(cicloId)) {
+        res.status(400).json({ error: 'INVALID_POTRERO_ID' });
+        return;
+      }
+      const { organizacionId, cuentaId } = req.ganaderiaAuth;
+      const resultado = await aplicarResidualRealADescanso(organizacionId, predioId, potreroId, cicloId, {
+        actorCuentaId: cuentaId,
+      });
+      res.json({ ok: true, ...resultado });
+    } catch (error) {
+      if (sendSemanticError(res, error)) return;
+      next(error);
+    }
+  });
+
+  // SPRINT-3D9.4 -- POST .../ciclos-pastoreo/:cicloId/residual-real/anular
+  // -- invalidación explícita con motivo obligatorio. Si sustentaba un
+  // descanso MEDIDO vigente, lo invalida en la misma transacción --
+  // nunca revierte automáticamente a ESTIMADO.
+  router.post('/:cicloId/residual-real/anular', async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const { predioId, potreroId, cicloId } = req.params;
+      if (!isPredioIdValid(predioId) || !isPotreroIdValid(potreroId) || !isCicloIdValid(cicloId)) {
+        res.status(400).json({ error: 'INVALID_POTRERO_ID' });
+        return;
+      }
+      const payload = validateAnularResidualRealBody(req.body);
+      const { organizacionId, cuentaId } = req.ganaderiaAuth;
+      const resultado = await anularResidualReal(organizacionId, predioId, potreroId, cicloId, {
+        ...payload, actorCuentaId: cuentaId,
+      });
+      res.json({ ok: true, ...resultado });
     } catch (error) {
       if (sendSemanticError(res, error)) return;
       next(error);
