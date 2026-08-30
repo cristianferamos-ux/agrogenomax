@@ -14,12 +14,41 @@ import {
 
 test('iniciar: body vacío es válido -- el cliente NUNCA está obligado a aportar nada', () => {
   const result = validateIniciarBody({});
-  assert.deepEqual(result, { numeroAnimales: undefined, pesoPromedioKg: undefined, categoriaCodigo: undefined });
+  assert.deepEqual(result, {
+    numeroAnimales: undefined, pesoPromedioKg: undefined, categoriaCodigo: undefined,
+    produccionLecheLDia: undefined, diasEnLeche: undefined, grasaLechePct: undefined, terneroAlPie: undefined,
+  });
 });
 
 test('iniciar: acepta el ajuste opcional del lote real', () => {
   const result = validateIniciarBody({ numeroAnimales: 9, pesoPromedioKg: 405, categoriaCodigo: 'novillo_ceba' });
-  assert.deepEqual(result, { numeroAnimales: 9, pesoPromedioKg: 405, categoriaCodigo: 'novillo_ceba' });
+  assert.deepEqual(result, {
+    numeroAnimales: 9, pesoPromedioKg: 405, categoriaCodigo: 'novillo_ceba',
+    produccionLecheLDia: undefined, diasEnLeche: undefined, grasaLechePct: undefined, terneroAlPie: undefined,
+  });
+});
+
+// SPRINT-3D9.3: campos condicionales REAL -- leche/ternero.
+test('iniciar: acepta campos condicionales REAL (leche/ternero) cuando el cliente los aporta', () => {
+  const result = validateIniciarBody({
+    categoriaCodigo: 'vaca_leche_produccion', numeroAnimales: 5, pesoPromedioKg: 480,
+    produccionLecheLDia: 12, diasEnLeche: 60, grasaLechePct: 3.8,
+  });
+  assert.equal(result.produccionLecheLDia, 12);
+  assert.equal(result.diasEnLeche, 60);
+  assert.equal(result.grasaLechePct, 3.8);
+});
+
+test('iniciar: acepta terneroAlPie booleano', () => {
+  const result = validateIniciarBody({ terneroAlPie: true });
+  assert.equal(result.terneroAlPie, true);
+});
+
+test('iniciar: campos condicionales REAL con tipo incorrecto son rechazados', () => {
+  assert.throws(() => validateIniciarBody({ produccionLecheLDia: '12' }), (e) => e.code === 'INVALID_PRODUCCION_LECHE_REAL');
+  assert.throws(() => validateIniciarBody({ diasEnLeche: '60' }), (e) => e.code === 'INVALID_DIAS_EN_LECHE_REAL');
+  assert.throws(() => validateIniciarBody({ grasaLechePct: '3.8' }), (e) => e.code === 'INVALID_GRASA_LECHE_REAL');
+  assert.throws(() => validateIniciarBody({ terneroAlPie: 'true' }), (e) => e.code === 'INVALID_TERNERO_AL_PIE_REAL');
 });
 
 test('iniciar: RECHAZA fechaIngresoReal/fechaInicioPastoreo -- el cliente NUNCA aporta una fecha', () => {
@@ -113,6 +142,7 @@ test('corregir: acepta un subconjunto cualquiera de los cinco campos corregibles
   assert.deepEqual(result, {
     fechaIngresoReal: undefined, fechaSalidaReal: undefined, categoriaCodigo: undefined,
     numeroAnimales: undefined, pesoPromedioKg: 410, motivo: 'peso mal capturado',
+    produccionLecheLDia: undefined, diasEnLeche: undefined, grasaLechePct: undefined, terneroAlPie: undefined,
   });
 });
 
@@ -122,6 +152,23 @@ test('corregir: tipos incorrectos son rechazados', () => {
   assert.throws(() => validateCorregirBody({ motivo: 'x', categoriaCodigo: 1 }), (e) => e.code === 'INVALID_CATEGORIA_CODIGO');
   assert.throws(() => validateCorregirBody({ motivo: 'x', numeroAnimales: '30' }), (e) => e.code === 'INVALID_NUMERO_ANIMALES_REAL');
   assert.throws(() => validateCorregirBody({ motivo: 'x', pesoPromedioKg: '410' }), (e) => e.code === 'INVALID_PESO_PROMEDIO_REAL');
+});
+
+// SPRINT-3D9.3: campos condicionales REAL corregibles -- mismo criterio
+// que iniciar.
+test('corregir: acepta campos condicionales REAL (leche/ternero)', () => {
+  const result = validateCorregirBody({ motivo: 'lote real mal capturado', produccionLecheLDia: 14, diasEnLeche: 45, grasaLechePct: 4.1, terneroAlPie: false });
+  assert.equal(result.produccionLecheLDia, 14);
+  assert.equal(result.diasEnLeche, 45);
+  assert.equal(result.grasaLechePct, 4.1);
+  assert.equal(result.terneroAlPie, false);
+});
+
+test('corregir: campos condicionales REAL con tipo incorrecto son rechazados', () => {
+  assert.throws(() => validateCorregirBody({ motivo: 'x', produccionLecheLDia: '14' }), (e) => e.code === 'INVALID_PRODUCCION_LECHE_REAL');
+  assert.throws(() => validateCorregirBody({ motivo: 'x', diasEnLeche: '45' }), (e) => e.code === 'INVALID_DIAS_EN_LECHE_REAL');
+  assert.throws(() => validateCorregirBody({ motivo: 'x', grasaLechePct: '4.1' }), (e) => e.code === 'INVALID_GRASA_LECHE_REAL');
+  assert.throws(() => validateCorregirBody({ motivo: 'x', terneroAlPie: 'false' }), (e) => e.code === 'INVALID_TERNERO_AL_PIE_REAL');
 });
 
 test('corregir: RECHAZA campos derivados server-side', () => {

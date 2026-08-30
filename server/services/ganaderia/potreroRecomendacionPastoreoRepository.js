@@ -97,7 +97,11 @@ async function fetchFichaMasReciente(client, potreroId) {
  * se usa 'mezcla' directamente -- no se prioriza una sola especie. En
  * caso contrario, se resuelve el tipo de la única especie registrada.
  */
-async function resolveTipoPasturaBotanico(client, fichaRow) {
+// SPRINT-3D9.3: exportada -- reutilizada tal cual por
+// potreroCicloRealPressureRepository.js (REAL pressure necesita el
+// mismo tipo botánico + nombres que PLAN, nunca una segunda
+// implementación de esta resolución).
+export async function resolveTipoPasturaBotanico(client, fichaRow) {
   if (fichaRow.tipo_cobertura === 'mezcla') {
     // Mezcla de especies -- no se prioriza una sola, así que tampoco hay
     // nombre único para intentar un match PASTURE_SPECIFIC_BASELINE.
@@ -498,6 +502,9 @@ function serializeRecomendacionRow(row) {
     produccionLecheLDia: row.produccion_leche_l_dia === null ? null : Number(row.produccion_leche_l_dia),
     diasEnLeche: row.dias_en_leche === null ? null : Number(row.dias_en_leche),
     grasaLechePct: row.grasa_leche_pct === null ? null : Number(row.grasa_leche_pct),
+    // SPRINT-3D9.3: simetría PLAN -- null en filas anteriores a este
+    // cambio (nunca backfill a false).
+    terneroAlPie: row.ternero_al_pie === null || row.ternero_al_pie === undefined ? null : Boolean(row.ternero_al_pie),
     materiaSecaPctAplicada: Number(row.materia_seca_pct_aplicada),
     utilizacionPctAplicada: Number(row.utilizacion_pct_aplicada),
     consumoPctPvAplicado: Number(row.consumo_pct_pv_aplicado),
@@ -540,13 +547,13 @@ export async function createRecomendacionPastoreo(organizacionId, predioId, potr
     const insertResult = await client.query(
       `insert into agx.potrero_recomendaciones_pastoreo
          (organizacion_id, predio_id, potrero_id, ficha_id, contexto_id, categoria_id,
-          numero_animales, peso_promedio_kg, produccion_leche_l_dia, dias_en_leche, grasa_leche_pct,
+          numero_animales, peso_promedio_kg, produccion_leche_l_dia, dias_en_leche, grasa_leche_pct, ternero_al_pie,
           materia_seca_pct_aplicada, utilizacion_pct_aplicada, consumo_pct_pv_aplicado,
           materia_seca_total_kg, materia_seca_utilizable_kg, demanda_diaria_lote_kg_ms, dias_ocupacion_estimados,
           nivel_confianza, parametros_fuente_json, motor_version)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
        returning recomendacion_id, ficha_id, contexto_id, numero_animales, peso_promedio_kg,
-                 produccion_leche_l_dia, dias_en_leche, grasa_leche_pct, materia_seca_pct_aplicada, utilizacion_pct_aplicada,
+                 produccion_leche_l_dia, dias_en_leche, grasa_leche_pct, ternero_al_pie, materia_seca_pct_aplicada, utilizacion_pct_aplicada,
                  consumo_pct_pv_aplicado, materia_seca_total_kg, materia_seca_utilizable_kg,
                  demanda_diaria_lote_kg_ms, dias_ocupacion_estimados, nivel_confianza,
                  parametros_fuente_json, motor_version, created_at`,
@@ -562,6 +569,7 @@ export async function createRecomendacionPastoreo(organizacionId, predioId, potr
         params.produccionLecheLDia ?? null,
         params.diasEnLeche ?? null,
         params.grasaLechePct ?? null,
+        params.terneroAlPie ?? null,
         pastureClimate.materiaSecaPct,
         pastureClimate.utilizacionPct,
         consumoPctPvAplicado,
@@ -604,7 +612,7 @@ export async function getRecomendacionPastoreoByPotrero(organizacionId, predioId
 
     const result = await client.query(
       `select r.recomendacion_id, r.ficha_id, r.contexto_id, r.numero_animales, r.peso_promedio_kg,
-              r.produccion_leche_l_dia, r.dias_en_leche, r.grasa_leche_pct, r.materia_seca_pct_aplicada, r.utilizacion_pct_aplicada,
+              r.produccion_leche_l_dia, r.dias_en_leche, r.grasa_leche_pct, r.ternero_al_pie, r.materia_seca_pct_aplicada, r.utilizacion_pct_aplicada,
               r.consumo_pct_pv_aplicado, r.materia_seca_total_kg, r.materia_seca_utilizable_kg,
               r.demanda_diaria_lote_kg_ms, r.dias_ocupacion_estimados, r.nivel_confianza,
               r.parametros_fuente_json, r.motor_version, r.created_at,

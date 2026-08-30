@@ -193,7 +193,16 @@ test('3. los tres campos de ajuste se precargan SIEMPRE desde `planLote` al abri
 test('4. confirmar con ajuste envía iniciarCicloPastoreo con los TRES campos editados (numeroAnimales, pesoPromedioKg, categoriaCodigo)', () => {
   const bloque = panelSource.match(/async function handleConfirmarIniciarConAjuste\(\)[\s\S]*?\n  \}/)?.[0] ?? '';
   assert.notEqual(bloque, '');
-  assert.match(bloque, /iniciarCicloPastoreo\(predioId, potreroId, \{\s*numeroAnimales, pesoPromedioKg, categoriaCodigo: ajusteCategoriaCodigo,?\s*\}\)/);
+  assert.match(bloque, /iniciarCicloPastoreo\(predioId, potreroId, \{\s*numeroAnimales,\s*pesoPromedioKg,\s*categoriaCodigo: ajusteCategoriaCodigo,/);
+});
+
+// SPRINT-3D9.3: campos condicionales REAL (leche/ternero) -- solo se
+// envían cuando la categoría los usa, mismo criterio que
+// PotreroRecomendacionPastoreoPanel.jsx (buildBody).
+test('4b: confirmar con ajuste solo envía produccionLecheLDia/diasEnLeche/grasaLechePct cuando la categoría requiere producción de leche, y terneroAlPie cuando requiere ternero al pie', () => {
+  const bloque = panelSource.match(/async function handleConfirmarIniciarConAjuste\(\)[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(bloque, /categoriaAjustada\?\.requiereProduccionLeche \? \{[\s\S]*?produccionLecheLDia:/);
+  assert.match(bloque, /categoriaAjustada\?\.requiereTerneroAlPie \? \{ terneroAlPie: ajusteTerneroAlPie \}/);
 });
 
 test('5. el panel de ciclo real nunca llama a un endpoint de recomendación de pastoreo -- el ajuste NUNCA modifica el plan original', () => {

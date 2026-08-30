@@ -35,6 +35,7 @@ import {
 import { ESTADO_DESCANSO, WINDOW_CONDITION } from './motorDescansoAuto/estadosDescanso.js';
 import { MOTOR_VERSION } from './motorDescansoAuto/motorVersion.js';
 import { resolveFechaHoyNegocio } from './motorDescansoAuto/businessTimezone.js';
+import { fetchSnapshotLoteRealVigente, computeRealPressureCore } from './potreroCicloRealPressureRepository.js';
 
 const HISTORIAL_LIMIT = 10;
 const MS_POR_DIA = 24 * 60 * 60 * 1000;
@@ -660,6 +661,19 @@ function serializeDescansoRow(row) {
     // SPRINT-3D9.2: versión dentro del mismo ciclo_pastoreo_id (1 en la
     // generación automática; 2, 3... solo tras una corrección de fecha).
     version: row.version === null || row.version === undefined ? 1 : Number(row.version),
+    // SPRINT-3D9.3: versión EXACTA del snapshot real que este descanso usó
+    // como fuente científica -- null para descansos PLANIFICADOS o
+    // generados en PLAN_FALLBACK.
+    loteRealVersionId: row.lote_real_version_id === null || row.lote_real_version_id === undefined ? null : String(row.lote_real_version_id),
+    // SPRINT-3D9.3: 'REAL' | 'PLAN_FALLBACK' | null (null = ciclo sin
+    // snapshot -- ni siquiera aplica la distinción, comportamiento
+    // anterior a 3D9.3 o descanso PLANIFICADO puro). Nunca inferido
+    // retroactivamente para históricos que no lo tienen.
+    fuentePresion: row.parametros_fuente_json?.fuentePresion ?? null,
+    fuentePresionMotivo: row.parametros_fuente_json?.fuentePresionMotivo ?? null,
+    // SPRINT-3D9.3: comparativo PLAN vs REAL -- nunca mezclados en un solo
+    // número (ver potreroCicloRealPressureRepository.js).
+    planVsReal: row.parametros_fuente_json?.planVsReal ?? null,
   };
 }
 
@@ -758,7 +772,7 @@ const DESCANSO_POST_CICLO_SELECT = `descanso_id, previous_descanso_id, recomenda
             to_char(fecha_reingreso_max, 'YYYY-MM-DD') as fecha_reingreso_max,
             to_char(fecha_reingreso_recomendada, 'YYYY-MM-DD') as fecha_reingreso_recomendada,
             nivel_confianza, agroclimate_status, condiciones_reentrada_json, applied_rules_json,
-            parametros_fuente_json, motor_version, created_at, ciclo_pastoreo_id, version`;
+            parametros_fuente_json, motor_version, created_at, ciclo_pastoreo_id, version, lote_real_version_id`;
 
 /**
  * SPRINT-3D9.1/3D9.2: cálculo compartido del descanso post-real -- usado
@@ -829,13 +843,51 @@ async function computeDescansoPostCicloRealCore(client, organizacionId, {
     climatologiaMensual,
   });
 
-  const ajustePresion = computeAjustePresionDias({
+  const ajustePresionPlan = computeAjustePresionDias({
     remanenteProyectadoKg: remnant.remanenteProyectadoKg,
     remanenteObjetivoKg: remnant.remanenteObjetivoKg,
   });
-  const rango = computeRangoDescansoDias({
-    baseline, agroClimateStatus: assessment.status, deltaPresionDias: ajustePresion.deltaDias,
+  const rangoPlan = computeRangoDescansoDias({
+    baseline, agroClimateStatus: assessment.status, deltaPresionDias: ajustePresionPlan.deltaDias,
   });
+
+  // SPRINT-3D9.3 -- REAL PRESSURE: si el ciclo tiene snapshot vigente,
+  // intenta calcular presión REAL (computeRealPressureCore reutiliza
+  // computeRecomendacionPastoreo() sin cambios, ver
+  // potreroCicloRealPressureRepository.js). "ANTES DE EJECUCIÓN: PLAN
+  // gobierna. DESPUÉS DE EJECUCIÓN: REAL tiene precedencia" -- si REAL
+  // está disponible, su ajuste/rango GOBIERNAN el descanso (nunca PLAN);
+  // si no, PLAN sigue gobernando explícitamente marcado como
+  // PLAN_FALLBACK (nunca disfrazado de REAL). El baseline/assessment
+  // climático es el MISMO para ambos -- la pastura y el clima no cambian
+  // según quién pastoreó.
+  const loteRealSnapshot = await fetchSnapshotLoteRealVigente(client, cicloId);
+  let realPressure = null;
+  if (loteRealSnapshot) {
+    realPressure = await computeRealPressureCore(client, { potreroId, snapshot: loteRealSnapshot });
+  }
+
+  let ajustePresion = ajustePresionPlan;
+  let rango = rangoPlan;
+  let fuentePresion = null;
+  let fuentePresionMotivo = null;
+  let loteRealVersionId = null;
+  if (loteRealSnapshot) {
+    if (realPressure.disponible) {
+      fuentePresion = 'REAL';
+      loteRealVersionId = Number(loteRealSnapshot.snapshotId);
+      ajustePresion = computeAjustePresionDias({
+        remanenteProyectadoKg: realPressure.remanenteProyectadoRealKg,
+        remanenteObjetivoKg: realPressure.remanenteObjetivoRealKg,
+      });
+      rango = computeRangoDescansoDias({
+        baseline, agroClimateStatus: assessment.status, deltaPresionDias: ajustePresion.deltaDias,
+      });
+    } else {
+      fuentePresion = 'PLAN_FALLBACK';
+      fuentePresionMotivo = realPressure.motivo;
+    }
+  }
 
   // CLAVE: la salida NUNCA se recalcula desde días de ocupación
   // estimados -- viene DADA por el ciclo real (Design Revision 1 §F).
@@ -851,14 +903,40 @@ async function computeDescansoPostCicloRealCore(client, organizacionId, {
   const condicionesReentrada = resolveCondicionesReentrada({ referenceEntryHeightCm: baseline.referenceEntryHeightCm });
 
   const parametrosFuenteJson = buildParametrosFuenteJson({
-    recomendacionRow, fichaRow, contextoRow, baseline, assessment, freshnessResult, ajustePresion, remnant, recomendacionEdadDias, climatologyGenerated,
+    recomendacionRow, fichaRow, contextoRow, baseline, assessment, freshnessResult, ajustePresion: ajustePresionPlan, remnant, recomendacionEdadDias, climatologyGenerated,
   });
   // Marca de origen -- distingue en la provenance que esta fila proviene
   // de la salida REAL de un ciclo, nunca de una planificación pura.
   parametrosFuenteJson.origenCicloRealId = String(cicloId);
 
+  // SPRINT-3D9.3 -- fuentePresion + comparativo PLAN vs REAL, nunca
+  // mezclados en un solo número (ver diseño 3D9.3, punto F).
+  parametrosFuenteJson.fuentePresion = fuentePresion;
+  parametrosFuenteJson.fuentePresionMotivo = fuentePresionMotivo;
+  parametrosFuenteJson.planVsReal = loteRealSnapshot ? {
+    plan: {
+      categoria: recomendacionRow.categoria_nombre,
+      numeroAnimales: Number(recomendacionRow.numero_animales),
+      pesoPromedioKg: Number(recomendacionRow.peso_promedio_kg),
+      demandaDiariaLoteKgMs,
+      diasOcupacionRecomendados: remnant.diasOcupacionRecomendados,
+      consumoProyectadoKg: remnant.consumoProyectadoKg,
+      remanenteProyectadoKg: remnant.remanenteProyectadoKg,
+    },
+    real: realPressure?.disponible ? {
+      categoria: realPressure.categoriaNombre,
+      numeroAnimales: loteRealSnapshot.numeroAnimales,
+      pesoPromedioKg: loteRealSnapshot.pesoPromedioKg,
+      permanenciaHoras: realPressure.permanenciaRealHoras,
+      demandaDiariaLoteKgMs: realPressure.demandaDiariaLoteKgMs,
+      consumoTotalEstimadoKg: realPressure.consumoTotalRealEstimadoKg,
+      remanenteEstimadoKg: realPressure.remanenteProyectadoRealKg,
+    } : null,
+  } : null;
+
   return {
     fichaRow, contextoRow, recomendacionRow, rango, fechasReingreso, nivelConfianza, assessment, condicionesReentrada, parametrosFuenteJson,
+    loteRealVersionId,
   };
 }
 
@@ -867,6 +945,7 @@ async function insertDescansoPostCicloRealVersion(client, organizacionId, {
 }) {
   const {
     fichaRow, contextoRow, recomendacionRow, rango, fechasReingreso, nivelConfianza, assessment, condicionesReentrada, parametrosFuenteJson,
+    loteRealVersionId,
   } = core;
 
   // SAVEPOINT: si el INSERT choca con la unique (ciclo_pastoreo_id,
@@ -882,8 +961,8 @@ async function insertDescansoPostCicloRealVersion(client, organizacionId, {
           dias_descanso_min, dias_descanso_max, dias_descanso_recomendado,
           fecha_reingreso_min, fecha_reingreso_max, fecha_reingreso_recomendada,
           nivel_confianza, agroclimate_status, condiciones_reentrada_json, applied_rules_json,
-          parametros_fuente_json, motor_version, ciclo_pastoreo_id, version)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+          parametros_fuente_json, motor_version, ciclo_pastoreo_id, version, lote_real_version_id)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
        returning ${DESCANSO_POST_CICLO_SELECT}`,
       [
         organizacionId,
@@ -909,6 +988,7 @@ async function insertDescansoPostCicloRealVersion(client, organizacionId, {
         MOTOR_VERSION,
         cicloId,
         version,
+        loteRealVersionId ?? null,
       ],
     );
     return { descanso: serializeDescansoRow(insertResult.rows[0]), yaExistia: false };

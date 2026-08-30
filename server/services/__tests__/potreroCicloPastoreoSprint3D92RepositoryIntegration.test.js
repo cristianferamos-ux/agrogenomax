@@ -137,6 +137,18 @@ describe('SPRINT-3D9.2: potreroCicloPastoreoRepository -- fix, reentry guard, co
   after(async () => {
     if (!adminPool) return;
     await adminPool.query(`delete from agx.potrero_evaluaciones_reingreso where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D92R%')`);
+    // SPRINT-3D9.3: cada ciclo creado por iniciarCicloPastoreo ahora
+    // siempre genera un snapshot real -- debe limpiarse ANTES de poder
+    // borrar potrero_ciclos_pastoreo (mismo patrón recurrente de FK
+    // circular en esta suite).
+    await adminPool.query(`update agx.potrero_recomendaciones_descanso set lote_real_version_id = null where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D92R%')`);
+    await adminPool.query(`delete from agx.potrero_ciclo_lote_real_invalidaciones where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D92R%')`);
+    await adminPool.query(`delete from agx.potrero_ciclo_lote_real_versiones where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D92R%')`);
+    // Preexistente (no relacionado a 3D9.3): la climatología local puede
+    // generarse realmente cuando finalizarCicloPastoreo/corregirCicloPastoreo
+    // se invocan sin climatologyFetchImpl explícito -- limpiar antes de
+    // borrar potreros.
+    await adminPool.query(`delete from agx.potrero_climatologias_agroclimaticas where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D92R%')`);
     await adminPool.query(`delete from agx.potrero_descanso_invalidaciones where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D92R%')`);
     await adminPool.query(`update agx.potrero_recomendaciones_descanso set ciclo_pastoreo_id = null where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D92R%')`);
     await adminPool.query(`update agx.potrero_ciclos_pastoreo set recomendacion_descanso_plan_id = null where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D92R%')`);
@@ -370,17 +382,27 @@ describe('SPRINT-3D9.2: potreroCicloPastoreoRepository -- fix, reentry guard, co
     assert.equal(Number(eventos.rows[0].count), 1, 'un retry con el mismo payload NUNCA debe duplicar el evento PASTOREO_CORREGIDO');
   });
 
-  test('corregir: corregir categoría/numeroAnimales/peso (sin fecha) NUNCA dispara regeneración de descanso', async () => {
+  // SPRINT-3D9.3 (superó el comportamiento 3D9.2 de esta prueba): desde
+  // que iniciarCicloPastoreo SIEMPRE crea un snapshot real (ver
+  // potreroCicloRealPressureRepositoryIntegration.test.js), corregir
+  // categoría/numeroAnimales/peso SÍ dispara regeneración -- son
+  // exactamente los campos que ahora alimentan la presión REAL (antes no
+  // alimentaban nada porque el motor de descanso solo leía el PLAN). El
+  // comportamiento "nunca regenera" queda vigente EXCLUSIVAMENTE para
+  // ciclos sin snapshot (legacy, pre-3D9.3) -- no hay forma de construir
+  // ese caso llamando a iniciarCicloPastoreo hoy, así que no se prueba
+  // aquí (cubierto por diseño: ausencia de snapshot es la rama LEGACY de
+  // resolveLoteCientificoCiclo).
+  test('corregir: corregir numeroAnimales (sin fecha) SÍ dispara regeneración cuando el ciclo tiene snapshot real (3D9.3)', async () => {
     const org = randomOrgId();
     const { predioId, potreroId } = await seedEscenarioCompleto(org, 'CORREGIR-C');
     const ciclo = await repo.iniciarCicloPastoreo(org, predioId, potreroId);
     await repo.finalizarCicloPastoreo(org, predioId, potreroId, ciclo.cicloId, { climatologyFetchImpl: SIN_RED_FETCH_IMPL });
 
     const corregido = await repo.corregirCicloPastoreo(org, predioId, potreroId, ciclo.cicloId, {
-      numeroAnimales: 8, motivo: 'conteo mal capturado',
+      numeroAnimales: 8, motivo: 'conteo mal capturado', climatologyFetchImpl: SIN_RED_FETCH_IMPL,
     });
-    assert.equal(corregido.descansoEstado, null);
-    assert.equal(corregido.descanso, null);
+    assert.equal(corregido.descansoEstado, 'GENERADO');
     assert.equal(corregido.ciclo.numeroAnimalesReal, 8);
   });
 
