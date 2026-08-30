@@ -1,0 +1,7 @@
+-- Rollback de 0018_descanso_residual_real_fk.sql.
+
+drop index if exists agx.potrero_recomendaciones_descanso_residual_real_version_idx;
+alter table agx.potrero_recomendaciones_descanso drop constraint if exists potrero_descansos_residual_real_version_fkey;
+alter table agx.potrero_recomendaciones_descanso drop constraint if exists potrero_recomendaciones_descanso_fuente_remanente_check;
+alter table agx.potrero_recomendaciones_descanso drop column if exists fuente_remanente;
+alter table agx.potrero_recomendaciones_descanso drop column if exists residual_real_version_id;

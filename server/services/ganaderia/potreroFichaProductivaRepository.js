@@ -146,7 +146,10 @@ async function resolveEspecies(client, pasturaIds) {
 // Ficha productiva (§2/§4/§10-§16 del sprint).
 // ---------------------------------------------------------------------
 
-function computeBiomasaTotalKg(areaHa, aforoPromedioGM2) {
+// SPRINT-3D9.4: exportada -- potreroCicloResidualRealRepository.js la
+// reutiliza EXACTAMENTE (misma fórmula, sin duplicar) para convertir el
+// aforo post-salida a biomasa fresca total.
+export function computeBiomasaTotalKg(areaHa, aforoPromedioGM2) {
   const areaM2 = Number(areaHa) * 10000;
   const gramos = areaM2 * Number(aforoPromedioGM2);
   return gramos / 1000;
