@@ -32,6 +32,7 @@ import {
   evaluarReingreso,
 } from './ganaderiaCicloPastoreoApi.js';
 import { getFichaProductiva } from './ganaderiaFichaProductivaApi.js';
+import PotreroResidualRealPanel from './PotreroResidualRealPanel.jsx';
 
 const GENERIC_ERROR = 'No fue posible completar la operación en este momento. Intenta nuevamente.';
 
@@ -83,6 +84,14 @@ function resolveCategoriaSeleccionada(codigo, categorias) {
   return (categorias || []).find((c) => c.codigo === codigo) || null;
 }
 
+// SPRINT-3D9.5: comparación robusta de IDs de ciclo -- ambos lados ya
+// llegan como String(...) desde el backend (potreroCicloPastoreoRepository.js/
+// potreroEstadoOperativoRepository.js), pero esto cierra cualquier futuro
+// cambio de tipo sin tener que re-auditar cada punto de comparación.
+function sameCicloId(a, b) {
+  return a !== null && a !== undefined && b !== null && b !== undefined && String(a) === String(b);
+}
+
 function validateAjusteLote({ numeroAnimales, pesoPromedioKg, categoriaCodigo, categorias }) {
   if (!Number.isInteger(numeroAnimales) || numeroAnimales < 1 || numeroAnimales > 100000) {
     return 'INVALID_NUMERO_ANIMALES_REAL';
@@ -124,7 +133,7 @@ const HISTORIAL_ESTADO_LABELS = {
 
 const CORREGIBLE_FIELDS_INICIALES = { fechaIngresoReal: '', fechaSalidaReal: '', categoriaCodigo: '', numeroAnimales: '', pesoPromedioKg: '' };
 
-export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLote, categorias }) {
+export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLote, categorias, onDescansoChange }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [actual, setActual] = useState(null);
@@ -506,6 +515,21 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
         </div>
       ) : null}
 
+      {/* SPRINT-3D9.5: el ciclo que motivó el descanso/evaluación vigente
+          (cicloOrigenId) es el candidato prioritario de aforo de salida --
+          se muestra expandido/destacado aquí SIN esperar a que el usuario
+          abra el historial. No depende de `ventana` (un descanso todavía
+          PENDIENTE de calcularse no impide registrar el aforo). */}
+      {!actual && !bloqueadoPorArchivo && (enDescanso || enEvaluacion) && estadoOperativo?.cicloOrigenId ? (
+        <PotreroResidualRealPanel
+          predioId={predioId}
+          potreroId={potreroId}
+          ciclo={{ cicloId: estadoOperativo.cicloOrigenId }}
+          destacado
+          onDescansoChange={onDescansoChange}
+        />
+      ) : null}
+
       {!actual && enEvaluacion ? (
         <div className="gan-stack">
           {!fichaEvaluacion ? (
@@ -738,6 +762,23 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
                     </button>
                   ) : null}
                 </div>
+              ) : null}
+
+              {/* SPRINT-3D9.5: acceso neutro al aforo de salida de ciclos
+                  FINALIZADO antiguos -- nunca un fetch automático (el
+                  ciclo prioritario ya se muestra destacado más arriba,
+                  fuera del historial, así que aquí se omite para no
+                  duplicarlo). Sin urgencia visual: mismo peso que
+                  "Corregir información", nunca un CTA prominente para
+                  capturar retroactivamente. */}
+              {ciclo.estado === 'FINALIZADO' && !sameCicloId(estadoOperativo?.cicloOrigenId, ciclo.cicloId) ? (
+                <PotreroResidualRealPanel
+                  predioId={predioId}
+                  potreroId={potreroId}
+                  ciclo={{ cicloId: ciclo.cicloId, fechaSalidaReal: ciclo.fechaSalidaReal, estado: ciclo.estado }}
+                  destacado={false}
+                  onDescansoChange={onDescansoChange}
+                />
               ) : null}
 
               {accionCicloId === ciclo.cicloId && accionTipo === 'anular' ? (
