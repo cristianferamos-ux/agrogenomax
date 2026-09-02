@@ -16,7 +16,7 @@
 // ACTUAL sin pretender que el lote entra de nuevo hoy (ancla a la fecha
 // de ingreso YA GUARDADA, §15 del hotfix) -- nunca edita silenciosamente
 // el histórico (siempre crea una fila nueva al guardar).
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { StatusMessage } from '../components/FormField.jsx';
 import { formatDateDisplay } from '../utils/dateFormat.js';
 import {
@@ -187,7 +187,7 @@ function DetalleTecnico({ agroClimate }) {
 function PlanPastoreoReport({ payload }) {
   const {
     lote, fechaInicioPastoreo, fechaSalidaEstimada, resultado, nivelConfianza, estado,
-    condicionesReentrada, agroClimate, windowConditions, fuentePresion, planVsReal,
+    condicionesReentrada, agroClimate, windowConditions, fuentePresion, planVsReal, fuenteRemanente,
   } = payload;
   const reassessment = (windowConditions || []).includes('REASSESSMENT_RECOMMENDED');
   const whyBullets = resolveWhyBullets(agroClimate?.appliedRules, agroClimate?.status);
@@ -281,6 +281,17 @@ function PlanPastoreoReport({ payload }) {
         <StatusMessage type="warning">El descanso se calculó con la estimación planificada porque no había evidencia real suficiente.</StatusMessage>
       ) : null}
 
+      {/* SPRINT-3D9.5: fuente del remanente -- distinto de fuentePresion
+          (esa es sobre el LOTE/exposición; esta es sobre el REMANENTE
+          usado para el ajuste de presión). NULL (versiones anteriores a
+          3D9.4, columna nueva) nunca se infiere como "Estimado" -- se
+          omite la fila por completo. */}
+      {fuenteRemanente === 'MEDIDO' ? (
+        <div className="gan-ficha-row"><span>Fuente del remanente</span><strong>Medido en aforo de salida</strong></div>
+      ) : fuenteRemanente === 'ESTIMADO' ? (
+        <div className="gan-ficha-row"><span>Fuente del remanente</span><strong>Estimado</strong></div>
+      ) : null}
+
       {planVsReal ? (
         <div className="gan-descanso-plan-vs-real">
           <p className="gan-capacidad-section-label">Plan vs. real</p>
@@ -306,12 +317,17 @@ function PlanPastoreoReport({ payload }) {
   );
 }
 
-export default function PotreroDescansoReentradaPanel({ predioId, potreroId }) {
+export default function PotreroDescansoReentradaPanel({ predioId, potreroId, refreshKey }) {
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [actual, setActual] = useState(null);
   const [loaded, setLoaded] = useState(false);
+  // SPRINT-3D9.5: espejo de `loaded` leído por el efecto de refresh de
+  // abajo SIN volverlo dependencia -- así ese efecto solo reacciona a
+  // `refreshKey` (una señal externa real), nunca a cada expand/collapse
+  // normal del propio panel.
+  const loadedRef = useRef(false);
 
   const [preview, setPreview] = useState(null);
   const [previewAnclado, setPreviewAnclado] = useState(false);
@@ -354,6 +370,7 @@ export default function PotreroDescansoReentradaPanel({ predioId, potreroId }) {
         const actualCargado = data?.actual ?? null;
         setActual(actualCargado);
         setLoaded(true);
+        loadedRef.current = true;
         setLoading(false);
         if (autoCalcularSiVacio && !actualCargado) {
           calcularPreview(false);
@@ -369,6 +386,28 @@ export default function PotreroDescansoReentradaPanel({ predioId, potreroId }) {
     setExpanded(true);
     if (!loaded) loadDescanso({ autoCalcularSiVacio: true });
   }
+
+  // SPRINT-3D9.5: refresco controlado -- una acción del panel de aforo de
+  // salida (hermano, vía PotreroRecomendacionPastoreoPanel) puede haber
+  // invalidado el descanso vigente. NUNCA remonta este componente (eso
+  // perdería `expanded`/`preview`/detalle técnico abiertos) -- solo
+  // refetchea `actual` cuando el panel YA fue cargado alguna vez; si nunca
+  // se cargó, la próxima expansión del usuario ya trae el estado fresco,
+  // así que no se fuerza un GET aquí. `active` protege contra una
+  // respuesta que llegue tarde si `refreshKey` vuelve a cambiar antes de
+  // resolver.
+  useEffect(() => {
+    if (!loadedRef.current) return;
+    let active = true;
+    getDescansoReentrada(predioId, potreroId).then(({ ok, data }) => {
+      if (!active) return;
+      if (ok) setActual(data?.actual ?? null);
+    });
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
   // HOTFIX 3D8.1 §1/§7: UN CLIC -- "Calcular descanso" ejecuta el preview
   // DIRECTAMENTE, sin pedir ninguna fecha. `anclado=true` es el modo
@@ -468,6 +507,7 @@ export default function PotreroDescansoReentradaPanel({ predioId, potreroId }) {
               windowConditions: [],
               fuentePresion: actual.fuentePresion,
               planVsReal: actual.planVsReal,
+              fuenteRemanente: actual.fuenteRemanente,
             }}
           />
           <div className="gan-potrero-actions">

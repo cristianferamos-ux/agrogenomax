@@ -36,7 +36,16 @@ test('el botón "Calcular descanso" existe en el panel de descanso', () => {
 
 test('PotreroRecomendacionPastoreoPanel embebe el panel de descanso dentro del bloque de recomendación guardada (`actual`)', () => {
   assert.match(recomendacionPanelSource, /import PotreroDescansoReentradaPanel from '\.\/PotreroDescansoReentradaPanel\.jsx'/);
-  assert.match(recomendacionPanelSource, /<PotreroDescansoReentradaPanel predioId=\{predioId\} potreroId=\{potreroId\} \/>/);
+  assert.match(recomendacionPanelSource, /<PotreroDescansoReentradaPanel predioId=\{predioId\} potreroId=\{potreroId\} refreshKey=\{descansoRefreshKey\} \/>/);
+});
+
+// SPRINT-3D9.5: `refreshKey` es una señal de refresco controlado (nunca
+// una `key` de React que remontaría el panel y perdería expanded/preview/
+// detalle técnico) -- ver potreroCicloPastoreoArchitecture.test.js para
+// las pruebas del contrato completo (loadedRef, refetch, protección
+// contra respuestas obsoletas).
+test('PotreroDescansoReentradaPanel nunca recibe una prop `key` dinámica (eso lo remontaría) -- solo `refreshKey`', () => {
+  assert.doesNotMatch(recomendacionPanelSource, /<PotreroDescansoReentradaPanel[^>]*\bkey=/);
 });
 
 // ---------------------------------------------------------------------

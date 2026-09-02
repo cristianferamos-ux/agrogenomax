@@ -84,3 +84,36 @@ export function corregirCicloPastoreo(predioId, potreroId, cicloId, cambios, mot
 export function evaluarReingreso(predioId, potreroId, { fichaId, resultado, observacion }) {
   return postJson(`${base(predioId, potreroId)}/evaluar-reingreso`, { fichaId, resultado, observacion });
 }
+
+// SPRINT-3D9.5 -- residual real post-pastoreo (backend 3D9.4). Mismo
+// patrón getJson/postJson -- GET sin CSRF, POST con CSRF vía postJson.
+function baseResidual(predioId, potreroId, cicloId) {
+  return `${base(predioId, potreroId)}/${cicloId}/residual-real`;
+}
+
+export function getResidualReal(predioId, potreroId, cicloId) {
+  return getJson(baseResidual(predioId, potreroId, cicloId));
+}
+
+export function registrarResidualReal(predioId, potreroId, cicloId, { numeroMuestras, aforoPromedioGM2, medicionRealAt, observacion }) {
+  return postJson(baseResidual(predioId, potreroId, cicloId), { numeroMuestras, aforoPromedioGM2, medicionRealAt, observacion });
+}
+
+export function actualizarComparativoResidualReal(predioId, potreroId, cicloId) {
+  return postJson(`${baseResidual(predioId, potreroId, cicloId)}/actualizar-comparativo`, {});
+}
+
+// `cambios` es el subconjunto de campos a corregir (numeroMuestras/
+// aforoPromedioGM2/medicionRealAt/observacion) -- solo los que el usuario
+// efectivamente editó, mismo criterio que corregirCicloPastoreo.
+export function corregirResidualReal(predioId, potreroId, cicloId, cambios) {
+  return postJson(`${baseResidual(predioId, potreroId, cicloId)}/corregir`, cambios);
+}
+
+export function aplicarResidualRealADescanso(predioId, potreroId, cicloId) {
+  return postJson(`${baseResidual(predioId, potreroId, cicloId)}/aplicar-a-descanso`, {});
+}
+
+export function anularResidualReal(predioId, potreroId, cicloId, motivo) {
+  return postJson(`${baseResidual(predioId, potreroId, cicloId)}/anular`, { motivo });
+}

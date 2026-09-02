@@ -242,6 +242,14 @@ export default function PotreroRecomendacionPastoreoPanel({ predioId, potreroId,
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
 
+  // SPRINT-3D9.5: señal de refresco hacia PotreroDescansoReentradaPanel --
+  // se incrementa cuando el panel de aforo de salida (dentro de
+  // PotreroCicloPastoreoPanel) puede haber invalidado el descanso vigente
+  // (aplicar/corregir/anular residual real). NUNCA una `key` dinámica --
+  // eso remontaría el panel de descanso y perdería expanded/preview/
+  // detalle técnico abiertos.
+  const [descansoRefreshKey, setDescansoRefreshKey] = useState(0);
+
   useEffect(() => {
     let active = true;
     getCategoriasProductivas().then(({ ok, data }) => {
@@ -407,7 +415,7 @@ export default function PotreroRecomendacionPastoreoPanel({ predioId, potreroId,
           {/* SPRINT-3D8-DESCANSO-REENTRADA §19: "Calcular descanso" se
               muestra únicamente después de una recomendación de pastoreo
               guardada -- nunca antes. */}
-          <PotreroDescansoReentradaPanel predioId={predioId} potreroId={potreroId} />
+          <PotreroDescansoReentradaPanel predioId={predioId} potreroId={potreroId} refreshKey={descansoRefreshKey} />
 
           {/* SPRINT-3D9.1: "Pastoreo real" -- ciclo REALMENTE ejecutado,
               distinto del plan de arriba. También depende de que exista una
@@ -430,6 +438,7 @@ export default function PotreroRecomendacionPastoreoPanel({ predioId, potreroId,
               terneroAlPie: actual.terneroAlPie,
             }}
             categorias={categorias}
+            onDescansoChange={() => setDescansoRefreshKey((k) => k + 1)}
           />
 
           {showHistorial && historial.length > 0 ? (

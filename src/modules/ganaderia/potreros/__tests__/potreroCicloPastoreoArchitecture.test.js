@@ -23,6 +23,9 @@ const panelSource = readNormalized(path.join(POTREROS_DIR, 'PotreroCicloPastoreo
 const apiSource = readNormalized(path.join(POTREROS_DIR, 'ganaderiaCicloPastoreoApi.js'));
 const apiCode = stripComments(apiSource);
 const recomendacionPanelSource = readNormalized(path.join(POTREROS_DIR, 'PotreroRecomendacionPastoreoPanel.jsx'));
+const residualPanelSource = readNormalized(path.join(POTREROS_DIR, 'PotreroResidualRealPanel.jsx'));
+const residualPanelCode = stripComments(residualPanelSource);
+const descansoPanelSource = readNormalized(path.join(POTREROS_DIR, 'PotreroDescansoReentradaPanel.jsx'));
 
 // ---------------------------------------------------------------------
 // El panel "Pastoreo real" se embebe junto al plan, dentro del bloque de
@@ -343,4 +346,126 @@ test('corregir precarga los valores ACTUALES del ciclo -- el usuario solo edita 
 
 test('el panel nunca muestra "Eliminar" como acción sobre historia operacional -- solo Anular/Corregir/Cancelar', () => {
   assert.doesNotMatch(panelSource, />\s*Eliminar\s*</i);
+});
+
+// ---------------------------------------------------------------------
+// SPRINT-3D9.5: "Aforo de salida" -- residual real post-pastoreo. Nuevo
+// componente PotreroResidualRealPanel.jsx, PotreroCicloPastoreoPanel actúa
+// como host/orquestador (nunca duplica el estado del residual).
+// ---------------------------------------------------------------------
+
+test('ganaderiaCicloPastoreoApi.js expone los 6 endpoints de residual real', () => {
+  assert.match(apiSource, /export function getResidualReal/);
+  assert.match(apiSource, /export function registrarResidualReal/);
+  assert.match(apiSource, /export function actualizarComparativoResidualReal/);
+  assert.match(apiSource, /export function corregirResidualReal/);
+  assert.match(apiSource, /export function aplicarResidualRealADescanso/);
+  assert.match(apiSource, /export function anularResidualReal/);
+});
+
+test('el cliente de API sigue sin enviar organizacionId/actorCuentaId (ya cubierto arriba para todo el archivo, incluidos los 6 endpoints nuevos)', () => {
+  const bloqueResidual = apiCode.match(/function baseResidual[\s\S]*$/)?.[0] ?? '';
+  assert.notEqual(bloqueResidual, '');
+  assert.doesNotMatch(bloqueResidual, /organizacionId/);
+});
+
+test('PotreroCicloPastoreoPanel importa y monta PotreroResidualRealPanel', () => {
+  assert.match(panelSource, /import PotreroResidualRealPanel from '\.\/PotreroResidualRealPanel\.jsx'/);
+  assert.match(panelSource, /<PotreroResidualRealPanel/);
+});
+
+test('el ciclo prioritario (cicloOrigenId) se destaca FUERA del historial -- las filas de historial nunca se destacan automáticamente (sin fetch por cada fila)', () => {
+  const idxDestacadoTop = panelSource.search(/estadoOperativo\?\.cicloOrigenId \? \(\s*<PotreroResidualRealPanel[\s\S]*?\bdestacado\b\s*\n/);
+  assert.ok(idxDestacadoTop >= 0, 'debe existir un bloque fuera del historial que monte el residual con `destacado` (shorthand truthy)');
+
+  const idxHistorialMap = panelSource.indexOf('historial.map((ciclo) =>');
+  assert.ok(idxHistorialMap >= 0);
+  assert.ok(idxDestacadoTop < idxHistorialMap, 'el bloque destacado debe aparecer ANTES del map de historial (fuera de él)');
+
+  const bloqueHistorial = panelSource.slice(idxHistorialMap);
+  assert.match(bloqueHistorial, /<PotreroResidualRealPanel[\s\S]*?destacado=\{false\}/);
+});
+
+test('sameCicloId normaliza la comparación con String(...) en ambos lados y se usa para excluir al ciclo destacado del historial (evita duplicarlo)', () => {
+  assert.match(panelSource, /function sameCicloId\(a, b\)[\s\S]*?String\(a\) === String\(b\)/);
+  assert.match(panelSource, /!sameCicloId\(estadoOperativo\?\.cicloOrigenId, ciclo\.cicloId\)/);
+});
+
+test('PotreroCicloPastoreoPanel recibe onDescansoChange y lo reenvía tal cual a los dos montajes de PotreroResidualRealPanel (destacado + historial)', () => {
+  assert.match(panelSource, /export default function PotreroCicloPastoreoPanel\(\{[^}]*onDescansoChange[^}]*\}\)/);
+  const ocurrencias = panelSource.match(/onDescansoChange=\{onDescansoChange\}/g) || [];
+  assert.equal(ocurrencias.length, 2);
+});
+
+test('PotreroRecomendacionPastoreoPanel mantiene descansoRefreshKey y lo conecta en ambas direcciones: refreshKey hacia el panel de descanso, onDescansoChange desde el panel de ciclo', () => {
+  assert.match(recomendacionPanelSource, /const \[descansoRefreshKey, setDescansoRefreshKey\] = useState\(0\)/);
+  assert.match(recomendacionPanelSource, /<PotreroDescansoReentradaPanel predioId=\{predioId\} potreroId=\{potreroId\} refreshKey=\{descansoRefreshKey\} \/>/);
+  assert.match(recomendacionPanelSource, /onDescansoChange=\{\(\) => setDescansoRefreshKey\(\(k\) => k \+ 1\)\}/);
+});
+
+test('PotreroDescansoReentradaPanel acepta refreshKey y refetcha SOLO si ya fue cargado -- nunca se remonta vía `key` dinámica', () => {
+  assert.match(descansoPanelSource, /export default function PotreroDescansoReentradaPanel\(\{ predioId, potreroId, refreshKey \}\)/);
+  assert.match(descansoPanelSource, /if \(!loadedRef\.current\) return;/);
+  assert.match(descansoPanelSource, /\}, \[refreshKey\]\);/);
+  assert.doesNotMatch(recomendacionPanelSource, /<PotreroDescansoReentradaPanel[^>]*\bkey=/);
+});
+
+test('el refresco por refreshKey protege contra respuestas async obsoletas (flag `active` + cleanup)', () => {
+  const bloque = descansoPanelSource.match(/useEffect\(\(\) => \{\s*if \(!loadedRef\.current\) return;[\s\S]*?\}, \[refreshKey\]\);/)?.[0] ?? '';
+  assert.notEqual(bloque, '');
+  assert.match(bloque, /let active = true;/);
+  assert.match(bloque, /if \(!active\) return;/);
+  assert.match(bloque, /active = false;/);
+});
+
+test('PlanPastoreoReport traduce fuenteRemanente (MEDIDO/ESTIMADO) sin inferir el histórico NULL', () => {
+  assert.match(descansoPanelSource, /fuenteRemanente === 'MEDIDO' \? \([\s\S]*?Medido en aforo de salida/);
+  assert.match(descansoPanelSource, /fuenteRemanente === 'ESTIMADO' \? \([\s\S]*?Estimado/);
+  const bloque = descansoPanelSource.match(/\{fuenteRemanente === 'MEDIDO' \? \([\s\S]*?\) : fuenteRemanente === 'ESTIMADO' \? \([\s\S]*?\) : null\}/)?.[0] ?? '';
+  assert.notEqual(bloque, '', 'la rama NULL debe resolver explícitamente a null -- nunca inferir "Estimado" para histórico sin dato');
+});
+
+// Nota: se usa `residualPanelCode` (sin comentarios) para las negativas --
+// el propio código fuente documenta con comentarios que registrar/
+// actualizar-comparativo NO disparan onDescansoChange, lo que haría que
+// una búsqueda sobre el texto crudo encontrara esa mención y diera un
+// falso positivo.
+test('el ciclo de vida del residual: registrar/actualizar-comparativo NUNCA disparan onDescansoChange (no tocan el descanso); corregir/anular/aplicar SÍ lo hacen', () => {
+  const bloqueRegistrar = residualPanelCode.match(/async function handleRegistrar\(\)[\s\S]*?\n  \}/)?.[0] ?? '';
+  const bloqueActualizar = residualPanelCode.match(/async function handleActualizarComparativo\(\)[\s\S]*?\n  \}/)?.[0] ?? '';
+  const bloqueCorregir = residualPanelSource.match(/async function handleConfirmarCorregir\(\)[\s\S]*?\n  \}/)?.[0] ?? '';
+  const bloqueAnular = residualPanelSource.match(/async function handleConfirmarAnular\(\)[\s\S]*?\n  \}/)?.[0] ?? '';
+  const bloqueAplicar = residualPanelSource.match(/async function handleConfirmarAplicar\(\)[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.notEqual(bloqueRegistrar, '');
+  assert.notEqual(bloqueActualizar, '');
+  assert.doesNotMatch(bloqueRegistrar, /onDescansoChange/);
+  assert.doesNotMatch(bloqueActualizar, /onDescansoChange/);
+  assert.match(bloqueCorregir, /if \(onDescansoChange\) onDescansoChange\(\);/);
+  assert.match(bloqueAnular, /if \(onDescansoChange\) onDescansoChange\(\);/);
+  assert.match(bloqueAplicar, /if \(onDescansoChange\) onDescansoChange\(\);/);
+});
+
+test('estado -> CTA: PENDIENTE_MATERIA_SECA/PENDIENTE_ESTIMADO/DESACTUALIZADO_POR_CORRECCION ofrecen "Actualizar comparativo"; INCOMPATIBLE_TEMPORAL nunca lo ofrece, solo "Corregir medición"', () => {
+  assert.match(residualPanelSource, /PUEDE_ACTUALIZAR_COMPARATIVO = new Set\(\['PENDIENTE_MATERIA_SECA', 'PENDIENTE_ESTIMADO', 'DESACTUALIZADO_POR_CORRECCION'\]\)/);
+  assert.match(residualPanelSource, /PUEDE_ACTUALIZAR_COMPARATIVO\.has\(comparativoEstado\)/);
+  assert.match(residualPanelSource, /comparativoEstado === 'INCOMPATIBLE_TEMPORAL' \? \([\s\S]*?Corregir medición/);
+});
+
+test('comparativoEstado nunca se imprime literalmente como texto -- solo se usa en comparaciones o como llave de un diccionario de copy', () => {
+  assert.doesNotMatch(residualPanelSource, />\{comparativoEstado\}</);
+  assert.doesNotMatch(residualPanelSource, />\{actual\.comparativoEstado\}</);
+  assert.doesNotMatch(residualPanelSource, />\{residual\.comparativoEstado\}</);
+});
+
+test('mutando bloquea todos los CTAs de mutación (registrar/actualizar/corregir/anular/aplicar); lectura pura (expandir, detalle técnico, historial) queda fuera', () => {
+  assert.match(residualPanelSource, /const mutando = registrando \|\| actualizando \|\| corrigiendo \|\| anulando \|\| aplicando;/);
+  const ocurrencias = (residualPanelSource.match(/disabled=\{mutando\}/g) || []).length;
+  assert.ok(ocurrencias >= 5, `se esperan al menos 5 CTAs de mutación deshabilitados por mutando (encontrados: ${ocurrencias})`);
+  assert.doesNotMatch(residualPanelSource, /onClick=\{handleToggleExpandir\}[^>]*disabled=\{mutando\}/);
+});
+
+test('el registro/corrección de residual usa datetime-local + los helpers de conversión ISO -- nunca envía el valor crudo del input al backend', () => {
+  assert.match(residualPanelSource, /import \{ formatDateTimeDisplay, isoToDatetimeLocalInput, datetimeLocalInputToIso \} from '\.\.\/utils\/dateFormat\.js'/);
+  assert.match(residualPanelSource, /type="datetime-local"/);
+  assert.match(residualPanelSource, /medicionRealAt: datetimeLocalInputToIso\(medicionRealAtLocal\)/);
 });
