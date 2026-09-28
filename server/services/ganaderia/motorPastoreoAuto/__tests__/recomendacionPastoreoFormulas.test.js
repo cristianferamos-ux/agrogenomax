@@ -18,6 +18,7 @@ import {
   computeRemnantDerivatives,
   computeConsumoYRemanenteReal,
   resolveNivelConfianza,
+  resolveDemandaIndividualKgMsDia,
   FICHA_STALE_DIAS,
   DENSIDAD_LECHE_KG_POR_LITRO,
 } from '../recomendacionPastoreoFormulas.js';
@@ -31,6 +32,51 @@ const BASE_ARGS = {
   pesoPromedioKg: 420,
   numeroAnimales: 10,
 };
+
+// -----------------------------------------------------------------------
+// SPRINT-3D10.4 FASE 2 §3/§17 -- equivalencia de resolveDemandaIndividualKgMsDia
+// (dispatcher extraído) contra computeRecomendacionPastoreo (llamador
+// existente, sin cambios de comportamiento). Mismos inputs -> mismo
+// demandaIndividualKgMsDia/dmiModel/dmiDetalle en cada caso ya cubierto
+// por el resto de este archivo -- demuestra que la extracción no alteró
+// la ciencia existente.
+// -----------------------------------------------------------------------
+
+test('EQUIVALENCIA: categoría genérica (no lactante) -- resolveDemandaIndividualKgMsDia coincide con computeRecomendacionPastoreo', () => {
+  const viaDispatcher = resolveDemandaIndividualKgMsDia({
+    pesoPromedioKg: BASE_ARGS.pesoPromedioKg, consumoPctPesoVivo: BASE_ARGS.consumoPctPesoVivo,
+  });
+  const viaCompleto = computeRecomendacionPastoreo(BASE_ARGS);
+  assert.equal(viaDispatcher.demandaIndividualKgMsDia, viaCompleto.demandaIndividualKgMsDia);
+  assert.equal(viaDispatcher.dmiModel, viaCompleto.dmiModel);
+  assert.equal(viaDispatcher.dmiDetalle, viaCompleto.dmiDetalle);
+});
+
+test('EQUIVALENCIA: lactante SIN %grasa (perfil genérico) -- mismo resultado en ambos', () => {
+  const inputs = { pesoPromedioKg: 500, consumoPctPesoVivo: 3, esCategoriaLeche: true, litrosPromedioVacaDia: 20, diasEnLeche: 100, grasaLechePct: null };
+  const viaDispatcher = resolveDemandaIndividualKgMsDia(inputs);
+  const viaCompleto = computeRecomendacionPastoreo({ ...BASE_ARGS, pesoPromedioKg: 500, consumoPctPesoVivo: 3, esCategoriaLeche: true, litrosPromedioVacaDia: 20, diasEnLeche: 100, grasaLechePct: null });
+  assert.equal(viaDispatcher.demandaIndividualKgMsDia, viaCompleto.demandaIndividualKgMsDia);
+  assert.equal(viaDispatcher.dmiModel, 'GENERIC_LACTATING_PROFILE');
+  assert.equal(viaDispatcher.dmiModel, viaCompleto.dmiModel);
+});
+
+test('EQUIVALENCIA: lactante CON %grasa (NRC 2001 real) -- mismo resultado y misma auditoría completa en ambos', () => {
+  const inputs = { pesoPromedioKg: 500, consumoPctPesoVivo: 3, esCategoriaLeche: true, litrosPromedioVacaDia: 20, diasEnLeche: 100, grasaLechePct: 3.8 };
+  const viaDispatcher = resolveDemandaIndividualKgMsDia(inputs);
+  const viaCompleto = computeRecomendacionPastoreo({ ...BASE_ARGS, ...inputs });
+  assert.equal(viaDispatcher.demandaIndividualKgMsDia, viaCompleto.demandaIndividualKgMsDia);
+  assert.equal(viaDispatcher.dmiModel, 'NRC_2001_DAIRY_DMI');
+  assert.deepEqual(viaDispatcher.dmiDetalle, viaCompleto.dmiDetalle);
+});
+
+test('EQUIVALENCIA: grasaLechePct=0 se trata igual que ausente en ambos (perfil genérico, no ecuación FCM)', () => {
+  const inputs = { pesoPromedioKg: 500, consumoPctPesoVivo: 3, esCategoriaLeche: true, litrosPromedioVacaDia: 20, diasEnLeche: 100, grasaLechePct: 0 };
+  const viaDispatcher = resolveDemandaIndividualKgMsDia(inputs);
+  const viaCompleto = computeRecomendacionPastoreo({ ...BASE_ARGS, ...inputs });
+  assert.equal(viaDispatcher.dmiModel, 'GENERIC_LACTATING_PROFILE');
+  assert.equal(viaDispatcher.demandaIndividualKgMsDia, viaCompleto.demandaIndividualKgMsDia);
+});
 
 test('sin ecuación de leche, computeRecomendacionPastoreo coincide exactamente con computeCapacidadPastoreoModoDias (misma física, §7 del sprint)', () => {
   const actual = computeRecomendacionPastoreo(BASE_ARGS);

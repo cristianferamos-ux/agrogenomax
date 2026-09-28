@@ -42,10 +42,16 @@ try {
   dbAvailable = false;
 }
 
+let cicloRepo;
 if (dbAvailable) {
   repo = await import('../ganaderia/potreroRecomendacionPastoreoRepository.js');
+  cicloRepo = await import('../ganaderia/potreroCicloPastoreoRepository.js');
   businessDb = await import('../../db/agxBusinessPool.js');
 }
+
+// SPRINT-3D10.4: FASE B de finalizar nunca depende de la red real en
+// tests -- mismo patrón que potreroCicloPastoreoRepositoryIntegration.test.js.
+const SIN_RED_FETCH_IMPL = async () => ({ ok: false, status: 503, json: async () => ({}) });
 
 function randomOrgId() {
   return crypto.randomUUID();
@@ -108,9 +114,53 @@ async function seedContexto(orgId, predioId, potreroId, { precipitacion7dMm = 20
   return result.rows[0].contexto_id;
 }
 
+// SPRINT-3D10.4: seed crudo de una recomendación (necesaria como FK previa
+// para iniciarCicloPastoreo) -- mismo patrón que
+// potreroCicloPastoreoRepositoryIntegration.test.js.
+async function fetchCategoriaId(codigo) {
+  const result = await adminPool.query('select categoria_id from agx.catalogo_categorias_productivas where codigo = $1', [codigo]);
+  return result.rows[0]?.categoria_id;
+}
+
+async function seedRecomendacionPastoreoRaw(org, predioId, potreroId, fichaId) {
+  const categoriaId = await fetchCategoriaId('novillo_ceba');
+  const result = await adminPool.query(
+    `insert into agx.potrero_recomendaciones_pastoreo
+       (organizacion_id, predio_id, potrero_id, ficha_id, categoria_id, numero_animales, peso_promedio_kg,
+        materia_seca_pct_aplicada, utilizacion_pct_aplicada, consumo_pct_pv_aplicado,
+        materia_seca_total_kg, materia_seca_utilizable_kg, demanda_diaria_lote_kg_ms, dias_ocupacion_estimados,
+        nivel_confianza, motor_version)
+     values ($1, $2, $3, $4, $5, 10, 420, 20, 50, 2.4, 1000, 500, 100.8, 5, 'MEDIA', 'pastoreo-auto-v1')
+     returning recomendacion_id`,
+    [org, predioId, potreroId, fichaId, categoriaId],
+  );
+  return result.rows[0].recomendacion_id;
+}
+
+// SPRINT-3D10.4: FASE B de finalizar nunca depende de la red real en tests.
+async function seedCicloFinalizado(org, predioId, potreroId, { ingresoAt, salidaAt }) {
+  const ciclo = await cicloRepo.iniciarCicloPastoreo(org, predioId, potreroId, { now: ingresoAt });
+  await cicloRepo.finalizarCicloPastoreo(org, predioId, potreroId, ciclo.cicloId, {
+    now: salidaAt, climatologyFetchImpl: SIN_RED_FETCH_IMPL,
+  });
+  return ciclo.cicloId;
+}
+
 describe('SPRINT-3D7.2: potreroRecomendacionPastoreoRepository contra Postgres-AGX-Business real', { skip: !dbAvailable }, () => {
   after(async () => {
     if (!adminPool) return;
+    // SPRINT-3D10.4: algunos tests nuevos siembran ciclos reales (FASE B
+    // genera descanso) -- romper el vínculo cíclico ciclo<->descanso antes
+    // de poder borrar cualquiera de las dos tablas (mismo criterio que
+    // potreroCicloPastoreoRepositoryIntegration.test.js).
+    await adminPool.query(`update agx.potrero_recomendaciones_descanso set ciclo_pastoreo_id = null where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D72R%')`);
+    await adminPool.query(`update agx.potrero_ciclos_pastoreo set recomendacion_descanso_plan_id = null where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D72R%')`);
+    await adminPool.query(`update agx.potrero_recomendaciones_descanso set lote_real_version_id = null where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D72R%')`);
+    await adminPool.query(`delete from agx.potrero_ciclo_lote_real_invalidaciones where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D72R%')`);
+    await adminPool.query(`delete from agx.potrero_ciclo_lote_real_versiones where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D72R%')`);
+    await adminPool.query(`delete from agx.potrero_ciclo_eventos where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D72R%')`);
+    await adminPool.query(`delete from agx.potrero_ciclos_pastoreo where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D72R%')`);
+    await adminPool.query(`delete from agx.potrero_recomendaciones_descanso where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D72R%')`);
     await adminPool.query(`
       delete from agx.potrero_recomendaciones_pastoreo
        where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D72R%')
@@ -549,5 +599,90 @@ describe('SPRINT-3D7.2: potreroRecomendacionPastoreoRepository contra Postgres-A
     assert.equal(preview.provenance.dryMatterSource, 'PASTURE_SPECIFIC_BASELINE');
     assert.equal(preview.parametrosAplicados.materiaSecaPct, 26);
     assert.equal(preview.nivelConfianza, 'ALTA');
+  });
+
+  // ---------------------------------------------------------------------
+  // SPRINT-3D10.4 -- autoridad única de vigencia de aforo (resolveFichaVigente)
+  // conectada al flujo MANUAL existente, y trazabilidad modo_calculo.
+  // ---------------------------------------------------------------------
+
+  test('potrero con último pastoreo finalizado y ficha VIGENTE (posterior a la salida) -> preview funciona igual que siempre', async () => {
+    const org = randomOrgId();
+    const predioId = await seedPredio(org, 'Predio Sprint3D72R VIGENTE');
+    const potreroId = await seedPotrero(org, predioId, 'Potrero Sprint3D72R VIGENTE');
+    const pasturaId = await seedPasturaPersonalizada(org, 'Pastura Sprint3D72R VIGENTE');
+    // fecha_aforo explícita y claramente ANTERIOR al ciclo -- seedFicha sin
+    // este override usa current_date (hoy), que podría caer DESPUÉS del
+    // ciclo sembrado abajo y volver la ficha "vieja" accidentalmente válida.
+    const fichaVieja = await seedFicha(org, potreroId, pasturaId);
+    await adminPool.query(`update agx.potrero_fichas_productivas set fecha_aforo = '2025-12-01' where ficha_id = $1`, [fichaVieja]);
+    await seedRecomendacionPastoreoRaw(org, predioId, potreroId, fichaVieja);
+    await seedCicloFinalizado(org, predioId, potreroId, {
+      ingresoAt: new Date('2026-01-02T10:00:00Z'), salidaAt: new Date('2026-01-10T16:00:00Z'),
+    });
+    // Ficha nueva, posterior a la salida real -- es la que debe usarse.
+    const fichaNuevaResult = await adminPool.query(
+      `insert into agx.potrero_fichas_productivas (organizacion_id, potrero_id, tipo_cobertura, nombre_principal, aforo_promedio_g_m2, fecha_aforo, biomasa_total_kg)
+       values ($1, $2, 'pastura', 'Pastura Test', 500, '2026-01-11', 5000) returning ficha_id`,
+      [org, potreroId],
+    );
+    await adminPool.query(
+      `insert into agx.potrero_ficha_pasturas (organizacion_id, ficha_id, pastura_id, porcentaje_estimado, orden) values ($1, $2, $3, 100, 0)`,
+      [org, fichaNuevaResult.rows[0].ficha_id, pasturaId],
+    );
+
+    const preview = await repo.previewRecomendacionPastoreo(org, predioId, potreroId, {
+      categoriaCodigo: 'novillo_ceba', numeroAnimales: 10, pesoPromedioKg: 420,
+    });
+    assert.equal(preview.ficha.fechaAforo, '2026-01-11');
+  });
+
+  test('potrero con último pastoreo finalizado y SOLO aforo viejo -> INSUFFICIENT_FORAGE_DATA (misma semántica que sin ficha, 3D10.4§8)', async () => {
+    const org = randomOrgId();
+    const predioId = await seedPredio(org, 'Predio Sprint3D72R AFOROVIEJO');
+    const potreroId = await seedPotrero(org, predioId, 'Potrero Sprint3D72R AFOROVIEJO');
+    const pasturaId = await seedPasturaPersonalizada(org, 'Pastura Sprint3D72R AFOROVIEJO');
+    const fichaVieja = await seedFicha(org, potreroId, pasturaId);
+    await adminPool.query(`update agx.potrero_fichas_productivas set fecha_aforo = '2025-12-01' where ficha_id = $1`, [fichaVieja]);
+    await seedRecomendacionPastoreoRaw(org, predioId, potreroId, fichaVieja);
+    // La única ficha del potrero es ANTERIOR a la salida real -- 3D10.4
+    // corrige el gap de 3D10.1: antes, "más reciente por created_at" la
+    // habría aceptado igual.
+    await seedCicloFinalizado(org, predioId, potreroId, {
+      ingresoAt: new Date('2026-01-02T10:00:00Z'), salidaAt: new Date('2026-01-20T16:00:00Z'),
+    });
+
+    await assert.rejects(
+      () => repo.previewRecomendacionPastoreo(org, predioId, potreroId, {
+        categoriaCodigo: 'novillo_ceba', numeroAnimales: 10, pesoPromedioKg: 420,
+      }),
+      (error) => error.status === 404 && error.code === 'INSUFFICIENT_FORAGE_DATA',
+    );
+  });
+
+  test('create manual persiste modo_calculo=MANUAL internamente, sin agregarlo al shape público de la respuesta', async () => {
+    const org = randomOrgId();
+    const predioId = await seedPredio(org, 'Predio Sprint3D72R MODOMANUAL');
+    const potreroId = await seedPotrero(org, predioId, 'Potrero Sprint3D72R MODOMANUAL');
+    const pasturaId = await seedPasturaPersonalizada(org, 'Pastura Sprint3D72R MODOMANUAL');
+    await seedFicha(org, potreroId, pasturaId);
+
+    const created = await repo.createRecomendacionPastoreo(org, predioId, potreroId, {
+      categoriaCodigo: 'novillo_ceba', numeroAnimales: 10, pesoPromedioKg: 420,
+    });
+    // Contrato público sin cambios -- mismas claves de siempre, ninguna nueva.
+    assert.deepEqual(Object.keys(created).sort(), [
+      'categoriaCodigo', 'categoriaGrupoProductivo', 'categoriaNombre', 'consumoPctPvAplicado',
+      'consumoProyectadoKg', 'contexto', 'contextoId', 'createdAt', 'demandaDiariaLoteKgMs', 'diasEnLeche',
+      'diasOcupacionEstimados', 'diasOcupacionRecomendados', 'ficha', 'fichaId', 'grasaLechePct',
+      'materiaSecaPctAplicada', 'materiaSecaTotalKg', 'materiaSecaUtilizableKg', 'motorVersion', 'nivelConfianza',
+      'numeroAnimales', 'parametrosFuente', 'pesoPromedioKg', 'produccionLecheLDia', 'recomendacionId',
+      'remanenteObjetivoKg', 'remanenteProyectadoKg', 'requiereAdvertenciaLeche', 'terneroAlPie',
+      'utilizacionPctAplicada',
+    ].sort());
+
+    // Persistencia interna: modo_calculo SÍ quedó fijado en la fila real.
+    const row = await adminPool.query('select modo_calculo from agx.potrero_recomendaciones_pastoreo where recomendacion_id = $1', [created.recomendacionId]);
+    assert.equal(row.rows[0].modo_calculo, 'MANUAL');
   });
 });

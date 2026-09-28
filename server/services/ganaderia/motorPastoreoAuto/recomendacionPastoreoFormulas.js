@@ -176,6 +176,57 @@ export function computeConsumoYRemanenteReal({
   });
 }
 
+// SPRINT-3D10.4 FASE 2 §3 -- autoridad UNICA de demandaIndividualKgMsDia,
+// extraida de computeRecomendacionPastoreo (antes embebida inline) SIN
+// cambiar ningun resultado -- mismo codigo, ahora exportado para que el
+// motor automatico nuevo (cargaAutomaticaFormulas.js) y cualquier flujo
+// futuro la consuman sin una segunda implementacion de NRC/%PV. La
+// decision de "cuando corre NRC 2001 completo" es EXACTAMENTE la misma
+// de siempre: esCategoriaLeche + grasaLechePct real (>0, finito) --
+// nunca inventa un %grasa (hardening ronda 4 §5).
+export function resolveDemandaIndividualKgMsDia({
+  pesoPromedioKg,
+  consumoPctPesoVivo,
+  esCategoriaLeche = false,
+  litrosPromedioVacaDia = null,
+  diasEnLeche = null,
+  grasaLechePct = null,
+}) {
+  const usaEcuacionCompleta = esCategoriaLeche
+    && typeof grasaLechePct === 'number' && Number.isFinite(grasaLechePct) && grasaLechePct > 0;
+
+  if (usaEcuacionCompleta) {
+    const dmiDetalle = computeDemandaIndividualLecheNrc2001({ pesoPromedioKg, litrosPromedioVacaDia, diasEnLeche, grasaLechePct });
+    return {
+      demandaIndividualKgMsDia: dmiDetalle.predictedDmiKgDay,
+      dmiModel: 'NRC_2001_DAIRY_DMI',
+      dmiDetalle,
+    };
+  }
+  // Hardening ronda 4 §5: sin %grasa real, NUNCA se ejecuta una ecuación
+  // FCM falsa -- perfil %PV genérico (misma fórmula que el resto de
+  // categorías, consumoPctPesoVivo viene del catálogo).
+  return {
+    demandaIndividualKgMsDia: computeDemandaIndividualKgMsDia(pesoPromedioKg, consumoPctPesoVivo),
+    dmiModel: esCategoriaLeche ? 'GENERIC_LACTATING_PROFILE' : null,
+    dmiDetalle: null,
+  };
+}
+
+// SPRINT-3D10.4 FASE 3: extraída de createRecomendacionPastoreo (antes
+// inline) SIN cambiar el resultado -- reutilizada también por
+// potreroCargaAutomaticaRepository.js para persistir consumo_pct_pv_aplicado
+// con EXACTAMENTE el mismo criterio de "honestidad de aplicado" (hardening
+// ronda 2 §7): si corrió la ecuación NRC (2001) real, el %PV aplicado es el
+// EQUIVALENTE derivado del resultado real; si no, es literalmente el valor
+// del catálogo (lo que se usó).
+export function resolveConsumoPctPvAplicado({ dmiModel, demandaIndividualKgMsDia, pesoPromedioKg, consumoMsPctPvTipico }) {
+  const usoEcuacionRealLeche = dmiModel === 'NRC_2001_DAIRY_DMI';
+  return usoEcuacionRealLeche
+    ? (demandaIndividualKgMsDia / pesoPromedioKg) * 100
+    : consumoMsPctPvTipico;
+}
+
 /**
  * Cálculo completo del motor automático (§7 del sprint, hardening rondas
  * 3/4/5) -- toma biomasaFrescaKg (de la ficha real), los parámetros ya
@@ -203,23 +254,9 @@ export function computeRecomendacionPastoreo({
   const materiaSecaTotalKg = computeMateriaSecaTotalKg(biomasaFrescaKg, materiaSecaPct);
   const materiaSecaUtilizableKg = computeMateriaSecaUtilizableKg(materiaSecaTotalKg, utilizacionPct);
 
-  const usaEcuacionCompleta = esCategoriaLeche
-    && typeof grasaLechePct === 'number' && Number.isFinite(grasaLechePct) && grasaLechePct > 0;
-
-  let demandaIndividualKgMsDia;
-  let dmiDetalle = null;
-  let dmiModel = null;
-  if (usaEcuacionCompleta) {
-    dmiDetalle = computeDemandaIndividualLecheNrc2001({ pesoPromedioKg, litrosPromedioVacaDia, diasEnLeche, grasaLechePct });
-    demandaIndividualKgMsDia = dmiDetalle.predictedDmiKgDay;
-    dmiModel = 'NRC_2001_DAIRY_DMI';
-  } else {
-    // Hardening ronda 4 §5: sin %grasa real, NUNCA se ejecuta una ecuación
-    // FCM falsa -- perfil %PV genérico (misma fórmula que el resto de
-    // categorías, consumoPctPesoVivo viene del catálogo).
-    demandaIndividualKgMsDia = computeDemandaIndividualKgMsDia(pesoPromedioKg, consumoPctPesoVivo);
-    dmiModel = esCategoriaLeche ? 'GENERIC_LACTATING_PROFILE' : null;
-  }
+  const { demandaIndividualKgMsDia, dmiModel, dmiDetalle } = resolveDemandaIndividualKgMsDia({
+    pesoPromedioKg, consumoPctPesoVivo, esCategoriaLeche, litrosPromedioVacaDia, diasEnLeche, grasaLechePct,
+  });
 
   // Hardening ronda 3 §4: terneroAlPie NUNCA altera la demanda -- sin
   // evidencia suficiente para un coeficiente por animal/edad/peso.

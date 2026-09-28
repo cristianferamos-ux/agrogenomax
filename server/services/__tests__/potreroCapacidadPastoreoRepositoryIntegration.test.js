@@ -42,10 +42,15 @@ try {
   dbAvailable = false;
 }
 
+let cicloRepo;
 if (dbAvailable) {
   repo = await import('../ganaderia/potreroCapacidadPastoreoRepository.js');
+  cicloRepo = await import('../ganaderia/potreroCicloPastoreoRepository.js');
   businessDb = await import('../../db/agxBusinessPool.js');
 }
+
+// SPRINT-3D10.4: FASE B de finalizar nunca depende de la red real en tests.
+const SIN_RED_FETCH_IMPL = async () => ({ ok: false, status: 503, json: async () => ({}) });
 
 const SQUARE_WKT = 'POLYGON((-75.5 1.3, -75.4 1.3, -75.4 1.4, -75.5 1.4, -75.5 1.3))';
 
@@ -107,9 +112,52 @@ function closeTo(actual, expected, tolerance, message) {
   assert.ok(Math.abs(actual - expected) < tolerance, `${message}: esperado ~${expected}, obtenido ${actual}`);
 }
 
+// SPRINT-3D10.4: seed crudo de una recomendación (FK previa para
+// iniciarCicloPastoreo) + ciclo FINALIZADO con fechas controladas -- mismo
+// patrón que potreroRecomendacionPastoreoRepositoryIntegration.test.js.
+async function fetchCategoriaId(codigo) {
+  const result = await adminPool.query('select categoria_id from agx.catalogo_categorias_productivas where codigo = $1', [codigo]);
+  return result.rows[0]?.categoria_id;
+}
+
+async function seedRecomendacionPastoreoRaw(org, predioId, potreroId, fichaId) {
+  const categoriaId = await fetchCategoriaId('novillo_ceba');
+  const result = await adminPool.query(
+    `insert into agx.potrero_recomendaciones_pastoreo
+       (organizacion_id, predio_id, potrero_id, ficha_id, categoria_id, numero_animales, peso_promedio_kg,
+        materia_seca_pct_aplicada, utilizacion_pct_aplicada, consumo_pct_pv_aplicado,
+        materia_seca_total_kg, materia_seca_utilizable_kg, demanda_diaria_lote_kg_ms, dias_ocupacion_estimados,
+        nivel_confianza, motor_version)
+     values ($1, $2, $3, $4, $5, 10, 420, 20, 50, 2.4, 1000, 500, 100.8, 5, 'MEDIA', 'pastoreo-auto-v1')
+     returning recomendacion_id`,
+    [org, predioId, potreroId, fichaId, categoriaId],
+  );
+  return result.rows[0].recomendacion_id;
+}
+
+async function seedCicloFinalizado(org, predioId, potreroId, { ingresoAt, salidaAt }) {
+  const ciclo = await cicloRepo.iniciarCicloPastoreo(org, predioId, potreroId, { now: ingresoAt });
+  await cicloRepo.finalizarCicloPastoreo(org, predioId, potreroId, ciclo.cicloId, {
+    now: salidaAt, climatologyFetchImpl: SIN_RED_FETCH_IMPL,
+  });
+  return ciclo.cicloId;
+}
+
 describe('SPRINT-3D7: potreroCapacidadPastoreoRepository contra Postgres-AGX-Business real', { skip: !dbAvailable }, () => {
   after(async () => {
     if (!adminPool) return;
+    // SPRINT-3D10.4: algunos tests nuevos siembran ciclos reales (FASE B
+    // genera descanso) -- romper el vínculo cíclico ciclo<->descanso antes
+    // de poder borrar cualquiera de las dos tablas.
+    await adminPool.query(`update agx.potrero_recomendaciones_descanso set ciclo_pastoreo_id = null where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D7R%')`);
+    await adminPool.query(`update agx.potrero_ciclos_pastoreo set recomendacion_descanso_plan_id = null where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D7R%')`);
+    await adminPool.query(`update agx.potrero_recomendaciones_descanso set lote_real_version_id = null where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D7R%')`);
+    await adminPool.query(`delete from agx.potrero_ciclo_lote_real_invalidaciones where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D7R%')`);
+    await adminPool.query(`delete from agx.potrero_ciclo_lote_real_versiones where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D7R%')`);
+    await adminPool.query(`delete from agx.potrero_ciclo_eventos where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D7R%')`);
+    await adminPool.query(`delete from agx.potrero_ciclos_pastoreo where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D7R%')`);
+    await adminPool.query(`delete from agx.potrero_recomendaciones_descanso where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D7R%')`);
+    await adminPool.query(`delete from agx.potrero_recomendaciones_pastoreo where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D7R%')`);
     await adminPool.query(`
       delete from agx.potrero_calculos_pastoreo
        where potrero_id in (select potrero_id from agx.potreros where nombre like 'Potrero Sprint3D7R%')
@@ -367,6 +415,47 @@ describe('SPRINT-3D7: potreroCapacidadPastoreoRepository contra Postgres-AGX-Bus
 
     assert.equal(calculo.capacidadAnimalesPeriodo, 0);
     assert.equal(calculo.resultadoExtremo, true);
+  });
+
+  // ---------------------------------------------------------------------
+  // SPRINT-3D10.4 -- capacidad de pastoreo usa la MISMA autoridad de
+  // vigencia de aforo que recomendación (resolveFichaVigente), nunca su
+  // propia lógica divergente.
+  // ---------------------------------------------------------------------
+
+  test('potrero con último pastoreo finalizado y SOLO aforo viejo -> FICHA_NOT_FOUND (misma semántica que sin ficha, no diverge de recomendación manual)', async () => {
+    const org = randomOrgId();
+    const predioId = await seedPredio(org, 'Predio Sprint3D7R AFOROVIEJO');
+    const potreroId = await seedPotrero(org, predioId, 'Potrero Sprint3D7R AFOROVIEJO');
+    const fichaVieja = await seedFicha(org, potreroId, 'Ficha Sprint3D7R AFOROVIEJO');
+    await adminPool.query(`update agx.potrero_fichas_productivas set fecha_aforo = '2026-01-01' where ficha_id = $1`, [fichaVieja]);
+    await seedRecomendacionPastoreoRaw(org, predioId, potreroId, fichaVieja);
+    await seedCicloFinalizado(org, predioId, potreroId, {
+      ingresoAt: new Date('2026-01-02T10:00:00Z'), salidaAt: new Date('2026-01-20T16:00:00Z'),
+    });
+
+    await assert.rejects(
+      () => repo.previewCapacidadPastoreo(org, predioId, potreroId, PARAMS_DIAS),
+      (error) => error.status === 404 && error.code === 'FICHA_NOT_FOUND',
+    );
+  });
+
+  test('potrero con último pastoreo finalizado y ficha VIGENTE (posterior a la salida) -> funciona igual que siempre', async () => {
+    const org = randomOrgId();
+    const predioId = await seedPredio(org, 'Predio Sprint3D7R VIGENTE');
+    const potreroId = await seedPotrero(org, predioId, 'Potrero Sprint3D7R VIGENTE');
+    const fichaVieja = await seedFicha(org, potreroId, 'Ficha Sprint3D7R VIGENTE');
+    await adminPool.query(`update agx.potrero_fichas_productivas set fecha_aforo = '2026-01-01' where ficha_id = $1`, [fichaVieja]);
+    await seedRecomendacionPastoreoRaw(org, predioId, potreroId, fichaVieja);
+    await seedCicloFinalizado(org, predioId, potreroId, {
+      ingresoAt: new Date('2026-01-02T10:00:00Z'), salidaAt: new Date('2026-01-10T16:00:00Z'),
+    });
+    const fichaNueva = await seedFicha(org, potreroId, 'Ficha Sprint3D7R VIGENTE-NUEVA');
+    await adminPool.query(`update agx.potrero_fichas_productivas set fecha_aforo = '2026-01-11' where ficha_id = $1`, [fichaNueva]);
+
+    const preview = await repo.previewCapacidadPastoreo(org, predioId, potreroId, PARAMS_DIAS);
+    assert.equal(preview.ficha.fichaId, String(fichaNueva));
+    assert.equal(preview.ficha.fechaAforo, '2026-01-11');
   });
 });
 

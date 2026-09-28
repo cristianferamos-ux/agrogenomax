@@ -57,3 +57,29 @@ export function previewRecomendacionPastoreo(predioId, potreroId, body) {
 export function createRecomendacionPastoreo(predioId, potreroId, body) {
   return postJson(`/api/ganaderia/predios/${predioId}/potreros/${potreroId}/recomendacion-pastoreo`, body);
 }
+
+// SPRINT-3D10.4 FASE 4: motor automático de carga recomendada (3D10.4
+// Fase 3). body: { categoriaCodigo, pesoPromedioKg, fechaIngresoPrevista,
+// produccionLecheLDia?, diasEnLeche?, grasaLechePct?, terneroAlPie? } --
+// NUNCA numeroAnimales (aquí siempre es OUTPUT) ni ningún campo derivado
+// server-side (fichaId/occupationPolicy/MSU/DI/resultados/provenance,
+// ver §0 del sprint) -- el backend rechaza cualquier otro campo con 400
+// FORBIDDEN_FIELDS.
+
+// Calcula server-side, NUNCA persiste.
+export function previewCargaAutomatica(predioId, potreroId, body) {
+  return postJson(`/api/ganaderia/predios/${predioId}/potreros/${potreroId}/recomendacion-pastoreo/auto/preview`, body);
+}
+
+// Mismo body + numeroAnimalesUsuario -- evalúa una cantidad alternativa.
+// Recalcula TODO desde cero (nunca reutiliza un preview previo). NUNCA
+// persiste, nunca crea una recomendación.
+export function evaluarEscenarioCargaAutomatica(predioId, potreroId, body) {
+  return postJson(`/api/ganaderia/predios/${predioId}/potreros/${potreroId}/recomendacion-pastoreo/auto/escenario`, body);
+}
+
+// Mismo body que preview -- el backend RECALCULA DESDE CERO (nunca confía
+// en un preview anterior) y persiste solo si el resultado es OK.
+export function guardarCargaAutomatica(predioId, potreroId, body) {
+  return postJson(`/api/ganaderia/predios/${predioId}/potreros/${potreroId}/recomendacion-pastoreo/auto`, body);
+}

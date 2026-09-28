@@ -32,12 +32,18 @@ import {
   computeRecomendacionPastoreo,
   computeRemnantDerivatives,
   resolveNivelConfianza,
+  resolveConsumoPctPvAplicado,
 } from './motorPastoreoAuto/recomendacionPastoreoFormulas.js';
 import { ESTADO_RECOMENDACION } from './motorPastoreoAuto/estadosRecomendacion.js';
 import { MOTOR_VERSION } from './motorPastoreoAuto/motorVersion.js';
+import { resolveFichaVigente } from './potreroFichaVigenciaResolver.js';
 
 const HISTORIAL_LIMIT = 10;
 const MS_POR_DIA = 24 * 60 * 60 * 1000;
+// SPRINT-3D10.4: discriminador de trazabilidad -- este repositorio solo
+// escribe recomendaciones MANUALES (numeroAnimales input humano). El motor
+// automatico (FASE 2, no implementado todavia) escribira 'AUTOMATICO'.
+const MODO_CALCULO_MANUAL = 'MANUAL';
 
 function semanticError(code, status, message) {
   return Object.assign(new Error(message || code), { status, code });
@@ -55,7 +61,9 @@ function assertPotreroIdFormat(potreroId) {
   }
 }
 
-async function assertPotreroBelongsToPredio(client, predioId, potreroId) {
+// SPRINT-3D10.4 FASE 3: exportada -- reutilizada tal cual por
+// potreroCargaAutomaticaRepository.js.
+export async function assertPotreroBelongsToPredio(client, predioId, potreroId) {
   const result = await client.query(
     'select potrero_id from agx.potreros where potrero_id = $1 and predio_id = $2',
     [potreroId, predioId],
@@ -67,28 +75,23 @@ async function assertPotreroBelongsToPredio(client, predioId, potreroId) {
 }
 
 /**
- * Ficha productiva más reciente (§17 del sprint: snapshot autoritativo).
- * Sin ficha -> INSUFFICIENT_FORAGE_DATA (§18), nunca un cálculo con
- * biomasa asumida.
+ * Ficha productiva VIGENTE (§17 del sprint original + 3D10.3/3D10.3.1:
+ * autoridad única compartida con capacidad de pastoreo, ver
+ * potreroFichaVigenciaResolver.js). Sin ficha vigente -> siempre
+ * INSUFFICIENT_FORAGE_DATA (§18) -- FASE 1 (3D10.4§8) no distingue todavía
+ * "sin ficha" de "ficha anterior al último pastoreo" a nivel de código de
+ * error HTTP, ambos casos son "no hay evidencia de forraje utilizable hoy".
  */
-async function fetchFichaMasReciente(client, potreroId) {
-  const result = await client.query(
-    `select ficha_id, biomasa_total_kg, tipo_cobertura,
-            to_char(fecha_aforo, 'YYYY-MM-DD') as fecha_aforo, created_at
-       from agx.potrero_fichas_productivas
-      where potrero_id = $1
-      order by created_at desc
-      limit 1`,
-    [potreroId],
-  );
-  if (result.rows.length === 0) {
+async function fetchFichaVigenteOrThrow(client, potreroId) {
+  const { ficha } = await resolveFichaVigente(client, potreroId);
+  if (!ficha) {
     throw semanticError(
       ESTADO_RECOMENDACION.INSUFFICIENT_FORAGE_DATA,
       404,
       'Primero registra una ficha productiva con un aforo del potrero.',
     );
   }
-  return result.rows[0];
+  return ficha;
 }
 
 /**
@@ -131,7 +134,9 @@ export async function resolveTipoPasturaBotanico(client, fichaRow) {
  * contexto, el motor sigue funcionando en modo degradado con menor
  * confianza, nunca una excepción fatal, §18).
  */
-async function fetchContextoMasReciente(client, potreroId) {
+// SPRINT-3D10.4 FASE 3: exportada -- reutilizada tal cual por
+// potreroCargaAutomaticaRepository.js.
+export async function fetchContextoMasReciente(client, potreroId) {
   const result = await client.query(
     `select contexto_id, precipitacion_7d_mm, created_at
        from agx.potrero_contextos_agroclimaticos
@@ -143,13 +148,17 @@ async function fetchContextoMasReciente(client, potreroId) {
   return result.rows[0] ?? null;
 }
 
-function fichaEdadEnDias(fichaRow) {
+// SPRINT-3D10.4 FASE 3: exportada -- reutilizada tal cual por
+// potreroCargaAutomaticaRepository.js.
+export function fichaEdadEnDias(fichaRow) {
   const creado = new Date(fichaRow.created_at).getTime();
   if (!Number.isFinite(creado)) return null;
   return (Date.now() - creado) / MS_POR_DIA;
 }
 
-function serializeFichaRef(fichaRow) {
+// SPRINT-3D10.4 FASE 3: exportada -- reutilizada tal cual por
+// potreroCargaAutomaticaRepository.js.
+export function serializeFichaRef(fichaRow) {
   return {
     fichaId: String(fichaRow.ficha_id),
     biomasaFrescaKg: Number(fichaRow.biomasa_total_kg),
@@ -158,7 +167,9 @@ function serializeFichaRef(fichaRow) {
   };
 }
 
-function serializeContextoRef(contextoRow) {
+// SPRINT-3D10.4 FASE 3: exportada -- reutilizada tal cual por
+// potreroCargaAutomaticaRepository.js.
+export function serializeContextoRef(contextoRow) {
   if (!contextoRow) return null;
   return {
     contextoId: String(contextoRow.contexto_id),
@@ -174,7 +185,10 @@ function serializeContextoRef(contextoRow) {
 // consumo_pct_pv_aplicado <= 10) con litros/día realistas. Aplica a TODAS
 // las categorías, no solo leche -- cierra el mismo vacío de "input
 // decorativo" que motivó este hardening.
-function assertPesoDentroDeRangoCategoria(categoria, pesoPromedioKg) {
+// SPRINT-3D10.4 FASE 3: exportada -- reutilizada tal cual por
+// potreroCargaAutomaticaRepository.js (el motor automático valida peso
+// exactamente igual que el manual, nunca una segunda implementación).
+export function assertPesoDentroDeRangoCategoria(categoria, pesoPromedioKg) {
   const { pesoMinReferenciaKg, pesoMaxReferenciaKg } = categoria;
   if (pesoMinReferenciaKg === null || pesoMaxReferenciaKg === null) return;
   if (pesoPromedioKg < pesoMinReferenciaKg || pesoPromedioKg > pesoMaxReferenciaKg) {
@@ -196,7 +210,9 @@ function assertPesoDentroDeRangoCategoria(categoria, pesoPromedioKg) {
 // (2001) completa, que exige WOL. Sin grasa, diasEnLeche no se usa (perfil
 // %PV genérico) -- no tiene sentido exigirlo (§2 hardening ronda 4: "no
 // pedir información que no entre al modelo").
-function assertCamposCondicionalesCompletos(categoria, { produccionLecheLDia, diasEnLeche, grasaLechePct, terneroAlPie }) {
+// SPRINT-3D10.4 FASE 3: exportada -- reutilizada tal cual por
+// potreroCargaAutomaticaRepository.js.
+export function assertCamposCondicionalesCompletos(categoria, { produccionLecheLDia, diasEnLeche, grasaLechePct, terneroAlPie }) {
   if (categoria.requiereProduccionLeche) {
     if (produccionLecheLDia === null || produccionLecheLDia === undefined) {
       throw semanticError(
@@ -242,7 +258,7 @@ async function resolveRecomendacion(client, {
   assertPesoDentroDeRangoCategoria(categoria, pesoPromedioKg);
   assertCamposCondicionalesCompletos(categoria, { produccionLecheLDia, diasEnLeche, grasaLechePct, terneroAlPie });
 
-  const fichaRow = await fetchFichaMasReciente(client, potreroId);
+  const fichaRow = await fetchFichaVigenteOrThrow(client, potreroId);
   const { tipo: tipoPasturaBotanico, nombreComun, nombreCientifico } = await resolveTipoPasturaBotanico(client, fichaRow);
   const contextoRow = await fetchContextoMasReciente(client, potreroId);
 
@@ -288,9 +304,12 @@ async function resolveRecomendacion(client, {
   // "aplicado", hardening ronda 2 §7).
   const usoEcuacionRealLeche = resultado.dmiModel === 'NRC_2001_DAIRY_DMI';
   const usaPerfilGenericoLeche = esCategoriaLeche && resultado.dmiModel === 'GENERIC_LACTATING_PROFILE';
-  const consumoPctPvAplicado = usoEcuacionRealLeche
-    ? (resultado.demandaIndividualKgMsDia / pesoPromedioKg) * 100
-    : categoria.consumoMsPctPvTipico;
+  const consumoPctPvAplicado = resolveConsumoPctPvAplicado({
+    dmiModel: resultado.dmiModel,
+    demandaIndividualKgMsDia: resultado.demandaIndividualKgMsDia,
+    pesoPromedioKg,
+    consumoMsPctPvTipico: categoria.consumoMsPctPvTipico,
+  });
 
   // Hardening §4: limitaciones explícitas -- ternero al pie no cuantificado.
   const limitaciones = [];
@@ -545,13 +564,18 @@ export async function createRecomendacionPastoreo(organizacionId, predioId, potr
     });
 
     const insertResult = await client.query(
+      // SPRINT-3D10.4: modo_calculo='MANUAL' persiste la trazabilidad de
+      // que numero_animales fue input humano (nunca calculado por el
+      // motor) -- columna interna de auditoría (0020_potrero_recomendacion_
+      // carga_automatica.sql), no se agrega a RETURNING ni al shape público
+      // devuelto al cliente (contrato HTTP del endpoint manual sin cambios).
       `insert into agx.potrero_recomendaciones_pastoreo
          (organizacion_id, predio_id, potrero_id, ficha_id, contexto_id, categoria_id,
           numero_animales, peso_promedio_kg, produccion_leche_l_dia, dias_en_leche, grasa_leche_pct, ternero_al_pie,
           materia_seca_pct_aplicada, utilizacion_pct_aplicada, consumo_pct_pv_aplicado,
           materia_seca_total_kg, materia_seca_utilizable_kg, demanda_diaria_lote_kg_ms, dias_ocupacion_estimados,
-          nivel_confianza, parametros_fuente_json, motor_version)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+          nivel_confianza, parametros_fuente_json, motor_version, modo_calculo)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
        returning recomendacion_id, ficha_id, contexto_id, numero_animales, peso_promedio_kg,
                  produccion_leche_l_dia, dias_en_leche, grasa_leche_pct, ternero_al_pie, materia_seca_pct_aplicada, utilizacion_pct_aplicada,
                  consumo_pct_pv_aplicado, materia_seca_total_kg, materia_seca_utilizable_kg,
@@ -580,6 +604,7 @@ export async function createRecomendacionPastoreo(organizacionId, predioId, potr
         nivelConfianza,
         JSON.stringify(parametrosFuenteJson),
         MOTOR_VERSION,
+        MODO_CALCULO_MANUAL,
       ],
     );
 

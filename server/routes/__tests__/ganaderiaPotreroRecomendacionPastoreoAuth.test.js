@@ -101,3 +101,32 @@ describe('SPRINT-3D7.2: recomendación de pastoreo automática exige sesión con
     }
   });
 });
+
+// ---------------------------------------------------------------------
+// SPRINT-3D10.4 FASE 3 -- las 3 rutas nuevas del motor automático cuelgan
+// del MISMO router (mismo router.use(requireSession) global) -- exigen
+// sesión exactamente igual que las rutas manuales de arriba. requireCsrf
+// se aplica con el mismo router.use incondicional, sin lógica por ruta --
+// probado una vez para el router es suficiente para cubrir las rutas
+// nuevas (no hay una segunda instancia de middleware).
+// ---------------------------------------------------------------------
+
+const VALID_BODY_AUTO = {
+  categoriaCodigo: 'novillo_ceba',
+  pesoPromedioKg: 420,
+  fechaIngresoPrevista: '2026-09-10',
+};
+
+describe('SPRINT-3D10.4 FASE 3: motor automático exige sesión con organización', () => {
+  test('POST .../recomendacion-pastoreo/auto/preview sin sesión -> 401', async () => {
+    await assertAnonymousRejected('POST', '/101/potreros/5/recomendacion-pastoreo/auto/preview', VALID_BODY_AUTO);
+  });
+
+  test('POST .../recomendacion-pastoreo/auto/escenario sin sesión -> 401', async () => {
+    await assertAnonymousRejected('POST', '/101/potreros/5/recomendacion-pastoreo/auto/escenario', { ...VALID_BODY_AUTO, numeroAnimalesUsuario: 15 });
+  });
+
+  test('POST .../recomendacion-pastoreo/auto sin sesión -> 401', async () => {
+    await assertAnonymousRejected('POST', '/101/potreros/5/recomendacion-pastoreo/auto', VALID_BODY_AUTO);
+  });
+});
