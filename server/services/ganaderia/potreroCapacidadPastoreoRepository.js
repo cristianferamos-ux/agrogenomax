@@ -21,6 +21,7 @@ import {
   computeCapacidadPastoreoModoAnimales,
   isResultadoExtremo,
 } from './capacidadPastoreoFormulas.js';
+import { resolveFichaVigente } from './potreroFichaVigenciaResolver.js';
 
 function semanticError(code, status, message) {
   return Object.assign(new Error(message || code), { status, code });
@@ -56,31 +57,27 @@ async function assertPotreroBelongsToPredio(client, predioId, potreroId) {
 }
 
 /**
- * Ficha productiva más reciente del potrero (§23 del sprint: "Por
- * defecto utilizar la ficha productiva más reciente"). Lanza
- * FICHA_NOT_FOUND si el potrero todavía no tiene ninguna ficha
- * registrada (§26 del sprint: sin ficha, no se permite el cálculo).
- * Nunca mezcla datos de distintas fichas (§23) -- una sola fila resuelta
- * aquí, biomasaFrescaKg siempre sale de esta ficha, jamás del body.
+ * Ficha productiva VIGENTE del potrero (§23 del sprint original + reemplazo
+ * 3D10.3/3D10.3.1: autoridad única compartida con recomendación de
+ * pastoreo, ver potreroFichaVigenciaResolver.js -- ya no es un simple
+ * "más reciente por created_at", excluye aforos anteriores al último
+ * pastoreo real finalizado). Lanza FICHA_NOT_FOUND si no hay ficha vigente
+ * (§26 del sprint: sin ficha, no se permite el cálculo) -- FASE 1
+ * (3D10.4§8) no distingue todavía "sin ficha" de "ficha anterior al último
+ * pastoreo" a nivel de código de error HTTP. Nunca mezcla datos de
+ * distintas fichas (§23) -- una sola fila resuelta aquí, biomasaFrescaKg
+ * siempre sale de esta ficha, jamás del body.
  */
-async function fetchFichaMasReciente(client, potreroId) {
-  const result = await client.query(
-    `select ficha_id, biomasa_total_kg, aforo_promedio_g_m2,
-            to_char(fecha_aforo, 'YYYY-MM-DD') as fecha_aforo, created_at
-       from agx.potrero_fichas_productivas
-      where potrero_id = $1
-      order by created_at desc
-      limit 1`,
-    [potreroId],
-  );
-  if (result.rows.length === 0) {
+async function fetchFichaVigenteOrThrow(client, potreroId) {
+  const { ficha } = await resolveFichaVigente(client, potreroId);
+  if (!ficha) {
     throw semanticError(
       'FICHA_NOT_FOUND',
       404,
       'Primero registra una ficha productiva con un aforo del potrero.',
     );
   }
-  return result.rows[0];
+  return ficha;
 }
 
 function serializeFichaRef(fichaRow) {
@@ -156,7 +153,7 @@ export async function previewCapacidadPastoreo(organizacionId, predioId, potrero
 
   return withOrganizacionTransaction(organizacionId, async (client) => {
     await assertPotreroBelongsToPredio(client, predioId, potreroId);
-    const fichaRow = await fetchFichaMasReciente(client, potreroId);
+    const fichaRow = await fetchFichaVigenteOrThrow(client, potreroId);
     const resultado = computeResultado(modo, fichaRow, params);
     return buildResponsePayload(modo, params, fichaRow, resultado);
   });
@@ -202,7 +199,7 @@ export async function createCapacidadPastoreo(organizacionId, predioId, potreroI
 
   return withOrganizacionTransaction(organizacionId, async (client) => {
     await assertPotreroBelongsToPredio(client, predioId, potreroId);
-    const fichaRow = await fetchFichaMasReciente(client, potreroId);
+    const fichaRow = await fetchFichaVigenteOrThrow(client, potreroId);
     const resultado = computeResultado(modo, fichaRow, params);
 
     const insertResult = await client.query(

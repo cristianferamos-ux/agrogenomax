@@ -23,6 +23,12 @@ import {
   createRecomendacionPastoreo,
 } from '../services/ganaderia/potreroRecomendacionPastoreoRepository.js';
 import {
+  previewCargaAutomatica,
+  evaluarEscenarioCargaAutomatica,
+  guardarCargaAutomatica,
+} from '../services/ganaderia/potreroCargaAutomaticaRepository.js';
+import { parseFechaCalendario } from '../services/ganaderia/motorPastoreoAuto/fechaPlanHelpers.js';
+import {
   MAX_PESO_VIVO_PROMEDIO_KG,
   MAX_NUMERO_ANIMALES,
 } from '../services/ganaderia/capacidadPastoreoFormulas.js';
@@ -141,6 +147,75 @@ export function validateRecomendacionPastoreoBody(body) {
   };
 }
 
+// SPRINT-3D10.4 FASE 3 §1/§10 -- input autoritativo del motor automático:
+// SOLO hechos del productor (categoría, peso, fecha prevista + leche/
+// ternero condicionales). fechaIngresoPrevista es formato calendario
+// YYYY-MM-DD -- parseFechaCalendario rechaza formato incorrecto Y fechas
+// inexistentes (ej. 2026-02-30).
+function validateFechaIngresoPrevista(rawValue) {
+  if (typeof rawValue !== 'string') {
+    throw validationError('INVALID_FECHA_INGRESO_PREVISTA', 'fechaIngresoPrevista debe tener formato YYYY-MM-DD.');
+  }
+  try {
+    parseFechaCalendario(rawValue);
+  } catch {
+    throw validationError('INVALID_FECHA_INGRESO_PREVISTA', 'fechaIngresoPrevista debe ser una fecha de calendario válida en formato YYYY-MM-DD.');
+  }
+  return rawValue;
+}
+
+// §9 del sprint: mismo rango que validateNumeroAnimales, con un código de
+// error propio (nunca confundir el override del escenario con el input
+// del endpoint manual).
+function validateNumeroAnimalesUsuario(rawValue) {
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 1) {
+    throw validationError('INVALID_NUMERO_ANIMALES_USUARIO', 'numeroAnimalesUsuario debe ser un entero >= 1.');
+  }
+  if (parsed > MAX_NUMERO_ANIMALES) {
+    throw validationError('NUMERO_ANIMALES_USUARIO_TOO_HIGH', `numeroAnimalesUsuario supera el máximo técnico permitido (${MAX_NUMERO_ANIMALES}).`);
+  }
+  return parsed;
+}
+
+// §0/§1 del sprint: whitelist estricta -- el cliente NUNCA aporta fichaId/
+// tipoPastura/generoPastura/occupationPolicy/MSU/DI/resultados/provenance
+// (ni siquiera numeroAnimales, que aquí es SIEMPRE output). Cualquier otra
+// clave -> 400 FORBIDDEN_FIELDS.
+const ALLOWED_KEYS_AUTO = new Set(['categoriaCodigo', 'pesoPromedioKg', 'fechaIngresoPrevista', 'produccionLecheLDia', 'diasEnLeche', 'grasaLechePct', 'terneroAlPie']);
+const ALLOWED_KEYS_AUTO_ESCENARIO = new Set([...ALLOWED_KEYS_AUTO, 'numeroAnimalesUsuario']);
+
+function parseCargaAutomaticaCamposComunes(body) {
+  return {
+    categoriaCodigo: validateCategoriaCodigo(body?.categoriaCodigo),
+    pesoPromedioKg: validatePesoPromedioKg(body?.pesoPromedioKg),
+    fechaIngresoPrevista: validateFechaIngresoPrevista(body?.fechaIngresoPrevista),
+    produccionLecheLDia: validateProduccionLecheLDia(body?.produccionLecheLDia),
+    diasEnLeche: validateDiasEnLeche(body?.diasEnLeche),
+    grasaLechePct: validateGrasaLechePct(body?.grasaLechePct),
+    terneroAlPie: validateTerneroAlPie(body?.terneroAlPie),
+  };
+}
+
+export function validateCargaAutomaticaBody(body) {
+  const unknownKeys = Object.keys(body || {}).filter((key) => !ALLOWED_KEYS_AUTO.has(key));
+  if (unknownKeys.length > 0) {
+    throw validationError('FORBIDDEN_FIELDS', `Campos no permitidos: ${unknownKeys.join(', ')}`);
+  }
+  return parseCargaAutomaticaCamposComunes(body);
+}
+
+export function validateCargaAutomaticaEscenarioBody(body) {
+  const unknownKeys = Object.keys(body || {}).filter((key) => !ALLOWED_KEYS_AUTO_ESCENARIO.has(key));
+  if (unknownKeys.length > 0) {
+    throw validationError('FORBIDDEN_FIELDS', `Campos no permitidos: ${unknownKeys.join(', ')}`);
+  }
+  return {
+    ...parseCargaAutomaticaCamposComunes(body),
+    numeroAnimalesUsuario: validateNumeroAnimalesUsuario(body?.numeroAnimalesUsuario),
+  };
+}
+
 function sendSemanticError(res, error) {
   if (typeof error?.status === 'number' && typeof error?.code === 'string') {
     res.status(error.status).json({ error: error.code, message: error.message });
@@ -219,6 +294,80 @@ export default function createGanaderiaPotreroRecomendacionPastoreoRouter({ appE
 
       const recomendacion = await createRecomendacionPastoreo(organizacionId, predioId, potreroId, payload);
       res.status(201).json({ ok: true, recomendacion });
+    } catch (error) {
+      if (sendSemanticError(res, error)) return;
+      next(error);
+    }
+  });
+
+  // ---------------------------------------------------------------------
+  // SPRINT-3D10.4 FASE 3 -- motor automático de carga recomendada. Rutas
+  // NUEVAS, el endpoint manual de arriba queda 100% intacto (§19 del
+  // sprint) -- ni su body, ni su validación, ni su cálculo, ni su
+  // response cambian.
+  // ---------------------------------------------------------------------
+
+  // POST .../auto/preview -- recalcula TODO server-side, NUNCA persiste.
+  router.post('/auto/preview', async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const { predioId, potreroId } = req.params;
+      if (!isPredioIdValid(predioId) || !isPotreroIdValid(potreroId)) {
+        res.status(400).json({ error: 'INVALID_POTRERO_ID' });
+        return;
+      }
+
+      const payload = validateCargaAutomaticaBody(req.body);
+      const { organizacionId } = req.ganaderiaAuth;
+
+      const resultado = await previewCargaAutomatica(organizacionId, predioId, potreroId, payload);
+      res.json({ ok: true, ...resultado });
+    } catch (error) {
+      if (sendSemanticError(res, error)) return;
+      next(error);
+    }
+  });
+
+  // POST .../auto/escenario -- recalcula TODO desde cero (nunca reutiliza
+  // un preview anterior del navegador), evalúa numeroAnimalesUsuario.
+  // NUNCA persiste.
+  router.post('/auto/escenario', async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const { predioId, potreroId } = req.params;
+      if (!isPredioIdValid(predioId) || !isPotreroIdValid(potreroId)) {
+        res.status(400).json({ error: 'INVALID_POTRERO_ID' });
+        return;
+      }
+
+      const payload = validateCargaAutomaticaEscenarioBody(req.body);
+      const { organizacionId } = req.ganaderiaAuth;
+
+      const resultado = await evaluarEscenarioCargaAutomatica(organizacionId, predioId, potreroId, payload);
+      res.json({ ok: true, ...resultado });
+    } catch (error) {
+      if (sendSemanticError(res, error)) return;
+      next(error);
+    }
+  });
+
+  // POST .../auto -- RECALCULA DESDE CERO (nunca confía en un preview
+  // previo) y persiste SOLO si estado=OK (modo_calculo='AUTOMATICO',
+  // append-only, igual que el endpoint manual).
+  router.post('/auto', async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const { predioId, potreroId } = req.params;
+      if (!isPredioIdValid(predioId) || !isPotreroIdValid(potreroId)) {
+        res.status(400).json({ error: 'INVALID_POTRERO_ID' });
+        return;
+      }
+
+      const payload = validateCargaAutomaticaBody(req.body);
+      const { organizacionId } = req.ganaderiaAuth;
+
+      const resultado = await guardarCargaAutomatica(organizacionId, predioId, potreroId, payload);
+      res.status(resultado.estado === 'OK' ? 201 : 200).json({ ok: true, ...resultado });
     } catch (error) {
       if (sendSemanticError(res, error)) return;
       next(error);

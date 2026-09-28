@@ -7,7 +7,11 @@
 // y NaN/Infinity/string basura.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateRecomendacionPastoreoBody } from '../ganaderiaPotreroRecomendacionPastoreo.js';
+import {
+  validateRecomendacionPastoreoBody,
+  validateCargaAutomaticaBody,
+  validateCargaAutomaticaEscenarioBody,
+} from '../ganaderiaPotreroRecomendacionPastoreo.js';
 
 const BASE = {
   categoriaCodigo: 'novillo_ceba',
@@ -178,4 +182,92 @@ test('nunca acepta NaN/Infinity/string basura', () => {
       `pesoPromedioKg=${String(garbage)} debía ser rechazado`,
     );
   }
+});
+
+// -----------------------------------------------------------------------
+// SPRINT-3D10.4 FASE 3 §0/§1/§23 -- validateCargaAutomaticaBody/
+// validateCargaAutomaticaEscenarioBody: whitelist estricta del motor
+// automático. numeroAnimales (input manual) y TODO campo server-side
+// (ficha/pastura/MSU/DI/resultado/provenance) deben ser rechazados --
+// aquí numeroAnimales JAMÁS es input, ni siquiera en el endpoint manual
+// que ya lo permite -- el automático nunca lo acepta.
+// -----------------------------------------------------------------------
+
+const BASE_AUTO = {
+  categoriaCodigo: 'novillo_ceba',
+  pesoPromedioKg: 420,
+  fechaIngresoPrevista: '2026-09-10',
+};
+
+test('validateCargaAutomaticaBody acepta un body mínimo válido', () => {
+  const result = validateCargaAutomaticaBody(BASE_AUTO);
+  assert.equal(result.categoriaCodigo, 'novillo_ceba');
+  assert.equal(result.pesoPromedioKg, 420);
+  assert.equal(result.fechaIngresoPrevista, '2026-09-10');
+  assert.equal(result.produccionLecheLDia, null);
+});
+
+test('validateCargaAutomaticaBody RECHAZA numeroAnimales -- en el motor automático SIEMPRE es output, nunca input (§1)', () => {
+  assert.throws(
+    () => validateCargaAutomaticaBody({ ...BASE_AUTO, numeroAnimales: 10 }),
+    (e) => e.status === 400 && e.code === 'FORBIDDEN_FIELDS',
+  );
+});
+
+test('validateCargaAutomaticaBody RECHAZA todos los campos resueltos server-side (§0 del sprint)', () => {
+  for (const forbiddenKey of [
+    'fichaId', 'fechaAforo', 'tipoPastura', 'generoPastura', 'generoDominante',
+    'occupationPolicy', 'policyVersion', 'MSU', 'materiaSecaTotalKg', 'materiaSecaUtilizableKg',
+    'materiaSecaPctAplicada', 'utilizacionPctAplicada', 'DI', 'demandaIndividualKgMsDia',
+    'numeroAnimalesRecomendado', 'diasPermanenciaRecomendada', 'fechaSalidaEstimada',
+    'consumoOperativoKg', 'remanenteOperativoKg', 'margenForrajeKg', 'diasMaximosSoportadosExactos',
+    'motivoDuracion', 'confidence', 'provenance', 'organizacionId', 'predioId', 'potreroId',
+  ]) {
+    assert.throws(
+      () => validateCargaAutomaticaBody({ ...BASE_AUTO, [forbiddenKey]: 1 }),
+      (e) => e.status === 400 && e.code === 'FORBIDDEN_FIELDS',
+      `debía rechazar el campo ${forbiddenKey}`,
+    );
+  }
+});
+
+test('validateCargaAutomaticaBody exige fechaIngresoPrevista con formato YYYY-MM-DD y fecha de calendario real', () => {
+  for (const invalida of ['10-09-2026', '2026/09/10', '2026-02-30', '', null, undefined, 20260910]) {
+    assert.throws(
+      () => validateCargaAutomaticaBody({ ...BASE_AUTO, fechaIngresoPrevista: invalida }),
+      (e) => e.code === 'INVALID_FECHA_INGRESO_PREVISTA',
+      `fechaIngresoPrevista=${String(invalida)} debía ser rechazada`,
+    );
+  }
+});
+
+test('validateCargaAutomaticaBody reutiliza las mismas validaciones de categoría/peso/leche/ternero del endpoint manual', () => {
+  assert.throws(() => validateCargaAutomaticaBody({ ...BASE_AUTO, categoriaCodigo: 'NO VALIDO' }), (e) => e.code === 'INVALID_CATEGORIA_CODIGO');
+  assert.throws(() => validateCargaAutomaticaBody({ ...BASE_AUTO, pesoPromedioKg: -1 }), (e) => e.code === 'INVALID_PESO_PROMEDIO');
+  const conLeche = validateCargaAutomaticaBody({ ...BASE_AUTO, categoriaCodigo: 'vaca_leche_produccion', produccionLecheLDia: 18, diasEnLeche: 90, grasaLechePct: 3.8 });
+  assert.equal(conLeche.grasaLechePct, 3.8);
+});
+
+test('validateCargaAutomaticaEscenarioBody exige numeroAnimalesUsuario (entero >= 1)', () => {
+  assert.throws(
+    () => validateCargaAutomaticaEscenarioBody(BASE_AUTO),
+    (e) => e.code === 'INVALID_NUMERO_ANIMALES_USUARIO',
+  );
+  assert.throws(
+    () => validateCargaAutomaticaEscenarioBody({ ...BASE_AUTO, numeroAnimalesUsuario: 0 }),
+    (e) => e.code === 'INVALID_NUMERO_ANIMALES_USUARIO',
+  );
+  assert.throws(
+    () => validateCargaAutomaticaEscenarioBody({ ...BASE_AUTO, numeroAnimalesUsuario: 1.5 }),
+    (e) => e.code === 'INVALID_NUMERO_ANIMALES_USUARIO',
+  );
+  const result = validateCargaAutomaticaEscenarioBody({ ...BASE_AUTO, numeroAnimalesUsuario: 15 });
+  assert.equal(result.numeroAnimalesUsuario, 15);
+});
+
+test('validateCargaAutomaticaEscenarioBody RECHAZA los mismos campos server-side prohibidos que preview/guardar', () => {
+  assert.throws(
+    () => validateCargaAutomaticaEscenarioBody({ ...BASE_AUTO, numeroAnimalesUsuario: 15, fichaId: 1 }),
+    (e) => e.code === 'FORBIDDEN_FIELDS',
+  );
 });
