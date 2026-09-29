@@ -24,6 +24,21 @@ import {
 } from './ganaderiaCicloPastoreoApi.js';
 
 const GENERIC_ERROR = 'No fue posible completar la operación en este momento. Intenta nuevamente.';
+
+// SPRINT-3D10.6: resultado INCIERTO de "Guardar aforo" (NETWORK_ERROR --
+// el POST pudo o no confirmarse en el servidor). Nunca se reintenta
+// solo: el guardado queda bloqueado hasta que el usuario verifique el
+// estado (GET del residual, nunca la mutación).
+//
+// Valor de `failure` que devuelve postWithCsrf (REQUEST_FAILURES.
+// NETWORK_ERROR). Los .jsx de potreros/ nunca importan el helper de auth
+// directamente (authResilienceArchitecture.test.js) -- el test de
+// arquitectura del ciclo ancla este literal al enum del helper.
+const FAILURE_NETWORK_ERROR = 'NETWORK_ERROR';
+const REGISTRO_INCIERTO_MESSAGE = 'Se perdió la conexión antes de confirmar si el aforo quedó guardado. Verifica el estado antes de volver a intentarlo.';
+const REGISTRO_VERIFICADO_EXISTE_MESSAGE = 'Este ciclo ya tiene un aforo de salida registrado. Revisa los datos; si necesitas cambiarlos, usa Corregir.';
+const REGISTRO_VERIFICADO_NO_EXISTE_MESSAGE = 'No encontramos un aforo guardado. Puedes volver a guardarlo.';
+const REGISTRO_VERIFICAR_ERROR_MESSAGE = 'No pudimos verificar el estado del aforo. Revisa tu conexión y vuelve a verificar.';
 // Mismo máximo que el aforo de ingreso (ver PotreroFichaProductivaPanel.jsx,
 // MAX_AFORO_G_M2) -- pequeña duplicación aceptada, mismo criterio que ya
 // usa el dominio (ver potreroCicloResidualRealRepository.js).
@@ -45,6 +60,7 @@ const RESIDUAL_ERROR_MESSAGES = {
   POTRERO_NOT_FOUND: 'Este potrero ya no está disponible.',
   INVALID_MOTIVO_ANULACION: 'Escribe el motivo de la anulación.',
   SIN_CAMBIOS_SOLICITADOS: 'Cambia al menos un dato antes de guardar la corrección.',
+  RESIDUAL_YA_REGISTRADO: 'Ya existe un aforo de salida registrado para este ciclo. Si necesitas cambiarlo, usa Corregir.',
 };
 
 function resolveErrorMessage(code) {
@@ -165,6 +181,12 @@ export default function PotreroResidualRealPanel({ predioId, potreroId, ciclo, d
   const [observacion, setObservacion] = useState('');
   const [registrando, setRegistrando] = useState(false);
   const [registrarError, setRegistrarError] = useState('');
+  // SPRINT-3D10.6: true tras un NETWORK_ERROR de "Guardar aforo" hasta que
+  // "Verificar estado" obtenga una respuesta autoritativa del servidor.
+  const [registroIncierto, setRegistroIncierto] = useState(false);
+  const [verificandoRegistro, setVerificandoRegistro] = useState(false);
+  const [registroAviso, setRegistroAviso] = useState('');
+  const [residualYaRegistrado, setResidualYaRegistrado] = useState(false);
 
   const [actualizando, setActualizando] = useState(false);
   const [actualizarError, setActualizarError] = useState('');
@@ -189,10 +211,15 @@ export default function PotreroResidualRealPanel({ predioId, potreroId, ciclo, d
   // lock que deshabilita TODOS los CTAs de mutación, nunca solo el propio.
   // Lectura pura (detalle técnico/historial/expandir) queda fuera de esto.
   const mutando = registrando || actualizando || corrigiendo || anulando || aplicando;
+  // SPRINT-3D10.6: el formulario de registro además queda bloqueado
+  // (datos conservados, solo lectura) mientras el resultado del último
+  // "Guardar aforo" sea incierto o se esté verificando.
+  const registroBloqueado = mutando || registroIncierto || verificandoRegistro;
 
   function loadResidual() {
     setLoading(true);
     setLoadError('');
+    setRegistroAviso('');
     getResidualReal(predioId, potreroId, ciclo.cicloId).then(({ ok, data }) => {
       if (!ok) {
         setLoadError(GENERIC_ERROR);
@@ -232,15 +259,20 @@ export default function PotreroResidualRealPanel({ predioId, potreroId, ciclo, d
     setMedicionRealAtLocal(isoToDatetimeLocalInput(new Date().toISOString()));
     setObservacion('');
     setRegistrarError('');
+    setRegistroAviso('');
+    setResidualYaRegistrado(false);
   }
 
+  // SPRINT-3D10.6: resetForm nunca limpia registroIncierto -- cancelar y
+  // reabrir el formulario no desbloquea "Guardar aforo"; solo
+  // handleVerificarRegistro (respuesta real del servidor) lo hace.
   function handleAbrirForm() {
     resetForm();
     setMostrarForm(true);
   }
 
   async function handleRegistrar() {
-    if (mutando) return;
+    if (mutando || registroIncierto) return;
     const numMuestras = Number(numeroMuestras);
     const aforo = Number(aforoPromedioGM2);
     const codigoInvalido = validateRegistroForm({ numeroMuestras: numMuestras, aforoPromedioGM2: aforo, medicionRealAtLocal });
@@ -250,7 +282,9 @@ export default function PotreroResidualRealPanel({ predioId, potreroId, ciclo, d
     }
     setRegistrando(true);
     setRegistrarError('');
-    const { ok, data } = await registrarResidualReal(predioId, potreroId, ciclo.cicloId, {
+    setRegistroAviso('');
+    setResidualYaRegistrado(false);
+    const { ok, data, failure } = await registrarResidualReal(predioId, potreroId, ciclo.cicloId, {
       numeroMuestras: numMuestras,
       aforoPromedioGM2: aforo,
       medicionRealAt: datetimeLocalInputToIso(medicionRealAtLocal),
@@ -258,12 +292,62 @@ export default function PotreroResidualRealPanel({ predioId, potreroId, ciclo, d
     });
     setRegistrando(false);
     if (!ok) {
+      if (failure === FAILURE_NETWORK_ERROR) {
+        // Resultado INCIERTO: conserva los datos escritos, bloquea el
+        // guardado y exige verificar -- nunca reintenta la mutación.
+        setRegistroIncierto(true);
+        return;
+      }
+      if (data?.error === 'RESIDUAL_YA_REGISTRADO') {
+        // Refresca en segundo plano (lectura) para que "Ver aforo
+        // registrado" muestre el vigente -- nunca reenvía la mutación.
+        setResidualYaRegistrado(true);
+        loadResidual();
+      }
       setRegistrarError(resolveErrorMessage(data?.error));
       return;
     }
     setMostrarForm(false);
     loadResidual();
     // No dispara onDescansoChange -- registrar nunca toca el descanso.
+  }
+
+  // SPRINT-3D10.6: única salida de registroIncierto. Solo LEE el residual
+  // (getResidualReal) -- nunca llama registrarResidualReal.
+  async function handleVerificarRegistro() {
+    if (verificandoRegistro) return;
+    setVerificandoRegistro(true);
+    setRegistrarError('');
+    setRegistroAviso('');
+    let respuesta;
+    try {
+      respuesta = await getResidualReal(predioId, potreroId, ciclo.cicloId);
+    } catch {
+      respuesta = { ok: false };
+    }
+    setVerificandoRegistro(false);
+    if (!respuesta.ok) {
+      setRegistrarError(REGISTRO_VERIFICAR_ERROR_MESSAGE);
+      return;
+    }
+    const actualServidor = respuesta.data?.actual ?? null;
+    setActual(actualServidor);
+    setHistorialResidual(Array.isArray(respuesta.data?.historial) ? respuesta.data.historial : []);
+    setLoaded(true);
+    setRegistroIncierto(false);
+    if (actualServidor) {
+      setMostrarForm(false);
+      setRegistroAviso(REGISTRO_VERIFICADO_EXISTE_MESSAGE);
+      return;
+    }
+    setRegistroAviso(REGISTRO_VERIFICADO_NO_EXISTE_MESSAGE);
+  }
+
+  function handleVerAforoRegistrado() {
+    setMostrarForm(false);
+    setRegistrarError('');
+    setResidualYaRegistrado(false);
+    loadResidual();
   }
 
   async function handleActualizarComparativo() {
@@ -414,7 +498,7 @@ export default function PotreroResidualRealPanel({ predioId, potreroId, ciclo, d
               type="number" min="1" step="1"
               value={numeroMuestras}
               onChange={(event) => setNumeroMuestras(event.target.value)}
-              disabled={mutando}
+              disabled={registroBloqueado}
             />
           </FormField>
           <FormField label="Aforo promedio (g/m² de materia fresca)" required>
@@ -422,7 +506,7 @@ export default function PotreroResidualRealPanel({ predioId, potreroId, ciclo, d
               type="number" min="0" max={MAX_AFORO_G_M2} step="any"
               value={aforoPromedioGM2}
               onChange={(event) => setAforoPromedioGM2(event.target.value)}
-              disabled={mutando}
+              disabled={registroBloqueado}
             />
           </FormField>
           <FormField label="Fecha y hora de la medición" required>
@@ -430,18 +514,30 @@ export default function PotreroResidualRealPanel({ predioId, potreroId, ciclo, d
               type="datetime-local"
               value={medicionRealAtLocal}
               onChange={(event) => setMedicionRealAtLocal(event.target.value)}
-              disabled={mutando}
+              disabled={registroBloqueado}
             />
           </FormField>
           <FormField label="Observación (opcional)">
-            <textarea value={observacion} onChange={(event) => setObservacion(event.target.value)} disabled={mutando} />
+            <textarea value={observacion} onChange={(event) => setObservacion(event.target.value)} disabled={registroBloqueado} />
           </FormField>
+          <StatusMessage type="warning">{registroIncierto ? REGISTRO_INCIERTO_MESSAGE : ''}</StatusMessage>
+          <StatusMessage type="info">{registroAviso}</StatusMessage>
           <StatusMessage type="error">{registrarError}</StatusMessage>
           <div className="gan-potrero-actions">
-            <button type="button" className="gan-submit" onClick={handleRegistrar} disabled={mutando}>
+            {registroIncierto ? (
+              <button type="button" className="gan-submit" onClick={handleVerificarRegistro} disabled={verificandoRegistro}>
+                {verificandoRegistro ? 'Verificando...' : 'Verificar estado'}
+              </button>
+            ) : null}
+            <button type="button" className="gan-submit" onClick={handleRegistrar} disabled={registroBloqueado}>
               {registrando ? 'Guardando...' : 'Guardar aforo'}
             </button>
-            <button type="button" className="gan-back-inline" onClick={() => setMostrarForm(false)} disabled={mutando}>
+            {residualYaRegistrado ? (
+              <button type="button" className="gan-secondary-button" onClick={handleVerAforoRegistrado} disabled={mutando}>
+                Ver aforo registrado
+              </button>
+            ) : null}
+            <button type="button" className="gan-back-inline" onClick={() => setMostrarForm(false)} disabled={mutando || verificandoRegistro}>
               Cancelar
             </button>
           </div>
@@ -450,6 +546,7 @@ export default function PotreroResidualRealPanel({ predioId, potreroId, ciclo, d
 
       {!mostrarForm && actual ? (
         <div className="gan-stack">
+          <StatusMessage type="info">{registroAviso}</StatusMessage>
           {comparativoEstado && comparativoEstado !== 'COMPLETO' ? (
             <StatusMessage type={comparativoEstado === 'INCOMPATIBLE_TEMPORAL' ? 'warning' : 'info'}>
               {COMPARATIVO_ESTADO_COPY[comparativoEstado]}

@@ -341,10 +341,43 @@ async function siguienteVersion(client, cicloId) {
 }
 
 /**
+ * SPRINT-3D10.6 -- ¿`incoming` es la MISMA medición física que `existing`
+ * (residual vigente serializado)? Solo participan los inputs físicos del
+ * usuario (numeroMuestras/aforoPromedioGM2/medicionRealAt/observacion) --
+ * nunca derivados (biomasa/horas/%MS/remanentes/comparativo), contexto
+ * congelado (snapshot/descanso origen) ni metadata (ids/version/
+ * created_at/actor/ámbito): esos dependen del estado vigente del ciclo o
+ * del momento del registro, no de la medición.
+ *
+ * Comparación EXACTA, sin tolerancia: aforo_promedio_g_m2 es `numeric`
+ * sin escala (guarda el decimal exacto de String(n), así que
+ * Number(persistido) === n); medicion_real_at se escribe desde un Date en
+ * ms. observacion: undefined === null, strings exactos sin trim (mismo
+ * criterio que corregirResidualReal).
+ */
+export function isSameResidualMeasurement(existing, incoming) {
+  if (Number(existing.numeroMuestras) !== incoming.numeroMuestras) return false;
+  if (Number(existing.aforoPromedioGM2) !== incoming.aforoPromedioGM2) return false;
+  if (new Date(existing.medicionRealAt).getTime() !== new Date(incoming.medicionRealAt).getTime()) return false;
+  return (existing.observacion ?? null) === (incoming.observacion ?? null);
+}
+
+/**
  * Captura el hecho físico -- SIEMPRE persistible aunque falle el
  * proveedor climático, no exista descanso REAL, o %MS no pueda
  * resolverse (Final Gate Revision punto 1). NUNCA rechaza por falta de
  * ciencia -- solo por invalidez del propio hecho (temporalidad).
+ *
+ * SPRINT-3D10.6 -- idempotente frente a reintentos manuales tras un
+ * resultado incierto (NETWORK_ERROR). Con el ciclo ya bloqueado (FOR
+ * UPDATE) y ANTES de cualquier validación dependiente del estado actual:
+ *   CASE A: sin residual vigente -> registro normal (v = max+1).
+ *   CASE B: vigente con la MISMA medición -> devuelve la vigente,
+ *           yaExistia true; sin INSERT, sin evento, sin invalidación.
+ *   CASE C: vigente distinta -> 409 RESIDUAL_YA_REGISTRADO (usar
+ *           Corregir); nada se escribe.
+ * Invariante: a lo sumo UNA versión no invalidada por ciclo -- registrar
+ * nunca crea una versión implícita sobre otra vigente.
  */
 export async function registrarResidualReal(organizacionId, predioId, potreroId, cicloId, {
   numeroMuestras, aforoPromedioGM2, medicionRealAt, observacion, actorCuentaId,
@@ -361,6 +394,19 @@ export async function registrarResidualReal(organizacionId, predioId, potreroId,
 
   return withOrganizacionTransaction(organizacionId, async (client) => {
     const ciclo = await fetchCicloParaResidual(client, { predioId, potreroId, cicloId });
+
+    // Statement separado, posterior al lock del ciclo -- en READ COMMITTED
+    // ve lo que confirmó una transacción concurrente que tenía el lock.
+    // Antes de la validación temporal: un reintento devuelve lo guardado,
+    // nunca se re-valida contra un estado posterior del ciclo.
+    const vigente = await fetchResidualRealVigente(client, cicloId);
+    if (vigente) {
+      if (isSameResidualMeasurement(vigente, { numeroMuestras, aforoPromedioGM2, medicionRealAt: medicionRealAtDate, observacion })) {
+        return { residual: vigente, yaExistia: true };
+      }
+      throw semanticError('RESIDUAL_YA_REGISTRADO', 409, 'Este ciclo ya tiene un residual real vigente. Usa corregir para modificarlo.');
+    }
+
     const dbNow = new Date(ciclo.db_now);
     const salidaRealAt = new Date(ciclo.salida_real_at);
 
@@ -387,6 +433,8 @@ export async function registrarResidualReal(organizacionId, predioId, potreroId,
       nivel2.disponible ? nivel2.remanenteEstimadoKgMs : null,
     );
 
+    // SAVEPOINT/23505 dentro de insertarVersionResidual queda como defensa
+    // en profundidad (nunca debería activarse bajo el lock del ciclo).
     const version = await siguienteVersion(client, cicloId);
     const { residual, yaExistia } = await insertarVersionResidual(client, {
       organizacionId, predioId, potreroId, cicloId, version,
