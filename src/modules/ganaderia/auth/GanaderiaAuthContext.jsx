@@ -10,7 +10,10 @@
 //   { authenticated: true, cuenta, tipoAcceso:'interno', rolInterno:'super_admin', organizacionActiva: null, organizacionesDisponibles: [] }
 //   { authenticated: true, cuenta, tipoAcceso:'cliente', rolInterno: null, organizacionActiva: null, organizacionesDisponibles }
 //   { authenticated: true, cuenta, tipoAcceso:'cliente', rolInterno: null, organizacionActiva: {...}, organizacionesDisponibles }
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import GanaderiaAuthNotice from './GanaderiaAuthNotice.jsx';
+import { nextAuthNotice, subscribeAuthNotice } from './ganaderiaAuthNoticeSignal.js';
+import { dismissAuthNotice, shouldAcceptAuthNotice } from './ganaderiaAuthUiModel.js';
 
 const GanaderiaAuthContext = createContext(null);
 
@@ -32,27 +35,11 @@ async function fetchSession() {
   return response.json();
 }
 
-// AUTH-FRONT-001 STAGING GATE §1: contrato real auditado en
-// server/security/ganaderiaSession.js (createRequireGanaderiaCsrf) --
-// toda mutación (POST/PUT/PATCH/DELETE) sobre una ruta ya autenticada
-// exige la cabecera `X-CSRF-Token`, obtenida vía GET /csrf (requiere
-// identidad/sesión ya válida). POST /login y POST /password/set quedan
-// EXPLÍCITAMENTE fuera de este requisito (no hay sesión todavía) --
-// validan origen/Content-Type en su lugar (rejectIfPreSessionRequestInvalid),
-// nunca CSRF. Se pide un token fresco en cada mutación en vez de
-// cachearlo -- más simple y evita servir un token obsoleto tras rotación
-// de sesión (login/logout), sin ningún costo real (GET /csrf es barato).
-export async function fetchCsrfToken() {
-  const response = await fetch(`${AUTH_BASE}/csrf`, {
-    method: 'GET',
-    credentials: 'include',
-  });
-  if (!response.ok) {
-    throw new Error(`CSRF_FETCH_FAILED_${response.status}`);
-  }
-  const payload = await response.json();
-  return payload.csrfToken;
-}
+// SPRINT-3D10.5: fetchCsrfToken vive en ganaderiaAuthedRequest.js (JS puro,
+// testeable con node:test) y se re-exporta aquí para mantener intactos los
+// imports existentes. Contrato conservado: sigue lanzando con
+// `CSRF_FETCH_FAILED_<status>` (ahora con err.status/err.code).
+export { fetchCsrfToken } from './ganaderiaAuthedRequest.js';
 
 // AGX-ADMIN-001: una cuenta interna (staff_crh, tipoAcceso:'interno') NUNCA
 // se asigna automáticamente una organización tenant -- el estado
@@ -71,6 +58,39 @@ function deriveStatus(sessionPayload) {
 export function GanaderiaAuthProvider({ children }) {
   const [status, setStatus] = useState('loading');
   const [session, setSession] = useState(null);
+  // SPRINT-3D10.5 F3b: aviso global único ('SESSION_EXPIRED' |
+  // 'CSRF_REJECTED' | 'NETWORK_ERROR' | null), idempotente y monótono en
+  // prioridad vía nextAuthNotice. Nunca dispara refresh/logout/redirect.
+  const [authNotice, setAuthNotice] = useState(null);
+  const statusRef = useRef(status);
+
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
+  useEffect(() => {
+    return subscribeAuthNotice((kind) => {
+      if (!shouldAcceptAuthNotice(statusRef.current)) return;
+      setAuthNotice((current) => nextAuthNotice(current, kind));
+    });
+  }, []);
+
+  const dismissNotice = useCallback(() => {
+    setAuthNotice((current) => dismissAuthNotice(current));
+  }, []);
+
+  // Transición LOCAL explícita a 'anonymous' (sin red, sin logout backend).
+  // Necesaria porque navegar a /ganaderia/login reutiliza esta misma
+  // instancia del Provider (ver GanaderiaAuthNotice.jsx) -- sin esto el
+  // login vería un 'authenticated' obsoleto y rebotaría al dashboard.
+  const endSessionLocally = useCallback(() => {
+    // Sincrónico: una respuesta tardía que llegue antes del próximo commit
+    // ya no puede reabrir el aviso.
+    statusRef.current = 'anonymous';
+    setSession(null);
+    setStatus('anonymous');
+    setAuthNotice(null);
+  }, []);
 
   // Devuelve el payload recién resuelto -- un caller inmediatamente
   // posterior (p. ej. GanaderiaLogin decidiendo a dónde navegar tras un
@@ -83,12 +103,14 @@ export function GanaderiaAuthProvider({ children }) {
       const payload = await fetchSession();
       setSession(payload);
       setStatus(deriveStatus(payload));
+      setAuthNotice(null);
       return payload;
     } catch {
       // Fallo de red/backend al consultar sesión -- nunca se asume
       // autenticado ante un error; se trata como anónimo (fail-closed).
       setSession(null);
       setStatus('anonymous');
+      setAuthNotice(null);
       return null;
     }
   }, []);
@@ -121,11 +143,17 @@ export function GanaderiaAuthProvider({ children }) {
       organizacionActiva: session?.organizacionActiva ?? null,
       organizacionesDisponibles: session?.organizacionesDisponibles ?? [],
       refresh,
+      endSessionLocally,
     }),
-    [status, session, refresh],
+    [status, session, refresh, endSessionLocally],
   );
 
-  return <GanaderiaAuthContext.Provider value={value}>{children}</GanaderiaAuthContext.Provider>;
+  return (
+    <GanaderiaAuthContext.Provider value={value}>
+      <GanaderiaAuthNotice notice={authNotice} onDismiss={dismissNotice} onEndSession={endSessionLocally} />
+      {children}
+    </GanaderiaAuthContext.Provider>
+  );
 }
 
 export function useGanaderiaAuth() {

@@ -16,7 +16,7 @@
 // sesión autenticada server-side -- este formulario NUNCA pide código
 // interno, propietario, documento/NIT, teléfono ni correo.
 import { useEffect, useState } from 'react';
-import { fetchCsrfToken } from '../auth/GanaderiaAuthContext.jsx';
+import { postJsonWithCsrf } from '../auth/ganaderiaAuthedRequest.js';
 import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
 import CatastroXMap from '../../catastrox/components/CatastroXMap.jsx';
@@ -116,23 +116,10 @@ function displayOrDash(value) {
   return value === null || value === undefined || value === '' ? '—' : value;
 }
 
-async function postGanaderiaPredios(path, body) {
-  const csrfToken = await fetchCsrfToken();
-  const response = await fetch(path, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-    body: JSON.stringify(body),
-  });
-
-  let data = null;
-  try {
-    data = await response.json();
-  } catch {
-    data = null;
-  }
-
-  return { ok: response.ok, status: response.status, data };
+// SPRINT-3D10.5: delega en el cliente autenticado compartido -- nunca lanza
+// y nunca envía el POST si /csrf falla.
+function postGanaderiaPredios(path, body) {
+  return postJsonWithCsrf(path, body);
 }
 
 function resolveSearchOutcomeKind(status) {

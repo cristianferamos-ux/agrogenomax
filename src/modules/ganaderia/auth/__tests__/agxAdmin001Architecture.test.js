@@ -123,11 +123,17 @@ test('GanaderiaAdminShell.jsx: expone los 4 módulos placeholder requeridos + ce
   assert.match(adminShellSource, /Cerrar sesión/);
 });
 
-test('GanaderiaAdminShell.jsx: logout hace POST real a /api/ganaderia/auth/logout con X-CSRF-Token (mismo contrato real, nunca un endpoint inventado)', () => {
+// SPRINT-3D10.5 F3b: el POST real a /api/ganaderia/auth/logout con
+// X-CSRF-Token + credentials include vive en performGanaderiaLogout.
+test('GanaderiaAdminShell.jsx: logout delega en performGanaderiaLogout (POST real /auth/logout con CSRF), sin fetch propio', () => {
   const codeOnly = stripComments(adminShellSource);
-  assert.match(codeOnly, /fetch\('\/api\/ganaderia\/auth\/logout'/);
-  assert.match(codeOnly, /'X-CSRF-Token':\s*csrfToken/);
-  assert.match(codeOnly, /credentials:\s*'include'/);
+  assert.match(codeOnly, /import \{ performGanaderiaLogout \} from '\.\.\/auth\/ganaderiaAuthedRequest\.js';/);
+  assert.match(codeOnly, /const outcome = await performGanaderiaLogout\(\);/);
+  assert.doesNotMatch(codeOnly, /fetchCsrfToken/);
+  assert.doesNotMatch(codeOnly, /\bfetch\(/);
+  const helperSource = fs.readFileSync(path.join(AUTH_DIR, 'ganaderiaAuthedRequest.js'), 'utf8');
+  assert.match(helperSource, /const LOGOUT_URL = '\/api\/ganaderia\/auth\/logout';/);
+  assert.match(helperSource, /method: 'POST',\s*credentials: 'include',\s*headers: \{ 'X-CSRF-Token': csrfToken \}/);
 });
 
 // ---------------------------------------------------------------------

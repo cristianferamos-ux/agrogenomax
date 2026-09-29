@@ -63,11 +63,14 @@ test('PrediosPage.jsx: NUNCA pide código interno, propietario, documento/NIT, t
 // 3. CSRF + credentials (mismo patrón que GanaderiaAdminCrearCuenta.jsx)
 // ---------------------------------------------------------------------
 
-test('PrediosPage.jsx: usa fetchCsrfToken + credentials include + X-CSRF-Token en cada POST', () => {
-  assert.match(source, /import\s*\{\s*fetchCsrfToken\s*\}\s*from\s*['"]\.\.\/auth\/GanaderiaAuthContext\.jsx['"]/);
-  assert.match(source, /fetchCsrfToken\(\)/);
+// SPRINT-3D10.5: CSRF + credentials centralizados en el cliente
+// autenticado compartido (auth/ganaderiaAuthedRequest.js).
+test('PrediosPage.jsx: cada POST delega en postJsonWithCsrf (CSRF + credentials include centralizados)', () => {
+  assert.match(source, /import\s*\{\s*postJsonWithCsrf\s*\}\s*from\s*['"]\.\.\/auth\/ganaderiaAuthedRequest\.js['"]/);
+  assert.match(codeOnly, /function postGanaderiaPredios\(path, body\) \{\s*return postJsonWithCsrf\(path, body\);\s*\}/);
+  assert.doesNotMatch(codeOnly, /fetchCsrfToken/);
+  assert.doesNotMatch(codeOnly, /X-CSRF-Token/);
   assert.match(source, /credentials:\s*'include'/);
-  assert.match(source, /'X-CSRF-Token':\s*csrfToken/);
 });
 
 // ---------------------------------------------------------------------
@@ -254,7 +257,8 @@ test('buildMapPredio: construye polygonGeoJson/referencePoint exclusivamente des
 });
 
 test('PrediosPage.jsx: ninguna función hace fetch a un endpoint de geometría separado (solo buscar-por-coordenadas/buscar-por-codigo/POST raíz)', () => {
-  const fetchPaths = codeOnly.match(/fetch\(path/g) || [];
+  // SPRINT-3D10.5: el POST raíz delega en postJsonWithCsrf(path, ...).
+  const fetchPaths = codeOnly.match(/fetch\(path|postJsonWithCsrf\(path/g) || [];
   assert.ok(fetchPaths.length >= 1);
   assert.doesNotMatch(codeOnly, /\/geometry['"]/);
   assert.doesNotMatch(codeOnly, /\/geometria['"]/);

@@ -2,32 +2,17 @@
 // productiva del potrero y el catálogo de pasturas. Mismo patrón que
 // ganaderiaPotrerosApi.js -- fetchCsrfToken + credentials:'include' +
 // X-CSRF-Token en mutaciones, GET sin CSRF.
-import { fetchCsrfToken } from '../auth/GanaderiaAuthContext.jsx';
+import { getJsonWithSession, postJsonWithCsrf } from '../auth/ganaderiaAuthedRequest.js';
 
-async function parseJson(response) {
-  try {
-    return await response.json();
-  } catch {
-    return null;
-  }
+// SPRINT-3D10.5: wrappers locales delegan en el cliente autenticado
+// compartido -- GET conserva su contrato exacto (red sigue lanzando);
+// POST nunca lanza y nunca se envía si /csrf falla.
+function getJson(path) {
+  return getJsonWithSession(path);
 }
 
-async function getJson(path) {
-  const response = await fetch(path, { credentials: 'include' });
-  const data = await parseJson(response);
-  return { ok: response.ok, status: response.status, data };
-}
-
-async function postJson(path, body) {
-  const csrfToken = await fetchCsrfToken();
-  const response = await fetch(path, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-    body: JSON.stringify(body),
-  });
-  const data = await parseJson(response);
-  return { ok: response.ok, status: response.status, data };
+function postJson(path, body) {
+  return postJsonWithCsrf(path, body);
 }
 
 // predioId/potreroId siempre vienen fijos desde la card que monta el

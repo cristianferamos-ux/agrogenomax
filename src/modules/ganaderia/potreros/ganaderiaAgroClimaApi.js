@@ -3,31 +3,18 @@
 // -- fetchCsrfToken + credentials:'include' + X-CSRF-Token en mutaciones,
 // GET sin CSRF. refresh() nunca envía body -- lat/lng se resuelven
 // server-side desde la geometry del potrero (§12 del sprint).
-import { fetchCsrfToken } from '../auth/GanaderiaAuthContext.jsx';
+import { getJsonWithSession, postWithCsrf } from '../auth/ganaderiaAuthedRequest.js';
 
-async function parseJson(response) {
-  try {
-    return await response.json();
-  } catch {
-    return null;
-  }
+// SPRINT-3D10.5: wrappers locales delegan en el cliente autenticado
+// compartido -- GET conserva su contrato exacto (red sigue lanzando);
+// POST nunca lanza y nunca se envía si /csrf falla.
+function getJson(path) {
+  return getJsonWithSession(path);
 }
 
-async function getJson(path) {
-  const response = await fetch(path, { credentials: 'include' });
-  const data = await parseJson(response);
-  return { ok: response.ok, status: response.status, data };
-}
-
-async function postJson(path) {
-  const csrfToken = await fetchCsrfToken();
-  const response = await fetch(path, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'X-CSRF-Token': csrfToken },
-  });
-  const data = await parseJson(response);
-  return { ok: response.ok, status: response.status, data };
+function postJson(path) {
+  // Sin body ni Content-Type -- idéntico al postJson previo.
+  return postWithCsrf(path);
 }
 
 // predioId/potreroId siempre vienen fijos desde la tarjeta del potrero que

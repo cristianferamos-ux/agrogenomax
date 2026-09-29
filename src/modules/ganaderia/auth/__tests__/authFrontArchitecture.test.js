@@ -272,9 +272,14 @@ test('OrganizacionRequerida.jsx: llama a POST /api/ganaderia/auth/organizacion (
 // POST /password/set explícitamente NO (no hay sesión todavía).
 // ---------------------------------------------------------------------
 
+// SPRINT-3D10.5: la implementación vive en ganaderiaAuthedRequest.js (JS
+// puro); el Context la re-exporta para no romper imports existentes.
 test('GanaderiaAuthContext.jsx: expone fetchCsrfToken() contra GET /api/ganaderia/auth/csrf (credentials include)', () => {
-  assert.match(authContextSource, /export async function fetchCsrfToken/);
-  assert.match(authContextSource, /fetch\(`\$\{AUTH_BASE\}\/csrf`/);
+  const authedRequestSource = fs.readFileSync(path.join(AUTH_DIR, 'ganaderiaAuthedRequest.js'), 'utf8');
+  assert.match(authContextSource, /export \{ fetchCsrfToken \} from '\.\/ganaderiaAuthedRequest\.js';/);
+  assert.match(authedRequestSource, /export async function fetchCsrfToken/);
+  assert.match(authedRequestSource, /const CSRF_URL = '\/api\/ganaderia\/auth\/csrf';/);
+  assert.match(authedRequestSource, /fetch\(CSRF_URL, \{\s*method: 'GET',\s*credentials: 'include',\s*\}\)/);
 });
 
 test('OrganizacionRequerida.jsx: obtiene un CSRF token fresco y lo envía como X-CSRF-Token en POST /organizacion', () => {
