@@ -469,3 +469,118 @@ test('el registro/corrección de residual usa datetime-local + los helpers de co
   assert.match(residualPanelSource, /type="datetime-local"/);
   assert.match(residualPanelSource, /medicionRealAt: datetimeLocalInputToIso\(medicionRealAtLocal\)/);
 });
+
+// ---------------------------------------------------------------------
+// SPRINT-3D10.6: idempotencia de "Guardar aforo" (residual real). El
+// backend devuelve la vigente si la medición es la misma (CASE B) o 409
+// RESIDUAL_YA_REGISTRADO si es distinta (CASE C). En el panel: un
+// NETWORK_ERROR deja el resultado INCIERTO -- bloquea el guardado hasta
+// "Verificar estado" (solo GET), nunca reintenta la mutación.
+// ---------------------------------------------------------------------
+
+const bloqueRegistrar3D106 = residualPanelCode.match(/async function handleRegistrar\(\)[\s\S]*?\n  \}/)?.[0] ?? '';
+const bloqueVerificar3D106 = residualPanelCode.match(/async function handleVerificarRegistro\(\)[\s\S]*?\n  \}/)?.[0] ?? '';
+
+function copyConstante(nombre) {
+  return residualPanelSource.match(new RegExp(`const ${nombre} = '([^']*)';`))?.[1];
+}
+
+test('3D10.6: RESIDUAL_YA_REGISTRADO tiene copy humano propio que dirige a Corregir', () => {
+  assert.match(
+    residualPanelSource,
+    /RESIDUAL_YA_REGISTRADO: 'Ya existe un aforo de salida registrado para este ciclo\. Si necesitas cambiarlo, usa Corregir\.'/,
+  );
+});
+
+test('3D10.6: el código RESIDUAL_YA_REGISTRADO nunca llega a la UI -- solo es llave del diccionario de copy y condición de rama', () => {
+  const ocurrencias = residualPanelCode.match(/RESIDUAL_YA_REGISTRADO/g) || [];
+  assert.equal(ocurrencias.length, 2, 'solo la llave del mapa de mensajes y la comparación con data?.error');
+  assert.match(residualPanelCode, /data\?\.error === 'RESIDUAL_YA_REGISTRADO'/);
+  assert.doesNotMatch(residualPanelSource, />\{data\?\.error\}</);
+  for (const nombre of ['REGISTRO_INCIERTO_MESSAGE', 'REGISTRO_VERIFICADO_EXISTE_MESSAGE', 'REGISTRO_VERIFICADO_NO_EXISTE_MESSAGE', 'REGISTRO_VERIFICAR_ERROR_MESSAGE']) {
+    const copy = copyConstante(nombre);
+    assert.ok(copy, `${nombre} debe existir`);
+    assert.doesNotMatch(copy, /[A-Z]{3,}_[A-Z_]+/, `${nombre} no debe exponer un enum/código`);
+  }
+});
+
+test('3D10.6: copies exactos de resultado incierto y de verificación', () => {
+  assert.equal(copyConstante('REGISTRO_INCIERTO_MESSAGE'), 'Se perdió la conexión antes de confirmar si el aforo quedó guardado. Verifica el estado antes de volver a intentarlo.');
+  assert.equal(copyConstante('REGISTRO_VERIFICADO_EXISTE_MESSAGE'), 'Este ciclo ya tiene un aforo de salida registrado. Revisa los datos; si necesitas cambiarlos, usa Corregir.');
+  assert.equal(copyConstante('REGISTRO_VERIFICADO_NO_EXISTE_MESSAGE'), 'No encontramos un aforo guardado. Puedes volver a guardarlo.');
+});
+
+test('3D10.6: registrarResidualReal se invoca UNA sola vez en el panel -- sin retry, sin temporizadores', () => {
+  const llamadas = residualPanelCode.match(/registrarResidualReal\(/g) || [];
+  assert.equal(llamadas.length, 1);
+  assert.notEqual(bloqueRegistrar3D106, '');
+  assert.match(bloqueRegistrar3D106, /registrarResidualReal\(/);
+  assert.doesNotMatch(bloqueRegistrar3D106, /setTimeout|setInterval|while\s*\(|for\s*\(/);
+});
+
+test('3D10.6: el literal FAILURE_NETWORK_ERROR del panel coincide con REQUEST_FAILURES.NETWORK_ERROR del helper (sin importarlo -- regla authResilienceArchitecture)', () => {
+  const helperSource = readNormalized(path.resolve(POTREROS_DIR, '..', 'auth', 'ganaderiaAuthedRequest.js'));
+  const valorHelper = helperSource.match(/export const REQUEST_FAILURES = Object\.freeze\(\{[\s\S]*?NETWORK_ERROR: '([^']+)'/)?.[1];
+  assert.ok(valorHelper, 'REQUEST_FAILURES.NETWORK_ERROR debe existir en el helper');
+  assert.match(residualPanelSource, new RegExp(`const FAILURE_NETWORK_ERROR = '${valorHelper}';`));
+  assert.doesNotMatch(residualPanelCode, /ganaderiaAuthedRequest/);
+});
+
+test('3D10.6: NETWORK_ERROR activa registroIncierto y sale sin resetForm ni reintento, conservando los datos', () => {
+  assert.match(bloqueRegistrar3D106, /const \{ ok, data, failure \} = await registrarResidualReal\(/);
+  const rama = bloqueRegistrar3D106.match(/if \(failure === FAILURE_NETWORK_ERROR\) \{[\s\S]*?\n      \}/)?.[0] ?? '';
+  assert.notEqual(rama, '', 'debe existir la rama explícita de NETWORK_ERROR');
+  assert.match(rama, /setRegistroIncierto\(true\);/);
+  assert.match(rama, /return;/);
+  assert.doesNotMatch(rama, /resetForm|registrarResidualReal|setMostrarForm|setNumeroMuestras|setAforoPromedioGM2|setMedicionRealAtLocal|setObservacion/);
+});
+
+test('3D10.6: resetForm nunca limpia registroIncierto -- cancelar y reabrir no desbloquea el guardado', () => {
+  const bloqueReset = residualPanelCode.match(/function resetForm\(\)[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.notEqual(bloqueReset, '');
+  assert.doesNotMatch(bloqueReset, /setRegistroIncierto/);
+});
+
+test('3D10.6: "Guardar aforo" y los campos del formulario se deshabilitan mientras el registro es incierto o se verifica', () => {
+  assert.match(residualPanelSource, /const registroBloqueado = mutando \|\| registroIncierto \|\| verificandoRegistro;/);
+  assert.match(residualPanelSource, /onClick=\{handleRegistrar\} disabled=\{registroBloqueado\}/);
+  const bloqueados = residualPanelSource.match(/disabled=\{registroBloqueado\}/g) || [];
+  assert.equal(bloqueados.length, 5, '4 campos + "Guardar aforo"');
+  assert.match(bloqueRegistrar3D106, /if \(mutando \|\| registroIncierto\) return;/);
+});
+
+test('3D10.6: "Verificar estado" solo aparece con registro incierto y llama SOLO getResidualReal', () => {
+  assert.match(residualPanelSource, /\{registroIncierto \? \(\s*<button[^>]*onClick=\{handleVerificarRegistro\}[\s\S]*?Verificar estado/);
+  assert.notEqual(bloqueVerificar3D106, '');
+  assert.match(bloqueVerificar3D106, /await getResidualReal\(predioId, potreroId, ciclo\.cicloId\)/);
+  assert.doesNotMatch(bloqueVerificar3D106, /registrarResidualReal|corregirResidualReal|anularResidualReal|aplicarResidualRealADescanso|actualizarComparativoResidualReal/);
+});
+
+test('3D10.6: solo una respuesta exitosa del GET limpia registroIncierto; si el GET falla el guardado sigue bloqueado', () => {
+  const limpiezas = residualPanelCode.match(/setRegistroIncierto\(false\)/g) || [];
+  assert.equal(limpiezas.length, 1, 'registroIncierto solo se limpia en un único punto');
+  const idxFallo = bloqueVerificar3D106.indexOf('if (!respuesta.ok)');
+  const idxRetornoFallo = bloqueVerificar3D106.indexOf('return;', idxFallo);
+  const idxLimpieza = bloqueVerificar3D106.indexOf('setRegistroIncierto(false)');
+  assert.ok(idxFallo >= 0 && idxRetornoFallo > idxFallo && idxLimpieza > idxRetornoFallo, 'el GET fallido retorna ANTES de limpiar registroIncierto');
+  assert.match(bloqueVerificar3D106, /setRegistrarError\(REGISTRO_VERIFICAR_ERROR_MESSAGE\)/);
+  assert.match(bloqueVerificar3D106, /if \(actualServidor\) \{[\s\S]*?setMostrarForm\(false\);[\s\S]*?REGISTRO_VERIFICADO_EXISTE_MESSAGE/);
+  assert.match(bloqueVerificar3D106, /setRegistroAviso\(REGISTRO_VERIFICADO_NO_EXISTE_MESSAGE\)/);
+});
+
+test('3D10.6: 409 RESIDUAL_YA_REGISTRADO refresca el residual por lectura, nunca reenvía la mutación', () => {
+  const rama = bloqueRegistrar3D106.match(/if \(data\?\.error === 'RESIDUAL_YA_REGISTRADO'\) \{[\s\S]*?\n      \}/)?.[0] ?? '';
+  assert.notEqual(rama, '');
+  assert.match(rama, /loadResidual\(\);/);
+  assert.doesNotMatch(rama, /registrarResidualReal/);
+});
+
+test('3D10.6: ningún otro Potrero*Panel.jsx usa registroIncierto/Verificar estado/RESIDUAL_YA_REGISTRADO', () => {
+  const otrosPaneles = fs.readdirSync(POTREROS_DIR)
+    .filter((nombre) => /^Potrero.*Panel\.jsx$/.test(nombre) && nombre !== 'PotreroResidualRealPanel.jsx');
+  assert.ok(otrosPaneles.length > 0);
+  for (const nombre of otrosPaneles) {
+    const fuente = readNormalized(path.join(POTREROS_DIR, nombre));
+    assert.doesNotMatch(fuente, /registroIncierto|handleVerificarRegistro|RESIDUAL_YA_REGISTRADO/, `${nombre} no debe participar del flujo 3D10.6`);
+  }
+});

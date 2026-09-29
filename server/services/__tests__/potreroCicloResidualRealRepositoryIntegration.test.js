@@ -546,50 +546,278 @@ describe('SPRINT-3D9.4: potreroCicloResidualRealRepository', { skip: !dbAvailabl
   });
 
   // -----------------------------------------------------------------------
-  // Concurrencia.
+  // SPRINT-3D10.6 -- idempotencia de registrar-residual frente a reintentos
+  // manuales tras un resultado incierto (NETWORK_ERROR). Contrato:
+  //   CASE A: sin residual vigente -> registro normal.
+  //   CASE B: vigente con la MISMA medición -> misma fila, yaExistia true,
+  //           sin versión/evento/invalidación nuevos.
+  //   CASE C: vigente distinta -> 409 RESIDUAL_YA_REGISTRADO, nada escrito.
+  // Invariante: a lo sumo UNA versión no invalidada por ciclo.
   // -----------------------------------------------------------------------
 
-  test('concurrencia: dos registrar-residual simultáneos con datos DISTINTOS para el mismo ciclo -- el lock del ciclo serializa en v1/v2, ninguna pérdida silenciosa, una sola vigente', async () => {
+  async function contarVersiones(cicloId) {
+    const result = await adminPool.query('select count(*)::int as n from agx.potrero_ciclo_residuales_reales_versiones where ciclo_id = $1', [cicloId]);
+    return result.rows[0].n;
+  }
+
+  async function contarVigentes(cicloId) {
+    const result = await adminPool.query(
+      `select count(*)::int as n from agx.potrero_ciclo_residuales_reales_versiones r
+        where r.ciclo_id = $1
+          and not exists (select 1 from agx.potrero_ciclo_residual_real_invalidaciones i where i.residual_id = r.residual_id)`,
+      [cicloId],
+    );
+    return result.rows[0].n;
+  }
+
+  async function contarEventos(cicloId, tipoEvento) {
+    const result = await adminPool.query(
+      'select count(*)::int as n from agx.potrero_ciclo_eventos where ciclo_id = $1 and tipo_evento = $2',
+      [cicloId, tipoEvento],
+    );
+    return result.rows[0].n;
+  }
+
+  // Foto de TODO lo que registrar/corregir/anular/aplicar podrían escribir
+  // para el ciclo -- usada para demostrar "DB sin cambios" tras un 409.
+  async function fotoCiclo(cicloId) {
+    const result = await adminPool.query(
+      `select
+         (select count(*)::int from agx.potrero_ciclo_residuales_reales_versiones where ciclo_id = $1) as versiones,
+         (select coalesce(max(version), 0)::int from agx.potrero_ciclo_residuales_reales_versiones where ciclo_id = $1) as max_version,
+         (select count(*)::int from agx.potrero_ciclo_residual_real_invalidaciones where ciclo_id = $1) as invalidaciones_residual,
+         (select count(*)::int from agx.potrero_ciclo_eventos where ciclo_id = $1) as eventos,
+         (select count(*)::int from agx.potrero_recomendaciones_descanso where ciclo_pastoreo_id = $1) as descansos,
+         (select count(*)::int from agx.potrero_descanso_invalidaciones where ciclo_pastoreo_id = $1) as invalidaciones_descanso`,
+      [cicloId],
+    );
+    return result.rows[0];
+  }
+
+  function esResidualYaRegistrado(error) {
+    return error.code === 'RESIDUAL_YA_REGISTRADO' && error.status === 409;
+  }
+
+  test('3D10.6 CASE A/B: primer registro crea v1; el segundo idéntico devuelve la MISMA v1 (yaExistia true) -- 1 versión, 1 evento, 1 vigente', async () => {
+    const org = randomOrgId();
+    const { predioId, potreroId, cicloId, salidaAt } = await crearCicloFinalizado(org, 'IDEM-A');
+    const payload = { numeroMuestras: 8, aforoPromedioGM2: 250.5, medicionRealAt: horasDespues(salidaAt, 4).toISOString(), observacion: 'lluvia previa' };
+
+    const primero = await residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, payload);
+    assert.equal(primero.yaExistia, false);
+    assert.equal(primero.residual.version, 1);
+
+    const segundo = await residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, payload);
+    assert.equal(segundo.yaExistia, true);
+    assert.equal(segundo.residual.residualId, primero.residual.residualId);
+    assert.equal(segundo.residual.version, 1);
+
+    assert.equal(await contarVersiones(cicloId), 1, 'el retry idéntico nunca crea una segunda versión');
+    assert.equal(await contarEventos(cicloId, 'RESIDUAL_REAL_REGISTRADO'), 1, 'el retry idéntico nunca escribe un segundo evento');
+    assert.equal(await contarVigentes(cicloId), 1);
+  });
+
+  test('3D10.6 CASE B: la misma medición expresada en otra zona horaria (mismo instante) sigue siendo idempotente', async () => {
+    const org = randomOrgId();
+    const { predioId, potreroId, cicloId, salidaAt } = await crearCicloFinalizado(org, 'IDEM-TZ');
+    const medicionAt = horasDespues(salidaAt, 4);
+    const primero = await residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, {
+      numeroMuestras: 8, aforoPromedioGM2: 250, medicionRealAt: medicionAt.toISOString(),
+    });
+    const bogota = new Date(medicionAt.getTime() - 5 * 60 * 60 * 1000).toISOString().replace('Z', '-05:00');
+    const segundo = await residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, {
+      numeroMuestras: 8, aforoPromedioGM2: 250, medicionRealAt: bogota,
+    });
+    assert.equal(segundo.yaExistia, true);
+    assert.equal(segundo.residual.residualId, primero.residual.residualId);
+    assert.equal(await contarVersiones(cicloId), 1);
+  });
+
+  test('3D10.6 CASE C: segundo registro DISTINTO -> 409 RESIDUAL_YA_REGISTRADO y la DB queda exactamente igual', async () => {
+    const org = randomOrgId();
+    const { predioId, potreroId, cicloId, salidaAt } = await crearCicloFinalizado(org, 'IDEM-C');
+    const medicionAt = horasDespues(salidaAt, 4);
+    const { residual: v1 } = await residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, {
+      numeroMuestras: 8, aforoPromedioGM2: 250, medicionRealAt: medicionAt.toISOString(),
+    });
+    await residualRepo.aplicarResidualRealADescanso(org, predioId, potreroId, cicloId, {});
+    const antes = await fotoCiclo(cicloId);
+
+    const variantes = [
+      { numeroMuestras: 9, aforoPromedioGM2: 250, medicionRealAt: medicionAt.toISOString() },
+      { numeroMuestras: 8, aforoPromedioGM2: 260, medicionRealAt: medicionAt.toISOString() },
+      { numeroMuestras: 8, aforoPromedioGM2: 250, medicionRealAt: new Date(medicionAt.getTime() + 1).toISOString() },
+      { numeroMuestras: 8, aforoPromedioGM2: 250, medicionRealAt: medicionAt.toISOString(), observacion: 'nota nueva' },
+    ];
+    for (const payload of variantes) {
+      await assert.rejects(
+        () => residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, payload),
+        esResidualYaRegistrado,
+      );
+    }
+
+    assert.deepEqual(await fotoCiclo(cicloId), antes, 'un 409 nunca escribe: ni versión, ni invalidación, ni evento, ni descanso');
+    const { actual } = await residualRepo.getResidualReal(org, predioId, potreroId, cicloId);
+    assert.equal(actual.residualId, v1.residualId, 'la vigente sigue siendo v1');
+  });
+
+  test('3D10.6 concurrencia: dos registrar-residual simultáneos IDÉNTICOS (retry de red) -- el lock del ciclo serializa: 1 versión, 1 evento, misma fila', async () => {
+    const org = randomOrgId();
+    const { predioId, potreroId, cicloId, salidaAt } = await crearCicloFinalizado(org, 'CONC-A2');
+    const payload = { numeroMuestras: 8, aforoPromedioGM2: 250, medicionRealAt: horasDespues(salidaAt, 4).toISOString() };
+
+    // La segunda transacción espera el FOR UPDATE del ciclo; al obtenerlo,
+    // su lectura de la vigente (statement posterior, READ COMMITTED) ya ve
+    // la v1 confirmada por la primera -> CASE B.
+    const [r1, r2] = await Promise.all([
+      residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, payload),
+      residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, payload),
+    ]);
+    assert.equal(r1.residual.residualId, r2.residual.residualId);
+    assert.deepEqual([r1.yaExistia, r2.yaExistia].sort(), [false, true]);
+    assert.equal(await contarVersiones(cicloId), 1);
+    assert.equal(await contarEventos(cicloId, 'RESIDUAL_REAL_REGISTRADO'), 1);
+  });
+
+  test('3D10.6 concurrencia: dos registrar-residual simultáneos DISTINTOS -- uno gana, el otro recibe 409; nunca una versión implícita', async () => {
     const org = randomOrgId();
     const { predioId, potreroId, cicloId, salidaAt } = await crearCicloFinalizado(org, 'CONC-A');
     const medicionAt = horasDespues(salidaAt, 4);
+    const payloadA = { numeroMuestras: 8, aforoPromedioGM2: 250, medicionRealAt: medicionAt.toISOString() };
+    const payloadB = { numeroMuestras: 9, aforoPromedioGM2: 260, medicionRealAt: medicionAt.toISOString() };
 
-    // Dos mediciones DISTINTAS enviadas a la vez (no un retry de la misma
-    // solicitud) -- el `for update` sobre el ciclo (fetchCicloParaResidual)
-    // las serializa en orden: la segunda transacción espera a que la
-    // primera confirme, relee max(version) ya actualizado y crea v2 --
-    // nunca colisionan, nunca se pierde ninguna.
-    const [r1, r2] = await Promise.all([
-      residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, { numeroMuestras: 8, aforoPromedioGM2: 250, medicionRealAt: medicionAt.toISOString() }),
-      residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, { numeroMuestras: 9, aforoPromedioGM2: 260, medicionRealAt: medicionAt.toISOString() }),
+    const resultados = await Promise.allSettled([
+      residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, payloadA),
+      residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, payloadB),
     ]);
-    assert.notEqual(r1.residual.residualId, r2.residual.residualId, 'son dos mediciones distintas -- ninguna debe perderse ni fusionarse');
+    const cumplidos = resultados.filter((r) => r.status === 'fulfilled');
+    const rechazados = resultados.filter((r) => r.status === 'rejected');
+    assert.equal(cumplidos.length, 1);
+    assert.equal(rechazados.length, 1);
+    assert.ok(esResidualYaRegistrado(rechazados[0].reason));
+    assert.equal(cumplidos[0].value.yaExistia, false);
 
-    const versiones = await adminPool.query('select version from agx.potrero_ciclo_residuales_reales_versiones where ciclo_id = $1 order by version', [cicloId]);
-    assert.deepEqual(versiones.rows.map((r) => r.version), [1, 2], 'versionado secuencial coherente -- nunca dos filas con version=1');
-
+    assert.equal(await contarVersiones(cicloId), 1);
+    assert.equal(await contarEventos(cicloId, 'RESIDUAL_REAL_REGISTRADO'), 1);
+    const ganador = resultados[0].status === 'fulfilled' ? payloadA : payloadB;
     const { actual } = await residualRepo.getResidualReal(org, predioId, potreroId, cicloId);
-    assert.equal(actual.version, 2, 'una sola versión vigente -- la más reciente');
+    assert.equal(actual.numeroMuestras, ganador.numeroMuestras);
+    assert.equal(actual.aforoPromedioGM2, ganador.aforoPromedioGM2);
   });
 
-  test('concurrencia: doble registrar-residual con el MISMO payload exacto (retry de red) -- versionado igualmente secuencial, sin pérdida', async () => {
+  test('3D10.6: tras un 409, Corregir sigue funcionando (v2, invalida v1, una sola vigente)', async () => {
     const org = randomOrgId();
-    const { predioId, potreroId, cicloId, salidaAt } = await crearCicloFinalizado(org, 'CONC-A2');
+    const { predioId, potreroId, cicloId, salidaAt } = await crearCicloFinalizado(org, 'IDEM-CORR');
     const medicionAt = horasDespues(salidaAt, 4);
     const payload = { numeroMuestras: 8, aforoPromedioGM2: 250, medicionRealAt: medicionAt.toISOString() };
+    const { residual: v1 } = await residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, payload);
+    await residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, payload);
+    await assert.rejects(
+      () => residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, { ...payload, aforoPromedioGM2: 300 }),
+      esResidualYaRegistrado,
+    );
 
-    // registrar-residual no tiene noción de "misma solicitud" (a
-    // diferencia de iniciar/finalizar, que son idempotentes por ESTADO del
-    // ciclo) -- cada llamada es, por diseño, un hecho de campo nuevo. El
-    // lock del ciclo igual garantiza que ninguna se pierde ni se corrompe.
-    const [r1, r2] = await Promise.all([
-      residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, payload),
-      residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, payload),
-    ]);
-    assert.notEqual(r1.residual.residualId, r2.residual.residualId);
-    const versiones = await adminPool.query('select count(*)::int as n from agx.potrero_ciclo_residuales_reales_versiones where ciclo_id = $1', [cicloId]);
-    assert.equal(versiones.rows[0].n, 2);
+    const { residual: v2, yaExistia } = await residualRepo.corregirResidualReal(org, predioId, potreroId, cicloId, { aforoPromedioGM2: 300 });
+    assert.equal(yaExistia, false);
+    assert.equal(v2.version, 2);
+    assert.equal(v2.aforoPromedioGM2, 300);
+    const v1Invalidado = await adminPool.query('select 1 from agx.potrero_ciclo_residual_real_invalidaciones where residual_id = $1', [v1.residualId]);
+    assert.equal(v1Invalidado.rows.length, 1);
+    assert.equal(await contarVigentes(cicloId), 1);
   });
+
+  test('3D10.6: anular sigue funcionando y, tras anular, registrar entra por CASE A (nueva versión legítima)', async () => {
+    const org = randomOrgId();
+    const { predioId, potreroId, cicloId, salidaAt } = await crearCicloFinalizado(org, 'IDEM-ANUL');
+    const medicionAt = horasDespues(salidaAt, 4);
+    const payload = { numeroMuestras: 8, aforoPromedioGM2: 250, medicionRealAt: medicionAt.toISOString() };
+    await residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, payload);
+    await residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, payload);
+
+    await residualRepo.anularResidualReal(org, predioId, potreroId, cicloId, { motivo: 'medición errónea' });
+    assert.equal(await contarVigentes(cicloId), 0);
+    const { actual: trasAnular } = await residualRepo.getResidualReal(org, predioId, potreroId, cicloId);
+    assert.equal(trasAnular, null);
+
+    // Reenviar la misma medición tras anular es una decisión explícita del
+    // usuario -- CASE A: nueva versión, no un "retry" de la anulada.
+    const { residual: nuevo, yaExistia } = await residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, payload);
+    assert.equal(yaExistia, false);
+    assert.equal(nuevo.version, 2);
+    assert.equal(await contarVigentes(cicloId), 1);
+  });
+
+  test('3D10.6: aplicar-a-descanso sigue funcionando tras un retry idempotente de registrar (MEDIDO sobre v1; retry de aplicar sigue idempotente)', async () => {
+    const org = randomOrgId();
+    const { predioId, potreroId, cicloId, salidaAt } = await crearCicloFinalizado(org, 'IDEM-APLI');
+    const payload = { numeroMuestras: 8, aforoPromedioGM2: 250, medicionRealAt: horasDespues(salidaAt, 4).toISOString() };
+    const { residual: v1 } = await residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, payload);
+    await residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, payload);
+
+    const primero = await residualRepo.aplicarResidualRealADescanso(org, predioId, potreroId, cicloId, {});
+    assert.equal(primero.descanso.fuenteRemanente, 'MEDIDO');
+    assert.equal(primero.descanso.residualRealVersionId, v1.residualId);
+
+    // Registrar idéntico DESPUÉS de aplicar: CASE B, nunca invalida el
+    // descanso MEDIDO vigente.
+    const reintento = await residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, payload);
+    assert.equal(reintento.yaExistia, true);
+    const segundo = await residualRepo.aplicarResidualRealADescanso(org, predioId, potreroId, cicloId, {});
+    assert.equal(segundo.yaExistia, true);
+    assert.equal(segundo.descanso.descansoId, primero.descanso.descansoId);
+  });
+
+  test('3D10.6: registrar A, intentar B (409), anular -> ninguna versión sombra reaparece', async () => {
+    const org = randomOrgId();
+    const { predioId, potreroId, cicloId, salidaAt } = await crearCicloFinalizado(org, 'IDEM-SOMBRA');
+    const medicionAt = horasDespues(salidaAt, 4);
+    await residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, {
+      numeroMuestras: 8, aforoPromedioGM2: 250, medicionRealAt: medicionAt.toISOString(),
+    });
+    await assert.rejects(
+      () => residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, {
+        numeroMuestras: 9, aforoPromedioGM2: 260, medicionRealAt: medicionAt.toISOString(),
+      }),
+      esResidualYaRegistrado,
+    );
+
+    await residualRepo.anularResidualReal(org, predioId, potreroId, cicloId, { motivo: 'medición errónea' });
+
+    const { actual } = await residualRepo.getResidualReal(org, predioId, potreroId, cicloId);
+    assert.equal(actual, null, 'antes de 3D10.6 una v1 no invalidada reaparecía aquí como vigente');
+    assert.equal(await contarVersiones(cicloId), 1);
+    assert.equal(await contarVigentes(cicloId), 0);
+  });
+
+  test('3D10.6: registrar -> corregir la salida del ciclo -> reintento idéntico es CASE B (sin 400 temporal); uno distinto es 409', async () => {
+    const org = randomOrgId();
+    const { predioId, potreroId, cicloId, salidaAt } = await crearCicloFinalizado(org, 'IDEM-TEMP', { horasOcupacion: 24 });
+    const medicionAt = horasDespues(salidaAt, 2);
+    const payload = { numeroMuestras: 8, aforoPromedioGM2: 250, medicionRealAt: medicionAt.toISOString() };
+    const { residual: v1 } = await residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, payload);
+
+    // La nueva salida (+3 días) deja la medición ANTES de la salida -- un
+    // registro nuevo sería RESIDUAL_ANTERIOR_O_IGUAL_A_SALIDA (400), pero
+    // un reintento devuelve lo guardado, nunca se re-valida.
+    const nuevaFechaSalida = new Date(salidaAt.getTime() + 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    await cicloRepo.corregirCicloPastoreo(org, predioId, potreroId, cicloId, {
+      fechaSalidaReal: nuevaFechaSalida, motivo: 'corrección de fecha de salida', climatologyFetchImpl: SIN_RED_FETCH_IMPL,
+    });
+
+    const reintento = await residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, payload);
+    assert.equal(reintento.yaExistia, true);
+    assert.equal(reintento.residual.residualId, v1.residualId);
+
+    await assert.rejects(
+      () => residualRepo.registrarResidualReal(org, predioId, potreroId, cicloId, { ...payload, numeroMuestras: 9 }),
+      esResidualYaRegistrado,
+    );
+    assert.equal(await contarVersiones(cicloId), 1);
+  });
+
+  // -----------------------------------------------------------------------
+  // Concurrencia (resto de operaciones -- sin cambios en 3D10.6).
+  // -----------------------------------------------------------------------
 
   test('concurrencia: dos actualizar-comparativo simultáneos -- nunca dos versiones vigentes', async () => {
     const org = randomOrgId();
