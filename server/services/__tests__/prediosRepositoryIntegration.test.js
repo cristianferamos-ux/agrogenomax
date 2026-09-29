@@ -589,3 +589,221 @@ describe('SPRINT-3C1-MIS-PREDIOS-API: prediosRepository contra Postgres-AGX-Busi
     await adminPool.query('delete from agx.predios where predio_id = $1', [predioId]);
   });
 });
+
+// ---------------------------------------------------------------------
+// SPRINT-3D10.7: creación manual idempotente por client_operation_id
+// (0021). Pool admin propio: el describe anterior cierra `adminPool` en
+// su after().
+// ---------------------------------------------------------------------
+const NOMBRE_3D107 = 'Finca Sprint3D107 Test';
+
+function manualValue(overrides = {}) {
+  return {
+    nombrePredio: NOMBRE_3D107,
+    departamento: 'Caquetá',
+    municipio: 'Florencia',
+    vereda: 'El Caraño',
+    areaDeclaradaHa: 12.5,
+    observaciones: 'Lindero norte con quebrada.',
+    latitud: 1.61438,
+    longitud: -75.60623,
+    clientOperationId: crypto.randomUUID(),
+    ...overrides,
+  };
+}
+
+describe('SPRINT-3D10.7: createManualPredioIdempotente contra Postgres-AGX-Business real', { skip: !dbAvailable }, () => {
+  let idemAdminPool;
+  let archivoRepo;
+
+  async function admin() {
+    if (!idemAdminPool) {
+      idemAdminPool = new pg.Pool({ connectionString: process.env.AGX_BUSINESS_INTEGRATION_ADMIN_DATABASE_URL, max: 2 });
+      archivoRepo = await import('../ganaderia/potreroArchivoRepository.js');
+    }
+    return idemAdminPool;
+  }
+
+  async function filasDeOperacion(orgId, operationId) {
+    const db = await admin();
+    const result = await db.query(
+      `select predio_id, nombre_predio, estado, codigo_predial, client_operation_id
+         from agx.predios where organizacion_id = $1 and client_operation_id = $2`,
+      [orgId, operationId],
+    );
+    return result.rows;
+  }
+
+  async function contarPrediosOrg(orgId) {
+    const db = await admin();
+    const result = await db.query('select count(*)::int as n from agx.predios where organizacion_id = $1', [orgId]);
+    return result.rows[0].n;
+  }
+
+  after(async () => {
+    const db = await admin();
+    await db.query(
+      `delete from agx.predio_archivo_eventos
+        where predio_id in (select predio_id from agx.predios where nombre_predio = $1)`,
+      [NOMBRE_3D107],
+    );
+    await db.query(
+      `delete from agx.predio_snapshots_catastrales
+        where predio_id in (select predio_id from agx.predios where nombre_predio = $1)`,
+      [NOMBRE_3D107],
+    );
+    await db.query('delete from agx.predios where nombre_predio = $1', [NOMBRE_3D107]);
+    await db.end();
+  });
+
+  test('1. legacy sin clientOperationId sigue creando (client_operation_id NULL)', async () => {
+    const orgId = randomOrgId();
+    const predioId = await repo.createManualPredio(orgId, manualValue({ clientOperationId: null }));
+    assert.ok(predioId);
+    const db = await admin();
+    const result = await db.query('select client_operation_id from agx.predios where predio_id = $1', [predioId]);
+    assert.equal(result.rows[0].client_operation_id, null);
+  });
+
+  test('2-6. primer UUID crea (yaExistia false); retry igual devuelve el mismo predioId (yaExistia true); sigue 1 fila', async () => {
+    const orgId = randomOrgId();
+    const value = manualValue();
+
+    const primero = await repo.createManualPredioIdempotente(orgId, value);
+    assert.equal(primero.yaExistia, false);
+    assert.match(primero.predioId, /^\d+$/);
+
+    const retry = await repo.createManualPredioIdempotente(orgId, { ...value });
+    assert.deepEqual(retry, { predioId: primero.predioId, yaExistia: true });
+
+    const filas = await filasDeOperacion(orgId, value.clientOperationId);
+    assert.equal(filas.length, 1);
+    assert.equal(String(filas[0].predio_id), primero.predioId);
+    assert.equal(filas[0].codigo_predial, null);
+    assert.equal(await contarPrediosOrg(orgId), 1);
+  });
+
+  test('7-8. mismo UUID + payload distinto -> 409 CLIENT_OPERATION_ID_REUSED; DB sin cambios', async () => {
+    const orgId = randomOrgId();
+    const value = manualValue();
+    const primero = await repo.createManualPredioIdempotente(orgId, value);
+    const antes = await filasDeOperacion(orgId, value.clientOperationId);
+
+    await assert.rejects(
+      repo.createManualPredioIdempotente(orgId, { ...value, areaDeclaradaHa: 13 }),
+      (error) => error.status === 409 && error.code === 'CLIENT_OPERATION_ID_REUSED',
+    );
+    await assert.rejects(
+      repo.createManualPredioIdempotente(orgId, { ...value, nombrePredio: `${NOMBRE_3D107} otro` }),
+      (error) => error.status === 409 && error.code === 'CLIENT_OPERATION_ID_REUSED',
+    );
+
+    assert.deepEqual(await filasDeOperacion(orgId, value.clientOperationId), antes);
+    assert.equal(await contarPrediosOrg(orgId), 1);
+    const db = await admin();
+    const detalle = await db.query('select area_total_ha, nombre_predio from agx.predios where predio_id = $1', [primero.predioId]);
+    assert.deepEqual(detalle.rows[0], { area_total_ha: '12.5', nombre_predio: NOMBRE_3D107 });
+  });
+
+  test('9. dos requests concurrentes iguales -> 1 fila, un CASE A y un CASE B con el mismo predioId (5 rondas)', async () => {
+    for (let ronda = 0; ronda < 5; ronda += 1) {
+      const orgId = randomOrgId();
+      const value = manualValue();
+      const resultados = await Promise.all([
+        repo.createManualPredioIdempotente(orgId, { ...value }),
+        repo.createManualPredioIdempotente(orgId, { ...value }),
+      ]);
+      assert.deepEqual(resultados.map((r) => r.yaExistia).sort(), [false, true]);
+      assert.equal(resultados[0].predioId, resultados[1].predioId);
+      assert.equal((await filasDeOperacion(orgId, value.clientOperationId)).length, 1);
+      assert.equal(await contarPrediosOrg(orgId), 1);
+    }
+  });
+
+  test('10. dos requests concurrentes distintos con el mismo UUID -> 1 fila + un 409 (5 rondas)', async () => {
+    for (let ronda = 0; ronda < 5; ronda += 1) {
+      const orgId = randomOrgId();
+      const value = manualValue();
+      const resultados = await Promise.allSettled([
+        repo.createManualPredioIdempotente(orgId, { ...value }),
+        repo.createManualPredioIdempotente(orgId, { ...value, vereda: 'Otra vereda' }),
+      ]);
+      const cumplidos = resultados.filter((r) => r.status === 'fulfilled');
+      const rechazados = resultados.filter((r) => r.status === 'rejected');
+      assert.equal(cumplidos.length, 1);
+      assert.equal(cumplidos[0].value.yaExistia, false);
+      assert.equal(rechazados.length, 1);
+      assert.equal(rechazados[0].reason.status, 409);
+      assert.equal(rechazados[0].reason.code, 'CLIENT_OPERATION_ID_REUSED');
+      assert.equal((await filasDeOperacion(orgId, value.clientOperationId)).length, 1);
+      assert.equal(await contarPrediosOrg(orgId), 1);
+    }
+  });
+
+  test('11. UUID distinto + mismo payload -> dos predios legítimos', async () => {
+    const orgId = randomOrgId();
+    const a = await repo.createManualPredioIdempotente(orgId, manualValue({ clientOperationId: crypto.randomUUID() }));
+    const b = await repo.createManualPredioIdempotente(orgId, manualValue({ clientOperationId: crypto.randomUUID() }));
+    assert.equal(a.yaExistia, false);
+    assert.equal(b.yaExistia, false);
+    assert.notEqual(a.predioId, b.predioId);
+    assert.equal(await contarPrediosOrg(orgId), 2);
+  });
+
+  test('12. mismo UUID en dos organizaciones -> ambas crean, una fila por organización, sin cruce', async () => {
+    const orgA = randomOrgId();
+    const orgB = randomOrgId();
+    const operationId = crypto.randomUUID();
+    const a = await repo.createManualPredioIdempotente(orgA, manualValue({ clientOperationId: operationId }));
+    // Payload distinto en B: si la búsqueda cruzara tenants daría 409.
+    const b = await repo.createManualPredioIdempotente(orgB, manualValue({ clientOperationId: operationId, vereda: 'Vereda B' }));
+    assert.equal(a.yaExistia, false);
+    assert.equal(b.yaExistia, false);
+    assert.notEqual(a.predioId, b.predioId);
+    assert.equal((await filasDeOperacion(orgA, operationId)).length, 1);
+    assert.equal((await filasDeOperacion(orgB, operationId)).length, 1);
+
+    const listadoA = await repo.listPredios(orgA);
+    assert.deepEqual(listadoA.map((p) => String(p.predio_id)), [a.predioId]);
+  });
+
+  test('13. predio archivado + retry igual -> mismo predio, yaExistia true, sigue ARCHIVADO, sin fila nueva', async () => {
+    await admin();
+    const orgId = randomOrgId();
+    const value = manualValue();
+    const primero = await repo.createManualPredioIdempotente(orgId, value);
+    await archivoRepo.archivarPredio(orgId, primero.predioId, { motivo: 'Prueba 3D10.7', actorCuentaId: crypto.randomUUID() });
+
+    const retry = await repo.createManualPredioIdempotente(orgId, { ...value });
+    assert.deepEqual(retry, { predioId: primero.predioId, yaExistia: true });
+
+    await assert.rejects(
+      repo.createManualPredioIdempotente(orgId, { ...value, observaciones: null }),
+      (error) => error.status === 409 && error.code === 'CLIENT_OPERATION_ID_REUSED',
+    );
+
+    const filas = await filasDeOperacion(orgId, value.clientOperationId);
+    assert.equal(filas.length, 1);
+    assert.equal(filas[0].estado, 'ARCHIVADO');
+    assert.equal(await contarPrediosOrg(orgId), 1);
+  });
+
+  test('14-16. CatastroX: la creación sigue funcionando, client_operation_id queda NULL y DUPLICATE_CODIGO_PREDIAL se mantiene', async () => {
+    const orgId = randomOrgId();
+    const predio = predioFixture({ nombrePredio: NOMBRE_3D107 });
+    const geometryJson = JSON.stringify(predio.geometry);
+
+    const predioId = await repo.createCatastroxPredio(orgId, { nombreFinal: NOMBRE_3D107, predio, geometryJson });
+    assert.ok(predioId);
+    const db = await admin();
+    const fila = await db.query('select client_operation_id, codigo_predial from agx.predios where predio_id = $1', [predioId]);
+    assert.equal(fila.rows[0].client_operation_id, null);
+    assert.equal(fila.rows[0].codigo_predial, predio.codigoPredial);
+
+    await assert.rejects(
+      repo.createCatastroxPredio(orgId, { nombreFinal: NOMBRE_3D107, predio, geometryJson }),
+      (error) => error.status === 409 && error.code === 'DUPLICATE_CODIGO_PREDIAL',
+    );
+    assert.equal(await contarPrediosOrg(orgId), 1);
+  });
+});

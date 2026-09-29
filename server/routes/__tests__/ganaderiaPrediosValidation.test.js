@@ -5,11 +5,13 @@
 // RECHAZADO explícitamente, nunca ignorado en silencio ni aceptado.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {
   validateCoordinatesBody,
   validateManualPredioBody,
   validateCatastroxSaveBody,
   serializePredioSearchResult,
+  buildManualCreateResponse,
 } from '../ganaderiaPredios.js';
 
 // ---------------------------------------------------------------------
@@ -274,4 +276,74 @@ test('serializePredioSearchResult: campos públicos conservan sus valores reales
   assert.equal(result.versionFuente, null);
   assert.deepEqual(result.geometry, fixture.geometry);
   assert.equal(result.fechaConsulta, fixture.fechaConsulta);
+});
+
+// ---------------------------------------------------------------------
+// SPRINT-3D10.7: clientOperationId (idempotencia de la creación manual)
+// ---------------------------------------------------------------------
+
+const MANUAL_BASE = Object.freeze({ mode: 'manual', nombrePredio: 'Finca X', departamento: 'Caquetá', municipio: 'Florencia' });
+const OPERATION_ID = '3f2b8c1e-9a4d-4c7b-8e21-5d6f7a8b9c0d';
+
+test('validateManualPredioBody: acepta clientOperationId UUID canónico en minúsculas', () => {
+  const result = validateManualPredioBody({ ...MANUAL_BASE, clientOperationId: OPERATION_ID });
+  assert.equal(result.clientOperationId, OPERATION_ID);
+});
+
+test('validateManualPredioBody: clientOperationId en mayúsculas se normaliza a minúsculas', () => {
+  const result = validateManualPredioBody({ ...MANUAL_BASE, clientOperationId: OPERATION_ID.toUpperCase() });
+  assert.equal(result.clientOperationId, OPERATION_ID);
+});
+
+test('validateManualPredioBody: clientOperationId ausente o null -> null (camino legacy)', () => {
+  assert.equal(validateManualPredioBody({ ...MANUAL_BASE }).clientOperationId, null);
+  assert.equal(validateManualPredioBody({ ...MANUAL_BASE, clientOperationId: null }).clientOperationId, null);
+});
+
+for (const [label, invalid] of [
+  ['string vacío', ''],
+  ['texto arbitrario', 'abc'],
+  ['number', 12345],
+  ['object', { id: OPERATION_ID }],
+  ['UUID nil', '00000000-0000-0000-0000-000000000000'],
+  ['UUID sin guiones', OPERATION_ID.replaceAll('-', '')],
+  ['UUID con llaves', `{${OPERATION_ID}}`],
+  ['UUID con espacios', ` ${OPERATION_ID} `],
+]) {
+  test(`validateManualPredioBody: clientOperationId inválido (${label}) -> 400 INVALID_CLIENT_OPERATION_ID`, () => {
+    assert.throws(
+      () => validateManualPredioBody({ ...MANUAL_BASE, clientOperationId: invalid }),
+      (e) => e.status === 400 && e.code === 'INVALID_CLIENT_OPERATION_ID',
+    );
+  });
+}
+
+test('validateCatastroxSaveBody: clientOperationId sigue siendo FORBIDDEN_FIELDS en modo catastrox', () => {
+  assert.throws(
+    () => validateCatastroxSaveBody({ mode: 'catastrox', candidateId: 'pcand_abc', clientOperationId: OPERATION_ID }),
+    (e) => e.status === 400 && e.code === 'FORBIDDEN_FIELDS',
+  );
+});
+
+test('buildManualCreateResponse: creación (legacy o CASE A) -> 201 con shape exacto', () => {
+  assert.deepEqual(buildManualCreateResponse({ predioId: 17, yaExistia: false }), {
+    status: 201,
+    body: { ok: true, predioId: '17', mode: 'manual', yaExistia: false },
+  });
+});
+
+test('buildManualCreateResponse: operación ya existente (CASE B) -> 200 con shape exacto', () => {
+  assert.deepEqual(buildManualCreateResponse({ predioId: '17', yaExistia: true }), {
+    status: 200,
+    body: { ok: true, predioId: '17', mode: 'manual', yaExistia: true },
+  });
+});
+
+test('POST / manual: CLIENT_OPERATION_ID_REUSED se responde 409 con código y mensaje exactos (estático)', () => {
+  const source = fs.readFileSync(new URL('../ganaderiaPredios.js', import.meta.url), 'utf8');
+  assert.match(
+    source,
+    /if \(error\?\.code === 'CLIENT_OPERATION_ID_REUSED'\) \{\s*res\.status\(409\)\.json\(\{\s*error: 'CLIENT_OPERATION_ID_REUSED',\s*message: 'Esta operación ya registró un predio con datos distintos\. Revisa tu lista de predios\.',\s*\}\);\s*return;/,
+  );
+  assert.equal(/clientOperationId[^\n]*\bjson\(/.test(source), false);
 });

@@ -89,6 +89,109 @@ export async function createManualPredio(organizacionId, value) {
   });
 }
 
+function sameNullableNumber(persisted, incoming) {
+  if (persisted === null || persisted === undefined) return incoming === null || incoming === undefined;
+  if (incoming === null || incoming === undefined) return false;
+  return Number(persisted) === Number(incoming);
+}
+
+/**
+ * SPRINT-3D10.7 -- ¿`row` (fila persistida de agx.predios, snake_case) es
+ * el MISMO predio manual que `value` (salida de validateManualPredioBody)?
+ * Solo participan los inputs manuales del usuario -- nunca predio_id,
+ * organizacion_id, fecha_*, estado/archivo, propietario ni el propio
+ * client_operation_id.
+ *
+ * Comparación EXACTA, sin tolerancia ni case-folding: `value` ya viene
+ * normalizado por el validador (trim, '' -> null). area_total_ha/latitud/
+ * longitud son `numeric` sin escala (guardan el decimal exacto de
+ * String(n) y pg los devuelve como string), así que Number(persistido) ===
+ * n. Una fila que no es manual (codigo_predial o geometría) nunca es igual.
+ */
+export function isSameManualPredio(row, value) {
+  if ((row.codigo_predial ?? null) !== null || row.tiene_geometria === true) return false;
+  return row.nombre_predio === value.nombrePredio
+    && row.departamento === value.departamento
+    && row.municipio === value.municipio
+    && (row.vereda ?? null) === (value.vereda ?? null)
+    && (row.observaciones ?? null) === (value.observaciones ?? null)
+    && sameNullableNumber(row.area_total_ha, value.areaDeclaradaHa)
+    && sameNullableNumber(row.latitud, value.latitud)
+    && sameNullableNumber(row.longitud, value.longitud);
+}
+
+/**
+ * SPRINT-3D10.7 -- creación manual idempotente por
+ * (organizacion_id, client_operation_id). Precondición: value.clientOperationId
+ * ya validado (UUID canónico, no null).
+ *   CASE A: sin fila para la operación -> INSERT, yaExistia false.
+ *   CASE B: fila existente con el MISMO predio manual -> la devuelve,
+ *           yaExistia true; sin escritura (también si está ARCHIVADO --
+ *           nunca se restaura ni se crea otro).
+ *   CASE C: fila existente distinta -> 409 CLIENT_OPERATION_ID_REUSED;
+ *           nada se escribe.
+ *
+ * Concurrencia: ON CONFLICT DO NOTHING sobre el índice parcial
+ * predios_org_client_operation_id_key (0021). Una transacción concurrente
+ * con la misma operación espera al COMMIT/ROLLBACK de la primera; si
+ * confirmó, no inserta y el SELECT posterior (statement nuevo, snapshot
+ * nuevo en READ COMMITTED) ve su fila. Sin 23505, así que la transacción
+ * nunca queda abortada -- no hace falta SAVEPOINT ni FOR UPDATE.
+ */
+export async function createManualPredioIdempotente(organizacionId, value) {
+  return withOrganizacionTransaction(organizacionId, async (client) => {
+    const inserted = await client.query(
+      `insert into agx.predios
+         (organizacion_id, nombre_predio, departamento, municipio, vereda, area_total_ha, observaciones,
+          latitud, longitud, codigo_predial, client_operation_id)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, null, $10)
+       on conflict (organizacion_id, client_operation_id)
+         where client_operation_id is not null
+         do nothing
+       returning predio_id`,
+      [
+        organizacionId,
+        value.nombrePredio,
+        value.departamento,
+        value.municipio,
+        value.vereda,
+        value.areaDeclaradaHa,
+        value.observaciones,
+        value.latitud,
+        value.longitud,
+        value.clientOperationId,
+      ],
+    );
+    if (inserted.rows[0]) {
+      return { predioId: String(inserted.rows[0].predio_id), yaExistia: false };
+    }
+
+    // Filtro explícito por organizacion_id (además de RLS): usa el índice
+    // (organizacion_id, client_operation_id) y deja el alcance a la vista.
+    const existingResult = await client.query(
+      `select predio_id, nombre_predio, departamento, municipio, vereda, area_total_ha,
+              observaciones, latitud, longitud, codigo_predial,
+              (geometry is not null) as tiene_geometria
+         from agx.predios
+        where organizacion_id = $1 and client_operation_id = $2`,
+      [organizacionId, value.clientOperationId],
+    );
+    const existing = existingResult.rows[0];
+    if (!existing) {
+      // Imposible con DELETE revocado para agx_app (0010); nunca se
+      // reintenta el INSERT.
+      throw new Error('CLIENT_OPERATION_ID_CONFLICT_ROW_MISSING');
+    }
+    if (isSameManualPredio(existing, value)) {
+      return { predioId: String(existing.predio_id), yaExistia: true };
+    }
+    throw Object.assign(
+      new Error('Esta operación ya registró un predio con datos distintos. Revisa tu lista de predios.'),
+      { status: 409, code: 'CLIENT_OPERATION_ID_REUSED' },
+    );
+  });
+}
+
 function translateDuplicateCodigoPredial(error) {
   if (error?.code === '23505') {
     const duplicateError = new Error('DUPLICATE_CODIGO_PREDIAL');
