@@ -7,7 +7,9 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Building2, LogOut, ShieldCheck, UserPlus, Users } from 'lucide-react';
-import { fetchCsrfToken, useGanaderiaAuth } from '../auth/GanaderiaAuthContext.jsx';
+import { useGanaderiaAuth } from '../auth/GanaderiaAuthContext.jsx';
+import { performGanaderiaLogout } from '../auth/ganaderiaAuthedRequest.js';
+import { resolveLogoutUiAction } from '../auth/ganaderiaAuthUiModel.js';
 import '../styles/ganaderia-admin.css';
 
 const adminModules = [
@@ -35,7 +37,7 @@ const adminModules = [
 ];
 
 export default function GanaderiaAdminShell() {
-  const { cuenta, refresh } = useGanaderiaAuth();
+  const { cuenta, endSessionLocally } = useGanaderiaAuth();
   const navigate = useNavigate();
   const [loggingOut, setLoggingOut] = useState(false);
   const [error, setError] = useState('');
@@ -44,24 +46,20 @@ export default function GanaderiaAdminShell() {
     if (loggingOut) return;
     setError('');
     setLoggingOut(true);
-    try {
-      const csrfToken = await fetchCsrfToken();
-      const response = await fetch('/api/ganaderia/auth/logout', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'X-CSRF-Token': csrfToken },
-      });
-      if (!response.ok) {
-        setError('No fue posible cerrar la sesión. Intenta nuevamente.');
-        setLoggingOut(false);
-        return;
-      }
-      await refresh();
-      navigate('/ganaderia/login', { replace: true });
-    } catch {
-      setError('No fue posible conectar con el servicio. Intenta nuevamente.');
+    // SPRINT-3D10.5 F3b: performGanaderiaLogout nunca lanza y sigue exigiendo
+    // CSRF cuando la sesión existe. LOGGED_OUT/ALREADY_LOGGED_OUT terminan la
+    // sesión LOCALMENTE (el Provider se reutiliza al navegar, no relee la
+    // sesión) antes de ir al login; CSRF_REJECTED/NETWORK_ERROR/FAILED
+    // permanecen autenticados con un mensaje, nunca navegan.
+    const outcome = await performGanaderiaLogout();
+    const action = resolveLogoutUiAction(outcome);
+    if (!action.endSession) {
+      setError(action.message);
       setLoggingOut(false);
+      return;
     }
+    endSessionLocally();
+    navigate('/ganaderia/login', { replace: true });
   }
 
   return (

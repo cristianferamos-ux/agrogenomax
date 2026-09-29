@@ -67,25 +67,23 @@ test('GanaderiaSidebar.jsx: existe el botón "Cerrar sesión"', () => {
 // 6-10. Logout reutiliza exactamente el patrón de GanaderiaAdminShell.jsx
 // ---------------------------------------------------------------------
 
-test('GanaderiaSidebar.jsx: obtiene un token CSRF fresco antes del logout (mismo patrón que GanaderiaAdminShell.jsx)', () => {
-  assert.match(sidebarSource, /fetchCsrfToken/);
-  assert.match(sidebarSource, /const csrfToken = await fetchCsrfToken\(\);/);
-});
-
-test('GanaderiaSidebar.jsx: hace POST a /api/ganaderia/auth/logout -- ningún endpoint nuevo', () => {
-  assert.match(sidebarSource, /fetch\('\/api\/ganaderia\/auth\/logout',/);
-  assert.match(sidebarSource, /method:\s*'POST'/);
-  assert.match(sidebarSource, /'X-CSRF-Token':\s*csrfToken/);
-});
-
-test('GanaderiaSidebar.jsx: usa credentials: "include" en el logout', () => {
-  assert.match(sidebarSource, /credentials:\s*'include'/);
-});
-
-test('GanaderiaSidebar.jsx: llama refresh() del AuthContext después de un logout exitoso, antes de navegar', () => {
+// SPRINT-3D10.5 F3b: el POST /auth/logout con CSRF + credentials include
+// vive ahora en performGanaderiaLogout (auth/ganaderiaAuthedRequest.js,
+// cubierto por ganaderiaAuthedRequest.test.js). El sidebar solo delega.
+test('GanaderiaSidebar.jsx: delega el logout en performGanaderiaLogout, sin fetchCsrfToken ni fetch propio', () => {
   const codeOnly = stripComments(sidebarSource);
-  const successBlock = codeOnly.match(/await refresh\(\);[\s\S]{0,80}navigate\('\/ganaderia\/login'/)?.[0] ?? '';
-  assert.ok(successBlock, 'refresh() debe preceder a la navegación tras logout exitoso');
+  assert.match(codeOnly, /import \{ performGanaderiaLogout \} from '\.\.\/auth\/ganaderiaAuthedRequest\.js';/);
+  assert.match(codeOnly, /const outcome = await performGanaderiaLogout\(\);/);
+  assert.match(codeOnly, /const action = resolveLogoutUiAction\(outcome\);/);
+  assert.doesNotMatch(codeOnly, /fetchCsrfToken/);
+  assert.doesNotMatch(codeOnly, /\bfetch\(/);
+});
+
+test('GanaderiaSidebar.jsx: termina la sesión LOCALMENTE (endSessionLocally) antes de navegar al login', () => {
+  const codeOnly = stripComments(sidebarSource);
+  const successBlock = codeOnly.match(/endSessionLocally\(\);\s*navigate\('\/ganaderia\/login'/)?.[0] ?? '';
+  assert.ok(successBlock, 'endSessionLocally() debe preceder a la navegación tras logout');
+  assert.doesNotMatch(codeOnly, /refresh\(\)/);
 });
 
 test('GanaderiaSidebar.jsx: navega a /ganaderia/login con replace:true tras logout exitoso', () => {
@@ -105,17 +103,16 @@ test('GanaderiaSidebar.jsx: handleLogout corta temprano si loggingOut=true, y el
 // 12. Error de logout visible
 // ---------------------------------------------------------------------
 
-test('GanaderiaSidebar.jsx: un logout fallido (response no-ok o excepción de red) muestra un mensaje discreto y NUNCA navega al login sin confirmación del backend', () => {
+test('GanaderiaSidebar.jsx: un logout no confirmado (CSRF_REJECTED/NETWORK_ERROR/FAILED) muestra el mensaje del modelo y NUNCA navega ni termina la sesión local', () => {
   const codeOnly = stripComments(sidebarSource);
   assert.match(codeOnly, /className="gan-dash-sidebar-account-error"/);
-  assert.match(sidebarSource, /'No fue posible cerrar la sesión\. Intenta nuevamente\.'/);
-  assert.match(sidebarSource, /'No fue posible conectar con el servicio\. Intenta nuevamente\.'/);
-
-  // El `if (!response.ok)` retorna ANTES de refresh()/navigate() -- nunca
-  // navega sin que el backend confirme el logout.
-  const failureBranch = codeOnly.match(/if\s*\(!response\.ok\)\s*\{[\s\S]{0,160}?\}/)?.[0] ?? '';
-  assert.ok(failureBranch, 'debe existir la rama de fallo de response.ok');
-  assert.doesNotMatch(failureBranch, /navigate\(/);
+  // El `if (!action.endSession)` retorna ANTES de endSessionLocally()/navigate().
+  const failureBranch = codeOnly.match(/if\s*\(!action\.endSession\)\s*\{[\s\S]{0,160}?\}/)?.[0] ?? '';
+  assert.ok(failureBranch, 'debe existir la rama de logout no confirmado');
+  assert.match(failureBranch, /setLogoutError\(action\.message\);/);
+  assert.match(failureBranch, /setLoggingOut\(false\);/);
+  assert.match(failureBranch, /return;/);
+  assert.doesNotMatch(failureBranch, /navigate\(|endSessionLocally/);
 });
 
 // ---------------------------------------------------------------------

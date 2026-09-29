@@ -7,32 +7,17 @@
 // org-scoped, subordinado a predioId). Nunca con el router legacy
 // /api/potreros ni con ganaderiaApi.js (listPotreros/createPotrero
 // legacy, sin aislamiento por organización ni CSRF).
-import { fetchCsrfToken } from '../auth/GanaderiaAuthContext.jsx';
+import { getJsonWithSession, postJsonWithCsrf, postWithCsrf } from '../auth/ganaderiaAuthedRequest.js';
 
-async function parseJson(response) {
-  try {
-    return await response.json();
-  } catch {
-    return null;
-  }
+// SPRINT-3D10.5: wrappers locales delegan en el cliente autenticado
+// compartido -- GET conserva su contrato exacto (red sigue lanzando);
+// POST nunca lanza y nunca se envía si /csrf falla.
+function getJson(path) {
+  return getJsonWithSession(path);
 }
 
-async function getJson(path) {
-  const response = await fetch(path, { credentials: 'include' });
-  const data = await parseJson(response);
-  return { ok: response.ok, status: response.status, data };
-}
-
-async function postJson(path, body) {
-  const csrfToken = await fetchCsrfToken();
-  const response = await fetch(path, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-    body: JSON.stringify(body),
-  });
-  const data = await parseJson(response);
-  return { ok: response.ok, status: response.status, data };
+function postJson(path, body) {
+  return postJsonWithCsrf(path, body);
 }
 
 // predioId siempre viene del contexto ya fijado por la tarjeta del predio
@@ -75,19 +60,13 @@ export function previewPotreroGps(predioId, puntos) {
 // -- el backend solo usa la extensión final (.kml/.kmz), que
 // encodeURIComponent nunca altera.
 export async function previewPotreroFile(predioId, file) {
-  const csrfToken = await fetchCsrfToken();
-  const response = await fetch(`/api/ganaderia/predios/${predioId}/potreros/preview-file`, {
-    method: 'POST',
-    credentials: 'include',
+  return postWithCsrf(`/api/ganaderia/predios/${predioId}/potreros/preview-file`, {
     headers: {
       'Content-Type': 'application/octet-stream',
-      'X-CSRF-Token': csrfToken,
       'X-Potrero-File-Name': encodeURIComponent(file.name || ''),
     },
     body: file,
   });
-  const data = await parseJson(response);
-  return { ok: response.ok, status: response.status, data };
 }
 
 // body: { candidateId, nombre, capacidadAnimales?, observaciones? } --

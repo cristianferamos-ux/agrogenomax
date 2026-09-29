@@ -16,7 +16,9 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { fetchCsrfToken, useGanaderiaAuthOptional } from '../auth/GanaderiaAuthContext.jsx';
+import { useGanaderiaAuthOptional } from '../auth/GanaderiaAuthContext.jsx';
+import { performGanaderiaLogout } from '../auth/ganaderiaAuthedRequest.js';
+import { resolveLogoutUiAction } from '../auth/ganaderiaAuthUiModel.js';
 
 // UX-SESSION-FIX-001: labels de rol -- solo presentación, no cambia los
 // valores reales del backend (agx.membresias.rol). Sin mapping centralizado
@@ -59,7 +61,7 @@ export default function GanaderiaSidebar() {
   const auth = useGanaderiaAuthOptional();
   const cuenta = auth?.cuenta ?? null;
   const organizacionActiva = auth?.organizacionActiva ?? null;
-  const refresh = auth?.refresh;
+  const endSessionLocally = auth?.endSessionLocally;
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState('');
 
@@ -71,24 +73,20 @@ export default function GanaderiaSidebar() {
     if (loggingOut) return;
     setLogoutError('');
     setLoggingOut(true);
-    try {
-      const csrfToken = await fetchCsrfToken();
-      const response = await fetch('/api/ganaderia/auth/logout', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'X-CSRF-Token': csrfToken },
-      });
-      if (!response.ok) {
-        setLogoutError('No fue posible cerrar la sesión. Intenta nuevamente.');
-        setLoggingOut(false);
-        return;
-      }
-      await refresh();
-      navigate('/ganaderia/login', { replace: true });
-    } catch {
-      setLogoutError('No fue posible conectar con el servicio. Intenta nuevamente.');
+    // SPRINT-3D10.5 F3b: performGanaderiaLogout nunca lanza y sigue exigiendo
+    // CSRF cuando la sesión existe. LOGGED_OUT/ALREADY_LOGGED_OUT terminan la
+    // sesión LOCALMENTE (el Provider se reutiliza al navegar, no relee la
+    // sesión) antes de ir al login; CSRF_REJECTED/NETWORK_ERROR/FAILED
+    // permanecen autenticados con un mensaje, nunca navegan.
+    const outcome = await performGanaderiaLogout();
+    const action = resolveLogoutUiAction(outcome);
+    if (!action.endSession) {
+      setLogoutError(action.message);
       setLoggingOut(false);
+      return;
     }
+    endSessionLocally();
+    navigate('/ganaderia/login', { replace: true });
   }
 
   return (

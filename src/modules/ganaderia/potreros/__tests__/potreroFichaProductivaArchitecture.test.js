@@ -87,9 +87,15 @@ test('ganaderiaFichaProductivaApi.js nunca referencia organizacionId en código 
   assert.doesNotMatch(apiSource, /catastrox/i);
 });
 
-test('mutaciones usan CSRF (fetchCsrfToken + X-CSRF-Token), GET no', () => {
-  assert.match(apiSource, /fetchCsrfToken/);
-  assert.match(apiSource, /X-CSRF-Token/);
+// SPRINT-3D10.5: CSRF centralizado en auth/ganaderiaAuthedRequest.js --
+// el wrapper local delega; nunca implementa fetchCsrfToken + fetch propio.
+test('mutaciones usan CSRF vía el cliente autenticado compartido, GET no', () => {
+  const apiCode = apiSource.replace(/\/\/.*$/gm, '');
+  assert.match(apiCode, /from '\.\.\/auth\/ganaderiaAuthedRequest\.js'/);
+  assert.match(apiCode, /return postJsonWithCsrf\(path/);
+  assert.match(apiCode, /return getJsonWithSession\(path\)/);
+  assert.doesNotMatch(apiCode, /fetchCsrfToken/);
+  assert.doesNotMatch(apiCode, /fetch\(/);
 });
 
 // ---------------------------------------------------------------------
