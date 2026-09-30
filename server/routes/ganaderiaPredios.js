@@ -33,6 +33,7 @@ import {
   listPredios,
   getPredioDetail,
   createManualPredio,
+  createManualPredioIdempotente,
   createCatastroxPredio,
 } from '../services/ganaderia/prediosRepository.js';
 import { archivarPredio, restaurarPredio } from '../services/ganaderia/potreroArchivoRepository.js';
@@ -127,7 +128,28 @@ const MANUAL_ALLOWED_KEYS = new Set([
   'observaciones',
   'latitud',
   'longitud',
+  'clientOperationId',
 ]);
+
+// SPRINT-3D10.7: UUID canónico (8-4-4-4-12 hex, cualquier versión) -- mismo
+// patrón ya usado en el repo; sin dependencia nueva. El UUID nil se
+// rechaza: compartido por clientes defectuosos, colisionaría entre
+// intenciones distintas.
+const CLIENT_OPERATION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const NIL_UUID = '00000000-0000-0000-0000-000000000000';
+
+// SPRINT-3D10.7: opcional por compatibilidad legacy -- ausente/null
+// conserva la creación sin idempotencia.
+function validateClientOperationId(rawValue) {
+  if (rawValue === undefined || rawValue === null) return null;
+  if (typeof rawValue !== 'string' || !CLIENT_OPERATION_ID_PATTERN.test(rawValue) || rawValue === NIL_UUID) {
+    throw Object.assign(new Error('clientOperationId inválido.'), {
+      status: 400,
+      code: 'INVALID_CLIENT_OPERATION_ID',
+    });
+  }
+  return rawValue.toLowerCase();
+}
 
 export function validateManualPredioBody(body) {
   const unknownKeys = Object.keys(body || {}).filter((key) => !MANUAL_ALLOWED_KEYS.has(key));
@@ -160,6 +182,7 @@ export function validateManualPredioBody(body) {
   const vereda = body.vereda === undefined || body.vereda === null ? null : String(body.vereda).trim().slice(0, MAX_TEXT_FIELD_LENGTH) || null;
   const areaDeclaradaHa = validateAreaDeclaradaHa(body.areaDeclaradaHa);
   const observaciones = validateObservaciones(body.observaciones);
+  const clientOperationId = validateClientOperationId(body.clientOperationId);
 
   let latitud = null;
   let longitud = null;
@@ -185,6 +208,17 @@ export function validateManualPredioBody(body) {
     observaciones,
     latitud,
     longitud,
+    clientOperationId,
+  };
+}
+
+// SPRINT-3D10.7: status/body de la creación manual -- 201 al crear (legacy
+// o CASE A), 200 cuando la operación ya existía (CASE B). Nunca devuelve
+// clientOperationId.
+export function buildManualCreateResponse({ predioId, yaExistia }) {
+  return {
+    status: yaExistia ? 200 : 201,
+    body: { ok: true, predioId: String(predioId), mode: 'manual', yaExistia },
   };
 }
 
@@ -451,8 +485,11 @@ export default function createGanaderiaPrediosRouter({ appEnv, csrfServerSecret,
 
       if (mode === 'manual') {
         const value = validateManualPredioBody(req.body);
-        const predioId = await createManualPredio(organizacionId, value);
-        res.status(201).json({ ok: true, predioId: String(predioId), mode: 'manual' });
+        const result = value.clientOperationId === null
+          ? { predioId: await createManualPredio(organizacionId, value), yaExistia: false }
+          : await createManualPredioIdempotente(organizacionId, value);
+        const { status, body } = buildManualCreateResponse(result);
+        res.status(status).json(body);
         return;
       }
 
@@ -503,6 +540,13 @@ export default function createGanaderiaPrediosRouter({ appEnv, csrfServerSecret,
 
       res.status(201).json({ ok: true, predioId: String(predioId), mode: 'catastrox' });
     } catch (error) {
+      if (error?.code === 'CLIENT_OPERATION_ID_REUSED') {
+        res.status(409).json({
+          error: 'CLIENT_OPERATION_ID_REUSED',
+          message: 'Esta operación ya registró un predio con datos distintos. Revisa tu lista de predios.',
+        });
+        return;
+      }
       if (error?.code === 'DUPLICATE_CODIGO_PREDIAL') {
         res.status(409).json({ error: 'DUPLICATE_CODIGO_PREDIAL', message: 'Este predio ya está registrado en tu cuenta.' });
         return;
