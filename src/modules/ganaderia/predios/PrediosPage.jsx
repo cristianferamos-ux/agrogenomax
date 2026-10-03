@@ -15,7 +15,7 @@
 // La identidad del cliente/organización viene exclusivamente de la
 // sesión autenticada server-side -- este formulario NUNCA pide código
 // interno, propietario, documento/NIT, teléfono ni correo.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { postJsonWithCsrf } from '../auth/ganaderiaAuthedRequest.js';
 import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
@@ -28,6 +28,14 @@ import '../../catastrox/styles/catastrox.css';
 const GENERIC_SEARCH_ERROR = 'No fue posible consultar el predio en este momento. Intenta nuevamente.';
 const GENERIC_SAVE_ERROR = 'No fue posible registrar el predio en este momento. Intenta nuevamente.';
 const SUCCESS_MESSAGE = 'Predio registrado correctamente.';
+
+// SPRINT-3D10.7: registro manual idempotente (POST con clientOperationId).
+// El copy de NETWORK_ERROR solo es cierto porque el POST manual nunca sale
+// sin un UUID (fail-closed si crypto.randomUUID no existe).
+const FAILURE_NETWORK_ERROR = 'NETWORK_ERROR';
+const MANUAL_NETWORK_ERROR_MESSAGE = 'No pudimos confirmar si el predio se guardó. Puedes reintentar: no se duplicará.';
+const MANUAL_OPERATION_REUSED_MESSAGE = 'Este intento ya registró un predio con otros datos. Revisa tu lista de predios antes de continuar.';
+const MANUAL_OPERATION_UNAVAILABLE_MESSAGE = 'No pudimos iniciar una operación segura para registrar el predio. Recarga la página e inténtalo nuevamente.';
 const LIST_ERROR_MESSAGE = 'No fue posible cargar tus predios registrados. Intenta nuevamente.';
 const LIST_EMPTY_MESSAGE = 'Aún no tienes predios registrados.';
 
@@ -122,6 +130,13 @@ function postGanaderiaPredios(path, body) {
   return postJsonWithCsrf(path, body);
 }
 
+// SPRINT-3D10.7: UUID de una intención de registro manual. Solo
+// crypto.randomUUID (contexto seguro) -- sin fallback casero; null significa
+// "sin operación segura" y el submit no envía nada.
+function newClientOperationId() {
+  return globalThis.crypto?.randomUUID?.() ?? null;
+}
+
 function resolveSearchOutcomeKind(status) {
   if (status === 409) return 'ambiguous';
   if (status === 404) return 'not_found';
@@ -188,6 +203,13 @@ export default function PrediosPage() {
   const [manualForm, setManualForm] = useState(INITIAL_MANUAL_FORM);
   const [manualSaving, setManualSaving] = useState(false);
   const [manualError, setManualError] = useState('');
+  // SPRINT-3D10.7: una intención de registro manual = un clientOperationId
+  // estable. Se genera SOLO en goToManual; se conserva tras cualquier error
+  // (NETWORK_ERROR, 400, 409, 500) y se descarta al confirmar o cancelar.
+  // Sin sessionStorage/localStorage: un refresh destruye la intención
+  // (deuda aceptada).
+  const manualOperationIdRef = useRef(null);
+  const [manualOperationReused, setManualOperationReused] = useState(false);
 
   function resetSearchState() {
     setSearchStatus('idle');
@@ -200,6 +222,8 @@ export default function PrediosPage() {
 
   function goToSearch() {
     resetSearchState();
+    manualOperationIdRef.current = null;
+    setManualOperationReused(false);
     setScreen('search');
   }
 
@@ -207,6 +231,8 @@ export default function PrediosPage() {
     resetSearchState();
     setManualForm(INITIAL_MANUAL_FORM);
     setManualError('');
+    setManualOperationReused(false);
+    manualOperationIdRef.current = newClientOperationId();
     setScreen('manual');
   }
 
@@ -367,6 +393,14 @@ export default function PrediosPage() {
   async function handleManualSubmit(event) {
     event.preventDefault();
     if (manualSaving) return;
+    if (manualOperationReused) return;
+    // SPRINT-3D10.7: fail-closed -- sin UUID de la intención no se envía
+    // nada (nunca clientOperationId: null desde este frontend: un retry
+    // tras NETWORK_ERROR podría duplicar). Nunca se genera aquí.
+    if (!manualOperationIdRef.current) {
+      setManualError(MANUAL_OPERATION_UNAVAILABLE_MESSAGE);
+      return;
+    }
     setManualSaving(true);
     setManualError('');
 
@@ -378,12 +412,17 @@ export default function PrediosPage() {
       vereda: manualForm.vereda.trim() ? manualForm.vereda.trim() : null,
       areaDeclaradaHa: manualForm.areaDeclaradaHa === '' ? null : Number(manualForm.areaDeclaradaHa),
       observaciones: manualForm.observaciones.trim() ? manualForm.observaciones.trim() : null,
+      clientOperationId: manualOperationIdRef.current,
     };
 
     try {
-      const { ok } = await postGanaderiaPredios('/api/ganaderia/predios', body);
+      const { ok, status, data, failure } = await postGanaderiaPredios('/api/ganaderia/predios', body);
 
+      // 201 (creado) y 200 (yaExistia: la misma intención ya se había
+      // guardado) son el mismo éxito para el usuario.
       if (ok) {
+        manualOperationIdRef.current = null;
+        setManualOperationReused(false);
         setManualSaving(false);
         setScreen('saved');
         // §6: refetch de la fuente real (GET) -- nunca insertar una copia
@@ -392,7 +431,19 @@ export default function PrediosPage() {
         return;
       }
 
-      setManualError(GENERIC_SAVE_ERROR);
+      // Cualquier error conserva el UUID: un reintento manual de esta
+      // misma intención nunca crea un segundo predio. Sin retry automático.
+      if (failure === FAILURE_NETWORK_ERROR) {
+        setManualError(MANUAL_NETWORK_ERROR_MESSAGE);
+      } else if (status === 409 && data?.error === 'CLIENT_OPERATION_ID_REUSED') {
+        // Esta intención ya creó un predio con otros datos: se bloquea el
+        // reintento; crear otro exige "Registrar otro predio" (UUID nuevo).
+        setManualOperationReused(true);
+        setManualError(MANUAL_OPERATION_REUSED_MESSAGE);
+        reloadRegisteredPredios();
+      } else {
+        setManualError(GENERIC_SAVE_ERROR);
+      }
       setManualSaving(false);
     } catch {
       setManualError(GENERIC_SAVE_ERROR);
@@ -463,6 +514,8 @@ export default function PrediosPage() {
             onSubmit={handleManualSubmit}
             saving={manualSaving}
             error={manualError}
+            blocked={manualOperationReused}
+            onStartNew={goToManual}
             onCancel={goToSearch}
           />
         ) : null}
@@ -906,7 +959,7 @@ function ResultScreen({
 // ---------------------------------------------------------------------
 // §14: registro manual -- alternativa explícita, formulario mínimo.
 // ---------------------------------------------------------------------
-function ManualScreen({ form, onChange, onSubmit, saving, error, onCancel }) {
+function ManualScreen({ form, onChange, onSubmit, saving, error, blocked, onStartNew, onCancel }) {
   return (
     <>
       <form className="gan-form" onSubmit={onSubmit}>
@@ -934,12 +987,18 @@ function ManualScreen({ form, onChange, onSubmit, saving, error, onCancel }) {
           <textarea value={form.observaciones} onChange={(event) => onChange('observaciones', event.target.value)} />
         </FormField>
 
-        <button className="gan-submit" type="submit" disabled={saving}>
+        <button className="gan-submit" type="submit" disabled={saving || blocked}>
           {saving ? 'Guardando...' : 'Guardar predio'}
         </button>
       </form>
 
       <StatusMessage type="error">{error}</StatusMessage>
+
+      {blocked ? (
+        <button type="button" className="gan-submit" onClick={onStartNew}>
+          Registrar otro predio
+        </button>
+      ) : null}
 
       <button type="button" className="gan-back-inline" onClick={onCancel} disabled={saving}>
         Cancelar y volver a la búsqueda

@@ -208,7 +208,7 @@ test('handleConfirm: areaDeclaradaHa enviado es el valor ACTUAL del campo (state
 // 9. Formulario manual: solo los 6 campos aprobados (§14)
 // ---------------------------------------------------------------------
 
-test('ManualScreen: body de registro manual es exactamente {mode, nombrePredio, departamento, municipio, vereda, areaDeclaradaHa, observaciones} -- sin geometry/snapshot/codigoPredial', () => {
+test('ManualScreen: body de registro manual es exactamente {mode, nombrePredio, departamento, municipio, vereda, areaDeclaradaHa, observaciones, clientOperationId} -- sin geometry/snapshot/codigoPredial (SPRINT-3D10.7)', () => {
   const fn = codeOnly.match(/async function handleManualSubmit[\s\S]*?\n  \}/)?.[0] ?? '';
   const bodyBlock = fn.match(/const body = \{[\s\S]*?\};/)?.[0] ?? '';
   assert.match(bodyBlock, /mode:\s*'manual'/);
@@ -218,13 +218,15 @@ test('ManualScreen: body de registro manual es exactamente {mode, nombrePredio, 
   assert.match(bodyBlock, /vereda:/);
   assert.match(bodyBlock, /areaDeclaradaHa:/);
   assert.match(bodyBlock, /observaciones:/);
+  assert.match(bodyBlock, /clientOperationId: manualOperationIdRef\.current,/);
   assert.doesNotMatch(bodyBlock, /geometry/);
   assert.doesNotMatch(bodyBlock, /snapshot/);
   assert.doesNotMatch(bodyBlock, /codigoPredial/);
+  assert.doesNotMatch(bodyBlock, /latitud|longitud/);
   // Cuenta tanto `clave: valor,` como propiedades abreviadas `clave,`
   // (p.ej. `candidateId,` sin `: candidateId`).
   const keyCount = (bodyBlock.match(/^\s*[a-zA-Z]+[,:]/gm) || []).length;
-  assert.equal(keyCount, 7, `el body manual debe tener exactamente 7 claves, se encontraron ${keyCount}`);
+  assert.equal(keyCount, 8, `el body manual debe tener exactamente 8 claves, se encontraron ${keyCount}`);
 });
 
 test('ManualScreen: nombrePredio/departamento/municipio son required, vereda/área/observaciones son opcionales', () => {
@@ -458,4 +460,155 @@ test('fetchRegisteredPrediosList: incluirArchivados=true agrega ?incluirArchivad
   const fn = codeOnly.match(/async function fetchRegisteredPrediosList\([\s\S]*?\n\}/)?.[0] ?? '';
   assert.match(fn, /const query = incluirArchivados \? '\?incluirArchivados=true' : '';/);
   assert.match(fn, /fetch\(`\/api\/ganaderia\/predios\$\{query\}`/);
+});
+
+// ---------------------------------------------------------------------
+// SPRINT-3D10.7: registro manual idempotente -- una intención = un
+// clientOperationId estable (backend: 201 / 200 yaExistia / 409
+// CLIENT_OPERATION_ID_REUSED).
+// ---------------------------------------------------------------------
+
+const manualSubmitFn = codeOnly.match(/async function handleManualSubmit[\s\S]*?\n  \}/)?.[0] ?? '';
+const goToManualFn = codeOnly.match(/function goToManual\(\) \{[\s\S]*?\n  \}/)?.[0] ?? '';
+const goToSearchFn = codeOnly.match(/function goToSearch\(\) \{[\s\S]*?\n  \}/)?.[0] ?? '';
+const newClientOperationIdFn = codeOnly.match(/function newClientOperationId\(\) \{[\s\S]*?\n\}/)?.[0] ?? '';
+const manualOkBlock = manualSubmitFn.match(/if \(ok\) \{[\s\S]*?\n {6}\}/)?.[0] ?? '';
+const manualReusedBlock = manualSubmitFn.match(/else if \(status === 409 && data\?\.error === 'CLIENT_OPERATION_ID_REUSED'\) \{[\s\S]*?\n {6}\}/)?.[0] ?? '';
+const manualNetworkBlock = manualSubmitFn.match(/if \(failure === FAILURE_NETWORK_ERROR\) \{[\s\S]*?\n {6}\}/)?.[0] ?? '';
+const manualScreenSrc = codeOnly.match(/function ManualScreen[\s\S]*$/)?.[0] ?? '';
+
+test('3D10.7: manualOperationIdRef existe como useRef(null) y el estado de bloqueo arranca en false', () => {
+  assert.match(codeOnly, /import \{ useEffect, useRef, useState \} from 'react';/);
+  assert.match(codeOnly, /const manualOperationIdRef = useRef\(null\);/);
+  assert.match(codeOnly, /const \[manualOperationReused, setManualOperationReused\] = useState\(false\);/);
+});
+
+test('3D10.7: newClientOperationId usa únicamente crypto.randomUUID -- sin Math.random, Date.now ni UUID casero', () => {
+  assert.ok(newClientOperationIdFn, 'newClientOperationId debe existir');
+  assert.match(newClientOperationIdFn, /return globalThis\.crypto\?\.randomUUID\?\.\(\) \?\? null;/);
+  assert.doesNotMatch(newClientOperationIdFn, /Math\.random|Date\.now|toString\(16\)|replace\(/);
+  assert.doesNotMatch(codeOnly, /Math\.random/);
+  assert.equal((codeOnly.match(/randomUUID/g) || []).length, 1, 'randomUUID solo dentro de newClientOperationId');
+});
+
+test('3D10.7: goToManual inicia una NUEVA intención -- resetea formulario, error y bloqueo y genera exactamente un UUID', () => {
+  assert.match(goToManualFn, /setManualForm\(INITIAL_MANUAL_FORM\);/);
+  assert.match(goToManualFn, /setManualError\(''\);/);
+  assert.match(goToManualFn, /setManualOperationReused\(false\);/);
+  assert.equal((goToManualFn.match(/manualOperationIdRef\.current = newClientOperationId\(\);/g) || []).length, 1);
+  const calls = (codeOnly.match(/newClientOperationId\(\)/g) || []).length;
+  // 1 declaración (`function newClientOperationId()`) + 1 llamada (goToManual).
+  assert.equal(calls, 2, 'newClientOperationId solo se llama desde goToManual');
+});
+
+test('3D10.7: handleManualSubmit NUNCA genera ni reasigna el UUID antes del POST', () => {
+  assert.ok(manualSubmitFn, 'handleManualSubmit debe existir');
+  assert.doesNotMatch(manualSubmitFn, /newClientOperationId|randomUUID/);
+  const beforePost = manualSubmitFn.slice(0, manualSubmitFn.indexOf('postGanaderiaPredios('));
+  assert.doesNotMatch(beforePost, /manualOperationIdRef\.current =/);
+});
+
+test('3D10.7: guards de submit -- manualSaving (literal original), bloqueo por 409 y UUID ausente, todos antes de setManualSaving(true)', () => {
+  const start = manualSubmitFn.indexOf('setManualSaving(true)');
+  assert.ok(start > 0);
+  const guards = manualSubmitFn.slice(0, start);
+  assert.match(guards, /if \(manualSaving\) return;/);
+  assert.match(guards, /if \(manualOperationReused\) return;/);
+  assert.match(guards, /if \(!manualOperationIdRef\.current\) \{\s*setManualError\(MANUAL_OPERATION_UNAVAILABLE_MESSAGE\);\s*return;\s*\}/);
+});
+
+test('3D10.7: fail-closed -- sin UUID muestra el error técnico aprobado y NO alcanza el POST (nunca clientOperationId: null)', () => {
+  assert.match(
+    source,
+    /const MANUAL_OPERATION_UNAVAILABLE_MESSAGE = 'No pudimos iniciar una operación segura para registrar el predio\. Recarga la página e inténtalo nuevamente\.';/,
+  );
+  const guardIdx = manualSubmitFn.indexOf('if (!manualOperationIdRef.current)');
+  const postIdx = manualSubmitFn.indexOf('postGanaderiaPredios(');
+  assert.ok(guardIdx > 0 && postIdx > guardIdx, 'el guard de UUID va antes del POST');
+  assert.doesNotMatch(codeOnly, /clientOperationId:\s*null/);
+});
+
+test('3D10.7: una sola llamada manual a postGanaderiaPredios y sin reintento automático (sin timers ni bucles)', () => {
+  assert.equal((manualSubmitFn.match(/postGanaderiaPredios\(/g) || []).length, 1);
+  assert.doesNotMatch(manualSubmitFn, /setTimeout|setInterval|\bwhile\b|\bfor\b/);
+  // Solo la propia declaración: el submit nunca se reinvoca a sí mismo.
+  assert.equal((manualSubmitFn.match(/handleManualSubmit\(/g) || []).length, 1);
+});
+
+test('3D10.7: éxito (result.ok, 201 creado o 200 yaExistia) -- mismo flujo: limpia UUID y bloqueo, pantalla saved y refetch real', () => {
+  assert.match(manualSubmitFn, /const \{ ok, status, data, failure \} = await postGanaderiaPredios\('\/api\/ganaderia\/predios', body\);/);
+  assert.match(manualOkBlock, /manualOperationIdRef\.current = null;/);
+  assert.match(manualOkBlock, /setManualOperationReused\(false\);/);
+  assert.match(manualOkBlock, /setManualSaving\(false\);/);
+  assert.match(manualOkBlock, /setScreen\('saved'\);/);
+  assert.match(manualOkBlock, /reloadRegisteredPredios\(\);/);
+  // Sin rama distinta por yaExistia/status: 200 y 201 entran por `ok`.
+  assert.doesNotMatch(manualSubmitFn, /yaExistia/);
+  assert.doesNotMatch(manualSubmitFn, /status === 20[01]/);
+});
+
+test('3D10.7: los errores NUNCA limpian el UUID -- la única escritura dentro del submit es el null del éxito', () => {
+  assert.equal((manualSubmitFn.match(/manualOperationIdRef\.current =/g) || []).length, 1);
+  const writes = codeOnly.match(/manualOperationIdRef\.current = [^;]+;/g) || [];
+  assert.deepEqual(writes.sort(), [
+    'manualOperationIdRef.current = newClientOperationId();',
+    'manualOperationIdRef.current = null;',
+    'manualOperationIdRef.current = null;',
+  ].sort());
+  const afterOk = manualSubmitFn.slice(manualSubmitFn.indexOf(manualOkBlock) + manualOkBlock.length);
+  assert.doesNotMatch(afterOk, /manualOperationIdRef\.current =/);
+});
+
+test('3D10.7: NETWORK_ERROR -- constante local, copy exacto, conserva UUID/formulario/bloqueo y rehabilita el botón', () => {
+  assert.match(codeOnly, /const FAILURE_NETWORK_ERROR = 'NETWORK_ERROR';/);
+  assert.match(
+    source,
+    /const MANUAL_NETWORK_ERROR_MESSAGE = 'No pudimos confirmar si el predio se guardó\. Puedes reintentar: no se duplicará\.';/,
+  );
+  assert.match(manualNetworkBlock, /setManualError\(MANUAL_NETWORK_ERROR_MESSAGE\);/);
+  assert.doesNotMatch(manualNetworkBlock, /manualOperationIdRef|setManualOperationReused|setManualForm/);
+  const afterOk = manualSubmitFn.slice(manualSubmitFn.indexOf(manualOkBlock) + manualOkBlock.length);
+  assert.match(afterOk, /setManualSaving\(false\);/);
+});
+
+test('3D10.7: CLIENT_OPERATION_ID_REUSED -- detectado por status+código, copy exacto, bloqueo y refetch; NO regenera UUID ni resetea formulario', () => {
+  assert.match(
+    source,
+    /const MANUAL_OPERATION_REUSED_MESSAGE = 'Este intento ya registró un predio con otros datos\. Revisa tu lista de predios antes de continuar\.';/,
+  );
+  assert.ok(manualReusedBlock, 'rama 409 CLIENT_OPERATION_ID_REUSED debe existir');
+  assert.match(manualReusedBlock, /setManualOperationReused\(true\);/);
+  assert.match(manualReusedBlock, /setManualError\(MANUAL_OPERATION_REUSED_MESSAGE\);/);
+  assert.match(manualReusedBlock, /reloadRegisteredPredios\(\);/);
+  assert.doesNotMatch(manualReusedBlock, /manualOperationIdRef|newClientOperationId|randomUUID|setManualForm|postGanaderiaPredios/);
+});
+
+test('3D10.7: ManualScreen -- Guardar deshabilitado si saving || blocked; "Registrar otro predio" (bloqueo) llama a goToManual', () => {
+  assert.match(manualScreenSrc, /function ManualScreen\(\{ form, onChange, onSubmit, saving, error, blocked, onStartNew, onCancel \}\)/);
+  assert.match(manualScreenSrc, /<button className="gan-submit" type="submit" disabled=\{saving \|\| blocked\}>/);
+  assert.match(manualScreenSrc, /\{blocked \? \(\s*<button type="button" className="gan-submit" onClick=\{onStartNew\}>\s*Registrar otro predio\s*<\/button>\s*\) : null\}/);
+  assert.match(codeOnly, /<ManualScreen[\s\S]*?blocked=\{manualOperationReused\}[\s\S]*?onStartNew=\{goToManual\}[\s\S]*?onCancel=\{goToSearch\}[\s\S]*?\/>/);
+});
+
+test('3D10.7: cancelar (goToSearch) descarta la intención -- UUID null y bloqueo false', () => {
+  assert.match(goToSearchFn, /manualOperationIdRef\.current = null;/);
+  assert.match(goToSearchFn, /setManualOperationReused\(false\);/);
+  assert.doesNotMatch(goToSearchFn, /newClientOperationId/);
+});
+
+test('3D10.7: CatastroX (handleConfirm) nunca envía clientOperationId', () => {
+  const fn = codeOnly.match(/async function handleConfirm\(\)[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.ok(fn);
+  assert.doesNotMatch(fn, /clientOperationId|manualOperationIdRef/);
+});
+
+test('3D10.7: sin persistencia -- ni sessionStorage ni localStorage (refresh destruye la intención: deuda aceptada)', () => {
+  assert.doesNotMatch(codeOnly, /sessionStorage/);
+  assert.doesNotMatch(codeOnly, /localStorage/);
+});
+
+test('3D10.7: el import del helper autenticado sigue siendo exactamente { postJsonWithCsrf } -- sin REQUEST_FAILURES', () => {
+  const imports = codeOnly.match(/^import[^\n]*ganaderiaAuthedRequest[^\n]*$/gm) || [];
+  assert.deepEqual(imports, ["import { postJsonWithCsrf } from '../auth/ganaderiaAuthedRequest.js';"]);
+  assert.doesNotMatch(codeOnly, /REQUEST_FAILURES/);
 });
