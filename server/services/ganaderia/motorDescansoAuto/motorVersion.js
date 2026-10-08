@@ -6,3 +6,8 @@
 // climáticas/de presión de descansoFormulas.js sin agregar una versión
 // nueva rompe la trazabilidad histórica.
 export const MOTOR_VERSION = 'descanso-v1';
+
+// SPRINT-3D10.8.1: marca de las filas de descanso DECLARADAS POR EL
+// PRODUCTOR (pasturas sin perfil técnico) -- no hay motor detrás, la
+// cadena distingue estas filas de las calculadas por MOTOR_VERSION.
+export const DESCANSO_DECLARADO_MOTOR_VERSION = 'declarado-productor-v1';

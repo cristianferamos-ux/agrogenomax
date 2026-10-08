@@ -39,6 +39,14 @@ export function finalizarCicloPastoreo(predioId, potreroId, cicloId) {
   return postJson(`${base(predioId, potreroId)}/${cicloId}/finalizar`, {});
 }
 
+// SPRINT-3D10.8.1 -- descanso declarado por el productor, solo para
+// pasturas sin perfil técnico de descanso (ASSESSMENT_PENDING /
+// NO_PASTURE_PROFILE). El reintento del cálculo automático reutiliza
+// finalizarCicloPastoreo (idempotente).
+export function declararDescansoProductor(predioId, potreroId, cicloId, diasDescanso) {
+  return postJson(`${base(predioId, potreroId)}/${cicloId}/descanso-declarado`, { diasDescanso });
+}
+
 export function cancelarCicloPastoreo(predioId, potreroId, cicloId, motivo) {
   return postJson(`${base(predioId, potreroId)}/${cicloId}/cancelar`, { motivo });
 }

@@ -492,7 +492,17 @@ export default function PotreroDescansoReentradaPanel({ predioId, potreroId, ref
       {loading ? <p className="gan-potrero-points-hint">Cargando descanso estimado...</p> : null}
       {loadError ? <StatusMessage type="error">{loadError}</StatusMessage> : null}
 
-      {!loading && !loadError && !preview && actual ? (
+      {/* SPRINT-3D10.8.1: un descanso DECLARADO POR EL PRODUCTOR (pastura
+          sin perfil técnico) nunca se presenta como recomendación técnica --
+          sin rango, sin confianza, sin clima. */}
+      {!loading && !loadError && !preview && actual && actual.origenDescanso === 'DECLARADO_PRODUCTOR' ? (
+        <div className="gan-ficha-preview">
+          <div className="gan-ficha-row"><span>Descanso declarado por el productor ({actual.diasDescansoMin} días)</span></div>
+          <div className="gan-ficha-row"><span>Reingreso habilitado desde</span><strong>{formatDateDisplay(actual.fechaReingresoMin)}</strong></div>
+        </div>
+      ) : null}
+
+      {!loading && !loadError && !preview && actual && actual.origenDescanso !== 'DECLARADO_PRODUCTOR' ? (
         <>
           <PlanPastoreoReport
             payload={{
