@@ -10,6 +10,7 @@ import {
   validateAnularBody,
   validateCorregirBody,
   validateEvaluarReingresoBody,
+  validateDescansoDeclaradoBody,
 } from '../ganaderiaPotreroCicloPastoreo.js';
 
 test('iniciar: body vacío es válido -- el cliente NUNCA está obligado a aportar nada', () => {
@@ -218,6 +219,37 @@ test('evaluar reingreso: RECHAZA campos derivados server-side', () => {
     assert.throws(
       () => validateEvaluarReingresoBody({ fichaId: '5', resultado: 'APTO', [forbidden]: 'y' }),
       (e) => e.status === 400 && e.code === 'FORBIDDEN_FIELDS',
+    );
+  }
+});
+
+// SPRINT-3D10.8.1 -- descanso declarado por el productor.
+test('descanso declarado: acepta enteros 1..180', () => {
+  assert.deepEqual(validateDescansoDeclaradoBody({ diasDescanso: 1 }), { diasDescanso: 1 });
+  assert.deepEqual(validateDescansoDeclaradoBody({ diasDescanso: 35 }), { diasDescanso: 35 });
+  assert.deepEqual(validateDescansoDeclaradoBody({ diasDescanso: 180 }), { diasDescanso: 180 });
+});
+
+test('descanso declarado: rechaza 0, negativos, decimales, NaN, texto, >180 y ausencia', () => {
+  for (const diasDescanso of [0, -1, 1.5, Number.NaN, '30', 181, null, undefined, Infinity]) {
+    assert.throws(
+      () => validateDescansoDeclaradoBody({ diasDescanso }),
+      (error) => error.status === 400 && error.code === 'INVALID_DIAS_DESCANSO_DECLARADO',
+      `debía rechazar ${String(diasDescanso)}`,
+    );
+  }
+  assert.throws(
+    () => validateDescansoDeclaradoBody({}),
+    (error) => error.status === 400 && error.code === 'INVALID_DIAS_DESCANSO_DECLARADO',
+  );
+});
+
+test('descanso declarado: RECHAZA campos no permitidos (fechas, organización, ciclo, confianza)', () => {
+  for (const extra of ['fechaReingresoMin', 'organizacionId', 'cicloId', 'nivelConfianza', 'origenDescanso']) {
+    assert.throws(
+      () => validateDescansoDeclaradoBody({ diasDescanso: 30, [extra]: 'x' }),
+      (error) => error.status === 400 && error.code === 'FORBIDDEN_FIELDS',
+      `debía rechazar ${extra}`,
     );
   }
 });

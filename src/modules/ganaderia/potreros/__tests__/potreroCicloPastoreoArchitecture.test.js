@@ -584,3 +584,122 @@ test('3D10.6: ningún otro Potrero*Panel.jsx usa registroIncierto/Verificar esta
     assert.doesNotMatch(fuente, /registroIncierto|handleVerificarRegistro|RESIDUAL_YA_REGISTRADO/, `${nombre} no debe participar del flujo 3D10.6`);
   }
 });
+
+// ---------------------------------------------------------------------
+// SPRINT-3D10.8.1 -- salida de EN_DESCANSO / ASSESSMENT_PENDING.
+// ---------------------------------------------------------------------
+
+const panelCode = stripComments(panelSource);
+const descansoPanelCode = stripComments(descansoPanelSource);
+
+function extractFunctionBody(code, name) {
+  const start = code.indexOf(`async function ${name}(`);
+  assert.ok(start >= 0, `${name} debe existir`);
+  const next = code.indexOf('\n  function ', start + 1);
+  const nextAsync = code.indexOf('\n  async function ', start + 1);
+  const ends = [next, nextAsync].filter((i) => i > 0);
+  return code.slice(start, ends.length ? Math.min(...ends) : undefined);
+}
+
+test('3D10.8.1: API expone declararDescansoProductor -> POST /:cicloId/descanso-declarado con { diasDescanso } vía postJson (CSRF)', () => {
+  assert.match(
+    apiCode,
+    /export function declararDescansoProductor\(predioId, potreroId, cicloId, diasDescanso\) \{\s*return postJson\(`\$\{base\(predioId, potreroId\)\}\/\$\{cicloId\}\/descanso-declarado`, \{ diasDescanso \}\);/,
+  );
+});
+
+test('3D10.8.1: el panel tiene un bloque explícito para EN_DESCANSO / ASSESSMENT_PENDING', () => {
+  assert.match(panelCode, /const descansoPendiente = enDescanso && estadoOperativo\?\.reason === 'ASSESSMENT_PENDING';/);
+  assert.match(panelCode, /\{!actual && !bloqueadoPorArchivo && descansoPendiente \? \(/);
+});
+
+test('3D10.8.1: NO_PASTURE_PROFILE muestra el campo "Días de descanso" + "Guardar descanso"; cualquier otro motivo muestra el reintento', () => {
+  const start = panelCode.indexOf('descansoPendiente ? (');
+  const bloque = panelCode.slice(start, panelCode.indexOf(') : null}', start));
+  const idxPerfil = bloque.indexOf("estadoOperativo?.motivoDescansoPendiente === 'NO_PASTURE_PROFILE' ? (");
+  assert.ok(idxPerfil >= 0, 'el input solo se muestra bajo NO_PASTURE_PROFILE');
+  const ramaNoPerfil = bloque.slice(idxPerfil, bloque.indexOf(') : ('));
+  const ramaReintento = bloque.slice(bloque.indexOf(') : ('));
+  assert.match(ramaNoPerfil, /Esta pastura todavía no tiene un perfil técnico de descanso\. Indica cuántos días deseas dejar descansar el potrero\./);
+  assert.match(ramaNoPerfil, /<FormField label="Días de descanso" required>/);
+  assert.match(ramaNoPerfil, /type="number"[\s\S]*?step="1"/);
+  assert.match(ramaNoPerfil, /onClick=\{handleGuardarDescansoDeclarado\}/);
+  assert.match(ramaNoPerfil, /'Guardar descanso'/);
+  assert.doesNotMatch(ramaNoPerfil, /handleReintentarDescanso/);
+  assert.match(ramaReintento, /onClick=\{handleReintentarDescanso\}/);
+  assert.match(ramaReintento, /'Reintentar cálculo de descanso'/);
+  assert.doesNotMatch(ramaReintento, /Días de descanso/);
+});
+
+test('3D10.8.1: el reintento reutiliza finalizarCicloPastoreo sobre el ciclo ORIGEN y luego recarga + notifica', () => {
+  const body = extractFunctionBody(panelCode, 'handleReintentarDescanso');
+  assert.match(body, /const cicloOrigenId = estadoOperativo\?\.cicloOrigenId;/);
+  assert.match(body, /await finalizarCicloPastoreo\(predioId, potreroId, cicloOrigenId\)/);
+  assert.ok(body.indexOf('loadActual();') > body.indexOf('if (!ok)'), 'loadActual solo tras éxito');
+  assert.match(body, /onDescansoChange\?\.\(\);/);
+});
+
+test('3D10.8.1: guardar el descanso declarado invoca el POST y, tras éxito, loadActual + onDescansoChange', () => {
+  const body = extractFunctionBody(panelCode, 'handleGuardarDescansoDeclarado');
+  assert.match(body, /await declararDescansoProductor\(predioId, potreroId, cicloOrigenId, diasDescanso\)/);
+  assert.match(body, /Number\.isInteger\(diasDescanso\)/);
+  assert.match(body, /diasDescanso < DIAS_DESCANSO_DECLARADO_MIN \|\| diasDescanso > DIAS_DESCANSO_DECLARADO_MAX/);
+  const exito = body.slice(body.indexOf('setDiasDescansoDeclarado(\'\')'));
+  assert.match(exito, /loadActual\(\);/);
+  assert.match(exito, /onDescansoChange\?\.\(\);/);
+  assert.match(panelCode, /DIAS_DESCANSO_DECLARADO_MIN = 1;/);
+  assert.match(panelCode, /DIAS_DESCANSO_DECLARADO_MAX = 180;/);
+});
+
+test('3D10.8.1: "Anular" NUNCA es la salida del descanso pendiente', () => {
+  const start = panelCode.indexOf('descansoPendiente ? (');
+  const bloque = panelCode.slice(start, panelCode.indexOf(') : null}', start));
+  assert.doesNotMatch(bloque, /anular/i);
+  assert.doesNotMatch(extractFunctionBody(panelCode, 'handleReintentarDescanso'), /anularCicloPastoreo/);
+  assert.doesNotMatch(extractFunctionBody(panelCode, 'handleGuardarDescansoDeclarado'), /anularCicloPastoreo/);
+});
+
+test('3D10.8.1: el copy ya no pide reintentar "Finalizar" (el botón desaparece tras la salida)', () => {
+  assert.doesNotMatch(panelSource, /intentar "Finalizar"/);
+  assert.match(panelCode, /usa "Reintentar cálculo de descanso"/);
+});
+
+test('3D10.8.1: el bloque pendiente no expone códigos internos, JSON, confianza ni motor', () => {
+  const start = panelCode.indexOf('descansoPendiente ? (');
+  const bloque = panelCode.slice(start, panelCode.indexOf(') : null}', start));
+  // Texto visible = nodos de texto JSX + label="..." + literales de
+  // botones ('Guardando...' : 'Guardar descanso').
+  const textoVisible = [
+    ...[...bloque.matchAll(/>([^<>{}]+)</g)].map((m) => m[1]),
+    ...[...bloque.matchAll(/label="([^"]+)"/g)].map((m) => m[1]),
+    ...[...bloque.matchAll(/\? '([^']+)' : '([^']+)'/g)].flatMap((m) => [m[1], m[2]]),
+  ].join(' | ');
+  assert.ok(textoVisible.includes('Guardar descanso') && textoVisible.includes('Días de descanso'));
+  assert.doesNotMatch(textoVisible, /NO_PASTURE_PROFILE|REINTENTABLE|ASSESSMENT_PENDING|JSON|confianza|motor|declarado-productor/i);
+});
+
+test('3D10.8.1: ventana de un descanso DECLARADO = una sola fecha + "Descanso declarado por el productor (N días)"; calculado conserva min/recomendada/máxima', () => {
+  const start = panelCode.indexOf("ventana.origenDescanso === 'DECLARADO_PRODUCTOR' ? (");
+  assert.ok(start >= 0);
+  const declarado = panelCode.slice(start, panelCode.indexOf(') : (', start));
+  const calculado = panelCode.slice(panelCode.indexOf(') : (', start), panelCode.indexOf(') : null}', start));
+  assert.match(declarado, /Descanso declarado por el productor \(\{ventana\.diasDescansoMin\} días\)/);
+  assert.match(declarado, /Reingreso habilitado desde/);
+  assert.doesNotMatch(declarado, /recomendad|máxima|mínima/i);
+  assert.match(calculado, /Ventana mínima de reingreso/);
+  assert.match(calculado, /Ventana recomendada/);
+  assert.match(calculado, /Ventana máxima/);
+});
+
+test('3D10.8.1: PotreroDescansoReentradaPanel muestra una tarjeta simple para el descanso declarado y conserva PlanPastoreoReport para el calculado', () => {
+  const declaradoIdx = descansoPanelCode.indexOf("actual && actual.origenDescanso === 'DECLARADO_PRODUCTOR' ? (");
+  assert.ok(declaradoIdx >= 0);
+  const declarado = descansoPanelCode.slice(declaradoIdx, descansoPanelCode.indexOf(') : null}', declaradoIdx));
+  assert.match(declarado, /Descanso declarado por el productor \(\{actual\.diasDescansoMin\} días\)/);
+  assert.match(declarado, /Reingreso habilitado desde/);
+  assert.doesNotMatch(declarado, /PlanPastoreoReport|nivelConfianza|agroclimate/i);
+  assert.match(
+    descansoPanelCode,
+    /actual && actual\.origenDescanso !== 'DECLARADO_PRODUCTOR' \? \(\s*<>\s*<PlanPastoreoReport/,
+  );
+});

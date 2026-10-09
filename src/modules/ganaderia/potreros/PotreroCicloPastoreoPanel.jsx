@@ -30,6 +30,7 @@ import {
   anularCicloPastoreo,
   corregirCicloPastoreo,
   evaluarReingreso,
+  declararDescansoProductor,
 } from './ganaderiaCicloPastoreoApi.js';
 import { getFichaProductiva } from './ganaderiaFichaProductivaApi.js';
 import PotreroResidualRealPanel from './PotreroResidualRealPanel.jsx';
@@ -66,7 +67,16 @@ const CICLO_ERROR_MESSAGES = {
   INVALID_DIAS_EN_LECHE_REAL: 'Los días en leche deben ser numéricos.',
   INVALID_GRASA_LECHE_REAL: 'El %grasa de la leche debe ser numérico.',
   INVALID_TERNERO_AL_PIE_REAL: 'Indica si hay ternero al pie.',
+  // SPRINT-3D10.8.1
+  INVALID_DIAS_DESCANSO_DECLARADO: 'Los días de descanso deben ser un número entero entre 1 y 180.',
+  DESCANSO_YA_EXISTE: 'Este potrero ya tiene un descanso registrado para el último pastoreo.',
+  DESCANSO_DECLARADO_NO_APLICA: 'Este potrero no requiere declarar el descanso manualmente.',
 };
+
+// SPRINT-3D10.8.1: espejo de validateDescansoDeclaradoBody (backend
+// autoritativo) -- entero 1..180.
+const DIAS_DESCANSO_DECLARADO_MIN = 1;
+const DIAS_DESCANSO_DECLARADO_MAX = 180;
 
 function resolveErrorMessage(code) {
   return CICLO_ERROR_MESSAGES[code] || GENERIC_ERROR;
@@ -107,11 +117,11 @@ function validateAjusteLote({ numeroAnimales, pesoPromedioKg, categoriaCodigo, c
 
 // El descanso post-real puede quedar GENERADO (incluso en modo degradado --
 // eso sigue siendo un éxito), PENDIENTE (condición transitoria,
-// reintentable con el mismo botón "Finalizar") o ERROR_TECNICO (el ciclo
-// YA quedó finalizado igual -- esto nunca revierte ese hecho).
+// reintentable con "Reintentar cálculo de descanso") o ERROR_TECNICO (el
+// ciclo YA quedó finalizado igual -- esto nunca revierte ese hecho).
 const DESCANSO_ESTADO_MESSAGES = {
   GENERADO: { type: 'info', text: 'Descanso post-real calculado.' },
-  PENDIENTE: { type: 'warning', text: 'El descanso no pudo calcularse todavía por una condición temporal -- vuelve a intentar "Finalizar" en unos minutos.' },
+  PENDIENTE: { type: 'warning', text: 'El descanso no pudo calcularse todavía por una condición temporal -- usa "Reintentar cálculo de descanso" en unos minutos.' },
   ERROR_TECNICO: { type: 'warning', text: 'El pastoreo quedó registrado, pero no fue posible calcular el descanso automáticamente.' },
 };
 
@@ -168,6 +178,15 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
   const [finalizando, setFinalizando] = useState(false);
   const [finalizarError, setFinalizarError] = useState('');
   const [descansoResultado, setDescansoResultado] = useState(null);
+
+  // SPRINT-3D10.8.1: salida de EN_DESCANSO / ASSESSMENT_PENDING --
+  // reintento del cálculo (REINTENTABLE) o descanso declarado por el
+  // productor (NO_PASTURE_PROFILE). Nunca "Anular" como salida normal.
+  const [reintentandoDescanso, setReintentandoDescanso] = useState(false);
+  const [reintentarDescansoError, setReintentarDescansoError] = useState('');
+  const [diasDescansoDeclarado, setDiasDescansoDeclarado] = useState('');
+  const [guardandoDescansoDeclarado, setGuardandoDescansoDeclarado] = useState(false);
+  const [descansoDeclaradoError, setDescansoDeclaradoError] = useState('');
 
   const [cancelando, setCancelando] = useState(false);
   const [cancelarError, setCancelarError] = useState('');
@@ -338,6 +357,49 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
     loadActual();
   }
 
+  // SPRINT-3D10.8.1: reintento del cálculo de descanso -- reutiliza
+  // "finalizar" (idempotente sobre un ciclo FINALIZADO: nunca toca la
+  // salida real, solo reintenta FASE B) sobre el ciclo origen.
+  async function handleReintentarDescanso() {
+    const cicloOrigenId = estadoOperativo?.cicloOrigenId;
+    if (reintentandoDescanso || !cicloOrigenId) return;
+    setReintentandoDescanso(true);
+    setReintentarDescansoError('');
+    const { ok, data } = await finalizarCicloPastoreo(predioId, potreroId, cicloOrigenId);
+    setReintentandoDescanso(false);
+    if (!ok) {
+      setReintentarDescansoError(resolveErrorMessage(data?.error));
+      return;
+    }
+    setDescansoResultado(data?.descansoEstado ?? null);
+    loadActual();
+    onDescansoChange?.();
+  }
+
+  async function handleGuardarDescansoDeclarado() {
+    const cicloOrigenId = estadoOperativo?.cicloOrigenId;
+    if (guardandoDescansoDeclarado || !cicloOrigenId) return;
+    const diasDescanso = Number(diasDescansoDeclarado);
+    if (diasDescansoDeclarado === '' || !Number.isInteger(diasDescanso)
+      || diasDescanso < DIAS_DESCANSO_DECLARADO_MIN || diasDescanso > DIAS_DESCANSO_DECLARADO_MAX) {
+      setDescansoDeclaradoError(resolveErrorMessage('INVALID_DIAS_DESCANSO_DECLARADO'));
+      return;
+    }
+    setGuardandoDescansoDeclarado(true);
+    setDescansoDeclaradoError('');
+    const { ok, data } = await declararDescansoProductor(predioId, potreroId, cicloOrigenId, diasDescanso);
+    setGuardandoDescansoDeclarado(false);
+    if (!ok) {
+      setDescansoDeclaradoError(resolveErrorMessage(data?.error));
+      if (data?.error === 'DESCANSO_YA_EXISTE') loadActual();
+      return;
+    }
+    setDiasDescansoDeclarado('');
+    setDescansoResultado(null);
+    loadActual();
+    onDescansoChange?.();
+  }
+
   function handleAbrirCancelar() {
     setMostrarCancelar(true);
     setMotivoCancelacion('');
@@ -486,6 +548,7 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
   const enDescanso = estado === 'EN_DESCANSO';
   const enEvaluacion = estado === 'EVALUACION_REINGRESO';
   const ventana = estadoOperativo?.descanso;
+  const descansoPendiente = enDescanso && estadoOperativo?.reason === 'ASSESSMENT_PENDING';
 
   return (
     <div className="gan-ficha-productiva-panel gan-ciclo-pastoreo-panel">
@@ -507,12 +570,61 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
         </StatusMessage>
       ) : null}
 
-      {!actual && !bloqueadoPorArchivo && (enDescanso || enEvaluacion) && ventana ? (
-        <div className="gan-ficha-preview">
-          <div className="gan-ficha-row"><span>Ventana mínima de reingreso</span><strong>{formatDateDisplay(ventana.fechaReingresoMin)}</strong></div>
-          <div className="gan-ficha-row"><span>Ventana recomendada</span><strong>{formatDateDisplay(ventana.fechaReingresoRecomendada)}</strong></div>
-          <div className="gan-ficha-row"><span>Ventana máxima</span><strong>{formatDateDisplay(ventana.fechaReingresoMax)}</strong></div>
+      {/* SPRINT-3D10.8.1: salida de ASSESSMENT_PENDING -- REINTENTABLE ->
+          reintento del cálculo; NO_PASTURE_PROFILE -> descanso declarado
+          por el productor. Nunca "Anular" como salida normal. */}
+      {!actual && !bloqueadoPorArchivo && descansoPendiente ? (
+        <div className="gan-stack">
+          {estadoOperativo?.motivoDescansoPendiente === 'NO_PASTURE_PROFILE' ? (
+            <>
+              <p className="gan-potrero-points-hint">
+                Esta pastura todavía no tiene un perfil técnico de descanso. Indica cuántos días deseas dejar descansar el potrero.
+              </p>
+              <FormField label="Días de descanso" required>
+                <input
+                  type="number"
+                  min={DIAS_DESCANSO_DECLARADO_MIN}
+                  max={DIAS_DESCANSO_DECLARADO_MAX}
+                  step="1"
+                  value={diasDescansoDeclarado}
+                  onChange={(event) => setDiasDescansoDeclarado(event.target.value)}
+                  disabled={guardandoDescansoDeclarado}
+                />
+              </FormField>
+              <StatusMessage type="error">{descansoDeclaradoError}</StatusMessage>
+              <div className="gan-potrero-actions">
+                <button type="button" className="gan-submit" onClick={handleGuardarDescansoDeclarado} disabled={guardandoDescansoDeclarado}>
+                  {guardandoDescansoDeclarado ? 'Guardando...' : 'Guardar descanso'}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="gan-potrero-points-hint">El pastoreo quedó registrado, pero todavía no se pudo calcular el descanso.</p>
+              <StatusMessage type="error">{reintentarDescansoError}</StatusMessage>
+              <div className="gan-potrero-actions">
+                <button type="button" className="gan-secondary-button" onClick={handleReintentarDescanso} disabled={reintentandoDescanso}>
+                  {reintentandoDescanso ? 'Reintentando...' : 'Reintentar cálculo de descanso'}
+                </button>
+              </div>
+            </>
+          )}
         </div>
+      ) : null}
+
+      {!actual && !bloqueadoPorArchivo && (enDescanso || enEvaluacion) && ventana ? (
+        ventana.origenDescanso === 'DECLARADO_PRODUCTOR' ? (
+          <div className="gan-ficha-preview">
+            <div className="gan-ficha-row"><span>Descanso declarado por el productor ({ventana.diasDescansoMin} días)</span></div>
+            <div className="gan-ficha-row"><span>Reingreso habilitado desde</span><strong>{formatDateDisplay(ventana.fechaReingresoMin)}</strong></div>
+          </div>
+        ) : (
+          <div className="gan-ficha-preview">
+            <div className="gan-ficha-row"><span>Ventana mínima de reingreso</span><strong>{formatDateDisplay(ventana.fechaReingresoMin)}</strong></div>
+            <div className="gan-ficha-row"><span>Ventana recomendada</span><strong>{formatDateDisplay(ventana.fechaReingresoRecomendada)}</strong></div>
+            <div className="gan-ficha-row"><span>Ventana máxima</span><strong>{formatDateDisplay(ventana.fechaReingresoMax)}</strong></div>
+          </div>
+        )
       ) : null}
 
       {/* SPRINT-3D9.5: el ciclo que motivó el descanso/evaluación vigente

@@ -8,7 +8,9 @@ import assert from 'node:assert/strict';
 import express from 'express';
 
 import createGanaderiaPotreroCicloPastoreoRouter from '../ganaderiaPotreroCicloPastoreo.js';
-import { __resetAgxAuthPoolForTests } from '../../db/agxAuthPool.js';
+import crypto from 'crypto';
+import { getAgxAuthPool, __resetAgxAuthPoolForTests } from '../../db/agxAuthPool.js';
+import { hashSessionSecret, sessionCookieName } from '../../security/ganaderiaSession.js';
 import { __resetAgxBusinessPoolForTests } from '../../db/agxBusinessPool.js';
 import { getConfig, __resetValidationStateForTests } from '../../config/env.js';
 import { errorHandler, notFound } from '../../middleware/errors.js';
@@ -105,6 +107,10 @@ describe('SPRINT-3D9.1: ciclos-pastoreo exige sesión con organización', () => 
     await assertAnonymousRejected('POST', '/101/potreros/5/ciclos-pastoreo/evaluar-reingreso', { fichaId: '9', resultado: 'APTO' });
   });
 
+  test('POST .../ciclos-pastoreo/:cicloId/descanso-declarado sin sesión -> 401', async () => {
+    await assertAnonymousRejected('POST', '/101/potreros/5/ciclos-pastoreo/42/descanso-declarado', { diasDescanso: 30 });
+  });
+
   test('GET .../ciclos-pastoreo/estado-operativo sin sesión -> 401', async () => {
     await assertAnonymousRejected('GET', '/101/potreros/5/ciclos-pastoreo/estado-operativo');
   });
@@ -114,6 +120,78 @@ describe('SPRINT-3D9.1: ciclos-pastoreo exige sesión con organización', () => 
     try {
       const response = await fetch(`${ctx.baseUrl}/101/potreros/5/ciclos-pastoreo/actual`);
       assert.equal(response.status, 401);
+    } finally {
+      await closeApp(ctx);
+    }
+  });
+});
+
+// SPRINT-3D10.8.1: el descanso declarado es una mutación -- con una
+// sesión de organización VÁLIDA pero sin X-CSRF-Token (o con uno
+// inválido) se rechaza ANTES de llegar al repositorio. agx_auth simulado
+// en memoria (mismo patrón que ganaderiaAdmin.test.js); Postgres-AGX-Business
+// no está configurado, así que cualquier acceso a negocio sería un 500.
+const FAKE_AUTH_CONNECTION_STRING = 'postgres://test:test@192.0.2.1:5432/never_connects';
+
+function wireFakeTenantSession() {
+  const rawToken = crypto.randomBytes(32).toString('base64url');
+  const tokenHash = hashSessionSecret(rawToken);
+  const pool = getAgxAuthPool({ AGX_AUTH_DATABASE_URL: FAKE_AUTH_CONNECTION_STRING });
+  pool.query = async (text, params = []) => {
+    if (text.includes('from agx.sesiones s') && params[0] === tokenHash) {
+      return {
+        rows: [{
+          sesion_id: 'sesion-1', cuenta_id: 'cuenta-1', organizacion_id: '00000000-0000-4000-8000-000000000001',
+          fecha_expiracion: new Date(Date.now() + 60_000).toISOString(), fecha_revocacion: null,
+          cuenta_estado: 'activa', email: 'test@example.com', nombre: 'Test',
+        }],
+      };
+    }
+    if (text.includes('fn_resolver_autorizacion_sesion') && params[0] === tokenHash) {
+      return { rows: [{ sesion_id: 'sesion-1', cuenta_id: 'cuenta-1', organizacion_id: '00000000-0000-4000-8000-000000000001', rol: 'propietario' }] };
+    }
+    return { rows: [] };
+  };
+  return rawToken;
+}
+
+describe('SPRINT-3D10.8.1: descanso-declarado exige CSRF', () => {
+  test('sesión válida SIN X-CSRF-Token -> 403 CSRF_REQUIRED', async () => {
+    const rawToken = wireFakeTenantSession();
+    const ctx = await startApp();
+    try {
+      const response = await fetch(`${ctx.baseUrl}/101/potreros/5/ciclos-pastoreo/42/descanso-declarado`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: `${sessionCookieName('development')}=${rawToken}`,
+          Origin: 'https://agrogenomax.com',
+        },
+        body: JSON.stringify({ diasDescanso: 30 }),
+      });
+      assert.equal(response.status, 403);
+      assert.equal((await response.json()).error, 'CSRF_REQUIRED');
+    } finally {
+      await closeApp(ctx);
+    }
+  });
+
+  test('sesión válida con X-CSRF-Token inválido -> 403 CSRF_INVALID', async () => {
+    const rawToken = wireFakeTenantSession();
+    const ctx = await startApp();
+    try {
+      const response = await fetch(`${ctx.baseUrl}/101/potreros/5/ciclos-pastoreo/42/descanso-declarado`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: `${sessionCookieName('development')}=${rawToken}`,
+          Origin: 'https://agrogenomax.com',
+          'X-CSRF-Token': 'token-invalido',
+        },
+        body: JSON.stringify({ diasDescanso: 30 }),
+      });
+      assert.equal(response.status, 403);
+      assert.equal((await response.json()).error, 'CSRF_INVALID');
     } finally {
       await closeApp(ctx);
     }

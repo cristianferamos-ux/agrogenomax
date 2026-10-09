@@ -24,7 +24,7 @@ import {
   getCicloActual,
   getCicloHistorial,
 } from '../services/ganaderia/potreroCicloPastoreoRepository.js';
-import { getEstadoOperativoPotrero } from '../services/ganaderia/potreroEstadoOperativoRepository.js';
+import { getEstadoOperativoPotrero, declararDescansoProductor } from '../services/ganaderia/potreroEstadoOperativoRepository.js';
 import { previewFichaBaseReal } from '../services/ganaderia/potreroCicloRealPressureRepository.js';
 import {
   registrarResidualReal,
@@ -272,6 +272,23 @@ export function validateAnularResidualRealBody(body) {
   return { motivo };
 }
 
+// SPRINT-3D10.8.1 -- descanso declarado por el productor (NO_PASTURE_PROFILE).
+// Entero 1..180: las fechas de reingreso son DATE y 180 es el tope del
+// CHECK potrero_descansos_dias_*_check.
+const ALLOWED_KEYS_DESCANSO_DECLARADO = new Set(['diasDescanso']);
+
+export function validateDescansoDeclaradoBody(body) {
+  const unknownKeys = Object.keys(body || {}).filter((key) => !ALLOWED_KEYS_DESCANSO_DECLARADO.has(key));
+  if (unknownKeys.length > 0) {
+    throw validationError('FORBIDDEN_FIELDS', `Campos no permitidos: ${unknownKeys.join(', ')}`);
+  }
+  const diasDescanso = body?.diasDescanso;
+  if (typeof diasDescanso !== 'number' || !Number.isInteger(diasDescanso) || diasDescanso < 1 || diasDescanso > 180) {
+    throw validationError('INVALID_DIAS_DESCANSO_DECLARADO', 'diasDescanso debe ser un entero entre 1 y 180.');
+  }
+  return { diasDescanso };
+}
+
 function sendSemanticError(res, error) {
   if (typeof error?.status === 'number' && typeof error?.code === 'string') {
     res.status(error.status).json({ error: error.code, message: error.message });
@@ -391,6 +408,31 @@ export default function createGanaderiaPotreroCicloPastoreoRouter({ appEnv, csrf
         actorCuentaId: cuentaId,
       });
       res.json({ ok: true, ...resultado });
+    } catch (error) {
+      if (sendSemanticError(res, error)) return;
+      next(error);
+    }
+  });
+
+  // SPRINT-3D10.8.1 -- POST .../ciclos-pastoreo/:cicloId/descanso-declarado
+  // -- el productor declara los días de descanso cuando la pastura no
+  // tiene perfil técnico (ASSESSMENT_PENDING / NO_PASTURE_PROFILE). 201 al
+  // crear; 200 en un reintento idéntico; 409 si ya hay descanso o no aplica.
+  router.post('/:cicloId/descanso-declarado', async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const { predioId, potreroId, cicloId } = req.params;
+      if (!isPredioIdValid(predioId) || !isPotreroIdValid(potreroId) || !isCicloIdValid(cicloId)) {
+        res.status(400).json({ error: 'INVALID_POTRERO_ID' });
+        return;
+      }
+      const payload = validateDescansoDeclaradoBody(req.body);
+      const { organizacionId, cuentaId } = req.ganaderiaAuth;
+
+      const { descanso, yaExistia } = await declararDescansoProductor(organizacionId, predioId, potreroId, cicloId, {
+        ...payload, actorCuentaId: cuentaId,
+      });
+      res.status(yaExistia ? 200 : 201).json({ ok: true, descanso, yaExistia });
     } catch (error) {
       if (sendSemanticError(res, error)) return;
       next(error);
