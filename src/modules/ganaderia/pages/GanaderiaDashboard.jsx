@@ -1,22 +1,13 @@
-import {
-  Beef,
-  ClipboardList,
-  Dna,
-  FileBarChart,
-  HeartPulse,
-  MapPin,
-  QrCode,
-  Scale,
-  ShieldPlus,
-  Sprout,
-  Stethoscope,
-} from 'lucide-react';
+import { Beef, FileBarChart, MapPin, Sprout } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ganaderiaApi } from '../api/ganaderiaApi.js';
 import GanaderiaSidebar from '../components/GanaderiaSidebar.jsx';
 import '../styles/ganaderia-dashboard.css';
 
+// SPRINT-3D11.SECURITY-LEGACY: sin tarjetas hacia los flujos legacy de
+// animales/QR/potreros (backend desmontado). Los potreros se registran
+// desde la tarjeta de cada predio.
 const operationCards = [
   {
     label: 'Registro de Predio',
@@ -25,54 +16,26 @@ const operationCards = [
     to: '/ganaderia/predios',
   },
   {
-    label: 'Registro de Potreros',
-    text: 'Asocia potreros a un predio registrado.',
+    label: 'Potreros',
+    text: 'Registra potreros desde la tarjeta de un predio registrado.',
     icon: Sprout,
-    to: '/ganaderia/potreros',
+    to: '/ganaderia/predios',
   },
   {
-    label: 'Registro de Animales',
-    text: 'Valida un QR antes de registrar animales nuevos.',
+    label: 'Mis animales',
+    text: 'El módulo de animales está en preparación.',
     icon: Beef,
     to: '/ganaderia/animales',
   },
   {
-    label: 'Escanear QR',
-    text: 'Abre cámara o ingresa código manual.',
-    icon: QrCode,
-    to: '/ganaderia/escanear-qr',
-  },
-  {
-    label: 'Mis animales',
-    text: 'Consulta animales registrados y abre su ficha.',
-    icon: ClipboardList,
-    to: '/ganaderia/animales/listado',
-  },
-  {
-    label: 'Ficha Animal',
-    text: 'Abre la trazabilidad completa del animal seleccionado.',
-    icon: ShieldPlus,
-    to: '/ganaderia/animales/listado?modulo=ficha',
-  },
-  {
-    label: 'Tratamientos',
-    text: 'Busca un animal para abrir su historia clínica.',
-    icon: Stethoscope,
-    to: '/ganaderia/animales/listado?modulo=tratamientos',
+    label: 'Reportes',
+    text: 'Disponible en una fase posterior.',
+    icon: FileBarChart,
+    to: '/ganaderia/proximamente/reportes',
   },
 ];
 
-const flowSteps = ['Predio', 'Potrero', 'Animal / QR', 'Ficha animal'];
-
-const secondaryModules = [
-  { label: 'Ficha', icon: ShieldPlus, to: '/ganaderia/animales/listado?modulo=ficha' },
-  { label: 'Pesajes', icon: Scale, to: '/ganaderia/animales/listado?modulo=pesajes' },
-  { label: 'Vacunaciones', icon: HeartPulse, to: '/ganaderia/animales/listado?modulo=vacunaciones' },
-  { label: 'Tratamientos', icon: Stethoscope, to: '/ganaderia/animales/listado?modulo=tratamientos' },
-  { label: 'Reproducción', icon: Sprout, to: '/ganaderia/animales/listado?modulo=reproduccion' },
-  { label: 'Genética', icon: Dna, to: '/ganaderia/animales/listado?modulo=genetica' },
-  { label: 'Reportes', icon: FileBarChart, to: '/ganaderia/proximamente/reportes' },
-];
+const flowSteps = ['Predio', 'Potrero', 'Animal'];
 
 export default function GanaderiaDashboard() {
   // Predios: fuente tenant-safe (Postgres-AGX-Business). Potreros y Animales
@@ -143,7 +106,7 @@ export default function GanaderiaDashboard() {
           <div>
             <span className="gan-dash-badge">Flujo operativo</span>
             <h1>AgroGenomaX Ganadería Inteligente</h1>
-            <p>Gestiona tu hato con trazabilidad QR, control productivo, sanidad y decisiones inteligentes por animal.</p>
+            <p>Gestiona tus predios y potreros con datos reales de tu cuenta y decisiones inteligentes de pastoreo.</p>
           </div>
           <Link to="/ganaderia/predios" className="gan-dash-btn is-primary">
             Registrar predio <MapPin size={17} />
@@ -166,10 +129,10 @@ export default function GanaderiaDashboard() {
         <section className="gan-dash-operativo-panel">
           <div className="gan-dash-operativo-copy">
             <span className="gan-dash-badge">Operación de campo</span>
-            <h2>Operación ganadera por QR desde campo.</h2>
+            <h2>Operación ganadera desde campo.</h2>
             <p>
-              Primero registra el predio y completa su información básica. Luego registra los potreros. Después
-              podrás registrar animales nuevos o abrir fichas mediante QR con datos reales de tu cuenta.
+              Primero registra el predio y completa su información básica. Luego registra los potreros. El registro
+              de animales estará disponible próximamente.
             </p>
           </div>
 
@@ -196,19 +159,6 @@ export default function GanaderiaDashboard() {
               </Link>
             ))}
           </div>
-        </section>
-
-        <section className="gan-dash-section">
-          <h2>Módulos por animal seleccionado</h2>
-          <div className="gan-dash-module-row">
-            {secondaryModules.map(({ label, icon: Icon, to }) => (
-              <Link key={label} to={to} className="gan-dash-module-link">
-                <Icon size={17} />
-                <span>{label}</span>
-              </Link>
-            ))}
-          </div>
-          <p className="gan-dash-helper">Selecciona un animal para abrir este módulo.</p>
         </section>
       </main>
     </div>

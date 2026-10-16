@@ -120,7 +120,8 @@ test('GanaderiaDashboard.jsx: copy del botón principal es "Registrar predio" (s
 });
 
 test('GanaderiaDashboard.jsx: paso del flujo es "Predio" (sin "y propietario")', () => {
-  assert.match(dashboardSource, /const flowSteps = \['Predio', 'Potrero', 'Animal \/ QR', 'Ficha animal'\];/);
+  // SPRINT-3D11.SECURITY-LEGACY: sin paso "Animal / QR" ni "Ficha animal" (flujos legacy desmontados).
+  assert.match(dashboardSource, /const flowSteps = \['Predio', 'Potrero', 'Animal'\];/);
   assert.doesNotMatch(dashboardSource, /'Predio y propietario'/);
 });
 

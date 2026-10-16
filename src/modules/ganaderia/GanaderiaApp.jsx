@@ -1,16 +1,7 @@
-import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
-import AnimalFichaBasica from './animales/AnimalFichaBasica.jsx';
-import AnimalGeneticaTab from './animales/AnimalGeneticaTab.jsx';
-import AnimalPesajesTab from './animales/AnimalPesajesTab.jsx';
-import AnimalReproduccionTab from './animales/AnimalReproduccionTab.jsx';
-import AnimalTratamientosTab from './animales/AnimalTratamientosTab.jsx';
-import AnimalVacunacionesTab from './animales/AnimalVacunacionesTab.jsx';
+import { Navigate, Route, Routes } from 'react-router-dom';
 import GanaderiaBackLink from './components/GanaderiaBackLink.jsx';
 import GanaderiaShell from './components/GanaderiaShell.jsx';
-import AnimalesListPage from './pages/AnimalesListPage.jsx';
-import PotrerosPage from './potreros/PotrerosPage.jsx';
 import PrediosPage from './predios/PrediosPage.jsx';
-import QrEntryPage from './qr/QrEntryPage.jsx';
 
 function ComingSoon({ title }) {
   return (
@@ -25,80 +16,26 @@ function ComingSoon({ title }) {
   );
 }
 
-function AnimalSubmodulePage({ title, children }) {
-  const { id } = useParams();
-  return (
-    <div className="gan-panel">
-      <GanaderiaBackLink to={`/ganaderia/animal/${id}`}>Volver a Ficha Animal</GanaderiaBackLink>
-      <div className="gan-section-heading">
-        <span className="gan-eyebrow">Ficha Animal</span>
-        <h2>{title}</h2>
-      </div>
-      {children}
-    </div>
-  );
-}
-
+// SPRINT-3D11.SECURITY-LEGACY: las páginas legacy de animales/QR/potreros
+// (QrEntryPage, AnimalesListPage, AnimalFichaBasica y pestañas,
+// PotrerosPage) consumían /api/animales, /api/qr, /api/predios,
+// /api/potreros, etc., ya desmontados del backend. Sus rutas quedan como
+// redirecciones/placeholder -- nunca vuelven a montar esas páginas. Los
+// potreros vigentes se registran desde la tarjeta de cada predio
+// (PrediosPage, /api/ganaderia/predios/:predioId/potreros).
 export default function GanaderiaApp() {
-  const location = useLocation();
-  const isPublicQr = location.pathname.startsWith('/qr/');
-
   return (
     <GanaderiaShell>
-      {isPublicQr ? (
-        <QrEntryPage mode="manual" />
-      ) : (
-        <Routes>
-          <Route index element={<Navigate to="/ganaderia/dashboard" replace />} />
-          <Route path="predios" element={<PrediosPage />} />
-          <Route path="potreros" element={<PotrerosPage />} />
-          <Route path="animales" element={<QrEntryPage mode="manual" />} />
-          <Route path="animales/listado" element={<AnimalesListPage />} />
-          <Route path="escanear-qr" element={<QrEntryPage mode="scan" />} />
-          <Route path="animal/:id" element={<AnimalFichaBasica />} />
-          <Route
-            path="animal/:id/pesajes"
-            element={
-              <AnimalSubmodulePage title="Pesajes">
-                <AnimalPesajesTab />
-              </AnimalSubmodulePage>
-            }
-          />
-          <Route
-            path="animal/:id/vacunaciones"
-            element={
-              <AnimalSubmodulePage title="Vacunaciones">
-                <AnimalVacunacionesTab />
-              </AnimalSubmodulePage>
-            }
-          />
-          <Route
-            path="animal/:id/tratamientos"
-            element={
-              <AnimalSubmodulePage title="Tratamientos">
-                <AnimalTratamientosTab />
-              </AnimalSubmodulePage>
-            }
-          />
-          <Route
-            path="animal/:id/reproduccion"
-            element={
-              <AnimalSubmodulePage title="REPRODUCCIÓN">
-                <AnimalReproduccionTab />
-              </AnimalSubmodulePage>
-            }
-          />
-          <Route path="proximamente/:modulo" element={<ComingSoon title="Módulo no disponible todavía" />} />
-          <Route
-            path="animal/:id/genetica"
-            element={
-              <AnimalSubmodulePage title="Genética">
-                <AnimalGeneticaTab />
-              </AnimalSubmodulePage>
-            }
-          />
-        </Routes>
-      )}
+      <Routes>
+        <Route index element={<Navigate to="/ganaderia/dashboard" replace />} />
+        <Route path="predios" element={<PrediosPage />} />
+        <Route path="potreros" element={<Navigate to="/ganaderia/predios" replace />} />
+        <Route path="animales" element={<ComingSoon title="Animales: módulo en preparación" />} />
+        <Route path="animales/*" element={<Navigate to="/ganaderia/animales" replace />} />
+        <Route path="escanear-qr" element={<Navigate to="/ganaderia/animales" replace />} />
+        <Route path="animal/*" element={<Navigate to="/ganaderia/animales" replace />} />
+        <Route path="proximamente/:modulo" element={<ComingSoon title="Módulo no disponible todavía" />} />
+      </Routes>
     </GanaderiaShell>
   );
 }

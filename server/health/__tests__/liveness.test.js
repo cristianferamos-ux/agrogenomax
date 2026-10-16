@@ -260,8 +260,11 @@ describe('LOTE-005: server/health/liveness.js', () => {
   test('25. el endpoint se registra antes de rutas de negocio', () => {
     const livenessIndex = indexSource.indexOf("app.get('/api/health/live'");
     const catastroxRouteIndex = indexSource.indexOf("app.use('/api/catastrox'");
-    const prediosRouteIndex = indexSource.indexOf("app.use('/api/predios'");
+    // SPRINT-3D11.SECURITY-LEGACY: /api/predios legacy ya no se monta; la
+    // referencia de "ruta de negocio" pasa a ser /api/ganaderia/predios.
+    const prediosRouteIndex = indexSource.indexOf("'/api/ganaderia/predios'");
     assert.ok(livenessIndex > -1, 'la ruta debe estar registrada en server/index.js');
+    assert.ok(catastroxRouteIndex > -1 && prediosRouteIndex > -1);
     assert.ok(livenessIndex < catastroxRouteIndex);
     assert.ok(livenessIndex < prediosRouteIndex);
   });
