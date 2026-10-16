@@ -46,6 +46,7 @@ import RequireGanaderiaAuth from './modules/ganaderia/auth/RequireGanaderiaAuth.
 import RequireGanaderiaSuperAdmin from './modules/ganaderia/auth/RequireGanaderiaSuperAdmin.jsx';
 import GanaderiaAdminShell from './modules/ganaderia/admin/GanaderiaAdminShell.jsx';
 import GanaderiaAdminCrearCuenta from './modules/ganaderia/admin/GanaderiaAdminCrearCuenta.jsx';
+import QrNoDisponiblePage from './modules/ganaderia/qr/QrNoDisponiblePage.jsx';
 import CatastroXApp from './modules/catastrox/CatastroXApp.jsx';
 import AgroGenomaXHome from './components/home/AgroGenomaXHome.jsx';
 
@@ -284,8 +285,8 @@ function App() {
             GanaderiaAuthProvider por ruta -- cada montaje consulta la sesión
             real (GET /api/ganaderia/auth/session), nunca estado viejo del
             navegador (§8/§11). /qr/:codigo permanece público y AJENO a este
-            provider/guard -- QrEntryPage vía GanaderiaApp no debe exigir
-            sesión (uso público por QR físico). */}
+            provider/guard -- SPRINT-3D11.SECURITY-LEGACY: renderiza una
+            página estática (QrNoDisponiblePage), sin consultar ninguna API. */}
         <Route
           path="/ganaderia/login"
           element={
@@ -341,7 +342,7 @@ function App() {
           }
         />
         <Route path="/catastrox/*" element={<CatastroXApp />} />
-        <Route path="/qr/:codigo" element={<GanaderiaApp />} />
+        <Route path="/qr/:codigo" element={<QrNoDisponiblePage />} />
       </Routes>
     </BrowserRouter>
   );

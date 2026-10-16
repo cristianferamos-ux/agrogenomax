@@ -14,7 +14,6 @@ import { closeCatastroxDbPool } from './catastroxDb.js';
 import { closeAgxAuthPool } from './db/agxAuthPool.js';
 import { createDeliveryWorker } from './services/catastrox/deliveryWorker.js';
 import { findAutonomousDeliveryJobIds, processDeliveryJob } from './services/catastrox/deliveryJobService.js';
-import createAnimalesRouter from './routes/animales.js';
 import catastroxRouter from './routes/catastrox.js';
 import catastroxPaymentsRouter from './routes/catastroxPayments.js';
 import createGanaderiaAdminRouter from './routes/ganaderiaAdmin.js';
@@ -30,14 +29,6 @@ import createGanaderiaPotreroCicloPastoreoRouter from './routes/ganaderiaPotrero
 import createGanaderiaCatalogoPasturasRouter from './routes/ganaderiaCatalogoPasturas.js';
 import createGanaderiaCategoriasProductivasRouter from './routes/ganaderiaCategoriasProductivas.js';
 import createHealthRouter from './routes/health.js';
-import createPesajesRouter from './routes/pesajes.js';
-import createPotrerosRouter from './routes/potreros.js';
-import createPrediosRouter from './routes/predios.js';
-import createQrRouter from './routes/qr.js';
-import createRazasRouter from './routes/razas.js';
-import createReproduccionRouter from './routes/reproduccion.js';
-import createTratamientosRouter from './routes/tratamientos.js';
-import createVacunacionesRouter from './routes/vacunaciones.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -287,35 +278,16 @@ app.use(
   }),
 );
 
-// FIX/GANADERIA-SPRINT-0-BUSINESS-AUTH: hallazgo crítico de la auditoría
-// "Organizaciones y QR" -- estas rutas de negocio legacy estaban montadas
-// sin ningún middleware de autenticación (predios/potreros/qr/animales/
-// pesajes/vacunaciones/tratamientos/reproduccion/razas, en especial
-// POST /api/qr/asociar, que permitía reasignar cualquier QR a cualquier
-// animal sin sesión). Cada router ahora es una fábrica que exige sesión
-// Ganadería real (createRequireGanaderiaIdentity -- SOLO agx.sesiones/
-// agx.cuentas, nunca agx.organizaciones/membresias: esas tablas todavía
-// no existen en producción) + CSRF (createRequireGanaderiaCsrf, se
-// auto-omite en GET/HEAD/OPTIONS) en mutaciones. GET /api/qr/:codigo es
-// la única excepción deliberada, gateada dentro de qr.js -- ver su
-// comentario de cabecera. NO se agrega scoping por organización todavía
-// (Sprint 1+, cuando esas tablas existan en producción).
-const ganaderiaBusinessRouterConfig = {
-  appEnv: appConfig.appEnv,
-  csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
-  allowedOrigins: appConfig.cors.allowedOrigins,
-};
-const razasRouterInstance = createRazasRouter(ganaderiaBusinessRouterConfig);
-app.use('/api/predios', createPrediosRouter(ganaderiaBusinessRouterConfig));
-app.use('/api/potreros', createPotrerosRouter(ganaderiaBusinessRouterConfig));
-app.use('/api/qr', createQrRouter(ganaderiaBusinessRouterConfig));
-app.use('/api/animales', createAnimalesRouter(ganaderiaBusinessRouterConfig));
-app.use('/api/razas', razasRouterInstance);
-app.use('/api', razasRouterInstance);
-app.use('/api', createPesajesRouter(ganaderiaBusinessRouterConfig));
-app.use('/api', createVacunacionesRouter(ganaderiaBusinessRouterConfig));
-app.use('/api', createTratamientosRouter(ganaderiaBusinessRouterConfig));
-app.use('/api', createReproduccionRouter(ganaderiaBusinessRouterConfig));
+// SPRINT-3D11.SECURITY-LEGACY: los routers de negocio legacy (predios,
+// potreros, qr, animales, razas, pesajes, vacunaciones, tratamientos,
+// reproduccion -- server/routes/*.js sobre el Postgres legacy de
+// server/db.js) YA NO se montan. Exigían identidad pero nunca
+// organización, la base legacy no tiene columna de tenant ni RLS, y
+// GET /api/qr/:codigo era público con códigos secuenciales (auditoría
+// read-only de producción 3D11.SECURITY-LEGACY). Sus rutas responden ahora
+// el 404 genérico de notFound. Los archivos fuente y los datos legacy se
+// conservan intactos; los dominios vigentes viven en /api/ganaderia/*.
+// No volver a montarlos (ver server/__tests__/architecture/legacyRoutersUnmounted.test.js).
 
 app.use(notFound);
 app.use(errorHandler);

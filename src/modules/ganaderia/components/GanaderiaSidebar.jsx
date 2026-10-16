@@ -1,19 +1,4 @@
-import {
-  Beef,
-  ClipboardList,
-  Dna,
-  FileBarChart,
-  HeartPulse,
-  Home,
-  LayoutDashboard,
-  LogOut,
-  MapPin,
-  QrCode,
-  Scale,
-  ShieldPlus,
-  Sprout,
-  Stethoscope,
-} from 'lucide-react';
+import { Beef, ClipboardList, FileBarChart, Home, LayoutDashboard, LogOut, MapPin } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useGanaderiaAuthOptional } from '../auth/GanaderiaAuthContext.jsx';
@@ -34,20 +19,15 @@ function rolLabel(rol) {
   return ROL_LABELS[rol] ?? rol ?? '';
 }
 
+// SPRINT-3D11.SECURITY-LEGACY: sin enlaces a los flujos legacy de
+// animales/QR/potreros (backend desmontado). Los potreros se registran
+// desde la tarjeta de cada predio; "Mis animales" lleva a un placeholder
+// hasta el módulo nuevo (3D11.2).
 const navItems = [
   { label: 'Home comercial', icon: Home, to: '/' },
   { label: 'Inicio', icon: LayoutDashboard, to: '/ganaderia/dashboard' },
   { label: 'Registro de Predio', icon: MapPin, to: '/ganaderia/predios' },
-  { label: 'Registro de Potreros', icon: Sprout, to: '/ganaderia/potreros' },
-  { label: 'Mis animales', icon: Beef, to: '/ganaderia/animales/listado' },
-  { label: 'Registro de Animales', icon: ClipboardList, to: '/ganaderia/animales' },
-  { label: 'Escanear QR', icon: QrCode, to: '/ganaderia/escanear-qr' },
-  { label: 'Ficha Animal', icon: ShieldPlus, to: '/ganaderia/animales/listado?modulo=ficha' },
-  { label: 'Pesajes', icon: Scale, to: '/ganaderia/animales/listado?modulo=pesajes' },
-  { label: 'Vacunaciones', icon: HeartPulse, to: '/ganaderia/animales/listado?modulo=vacunaciones' },
-  { label: 'Tratamientos', icon: Stethoscope, to: '/ganaderia/animales/listado?modulo=tratamientos' },
-  { label: 'Reproducción', icon: Sprout, to: '/ganaderia/animales/listado?modulo=reproduccion' },
-  { label: 'Genética', icon: Dna, to: '/ganaderia/animales/listado?modulo=genetica' },
+  { label: 'Mis animales', icon: Beef, to: '/ganaderia/animales' },
   { label: 'Reportes', icon: FileBarChart, to: '/ganaderia/proximamente/reportes' },
 ];
 
