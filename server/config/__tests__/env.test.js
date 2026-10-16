@@ -1315,3 +1315,247 @@ describe('CATX-FREEZE-01: resolveCommerceMode()', () => {
     assert.equal(config.commerceMode, null);
   });
 });
+
+// STAGING-PASSWORD-BOOT: con CATASTROX_COMMERCE_MODE=password (cobro con
+// Wompi suspendido, acceso temporal por contraseña activo) staging exige solo
+// la base + las dos variables del acceso temporal. wompi_test/wompi_live y el
+// modo ausente conservan exactamente el bucket staging actual, y cualquier
+// variable comercial PRESENTE sigue validándose igual. Production no cambia.
+const TEST_TEMP_ACCESS_SECRET = 'contrasena-temporal-de-prueba';
+const TEST_TEMP_ACCESS_TOKEN_KEY = Buffer.alloc(32, 7).toString('base64');
+
+const STAGING_COMMERCE_ONLY_VARIABLES = Object.freeze([
+  'CATASTROX_PII_ENCRYPTION_KEY',
+  'CATASTROX_PII_HASH_SECRET',
+  'CATASTROX_VERIFY_HANDLE_KEY',
+  'CATASTROX_CHECKOUT_IDENTITY_KEY',
+  'WOMPI_PUBLIC_KEY_TEST',
+  'WOMPI_INTEGRITY_SECRET_TEST',
+  'WOMPI_EVENTS_SECRET_TEST',
+  'CATASTROX_FRONTEND_URL',
+  'EMAIL_PROVIDER',
+  'RESEND_API_KEY',
+  'EMAIL_FROM',
+]);
+
+function stagingPasswordSource(overrides = {}) {
+  return {
+    APP_ENV: 'staging',
+    CATASTROX_COMMERCE_MODE: 'password',
+    DATABASE_URL: 'postgres://staging-host/agx',
+    CATASTROX_DATABASE_URL: 'postgres://staging-host/gis',
+    HEALTH_MONITOR_TOKEN: 'a'.repeat(32),
+    PUBLIC_APP_ORIGIN: TEST_PUBLIC_APP_ORIGIN,
+    CATASTROX_TEMP_ACCESS_SECRET: TEST_TEMP_ACCESS_SECRET,
+    CATASTROX_TEMP_ACCESS_TOKEN_KEY: TEST_TEMP_ACCESS_TOKEN_KEY,
+    ...overrides,
+  };
+}
+
+function productionPasswordSource(overrides = {}) {
+  return {
+    APP_ENV: 'production',
+    CATASTROX_COMMERCE_MODE: 'password',
+    DATABASE_URL: 'postgres://real-prod-host/agx',
+    CATASTROX_DATABASE_URL: 'postgres://real-prod-host/gis',
+    HEALTH_MONITOR_TOKEN: 'a'.repeat(32),
+    CATASTROX_PII_ENCRYPTION_KEY: TEST_PII_ENCRYPTION_KEY,
+    CATASTROX_PII_HASH_SECRET: TEST_PII_HASH_SECRET,
+    CATASTROX_VERIFY_HANDLE_KEY: TEST_VERIFY_HANDLE_KEY,
+    CATASTROX_CHECKOUT_IDENTITY_KEY: TEST_CHECKOUT_IDENTITY_KEY,
+    PUBLIC_APP_ORIGIN: TEST_PUBLIC_APP_ORIGIN,
+    ...overrides,
+  };
+}
+
+function isConfigError(code, variable) {
+  return (error) => error instanceof ConfigurationError && error.code === code && error.variable === variable;
+}
+
+describe('STAGING-PASSWORD-BOOT: staging + CATASTROX_COMMERCE_MODE=password', () => {
+  beforeEach(() => {
+    __resetValidationStateForTests();
+  });
+
+  test('1) arranca sin ninguna de las 11 variables exclusivas del flujo comercial y expone commerceMode=password', () => {
+    const source = stagingPasswordSource();
+    for (const variable of STAGING_COMMERCE_ONLY_VARIABLES) assert.equal(source[variable], undefined, variable);
+    const config = getConfig(source, {});
+    assert.equal(config.appEnv, 'staging');
+    assert.equal(config.commerceMode, 'password');
+  });
+
+  test('1b) la base del bucket staging sigue siendo obligatoria en password', () => {
+    for (const variable of ['DATABASE_URL', 'CATASTROX_DATABASE_URL', 'HEALTH_MONITOR_TOKEN', 'PUBLIC_APP_ORIGIN']) {
+      __resetValidationStateForTests();
+      const source = stagingPasswordSource();
+      delete source[variable];
+      assert.throws(() => getConfig(source, {}), isConfigError('REQUIRED_VARIABLE_MISSING', variable), variable);
+    }
+  });
+
+  test('2) sin CATASTROX_TEMP_ACCESS_SECRET o sin CATASTROX_TEMP_ACCESS_TOKEN_KEY (ausente o solo espacios) -> REQUIRED_VARIABLE_MISSING', () => {
+    for (const variable of ['CATASTROX_TEMP_ACCESS_SECRET', 'CATASTROX_TEMP_ACCESS_TOKEN_KEY']) {
+      __resetValidationStateForTests();
+      const source = stagingPasswordSource();
+      delete source[variable];
+      assert.throws(() => getConfig(source, {}), isConfigError('REQUIRED_VARIABLE_MISSING', variable), variable);
+      __resetValidationStateForTests();
+      assert.throws(
+        () => getConfig(stagingPasswordSource({ [variable]: '   ' }), {}),
+        isConfigError('REQUIRED_VARIABLE_MISSING', variable),
+        `${variable} solo espacios`,
+      );
+    }
+  });
+
+  test('2b) CATASTROX_TEMP_ACCESS_SECRET solo exige presencia (sin reglas de longitud nuevas)', () => {
+    const config = getConfig(stagingPasswordSource({ CATASTROX_TEMP_ACCESS_SECRET: 'x' }), {});
+    assert.equal(config.commerceMode, 'password');
+  });
+
+  test('3) CATASTROX_TEMP_ACCESS_TOKEN_KEY inválida (31 bytes, 33 bytes, base64 no canónico, espacios) -> INSECURE_VALUE', () => {
+    const urlSafe = Buffer.alloc(32, 0xfb).toString('base64').replace(/\+/g, '-').replace(/\//g, '_');
+    const invalidKeys = {
+      '31 bytes': Buffer.alloc(31, 7).toString('base64'),
+      '33 bytes': Buffer.alloc(33, 7).toString('base64'),
+      'base64url (no estándar)': urlSafe,
+      'sin padding': TEST_TEMP_ACCESS_TOKEN_KEY.slice(0, -1),
+      'espacio inicial': ` ${TEST_TEMP_ACCESS_TOKEN_KEY}`,
+      'espacio final': `${TEST_TEMP_ACCESS_TOKEN_KEY} `,
+    };
+    for (const [label, key] of Object.entries(invalidKeys)) {
+      __resetValidationStateForTests();
+      assert.throws(
+        () => getConfig(stagingPasswordSource({ CATASTROX_TEMP_ACCESS_TOKEN_KEY: key }), {}),
+        isConfigError('INSECURE_VALUE', 'CATASTROX_TEMP_ACCESS_TOKEN_KEY'),
+        label,
+      );
+    }
+  });
+
+  test('3b) la regla de arranque coincide con loadTokenKey(): la clave válida la aceptan ambos y las inválidas las rechazan ambos', async () => {
+    const { createTemporaryAccessCapability } = await import('../../services/catastrox/temporaryAccessCapability.js');
+    const previous = process.env.CATASTROX_TEMP_ACCESS_TOKEN_KEY;
+    const tryRuntime = (key) => {
+      process.env.CATASTROX_TEMP_ACCESS_TOKEN_KEY = key;
+      try {
+        createTemporaryAccessCapability({ canonicalPredioId: 'P1', lookupId: 'L1', packageId: 'plus' });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    try {
+      assert.equal(tryRuntime(TEST_TEMP_ACCESS_TOKEN_KEY), true);
+      for (const key of [Buffer.alloc(31, 7).toString('base64'), Buffer.alloc(33, 7).toString('base64'), ` ${TEST_TEMP_ACCESS_TOKEN_KEY}`]) {
+        assert.equal(tryRuntime(key), false, key);
+      }
+    } finally {
+      if (previous === undefined) delete process.env.CATASTROX_TEMP_ACCESS_TOKEN_KEY;
+      else process.env.CATASTROX_TEMP_ACCESS_TOKEN_KEY = previous;
+    }
+    assert.equal(getConfig(stagingPasswordSource(), {}).commerceMode, 'password');
+  });
+
+  test('4) una variable comercial PRESENTE pero mal formada sigue fallando en password con su validación existente', () => {
+    const malformed = {
+      WOMPI_PUBLIC_KEY_TEST: 'pub_prod_abcdef123456',
+      WOMPI_EVENTS_SECRET_TEST: 'corto',
+      WOMPI_INTEGRITY_SECRET_TEST: ' secreto-con-espacio-inicial-0000000000',
+      CATASTROX_FRONTEND_URL: 'http://localhost:5173',
+      EMAIL_PROVIDER: 'smtp',
+      RESEND_API_KEY: 'TU_RESEND_API_KEY',
+      EMAIL_FROM: 'no-es-un-correo',
+      CATASTROX_PII_ENCRYPTION_KEY: Buffer.alloc(16, 1).toString('base64'),
+      CATASTROX_PII_HASH_SECRET: 'b'.repeat(10),
+      CATASTROX_VERIFY_HANDLE_KEY: Buffer.alloc(31, 2).toString('base64'),
+      CATASTROX_CHECKOUT_IDENTITY_KEY: 'no-es-base64',
+    };
+    assert.deepEqual(Object.keys(malformed).sort(), [...STAGING_COMMERCE_ONLY_VARIABLES].sort());
+    for (const [variable, value] of Object.entries(malformed)) {
+      __resetValidationStateForTests();
+      assert.throws(
+        () => getConfig(stagingPasswordSource({ [variable]: value }), {}),
+        (error) => error instanceof ConfigurationError && error.variable === variable && error.code !== 'REQUIRED_VARIABLE_MISSING',
+        variable,
+      );
+    }
+  });
+
+  test('4b) variables comerciales presentes y válidas siguen siendo aceptadas en password', () => {
+    const config = getConfig({ ...validStagingSource(), ...stagingPasswordSource() }, {});
+    assert.equal(config.commerceMode, 'password');
+  });
+
+  test('5/6) staging + wompi_test y staging + wompi_live conservan las 11 variables comerciales como obligatorias', () => {
+    for (const mode of ['wompi_test', 'wompi_live']) {
+      __resetValidationStateForTests();
+      assert.equal(getConfig(validStagingSource({ CATASTROX_COMMERCE_MODE: mode }), {}).commerceMode, mode);
+      for (const variable of STAGING_COMMERCE_ONLY_VARIABLES) {
+        __resetValidationStateForTests();
+        const source = validStagingSource({ CATASTROX_COMMERCE_MODE: mode });
+        delete source[variable];
+        assert.throws(() => getConfig(source, {}), isConfigError('REQUIRED_VARIABLE_MISSING', variable), `${mode}: ${variable}`);
+      }
+    }
+  });
+
+  test('5b) wompi_test/wompi_live no exigen las variables de acceso temporal (sin cambio respecto de hoy)', () => {
+    for (const mode of ['wompi_test', 'wompi_live']) {
+      __resetValidationStateForTests();
+      const source = validStagingSource({ CATASTROX_COMMERCE_MODE: mode });
+      assert.equal(source.CATASTROX_TEMP_ACCESS_SECRET, undefined);
+      assert.equal(getConfig(source, {}).commerceMode, mode);
+    }
+  });
+
+  test('7) staging sin CATASTROX_COMMERCE_MODE conserva el comportamiento legacy (bucket comercial completo)', () => {
+    assert.equal(getConfig(validStagingSource(), {}).commerceMode, null);
+    for (const variable of STAGING_COMMERCE_ONLY_VARIABLES) {
+      __resetValidationStateForTests();
+      const source = validStagingSource();
+      delete source[variable];
+      assert.throws(() => getConfig(source, {}), isConfigError('REQUIRED_VARIABLE_MISSING', variable), variable);
+    }
+    __resetValidationStateForTests();
+    const withoutMode = stagingPasswordSource();
+    delete withoutMode.CATASTROX_COMMERCE_MODE;
+    assert.throws(() => getConfig(withoutMode, {}), (error) => error.code === 'REQUIRED_VARIABLE_MISSING');
+  });
+
+  test('8) staging + password + WOMPI_ENV=production sigue fallando por la regla actual', () => {
+    assert.throws(
+      () => getConfig(stagingPasswordSource({ WOMPI_ENV: 'production' }), {}),
+      isConfigError('INCOMPATIBLE_COMBINATION', 'WOMPI_ENV'),
+    );
+  });
+
+  test('8b) un modo inválido sigue fallando con INVALID_COMMERCE_MODE, también en staging', () => {
+    assert.throws(
+      () => getConfig(stagingPasswordSource({ CATASTROX_COMMERCE_MODE: 'disabled' }), {}),
+      isConfigError('INVALID_COMMERCE_MODE', 'CATASTROX_COMMERCE_MODE'),
+    );
+  });
+
+  test('9) production + password conserva su bucket: sigue exigiendo PII/identidad y NO exige las variables temporales', () => {
+    assert.equal(getConfig(productionPasswordSource(), {}).commerceMode, 'password');
+    for (const variable of ['CATASTROX_PII_ENCRYPTION_KEY', 'CATASTROX_PII_HASH_SECRET', 'CATASTROX_VERIFY_HANDLE_KEY', 'CATASTROX_CHECKOUT_IDENTITY_KEY']) {
+      __resetValidationStateForTests();
+      const source = productionPasswordSource();
+      delete source[variable];
+      assert.throws(() => getConfig(source, {}), isConfigError('REQUIRED_VARIABLE_MISSING', variable), variable);
+    }
+  });
+
+  test('9b) production + password con las variables temporales presentes y válidas sigue arrancando', () => {
+    const config = getConfig(
+      productionPasswordSource({
+        CATASTROX_TEMP_ACCESS_SECRET: TEST_TEMP_ACCESS_SECRET,
+        CATASTROX_TEMP_ACCESS_TOKEN_KEY: TEST_TEMP_ACCESS_TOKEN_KEY,
+      }),
+      {},
+    );
+    assert.equal(config.appEnv, 'production');
+  });
+});

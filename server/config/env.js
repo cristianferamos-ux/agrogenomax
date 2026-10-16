@@ -70,11 +70,10 @@ const REQUIRED_VARIABLES_BY_ENV = Object.freeze({
     'EMAIL_PROVIDER',
     'RESEND_API_KEY',
     'EMAIL_FROM',
-    // AGX-SUPERADMIN-AUTH-006: el servicio Railway "production" corre hoy
-    // con APP_ENV=staging (anomalía documentada, no corregida aquí) -- por
-    // eso PUBLIC_APP_ORIGIN debe ser obligatoria también en este bucket
-    // para que el enlace real de /ganaderia/restablecer-contrasena nunca
-    // se construya sin autoridad explícita.
+    // AGX-SUPERADMIN-AUTH-006: PUBLIC_APP_ORIGIN es obligatoria en
+    // staging igual que en production, para que el enlace real de
+    // /ganaderia/restablecer-contrasena nunca se construya sin autoridad
+    // explícita.
     'PUBLIC_APP_ORIGIN',
   ]),
   production: Object.freeze([
@@ -91,6 +90,45 @@ const REQUIRED_VARIABLES_BY_ENV = Object.freeze({
     'PUBLIC_APP_ORIGIN',
   ]),
 });
+
+// STAGING-PASSWORD-BOOT: variables del bucket staging que pertenecen
+// EXCLUSIVAMENTE al flujo comercial (Wompi/comprador/OTP/correo). Con
+// CATASTROX_COMMERCE_MODE=password ese flujo está suspendido: /customers y
+// /checkout responden 403 COMMERCE_DISABLED, y las rutas que leerían estas
+// variables fallan cerradas si faltan (webhook 503, verify 500, tokens de
+// identidad inválidos). Si alguna está PRESENTE, sus validaciones de formato
+// de validateEnv() siguen aplicando igual que en cualquier otro modo.
+const STAGING_COMMERCE_ONLY_REQUIRED_VARIABLES = Object.freeze([
+  'CATASTROX_PII_ENCRYPTION_KEY',
+  'CATASTROX_PII_HASH_SECRET',
+  'CATASTROX_VERIFY_HANDLE_KEY',
+  'CATASTROX_CHECKOUT_IDENTITY_KEY',
+  'WOMPI_PUBLIC_KEY_TEST',
+  'WOMPI_INTEGRITY_SECRET_TEST',
+  'WOMPI_EVENTS_SECRET_TEST',
+  'CATASTROX_FRONTEND_URL',
+  'EMAIL_PROVIDER',
+  'RESEND_API_KEY',
+  'EMAIL_FROM',
+]);
+
+// STAGING-PASSWORD-BOOT: staging + CATASTROX_COMMERCE_MODE=password exige la
+// base del bucket staging (DATABASE_URL, CATASTROX_DATABASE_URL,
+// HEALTH_MONITOR_TOKEN, PUBLIC_APP_ORIGIN) más las dos variables del acceso
+// temporal por contraseña (temporaryAccessCapability.js) -- sin ellas el
+// modo password arrancaría "sano" pero rechazaría toda contraseña. wompi_test,
+// wompi_live y el modo ausente (legacy) conservan el bucket staging completo.
+const STAGING_PASSWORD_REQUIRED_VARIABLES = Object.freeze([
+  ...REQUIRED_VARIABLES_BY_ENV.staging.filter((variable) => !STAGING_COMMERCE_ONLY_REQUIRED_VARIABLES.includes(variable)),
+  'CATASTROX_TEMP_ACCESS_SECRET',
+  'CATASTROX_TEMP_ACCESS_TOKEN_KEY',
+]);
+
+// Production no cambia: su bucket se aplica en cualquier modo.
+function resolveRequiredVariables(appEnv, commerceMode) {
+  if (appEnv === 'staging' && commerceMode === 'password') return STAGING_PASSWORD_REQUIRED_VARIABLES;
+  return REQUIRED_VARIABLES_BY_ENV[appEnv];
+}
 
 // Variables que nunca deben aparecer cuando APP_ENV=demo (ADR-014 §13/§7):
 // demo no tiene backend, no tiene credenciales, no tiene relay productivo.
@@ -289,7 +327,11 @@ export function validateEnv(appEnv, source = process.env) {
     );
   }
 
-  for (const variable of REQUIRED_VARIABLES_BY_ENV[appEnv]) {
+  // STAGING-PASSWORD-BOOT: el modo comercial se resuelve (y valida) ANTES de
+  // comprobar las obligatorias, porque en staging de él depende qué se exige.
+  const commerceMode = resolveCommerceMode(appEnv, source);
+
+  for (const variable of resolveRequiredVariables(appEnv, commerceMode)) {
     if (!isNonEmpty(source[variable])) {
       throw new ConfigurationError('La variable requerida no está definida para este ambiente.', {
         code: 'REQUIRED_VARIABLE_MISSING',
@@ -471,7 +513,15 @@ export function validateEnv(appEnv, source = process.env) {
   // que CATASTROX_PII_ENCRYPTION_KEY a propósito (ver
   // STRICT_BASE64_32_BYTES_PATTERN arriba): se exige la forma canónica
   // exacta ANTES de decodificar, no solo la longitud resultante.
-  for (const identityKeyVariable of ['CATASTROX_VERIFY_HANDLE_KEY', 'CATASTROX_CHECKOUT_IDENTITY_KEY']) {
+  // STAGING-PASSWORD-BOOT: CATASTROX_TEMP_ACCESS_TOKEN_KEY usa exactamente la
+  // misma regla que loadTokenKey() (temporaryAccessCapability.js) -- sin
+  // espacios, STRICT_BASE64_32_BYTES_PATTERN y 32 bytes decodificados --, así
+  // que un valor que el runtime rechazaría falla aquí al arrancar.
+  for (const identityKeyVariable of [
+    'CATASTROX_VERIFY_HANDLE_KEY',
+    'CATASTROX_CHECKOUT_IDENTITY_KEY',
+    'CATASTROX_TEMP_ACCESS_TOKEN_KEY',
+  ]) {
     if (!isNonEmpty(source[identityKeyVariable])) continue;
     const rawKey = source[identityKeyVariable];
 
