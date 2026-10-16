@@ -1,0 +1,10 @@
+import { test, describe } from 'node:test';
+import assert from 'node:assert/strict';
+const mode = process.env.AGX_RUNNER_FIXTURE;
+if (mode === 'pass') test('passes', () => {});
+if (mode === 'fail') test('fails', () => assert.fail('fixture failure'));
+if (mode === 'skip') test.skip('skipped', () => {});
+if (mode === 'todo') test.todo('pending');
+if (mode === 'dynamic-skip') test('runtime skip', (t) => t.skip());
+if (mode === 'suite-skip') describe.skip('skipped suite', () => { test('unreachable', () => {}); });
+if (mode === 'fail-todo') test.todo('known failure', () => assert.fail('pending failure'));
