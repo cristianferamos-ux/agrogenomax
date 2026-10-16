@@ -1,0 +1,193 @@
+// SPRINT-3D11.2: registro manual de un animal (POST /api/ganaderia/animales).
+//
+// Idempotencia (mismo principio que el registro manual de Predios): una
+// intención de registro = un clientOperationId estable. Se genera al abrir
+// el formulario y al pulsar "Registrar otro animal"; se CONSERVA ante
+// cualquier error (red, 400, 409, 500) para que un reintento manual nunca
+// duplique; se descarta solo tras el éxito o al cancelar. Sin
+// localStorage/sessionStorage. Nunca hay reintento automático del POST.
+import { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
+import { StatusMessage } from '../components/FormField.jsx';
+import HatoAnimalFields from './HatoAnimalFields.jsx';
+import { createAnimal } from './hatoApi.js';
+import {
+  INITIAL_ANIMAL_FORM,
+  NETWORK_UNCERTAIN_MESSAGE,
+  OPERATION_UNAVAILABLE_MESSAGE,
+  buildCreateAnimalBody,
+  categoriaSigueValida,
+  fechaHoyLocal,
+  formatIdentidad,
+  messageForError,
+  newClientOperationId,
+  validateAnimalForm,
+} from './hatoFormModel.js';
+import useHatoCatalogos from './useHatoCatalogos.js';
+import '../styles/ganaderia-hato.css';
+
+const FAILURE_NETWORK_ERROR = 'NETWORK_ERROR';
+
+export default function HatoRegistroPage() {
+  const navigate = useNavigate();
+  const catalogos = useHatoCatalogos();
+  const [form, setForm] = useState(INITIAL_ANIMAL_FORM);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [fieldError, setFieldError] = useState('');
+  const [operationReused, setOperationReused] = useState(false);
+  const [registrado, setRegistrado] = useState(null);
+  const operationIdRef = useRef(newClientOperationId());
+
+  // Un único predio activo se preselecciona.
+  useEffect(() => {
+    if (catalogos.status === 'ok' && catalogos.predios.length === 1) {
+      setForm((current) => (current.predioId ? current : { ...current, predioId: catalogos.predios[0].predioId }));
+    }
+  }, [catalogos.status, catalogos.predios]);
+
+  function update(field, value) {
+    setFieldError('');
+    setForm((current) => {
+      const next = { ...current, [field]: value };
+      if (field === 'sexo' && !categoriaSigueValida(catalogos.categorias, next.categoriaProductivaId, value)) {
+        next.categoriaProductivaId = '';
+      }
+      if (field === 'razaModo') {
+        next.razaPrincipalId = '';
+        next.razaOtroNombre = '';
+        next.cruceDescripcion = '';
+      }
+      return next;
+    });
+  }
+
+  function registrarOtro() {
+    operationIdRef.current = newClientOperationId();
+    setForm((current) => ({ ...INITIAL_ANIMAL_FORM, predioId: current.predioId }));
+    setRegistrado(null);
+    setError('');
+    setFieldError('');
+    setOperationReused(false);
+  }
+
+  function cancelar() {
+    operationIdRef.current = null;
+    navigate('/ganaderia/animales');
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    if (saving || operationReused) return;
+
+    const problema = validateAnimalForm(form);
+    if (problema) {
+      setError(problema);
+      return;
+    }
+    // Fail-closed: sin UUID de la intención no se envía nada.
+    if (!operationIdRef.current) {
+      setError(OPERATION_UNAVAILABLE_MESSAGE);
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+    setFieldError('');
+    try {
+      const { ok, status, data, failure } = await createAnimal(buildCreateAnimalBody(form, operationIdRef.current));
+      if (ok && data?.animal) {
+        // 201 (creado) y 200 (yaExistia) son el mismo éxito para el productor.
+        operationIdRef.current = null;
+        setRegistrado(data.animal);
+        return;
+      }
+      if (failure === FAILURE_NETWORK_ERROR) {
+        setError(NETWORK_UNCERTAIN_MESSAGE);
+      } else if (status === 409 && data?.error === 'CLIENT_OPERATION_ID_REUSED') {
+        // Esta intención ya creó otro animal: crear otro exige una intención nueva.
+        setOperationReused(true);
+        setError(messageForError(data.error));
+      } else if (status === 409 && data?.error === 'ANIMAL_NUMERO_VISUAL_DUPLICADO') {
+        setFieldError(messageForError(data.error));
+      } else if (failure) {
+        // Sesión expirada / CSRF: el aviso global ya informa; el formulario conserva lo escrito.
+        setError('No se pudo enviar el registro. Revisa el aviso de sesión e inténtalo de nuevo.');
+      } else {
+        setError(messageForError(data?.error));
+      }
+    } catch {
+      setError(NETWORK_UNCERTAIN_MESSAGE);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (registrado) {
+    return (
+      <div className="gan-panel gan-hato">
+        <div className="gan-section-heading">
+          <span className="gan-eyebrow">Animales</span>
+          <h2>Animal registrado</h2>
+        </div>
+        <StatusMessage type="success">{formatIdentidad(registrado)} quedó registrado en {registrado.predioNombre}.</StatusMessage>
+        <div className="gan-hato-actions">
+          <button type="button" className="gan-submit" onClick={registrarOtro}>Registrar otro animal</button>
+          <Link className="gan-secondary-button" to={`/ganaderia/animales/${registrado.animalId}`}>Ver animal</Link>
+          <Link className="gan-secondary-button" to="/ganaderia/animales">Ver mis animales</Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="gan-panel gan-hato">
+      <GanaderiaBackLink to="/ganaderia/animales">Volver a mis animales</GanaderiaBackLink>
+      <div className="gan-section-heading">
+        <span className="gan-eyebrow">Animales</span>
+        <h2>Registrar animal</h2>
+      </div>
+
+      {catalogos.status === 'loading' ? <StatusMessage>Cargando datos del formulario...</StatusMessage> : null}
+      {catalogos.status === 'error' ? (
+        <div className="gan-hato-actions">
+          <StatusMessage type="error">No fue posible cargar los datos del formulario.</StatusMessage>
+          <button type="button" className="gan-secondary-button" onClick={catalogos.reload}>Reintentar</button>
+        </div>
+      ) : null}
+      {catalogos.status === 'ok' && catalogos.predios.length === 0 ? (
+        <StatusMessage type="info">
+          Para registrar animales primero necesitas un predio activo. <Link to="/ganaderia/predios">Registrar predio</Link>
+        </StatusMessage>
+      ) : null}
+
+      {catalogos.status === 'ok' && catalogos.predios.length > 0 ? (
+        <form className="gan-form" onSubmit={handleSubmit} noValidate>
+          <HatoAnimalFields
+            form={form}
+            onChange={update}
+            razas={catalogos.razas}
+            categorias={catalogos.categorias}
+            predios={catalogos.predios}
+            showPeso
+            disabled={saving || operationReused}
+            maxFecha={fechaHoyLocal()}
+          />
+          {fieldError ? <StatusMessage type="error">{fieldError}</StatusMessage> : null}
+          {error ? <StatusMessage type="error">{error}</StatusMessage> : null}
+          <div className="gan-hato-actions">
+            {operationReused ? (
+              <button type="button" className="gan-submit" onClick={registrarOtro}>Registrar otro animal</button>
+            ) : (
+              <button type="submit" className="gan-submit" disabled={saving}>
+                {saving ? 'Registrando...' : 'Registrar animal'}
+              </button>
+            )}
+            <button type="button" className="gan-secondary-button" onClick={cancelar} disabled={saving}>Cancelar</button>
+          </div>
+        </form>
+      ) : null}
+    </div>
+  );
+}

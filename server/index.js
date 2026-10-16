@@ -28,6 +28,8 @@ import createGanaderiaPotreroDescansoReentradaRouter from './routes/ganaderiaPot
 import createGanaderiaPotreroCicloPastoreoRouter from './routes/ganaderiaPotreroCicloPastoreo.js';
 import createGanaderiaCatalogoPasturasRouter from './routes/ganaderiaCatalogoPasturas.js';
 import createGanaderiaCategoriasProductivasRouter from './routes/ganaderiaCategoriasProductivas.js';
+import createGanaderiaAnimalesRouter from './routes/ganaderiaAnimales.js';
+import createGanaderiaCatalogoRazasRouter from './routes/ganaderiaCatalogoRazas.js';
 import createHealthRouter from './routes/health.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -272,6 +274,26 @@ app.use(
 app.use(
   '/api/ganaderia/categorias-productivas',
   createGanaderiaCategoriasProductivasRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
+
+// SPRINT-3D11.2: registro manual de animales y catálogo de razas
+// (Postgres-AGX-Business, 0022). Sesión con organización + CSRF. Nunca
+// /api/animales, /api/qr ni /api/razas legacy.
+app.use(
+  '/api/ganaderia/animales',
+  createGanaderiaAnimalesRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
+app.use(
+  '/api/ganaderia/catalogo-razas',
+  createGanaderiaCatalogoRazasRouter({
     appEnv: appConfig.appEnv,
     csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
     allowedOrigins: appConfig.cors.allowedOrigins,

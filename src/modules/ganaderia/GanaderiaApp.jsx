@@ -1,6 +1,9 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import GanaderiaBackLink from './components/GanaderiaBackLink.jsx';
 import GanaderiaShell from './components/GanaderiaShell.jsx';
+import HatoDetallePage from './hato/HatoDetallePage.jsx';
+import HatoListaPage from './hato/HatoListaPage.jsx';
+import HatoRegistroPage from './hato/HatoRegistroPage.jsx';
 import PrediosPage from './predios/PrediosPage.jsx';
 
 function ComingSoon({ title }) {
@@ -20,9 +23,12 @@ function ComingSoon({ title }) {
 // (QrEntryPage, AnimalesListPage, AnimalFichaBasica y pestañas,
 // PotrerosPage) consumían /api/animales, /api/qr, /api/predios,
 // /api/potreros, etc., ya desmontados del backend. Sus rutas quedan como
-// redirecciones/placeholder -- nunca vuelven a montar esas páginas. Los
-// potreros vigentes se registran desde la tarjeta de cada predio
-// (PrediosPage, /api/ganaderia/predios/:predioId/potreros).
+// redirecciones -- nunca vuelven a montar esas páginas. Los potreros
+// vigentes se registran desde la tarjeta de cada predio (PrediosPage).
+//
+// SPRINT-3D11.2: /ganaderia/animales es el módulo nuevo (hato/, solo
+// /api/ganaderia/animales). Los ids legacy no se traducen: animal/*,
+// escanear-qr y animales/listado redirigen a la lista nueva.
 export default function GanaderiaApp() {
   return (
     <GanaderiaShell>
@@ -30,7 +36,10 @@ export default function GanaderiaApp() {
         <Route index element={<Navigate to="/ganaderia/dashboard" replace />} />
         <Route path="predios" element={<PrediosPage />} />
         <Route path="potreros" element={<Navigate to="/ganaderia/predios" replace />} />
-        <Route path="animales" element={<ComingSoon title="Animales: módulo en preparación" />} />
+        <Route path="animales" element={<HatoListaPage />} />
+        <Route path="animales/nuevo" element={<HatoRegistroPage />} />
+        <Route path="animales/listado" element={<Navigate to="/ganaderia/animales" replace />} />
+        <Route path="animales/:animalId" element={<HatoDetallePage />} />
         <Route path="animales/*" element={<Navigate to="/ganaderia/animales" replace />} />
         <Route path="escanear-qr" element={<Navigate to="/ganaderia/animales" replace />} />
         <Route path="animal/*" element={<Navigate to="/ganaderia/animales" replace />} />

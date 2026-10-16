@@ -88,7 +88,9 @@ test('GanaderiaApp.jsx: las rutas legacy redirigen (nunca vuelven a montar las p
   assert.match(ganaderiaAppCode, /<Route path="animales\/\*" element=\{<Navigate to="\/ganaderia\/animales" replace \/>\} \/>/);
   assert.match(ganaderiaAppCode, /<Route path="escanear-qr" element=\{<Navigate to="\/ganaderia\/animales" replace \/>\} \/>/);
   assert.match(ganaderiaAppCode, /<Route path="animal\/\*" element=\{<Navigate to="\/ganaderia\/animales" replace \/>\} \/>/);
-  assert.match(ganaderiaAppCode, /<Route path="animales" element=\{<ComingSoon /);
+  // SPRINT-3D11.2: /ganaderia/animales ya no es un placeholder: monta el
+  // módulo nuevo (hato/), nunca una página legacy.
+  assert.match(ganaderiaAppCode, /<Route path="animales" element=\{<HatoListaPage \/>\} \/>/);
   assert.match(ganaderiaAppCode, /<Route path="predios" element=\{<PrediosPage \/>\} \/>/);
 });
 
