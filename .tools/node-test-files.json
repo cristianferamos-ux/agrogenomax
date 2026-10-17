@@ -1,5 +1,4 @@
 [
-  "functions/_data/__tests__/agxStaticCors.test.js",
   "functions/api/__tests__/healthRelay.test.js",
   "functions/api/catastrox/__tests__/corsRelay.test.js",
   "functions/api/ganaderia/__tests__/ganaderiaRelay.test.js",

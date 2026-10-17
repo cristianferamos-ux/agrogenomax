@@ -156,8 +156,19 @@ test('Demo: GanaderiaDemo.jsx no recibe código de contención ni APIs reales', 
   }
 });
 
-test('Demo: los Functions estáticos de Cloudflare siguen presentes (fuera de alcance)', () => {
-  for (const file of ['functions/api/animales/[id].js', 'functions/api/qr/[codigo].js', 'functions/_data/agxStatic.js']) {
-    assert.ok(fs.existsSync(path.join(REPO_ROOT, file)), `${file} debe seguir existiendo`);
+test('Cloudflare: los Functions legacy de animales/QR no son desplegables', () => {
+  const forbiddenDeployableFiles = [
+    'functions/api/animales/[id].js',
+    'functions/api/animales/[id]/razas.js',
+    'functions/api/qr/[codigo].js',
+    'functions/_data/agxStatic.js',
+  ];
+
+  for (const file of forbiddenDeployableFiles) {
+    assert.equal(
+      fs.existsSync(path.join(REPO_ROOT, file)),
+      false,
+      `${file} no debe existir dentro de functions/`,
+    );
   }
 });
