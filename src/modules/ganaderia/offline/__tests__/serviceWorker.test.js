@@ -1,196 +1,77 @@
-// SPRINT-3D11.3 (R1) -- public/service-worker.js REAL ejecutado en un
-// sandbox (node:vm) con Cache Storage, fetch y clients simulados:
-// precache del build, shell offline, /api nunca cacheado, assets cache-first,
-// timeout de navegación ("lie-fi") y Background Sync.
+// SPRINT-3D11.3 (R1) -- public/service-worker.js REAL en node:vm
+// (swHarness.js): comportamiento offline de GANADERÍA -- precache bajo
+// demanda, shell sin red, timeout de navegación, assets del precache y
+// Background Sync. La no regresión de CatastroX está en
+// serviceWorkerCatastroxRegression.test.js.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
+import { MANIFEST, loadServiceWorker } from './swHarness.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SW_SOURCE = fs.readFileSync(path.resolve(__dirname, '..', '..', '..', '..', '..', 'public', 'service-worker.js'), 'utf8');
-const ORIGIN = 'https://agrogenomax.test';
-const MANIFEST = { version: 'abc123', assets: ['/assets/index-A1.js', '/assets/index-B2.css', '/assets/lazy-C3.js'] };
 
-function createCaches() {
-  const stores = new Map();
-  const keyOf = (input) => new URL(typeof input === 'string' ? input : input.url, ORIGIN).href;
-  const open = async (name) => {
-    if (!stores.has(name)) stores.set(name, new Map());
-    const store = stores.get(name);
-    return {
-      async put(input, response) { store.set(keyOf(input), response); },
-      async match(input) { return store.get(keyOf(input))?.clone(); },
-      async addAll(inputs) {
-        for (const input of inputs) {
-          const response = await globalFetch(new URL(input, ORIGIN).href);
-          if (!response.ok) throw new Error(`addAll ${input}`);
-          store.set(keyOf(input), response);
-        }
-      },
-    };
-  };
-  let globalFetch;
-  return {
-    stores,
-    setFetch(fn) { globalFetch = fn; },
-    api: {
-      open,
-      async keys() { return [...stores.keys()]; },
-      async delete(name) { return stores.delete(name); },
-      async match(input, options = {}) {
-        // Simula "Vary: Origin": una petición con Origin (script crossorigin)
-        // no coincide con lo precacheado salvo con ignoreVary.
-        if (input?.headers?.origin && !options.ignoreVary) return undefined;
-        for (const store of stores.values()) {
-          const hit = store.get(keyOf(input));
-          if (hit) return hit.clone();
-        }
-        return undefined;
-      },
-    },
-  };
+async function swPreparado() {
+  const sw = loadServiceWorker(SW_SOURCE);
+  await sw.dispatch('install');
+  assert.deepEqual(await sw.precache(), { ok: true, version: 'abc123', assets: 3 });
+  return sw;
 }
 
-function loadServiceWorker({ network, clients = [], withSyncBundle = true }) {
-  const listeners = new Map();
-  const caches = createCaches();
-  const red = { modo: 'online', ...network };
-  const fetchImpl = async (input) => {
-    const url = new URL(typeof input === 'string' ? input : input.url, ORIGIN);
-    if (red.modo === 'offline') throw new TypeError('Failed to fetch');
-    if (red.modo === 'lie-fi') return new Promise(() => {});
-    if (url.pathname === '/agx-precache.json') return new Response(JSON.stringify(MANIFEST), { status: 200 });
-    if (url.pathname.startsWith('/api/')) return new Response('{"ok":true}', { status: 200 });
-    return new Response(`contenido ${url.pathname}`, { status: 200 });
-  };
-  caches.setFetch(fetchImpl);
-  const pushes = [];
-  const self = {
-    location: new URL(`${ORIGIN}/service-worker.js`),
-    addEventListener: (type, handler) => listeners.set(type, handler),
-    skipWaiting: async () => {},
-    clients: {
-      claim: async () => {},
-      matchAll: async () => clients,
-    },
-    navigator: { onLine: true },
-  };
-  const context = vm.createContext({
-    self,
-    caches: caches.api,
-    fetch: fetchImpl,
-    Response,
-    Request,
-    URL,
-    console,
-    // Timeout de navegación acelerado x1000 para la prueba.
-    setTimeout: (fn, ms) => setTimeout(fn, Math.ceil(ms / 1000)),
-    clearTimeout,
-    importScripts: () => {
-      if (withSyncBundle) self.AgxOfflineSync = { pushDesdeServiceWorker: async () => { pushes.push('push'); return 'OK'; } };
-    },
-  });
-  vm.runInContext(SW_SOURCE, context);
-
-  async function dispatch(type, init) {
-    const waits = [];
-    let responsePromise = null;
-    const event = {
-      ...init,
-      waitUntil: (promise) => waits.push(promise),
-      respondWith: (promise) => { responsePromise = promise; },
-    };
-    listeners.get(type)?.(event);
-    await Promise.all(waits);
-    return responsePromise ? await responsePromise : null;
-  }
-
-  return { dispatch, caches, red, pushes, listeners };
-}
-
-function navigateRequest(pathname) {
-  // Request de Node no permite mode 'navigate': se simula la forma que lee el SW.
-  return { url: `${ORIGIN}${pathname}`, method: 'GET', mode: 'navigate', destination: 'document' };
-}
-
-async function navegar(sw, pathname) {
-  return sw.dispatch('fetch', { request: navigateRequest(pathname) });
-}
-
-test('17. install: precachea shell + TODO el build (agx-precache.json) y el bundle de sync', async () => {
-  const sw = loadServiceWorker({});
-  await sw.dispatch('install', {});
-  const assetsCache = sw.caches.stores.get('agrogenomax-assets-abc123');
-  assert.ok(assetsCache, 'caché versionado del build');
-  for (const asset of [...MANIFEST.assets, '/agx-offline-sync.js']) assert.ok(assetsCache.has(`${ORIGIN}${asset}`), asset);
-  assert.ok([...sw.caches.stores.values()].some((store) => store.has(`${ORIGIN}/index.html`)));
+test('17. la instalación NO precachea el build: solo Ganadería lo pide (AGX_PRECACHE)', async () => {
+  const sw = loadServiceWorker(SW_SOURCE);
+  await sw.dispatch('install');
+  assert.ok(!sw.red.peticiones.includes('/agx-precache.json'));
+  assert.ok(!Object.keys(sw.cacheSnapshot()).some((name) => name.startsWith('agrogenomax-assets-')));
+  assert.deepEqual(await sw.precache(), { ok: true, version: 'abc123', assets: 3 });
+  const assets = sw.cacheSnapshot()['agrogenomax-assets-abc123'];
+  for (const asset of [...MANIFEST.assets, '/agx-offline-sync.js']) assert.ok(assets.includes(asset), asset);
 });
 
-test('17. sin red: la navegación a cualquier ruta de Ganadería sirve el shell cacheado', async () => {
-  const sw = loadServiceWorker({});
-  await sw.dispatch('install', {});
+test('17. dispositivo preparado y sin red: toda ruta de Ganadería sirve el shell', async () => {
+  const sw = await swPreparado();
   sw.red.modo = 'offline';
-  for (const ruta of ['/ganaderia/animales', '/ganaderia/escanear-qr', '/ganaderia/animales/nuevo?chapeta=AGX-7KM4-P2XZ-R', '/qr/AGX-000003']) {
-    const response = await navegar(sw, ruta);
-    assert.ok(response, ruta);
-    assert.equal(await response.text(), 'contenido /index.html', ruta);
+  for (const ruta of ['/ganaderia/animales', '/ganaderia/predios', '/ganaderia/escanear-qr', '/ganaderia/animales/nuevo?chapeta=AGX-7KM4-P2XZ-R', '/qr/AGX-000003']) {
+    assert.equal((await sw.navegar(ruta)).body, 'red /index.html', ruta);
   }
 });
 
-test('17. "lie-fi" (red que no responde): la navegación no se queda esperando -- timeout y shell', async () => {
-  const sw = loadServiceWorker({});
-  await sw.dispatch('install', {});
+test('17. "lie-fi" en Ganadería: timeout y shell, la app no se queda esperando', async () => {
+  const sw = await swPreparado();
   sw.red.modo = 'lie-fi';
   const inicio = Date.now();
-  const response = await navegar(sw, '/ganaderia/animales');
-  assert.equal(await response.text(), 'contenido /index.html');
+  assert.equal((await sw.navegar('/ganaderia/animales')).body, 'red /index.html');
   assert.ok(Date.now() - inicio < 1000);
 });
 
-test('17. assets con hash: caché primero (JS/CSS de la app sin red), también <script type="module" crossorigin> con Vary: Origin', async () => {
-  const sw = loadServiceWorker({});
-  await sw.dispatch('install', {});
+test('17. assets del precache: caché primero sin red, incluido <script type="module" crossorigin> con Vary: Origin', async () => {
+  const sw = await swPreparado();
   sw.red.modo = 'offline';
-  const response = await sw.dispatch('fetch', { request: { url: `${ORIGIN}/assets/lazy-C3.js`, method: 'GET', mode: 'no-cors', destination: 'script' } });
-  assert.equal(await response.text(), 'contenido /assets/lazy-C3.js');
-  const moduleScript = await sw.dispatch('fetch', {
-    request: { url: `${ORIGIN}/assets/index-A1.js`, method: 'GET', mode: 'cors', destination: 'script', headers: { origin: ORIGIN } },
-  });
-  assert.equal(await moduleScript.text(), 'contenido /assets/index-A1.js');
+  assert.equal((await sw.get('/assets/lazy-C3.js', { destination: 'script' })).body, 'red /assets/lazy-C3.js');
+  const modulo = await sw.get('/assets/index-A1.js', { mode: 'cors', destination: 'script', headers: { origin: 'https://agrogenomax.test' } });
+  assert.equal(modulo.body, 'red /assets/index-A1.js');
 });
 
 test('/api/* nunca se cachea (datos y sesión siempre de la red)', async () => {
-  const sw = loadServiceWorker({});
-  await sw.dispatch('install', {});
-  await sw.dispatch('fetch', { request: { url: `${ORIGIN}/api/ganaderia/sync/pull`, method: 'GET', mode: 'cors', destination: '' } });
-  for (const store of sw.caches.stores.values()) {
-    for (const key of store.keys()) assert.ok(!key.includes('/api/'), key);
+  const sw = await swPreparado();
+  await sw.get('/api/ganaderia/sync/pull');
+  for (const [name, keys] of Object.entries(sw.cacheSnapshot())) {
+    assert.ok(!keys.some((key) => key.startsWith('/api/')), name);
   }
-  assert.match(SW_SOURCE, /pathname\.startsWith\('\/api\/'\)\) \{\s*event\.respondWith\(fetch\(request\)\);/);
 });
 
 test('Background Sync: con la app abierta pide a la página sincronizar; cerrada, ejecuta el PUSH en el SW', async () => {
   const mensajes = [];
-  const abierta = loadServiceWorker({ clients: [{ postMessage: (m) => mensajes.push(m) }] });
+  const abierta = loadServiceWorker(SW_SOURCE, { clients: [{ postMessage: (m) => mensajes.push(JSON.parse(JSON.stringify(m))) }] });
   await abierta.dispatch('sync', { tag: 'agx-ganaderia-outbox' });
-  assert.equal(JSON.stringify(mensajes), JSON.stringify([{ type: 'AGX_SYNC_REQUEST' }]));
+  assert.deepEqual(mensajes, [{ type: 'AGX_SYNC_REQUEST' }]);
   assert.deepEqual(abierta.pushes, []);
-
-  const cerrada = loadServiceWorker({ clients: [] });
+  const cerrada = loadServiceWorker(SW_SOURCE, { clients: [] });
   await cerrada.dispatch('sync', { tag: 'agx-ganaderia-outbox' });
   assert.deepEqual(cerrada.pushes, ['push']);
-
-  const otraEtiqueta = loadServiceWorker({ clients: [] });
-  await otraEtiqueta.dispatch('sync', { tag: 'otra' });
-  assert.deepEqual(otraEtiqueta.pushes, []);
-});
-
-test('AGX_PRECACHE: "Preparar dispositivo" obtiene confirmación del precache por MessageChannel', async () => {
-  const sw = loadServiceWorker({});
-  let respuesta = null;
-  await sw.dispatch('message', { data: { type: 'AGX_PRECACHE' }, ports: [{ postMessage: (m) => { respuesta = m; } }] });
-  assert.equal(JSON.stringify(respuesta), JSON.stringify({ ok: true, version: 'abc123', assets: 3 }));
+  const otra = loadServiceWorker(SW_SOURCE, { clients: [] });
+  await otra.dispatch('sync', { tag: 'otra' });
+  assert.deepEqual(otra.pushes, []);
 });

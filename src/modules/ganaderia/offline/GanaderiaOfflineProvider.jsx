@@ -118,6 +118,17 @@ export function GanaderiaOfflineProvider({ children }) {
 
   const online = navigatorOnline && !auth.offline && engineState.ultimoResultado !== RUN_RESULT.OFFLINE;
 
+  // Dispositivo ya preparado: al abrir Ganadería con red se refresca el
+  // precache del build vigente (tras un despliegue, los archivos nuevos
+  // quedan disponibles sin señal). Solo Ganadería lo pide; el SW nunca
+  // precachea por su cuenta.
+  const precacheRefrescado = useRef(false);
+  useEffect(() => {
+    if (precacheRefrescado.current || !stats?.preparadoAt || !online) return;
+    precacheRefrescado.current = true;
+    precacheApp().catch(() => {});
+  }, [stats?.preparadoAt, online]);
+
   const syncNow = useCallback(async () => {
     if (!instancia.engine) return null;
     return instancia.engine.syncNow({ forzar: true });

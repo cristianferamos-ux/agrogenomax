@@ -89,7 +89,9 @@ export async function pullCambios(organizacionId, { cursor }) {
     );
 
     const predios = (await client.query(
-      `select predio_id::text as predio_id, nombre_predio, departamento, municipio, vereda, area_total_ha, estado
+      `select predio_id::text as predio_id, nombre_predio, departamento, municipio, vereda, area_total_ha,
+              observaciones, codigo_predial, latitud, longitud, (geometry is not null) as tiene_geometria,
+              fecha_creacion, estado
          from agx.predios where fecha_actualizacion > $1 order by predio_id`,
       [desde],
     )).rows;
@@ -111,13 +113,21 @@ export async function pullCambios(organizacionId, { cursor }) {
       servidorAhora: ahora,
       animales: animalesRows.map((row) => ({ ...serializeAnimal(row), clientOperationId: operaciones.get(row.animal_id) ?? null })),
       chapetas: chapetasRows.map((row) => ({ ...serializeChapeta(row), tokenHash: row.token_hash, actualizadoAt: row.updated_at_iso })),
+      // Mismo formato que GET /api/ganaderia/predios (serializePredioListItem):
+      // Mis predios se pinta igual con la copia local.
       predios: predios.map((row) => ({
         predioId: row.predio_id,
         nombrePredio: row.nombre_predio,
         departamento: row.departamento,
         municipio: row.municipio,
         vereda: row.vereda,
-        areaTotalHa: row.area_total_ha === null ? null : Number(row.area_total_ha),
+        areaDeclaradaHa: row.area_total_ha === null ? null : Number(row.area_total_ha),
+        observaciones: row.observaciones ?? null,
+        codigoPredial: row.codigo_predial,
+        latitud: row.latitud === null ? null : Number(row.latitud),
+        longitud: row.longitud === null ? null : Number(row.longitud),
+        tieneGeometria: Boolean(row.tiene_geometria),
+        fechaCreacion: row.fecha_creacion,
         estado: row.estado,
       })),
       potreros: potreros.map((row) => ({

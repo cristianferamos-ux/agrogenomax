@@ -111,7 +111,11 @@ test('Service Worker: precache del build, /api nunca cacheado, Background Sync, 
   assert.match(sw, /const PRECACHE_MANIFEST = '\/agx-precache\.json';/);
   assert.match(sw, /const BACKGROUND_SYNC_TAG = 'agx-ganaderia-outbox';/);
   assert.match(sw, /importScripts\('\/agx-offline-sync\.js'\)/);
-  assert.match(sw, /networkWithTimeout\(request, NAVIGATION_TIMEOUT_MS\)/);
+  // Estrategias offline LIMITADAS a Ganadería (ver serviceWorkerCatastroxRegression.test.js).
+  assert.match(sw, /const network = isGanaderiaPath\(requestUrl\.pathname\)\s*\? networkWithTimeout\(request, GANADERIA_NAVIGATION_TIMEOUT_MS\)\s*: fetch\(request\);/);
+  assert.match(sw, /return pathname === '\/ganaderia' \|\| pathname\.startsWith\('\/ganaderia\/'\) \|\| pathname\.startsWith\('\/qr\/'\);/);
+  const install = sw.match(/self\.addEventListener\('install'[\s\S]*?\n\}\);/)?.[0] ?? '';
+  assert.doesNotMatch(install, /precacheBuild/, 'la instalación nunca precachea el build');
   const plugin = read(path.join(REPO_ROOT, 'vite.agx-offline.js'));
   assert.match(plugin, /fileName: 'agx-precache\.json'/);
   assert.match(plugin, /entry: 'src\/modules\/ganaderia\/offline\/swSyncEntry\.js'/);

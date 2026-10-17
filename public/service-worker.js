@@ -1,19 +1,26 @@
-// AgroGenomaX PWA. SPRINT-3D11.3 (R1) offline-first de Ganadería:
-//   * precache de TODO el build (agx-precache.json, generado por
-//     vite.agx-offline.js) -> la app arranca sin red una vez preparada;
-//   * navegación: red con timeout (4 s) y respaldo /index.html del caché ->
-//     sin red o con "lie-fi" la app no se queda esperando;
-//   * /assets/* (nombres con hash, inmutables): caché primero;
-//   * /api/*: SIEMPRE red, nunca se cachea (datos y sesión);
-//   * Background Sync 'agx-ganaderia-outbox': pide a las páginas abiertas
-//     que sincronicen; sin páginas, ejecuta el PUSH aquí mismo
-//     (agx-offline-sync.js). Solo Chromium implementa Background Sync; el
-//     sistema operativo decide si despierta al SW (ver informe R1).
+// AgroGenomaX PWA.
+//
+// Comportamiento BASE (todo el sitio, incluido CatastroX): idéntico al
+// service worker v18 -- shell en caché, navegación red-primero con respaldo
+// /index.html, scripts/estilos red-primero, demás recursos caché-con-
+// revalidación, /api/* siempre red, recursos de otros orígenes sin tocar.
+//
+// SPRINT-3D11.3 (R1) offline-first, LIMITADO A GANADERÍA:
+//   * el build completo solo se precachea cuando Ganadería lo pide
+//     ("Preparar dispositivo" -> mensaje AGX_PRECACHE); nunca en la
+//     instalación -> un visitante de CatastroX no descarga nada extra;
+//   * los recursos de ese precache se sirven desde caché (solo existen si se
+//     preparó Ganadería; son archivos con hash, idénticos a los de la red);
+//   * la navegación a /ganaderia/* y /qr/* usa un timeout de 4 s antes del
+//     respaldo (sin red o con "lie-fi" la app no se queda esperando); el
+//     resto del sitio espera a la red como en v18;
+//   * Background Sync 'agx-ganaderia-outbox' (solo Chromium; el sistema
+//     operativo decide si despierta al SW).
 const CACHE_VERSION = 'agrogenomax-pwa-v20-offline-first';
 const ASSETS_CACHE_PREFIX = 'agrogenomax-assets-';
 const PRECACHE_MANIFEST = '/agx-precache.json';
 const BACKGROUND_SYNC_TAG = 'agx-ganaderia-outbox';
-const NAVIGATION_TIMEOUT_MS = 4000;
+const GANADERIA_NAVIGATION_TIMEOUT_MS = 4000;
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -39,9 +46,45 @@ const APP_SHELL = [
 try {
   importScripts('/agx-offline-sync.js');
 } catch (error) {
-  // Sin el bundle (p. ej. build antiguo) el SW sigue sirviendo el shell; el
-  // PUSH ocurre desde la página.
+  // Sin el bundle el SW sigue sirviendo el sitio; Ganadería sincroniza
+  // desde la página.
 }
+
+function isGanaderiaPath(pathname) {
+  return pathname === '/ganaderia' || pathname.startsWith('/ganaderia/') || pathname.startsWith('/qr/');
+}
+
+// ---------------------------------------------------------------------
+// Ciclo de vida (igual que v18)
+// ---------------------------------------------------------------------
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches
+      .open(CACHE_VERSION)
+      .then((cache) => cache.addAll(APP_SHELL))
+      .then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(
+          keys
+            .filter((key) => key !== CACHE_VERSION && !key.startsWith(ASSETS_CACHE_PREFIX))
+            .map((key) => caches.delete(key))
+        )
+      )
+      .then(() => self.clients.claim())
+  );
+});
+
+// ---------------------------------------------------------------------
+// Ganadería: precache bajo demanda + Background Sync
+// ---------------------------------------------------------------------
 
 async function precacheBuild() {
   let manifest;
@@ -64,35 +107,6 @@ async function precacheBuild() {
   return { ok: true, version: manifest.version, assets: assets.length };
 }
 
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches
-      .open(CACHE_VERSION)
-      .then((cache) => cache.addAll(APP_SHELL))
-      // Un fallo del precache del build no impide instalar el shell; la app
-      // lo reintenta con AGX_PRECACHE ("Preparar dispositivo").
-      .then(() => precacheBuild().catch(() => null))
-      .then(() => self.skipWaiting())
-  );
-});
-
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches
-      .keys()
-      .then((keys) =>
-        Promise.all(
-          keys
-            .filter((key) => key !== CACHE_VERSION && !key.startsWith(ASSETS_CACHE_PREFIX))
-            .map((key) => caches.delete(key))
-        )
-      )
-      .then(() => self.clients.claim())
-  );
-});
-
-// La app (Ganadería, "Preparar dispositivo") pide precachear el build
-// vigente y espera la respuesta por MessageChannel.
 self.addEventListener('message', (event) => {
   if (event.data?.type !== 'AGX_PRECACHE') return;
   const port = event.ports && event.ports[0];
@@ -122,6 +136,20 @@ self.addEventListener('sync', (event) => {
   if (event.tag === BACKGROUND_SYNC_TAG) event.waitUntil(backgroundSync());
 });
 
+/** Solo el precache de Ganadería (existe únicamente si se preparó el dispositivo). */
+async function matchPrecache(request) {
+  const keys = await caches.keys();
+  for (const key of keys) {
+    if (!key.startsWith(ASSETS_CACHE_PREFIX)) continue;
+    // ignoreVary: los <script type="module" crossorigin> envían Origin y el
+    // servidor puede responder con "Vary: Origin"; un archivo con hash es el
+    // mismo para cualquier origen.
+    const hit = await (await caches.open(key)).match(request, { ignoreVary: true });
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
 function networkWithTimeout(request, timeoutMs) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('timeout')), timeoutMs);
@@ -138,8 +166,55 @@ function networkWithTimeout(request, timeoutMs) {
   });
 }
 
-async function cachedShell() {
-  return (await caches.match('/index.html')) || (await caches.match('/'));
+// ---------------------------------------------------------------------
+// fetch
+// ---------------------------------------------------------------------
+
+function navigationResponse(request, requestUrl) {
+  const network = isGanaderiaPath(requestUrl.pathname)
+    ? networkWithTimeout(request, GANADERIA_NAVIGATION_TIMEOUT_MS)
+    : fetch(request);
+  return network
+    .then((response) => {
+      const copy = response.clone();
+      caches.open(CACHE_VERSION).then((cache) => cache.put('/index.html', copy));
+      return response;
+    })
+    .catch(() => caches.match('/index.html'));
+}
+
+function baseResponse(request) {
+  if (
+    request.destination === 'script' ||
+    request.destination === 'style' ||
+    request.destination === 'manifest'
+  ) {
+    return fetch(request)
+      .then((response) => {
+        if (response && response.ok) {
+          const copy = response.clone();
+          caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy));
+        }
+
+        return response;
+      })
+      .catch(() => caches.match(request));
+  }
+
+  return caches.match(request).then((cachedResponse) => {
+    const networkResponse = fetch(request)
+      .then((response) => {
+        if (response && response.ok) {
+          const copy = response.clone();
+          caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy));
+        }
+
+        return response;
+      })
+      .catch(() => cachedResponse);
+
+    return cachedResponse || networkResponse;
+  });
 }
 
 self.addEventListener('fetch', (event) => {
@@ -155,78 +230,13 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (request.mode === 'navigate') {
-    event.respondWith(
-      networkWithTimeout(request, NAVIGATION_TIMEOUT_MS)
-        .then((response) => {
-          if (response && response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE_VERSION).then((cache) => cache.put('/index.html', copy));
-          }
-          return response;
-        })
-        .catch(() => cachedShell())
-    );
+    event.respondWith(navigationResponse(request, requestUrl));
     return;
   }
 
   if (requestUrl.origin !== self.location.origin) return;
 
-  // Assets con hash: inmutables -> caché primero (arranque sin red y sin
-  // esperar a una red lenta).
-  // ignoreVary: los <script type="module" crossorigin> envían Origin y el
-  // servidor puede responder con "Vary: Origin"; un asset con hash es el
-  // mismo archivo para cualquier origen.
-  if (requestUrl.pathname.startsWith('/assets/')) {
-    event.respondWith(
-      caches.match(request, { ignoreVary: true }).then(
-        (cached) =>
-          cached ||
-          fetch(request).then((response) => {
-            if (response && response.ok) {
-              const copy = response.clone();
-              caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy));
-            }
-            return response;
-          })
-      )
-    );
-    return;
-  }
-
-  if (
-    request.destination === 'script' ||
-    request.destination === 'style' ||
-    request.destination === 'manifest'
-  ) {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          if (response && response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy));
-          }
-
-          return response;
-        })
-        .catch(() => caches.match(request))
-    );
-    return;
-  }
-
-  event.respondWith(
-    caches.match(request).then((cachedResponse) => {
-      const networkResponse = fetch(request)
-        .then((response) => {
-          if (response && response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy));
-          }
-
-          return response;
-        })
-        .catch(() => cachedResponse);
-
-      return cachedResponse || networkResponse;
-    })
-  );
+  // Recursos del build precacheados por Ganadería: caché primero; si no
+  // están (nunca se preparó Ganadería), estrategia base v18.
+  event.respondWith(matchPrecache(request).then((hit) => hit || baseResponse(request)));
 });

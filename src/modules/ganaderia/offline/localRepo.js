@@ -90,7 +90,10 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
       return (await storage.get('animales', `srv:${routeId}`)) ?? null;
     },
 
-    listPredios: async () => (await storage.getAll('predios')).filter((p) => p.estado === 'ACTIVO').sort((a, b) => a.nombrePredio.localeCompare(b.nombrePredio)),
+    /** Activos por defecto; incluirArchivados = mismo opt-in que GET /api/ganaderia/predios. */
+    listPredios: async ({ incluirArchivados = false } = {}) => (await storage.getAll('predios'))
+      .filter((p) => incluirArchivados || p.estado === 'ACTIVO')
+      .sort((a, b) => String(b.fechaCreacion ?? '').localeCompare(String(a.fechaCreacion ?? '')) || a.nombrePredio.localeCompare(b.nombrePredio)),
     listPotreros: async (predioId) => (predioId ? storage.getAllByIndex('potreros', 'predioId', predioId) : storage.getAll('potreros')),
     listRazas: async () => (await storage.getAll('razas')).sort((a, b) => a.nombre.localeCompare(b.nombre)),
     listCategorias: async () => (await storage.getAll('categorias')).sort((a, b) => a.nombre.localeCompare(b.nombre)),

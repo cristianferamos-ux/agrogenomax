@@ -87,6 +87,14 @@ describe('SPRINT-3D11.3: PULL de sincronización contra Postgres real', { skip: 
     assert.deepEqual(result.animales.map((x) => x.animalId), [a.animal.animalId]);
     assert.equal(result.animales[0].clientOperationId, a.clientOperationId);
     assert.deepEqual(result.predios.map((x) => x.predioId), [a.predioId]);
+    // Mis predios offline se pinta con la copia local: mismo formato que
+    // GET /api/ganaderia/predios (serializePredioListItem).
+    assert.deepEqual(Object.keys(result.predios[0]).sort(), [
+      'areaDeclaradaHa', 'codigoPredial', 'departamento', 'estado', 'fechaCreacion', 'latitud', 'longitud',
+      'municipio', 'nombrePredio', 'observaciones', 'predioId', 'tieneGeometria', 'vereda',
+    ]);
+    assert.equal(result.predios[0].nombrePredio, 'Finca Sync');
+    assert.equal(result.predios[0].tieneGeometria, false);
     assert.equal(result.chapetas.length, 1, 'solo la chapeta asignada; nunca el stock central');
     const [chapeta] = result.chapetas;
     assert.equal(chapeta.estado, 'ASIGNADO_ORGANIZACION');

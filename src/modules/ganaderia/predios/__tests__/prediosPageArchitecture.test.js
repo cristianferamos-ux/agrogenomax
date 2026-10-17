@@ -410,7 +410,8 @@ function extractPredioCardFn() {
 test('PredioCard: "Eliminar predio" solo se muestra cuando el predio NO está archivado; "Restaurar" solo cuando SÍ lo está', () => {
   const fn = extractPredioCardFn();
   assert.match(fn, /const archivado = predio\.estado === 'ARCHIVADO';/);
-  assert.match(fn, /\{!archivado \? \(/);
+  // SPRINT-3D11.3 (R1): sin conexión no se ofrece ninguno de los dos.
+  assert.match(fn, /\{sinConexion \? null : !archivado \? \(/);
   assert.match(fn, /Eliminar predio/);
   assert.match(fn, /\) : \(/);
   assert.match(fn, /Restaurar/);
@@ -451,7 +452,8 @@ test('PrediosPage.jsx nunca declara ni llama un hard DELETE para predios (sin fe
 
 test('PrediosPage: "Ver archivados" es el único punto de acceso explícito para ver predios ARCHIVADO -- alterna mostrarArchivadosPredios y lo pasa a fetchRegisteredPrediosList', () => {
   assert.match(codeOnly, /const \[mostrarArchivadosPredios, setMostrarArchivadosPredios\] = useState\(false\)/);
-  assert.match(codeOnly, /fetchRegisteredPrediosList\(mostrarArchivadosPredios\)/);
+  // SPRINT-3D11.3 (R1): vía cargarPrediosLocalFirst (copia local + servidor).
+  assert.match(codeOnly, /incluirArchivados: mostrarArchivadosPredios,\s*fetchRemote: fetchRegisteredPrediosList,/);
   assert.match(codeOnly, /setMostrarArchivadosPredios\(\(current\) => !current\)/);
   assert.match(codeOnly, /\{mostrarArchivadosPredios \? 'Ver activos' : 'Ver archivados'\}/);
 });
