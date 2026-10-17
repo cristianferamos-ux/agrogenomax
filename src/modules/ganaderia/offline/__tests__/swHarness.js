@@ -6,6 +6,20 @@ import vm from 'node:vm';
 export const ORIGIN = 'https://agrogenomax.test';
 export const MANIFEST = { version: 'abc123', assets: ['/assets/index-A1.js', '/assets/index-B2.css', '/assets/lazy-C3.js'] };
 
+// Cloudflare Pages responde /index.html con 308 -> '/': fetch (redirect
+// 'follow') entrega la respuesta de '/' marcada redirected, y Cache Storage
+// la guarda (y la devuelve) con esa marca.
+function marcarRedirigida(response, url) {
+  Object.defineProperty(response, 'redirected', { value: true });
+  Object.defineProperty(response, 'url', { value: url });
+  return response;
+}
+
+function clonar(response) {
+  const copia = response.clone();
+  return response.redirected ? marcarRedirigida(copia, response.url) : copia;
+}
+
 function createCaches(getFetch) {
   const stores = new Map();
   const keyOf = (input) => new URL(typeof input === 'string' ? input : input.url, ORIGIN).href;
@@ -19,7 +33,8 @@ function createCaches(getFetch) {
       async put(input, response) { store.set(keyOf(input), response); },
       async match(input, options) {
         if (varyMismatch(input, options)) return undefined;
-        return store.get(keyOf(input))?.clone();
+        const hit = store.get(keyOf(input));
+        return hit ? clonar(hit) : undefined;
       },
       async addAll(inputs) {
         for (const input of inputs) {
@@ -40,7 +55,7 @@ function createCaches(getFetch) {
         if (varyMismatch(input, options)) return undefined;
         for (const store of stores.values()) {
           const hit = store.get(keyOf(input));
-          if (hit) return hit.clone();
+          if (hit) return clonar(hit);
         }
         return undefined;
       },
@@ -57,6 +72,7 @@ export function loadServiceWorker(source, { clients = [], withSyncBundle = true 
   const responder = (url) => {
     if (url.pathname === '/agx-precache.json') return new Response(JSON.stringify(MANIFEST), { status: 200 });
     if (url.pathname.startsWith('/api/')) return new Response('{"ok":true}', { status: 200 });
+    if (url.pathname === '/index.html') return marcarRedirigida(new Response('red /', { status: 200 }), `${ORIGIN}/`);
     return new Response(`red ${url.pathname}`, { status: 200 });
   };
   const fetchImpl = async (input) => {
@@ -104,14 +120,28 @@ export function loadServiceWorker(source, { clients = [], withSyncBundle = true 
     };
     listeners.get(type)?.(event);
     await Promise.all(waits);
-    const response = responsePromise ? await responsePromise : null;
-    return { responded, response };
+    let response = responsePromise ? await responsePromise : null;
+    // Regla del navegador: una navegación (redirect 'manual') que recibe una
+    // respuesta redirigida -> error de red (Chrome: ERR_FAILED). Sin
+    // respuesta (undefined) también es error de red.
+    let networkError = false;
+    if (responded && init.request?.mode === 'navigate' && (!response || response.redirected)) {
+      networkError = true;
+      response = null;
+    }
+    return { responded, response, networkError };
   }
 
   const request = (pathname, extra = {}) => ({ url: pathname.startsWith('http') ? pathname : `${ORIGIN}${pathname}`, method: 'GET', mode: 'no-cors', destination: '', ...extra });
   async function get(pathname, extra) {
-    const { responded, response } = await dispatch('fetch', { request: request(pathname, extra) });
-    return { responded, body: response ? await response.text() : null };
+    const { responded, response, networkError } = await dispatch('fetch', { request: request(pathname, extra) });
+    return {
+      responded,
+      networkError,
+      status: response ? response.status : null,
+      redirected: response ? response.redirected : null,
+      body: response ? await response.text() : null,
+    };
   }
   const navegar = (pathname) => get(pathname, { mode: 'navigate', destination: 'document' });
   async function precache() {

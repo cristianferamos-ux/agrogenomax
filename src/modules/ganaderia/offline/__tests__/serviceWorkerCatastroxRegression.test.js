@@ -103,8 +103,26 @@ test('el único cambio fuera de Ganadería es aditivo: assets precacheados SOLO 
   sw.red.modo = 'offline';
   // Mismo archivo con hash (contenido idéntico al de la red), ahora disponible sin red.
   assert.equal((await sw.get('/assets/index-A1.js', { destination: 'script' })).body, 'red /assets/index-A1.js');
-  // CatastroX sin red no cambia: su navegación sigue el respaldo /index.html de v18.
-  assert.equal((await sw.navegar('/catastrox')).body, 'red /index.html');
+  // CatastroX sin red: respaldo /index.html como en v18, servido como shell
+  // 200 no redirigido (el navegador lo acepta).
+  const catastrox = await sw.navegar('/catastrox');
+  assert.equal(catastrox.networkError, false);
+  assert.equal(catastrox.status, 200);
+  assert.equal(catastrox.redirected, false);
+  assert.equal(catastrox.body, 'red /');
+});
+
+test('CatastroX: visitada con red, Ganadería preparada después y sin red -> /catastrox sigue abriendo (shell 200 no redirigido)', async () => {
+  const sw = loadServiceWorker(NUEVO);
+  await sw.dispatch('install');
+  await sw.dispatch('activate');
+  await sw.navegar('/catastrox');
+  await sw.precache();
+  sw.red.modo = 'offline';
+  const catastrox = await sw.navegar('/catastrox');
+  assert.equal(catastrox.networkError, false);
+  assert.equal(catastrox.status, 200);
+  assert.equal(catastrox.redirected, false);
 });
 
 test('fixture v18 = SW de producción (sin estrategias offline-first)', () => {

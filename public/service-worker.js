@@ -16,7 +16,11 @@
 //     resto del sitio espera a la red como en v18;
 //   * Background Sync 'agx-ganaderia-outbox' (solo Chromium; el sistema
 //     operativo decide si despierta al SW).
-const CACHE_VERSION = 'agrogenomax-pwa-v20-offline-first';
+//
+// v21: el respaldo de navegación nunca entrega una respuesta "redirected"
+// (Cloudflare Pages responde /index.html con 308 -> /, y el navegador
+// rechaza una respuesta redirigida para una navegación: ERR_FAILED).
+const CACHE_VERSION = 'agrogenomax-pwa-v21-offline-shell';
 const ASSETS_CACHE_PREFIX = 'agrogenomax-assets-';
 const PRECACHE_MANIFEST = '/agx-precache.json';
 const BACKGROUND_SYNC_TAG = 'agx-ganaderia-outbox';
@@ -100,8 +104,13 @@ async function precacheBuild() {
   const cache = await caches.open(cacheName);
   const assets = manifest.assets.filter((asset) => typeof asset === 'string' && asset.startsWith('/') && !asset.startsWith('/api/'));
   await cache.addAll(['/agx-offline-sync.js', ...assets].filter((value, index, list) => list.indexOf(value) === index));
+  // Shell desde '/' (no se pide /index.html: Pages lo redirige con 308).
+  const shellRaiz = await fetch('/');
+  if (!shellRaiz.ok) throw new Error('shell');
   const shell = await caches.open(CACHE_VERSION);
-  await shell.addAll(['/', '/index.html']);
+  const shellLimpio = await sinRedireccion(shellRaiz);
+  await shell.put('/', shellLimpio.clone());
+  await shell.put('/index.html', shellLimpio);
   const keys = await caches.keys();
   await Promise.all(keys.filter((key) => key.startsWith(ASSETS_CACHE_PREFIX) && key !== cacheName).map((key) => caches.delete(key)));
   return { ok: true, version: manifest.version, assets: assets.length };
@@ -170,6 +179,22 @@ function networkWithTimeout(request, timeoutMs) {
 // fetch
 // ---------------------------------------------------------------------
 
+/** Copia no redirigida (mismo cuerpo, estado y cabeceras) de una respuesta. */
+async function sinRedireccion(response) {
+  if (!response || !response.redirected) return response;
+  return new Response(await response.blob(), {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
+/** Shell para navegar sin red: /index.html o '/', nunca una respuesta redirigida. */
+async function shellResponse() {
+  const cached = (await caches.match('/index.html')) || (await caches.match('/'));
+  return sinRedireccion(cached);
+}
+
 function navigationResponse(request, requestUrl) {
   const network = isGanaderiaPath(requestUrl.pathname)
     ? networkWithTimeout(request, GANADERIA_NAVIGATION_TIMEOUT_MS)
@@ -180,7 +205,7 @@ function navigationResponse(request, requestUrl) {
       caches.open(CACHE_VERSION).then((cache) => cache.put('/index.html', copy));
       return response;
     })
-    .catch(() => caches.match('/index.html'));
+    .catch(() => shellResponse());
 }
 
 function baseResponse(request) {
