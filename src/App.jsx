@@ -46,6 +46,7 @@ import RequireGanaderiaAuth from './modules/ganaderia/auth/RequireGanaderiaAuth.
 import RequireGanaderiaSuperAdmin from './modules/ganaderia/auth/RequireGanaderiaSuperAdmin.jsx';
 import GanaderiaAdminShell from './modules/ganaderia/admin/GanaderiaAdminShell.jsx';
 import GanaderiaAdminCrearCuenta from './modules/ganaderia/admin/GanaderiaAdminCrearCuenta.jsx';
+import GanaderiaAdminQrInventario from './modules/ganaderia/admin/GanaderiaAdminQrInventario.jsx';
 import HatoQrEntradaPublica from './modules/ganaderia/hato/HatoQrEntradaPublica.jsx';
 import CatastroXApp from './modules/catastrox/CatastroXApp.jsx';
 import AgroGenomaXHome from './components/home/AgroGenomaXHome.jsx';
@@ -330,6 +331,18 @@ function App() {
             <GanaderiaAuthProvider>
               <RequireGanaderiaSuperAdmin>
                 <GanaderiaAdminCrearCuenta />
+              </RequireGanaderiaSuperAdmin>
+            </GanaderiaAuthProvider>
+          }
+        />
+        {/* SPRINT-3D11.3 (R1): inventario central de chapetas QR -- mismo
+            guard super_admin que el resto de /ganaderia/admin. */}
+        <Route
+          path="/ganaderia/admin/qr"
+          element={
+            <GanaderiaAuthProvider>
+              <RequireGanaderiaSuperAdmin>
+                <GanaderiaAdminQrInventario />
               </RequireGanaderiaSuperAdmin>
             </GanaderiaAuthProvider>
           }

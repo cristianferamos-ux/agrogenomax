@@ -29,7 +29,8 @@ import createGanaderiaPotreroCicloPastoreoRouter from './routes/ganaderiaPotrero
 import createGanaderiaCatalogoPasturasRouter from './routes/ganaderiaCatalogoPasturas.js';
 import createGanaderiaCategoriasProductivasRouter from './routes/ganaderiaCategoriasProductivas.js';
 import createGanaderiaAnimalesRouter from './routes/ganaderiaAnimales.js';
-import { createGanaderiaAnimalQrRouter, createGanaderiaQrResolverRouter } from './routes/ganaderiaAnimalQr.js';
+import { createGanaderiaAnimalQrRouter, createGanaderiaQrRouter } from './routes/ganaderiaAnimalQr.js';
+import createGanaderiaAdminQrRouter from './routes/ganaderiaAdminQr.js';
 import createGanaderiaCatalogoRazasRouter from './routes/ganaderiaCatalogoRazas.js';
 import createHealthRouter from './routes/health.js';
 
@@ -134,6 +135,17 @@ app.use('/api/catastrox/payments', catastroxPaymentsRouter);
 app.use(
   '/api/ganaderia/admin',
   createGanaderiaAdminRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
+
+// SPRINT-3D11.3 (R1): Administración > inventario de chapetas QR. Misma
+// autorización que /api/ganaderia/admin (identidad + super_admin + CSRF).
+app.use(
+  '/api/ganaderia/admin/qr',
+  createGanaderiaAdminQrRouter({
     appEnv: appConfig.appEnv,
     csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
     allowedOrigins: appConfig.cors.allowedOrigins,
@@ -281,9 +293,10 @@ app.use(
   }),
 );
 
-// SPRINT-3D11.3 (R1): QR seguro del animal (Postgres-AGX-Business, 0023).
-// Montado ANTES del router de animales para que /animales/:id/qr no pase
-// por él. Sesión con organización + CSRF. Nunca /api/qr legacy.
+// SPRINT-3D11.3 (R1): uso de chapetas QR por la organización
+// (Postgres-AGX-Business, 0023). /animales/:id/qr montado ANTES del router
+// de animales para que no pase por él. Sesión con organización + CSRF.
+// Nunca /api/qr legacy.
 app.use(
   '/api/ganaderia/animales/:animalId/qr',
   createGanaderiaAnimalQrRouter({
@@ -294,7 +307,7 @@ app.use(
 );
 app.use(
   '/api/ganaderia/qr',
-  createGanaderiaQrResolverRouter({
+  createGanaderiaQrRouter({
     appEnv: appConfig.appEnv,
     csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
     allowedOrigins: appConfig.cors.allowedOrigins,

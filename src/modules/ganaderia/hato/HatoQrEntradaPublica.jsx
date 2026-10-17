@@ -1,15 +1,16 @@
-// SPRINT-3D11.3 (R1): /qr/:codigo (pública, contenido impreso en el QR).
-// Nunca consulta ninguna API ni muestra datos: si el código tiene forma de
-// token QR AGX, redirige al resolver privado /ganaderia/qr/:token (que
-// exige sesión y resuelve bajo la organización de la sesión); cualquier
-// otro código -- incluidos los legacy AGX-000001, ... -- muestra la página
-// estática QrNoDisponiblePage.
+// SPRINT-3D11.3 (R1): /qr/:codigo (pública, contenido impreso en la
+// chapeta). Nunca consulta ninguna API ni muestra datos: si el valor es un
+// token QR AGX o un código de chapeta (nuevo o legacy AGX-000003), redirige
+// al resolver privado /ganaderia/qr/:valor, que exige sesión y resuelve
+// bajo la organización de la sesión. Cualquier otro valor muestra la
+// página estática QrNoDisponiblePage.
 import { Navigate, useParams } from 'react-router-dom';
 import QrNoDisponiblePage from '../qr/QrNoDisponiblePage.jsx';
-import { isQrToken, qrResolverPath } from './qrToken.js';
+import { parseQrContent, qrResolverPath } from './qrToken.js';
 
 export default function HatoQrEntradaPublica() {
   const { codigo } = useParams();
-  if (isQrToken(codigo)) return <Navigate to={qrResolverPath(codigo)} replace />;
+  const parsed = parseQrContent(codigo);
+  if (parsed.kind !== 'invalid') return <Navigate to={qrResolverPath(parsed)} replace />;
   return <QrNoDisponiblePage />;
 }

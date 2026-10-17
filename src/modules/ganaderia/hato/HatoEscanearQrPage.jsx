@@ -1,7 +1,8 @@
-// SPRINT-3D11.3 (R1): /ganaderia/escanear-qr (privada). Cámara o código
-// escrito -> parseQrContent -> /ganaderia/qr/:token, donde se resuelve
-// bajo la organización de la sesión. Los códigos legacy (AGX-000001, ...)
-// se reconocen pero no se consultan: aún no están migrados.
+// SPRINT-3D11.3 (R1): /ganaderia/escanear-qr (privada). Cámara o código de
+// chapeta digitado -> parseQrContent -> /ganaderia/qr/:valor. La entrada
+// manual resuelve EXACTAMENTE igual que el escaneo (mismo resolver): es la
+// alternativa obligatoria en campo cuando falla la cámara o el QR está
+// sucio, dañado o mal iluminado.
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
@@ -10,22 +11,22 @@ import HatoQrScanner from './HatoQrScanner.jsx';
 import { parseQrContent, qrResolverPath } from './qrToken.js';
 import '../styles/ganaderia-hato.css';
 
-const LEGACY_MESSAGE = 'Este es un código QR del sistema anterior. Todavía no está vinculado a tus animales.';
-const INVALID_MESSAGE = 'El código leído no es un QR de AgroGenomaX.';
+const INVALID_SCAN_MESSAGE = 'El QR leído no es una chapeta AgroGenomaX.';
+const INVALID_CODE_MESSAGE = 'Revisa el código: tiene la forma AGX-7KM4-P2XZ.';
 
 export default function HatoEscanearQrPage() {
   const navigate = useNavigate();
-  const [manual, setManual] = useState('');
+  const [codigo, setCodigo] = useState('');
   const [error, setError] = useState('');
 
-  function handleContent(rawValue) {
+  function handleContent(rawValue, invalidMessage) {
     const parsed = parseQrContent(rawValue);
-    if (parsed.kind === 'token') {
-      setError('');
-      navigate(qrResolverPath(parsed.token));
+    if (parsed.kind === 'invalid') {
+      setError(invalidMessage);
       return;
     }
-    setError(parsed.kind === 'legacy' ? LEGACY_MESSAGE : INVALID_MESSAGE);
+    setError('');
+    navigate(qrResolverPath(parsed));
   }
 
   return (
@@ -33,32 +34,36 @@ export default function HatoEscanearQrPage() {
       <GanaderiaBackLink to="/ganaderia/animales">Volver a mis animales</GanaderiaBackLink>
       <div className="gan-section-heading">
         <span className="gan-eyebrow">Identificación</span>
-        <h2>Escanear QR</h2>
+        <h2>Escanear chapeta</h2>
       </div>
-      <p className="gan-hato-hint">Apunta la cámara al QR del animal para abrir su ficha.</p>
+      <p className="gan-hato-hint">
+        Escanea una chapeta nueva para registrar el animal, o una chapeta en uso para abrir su ficha.
+      </p>
 
-      <HatoQrScanner onDecoded={handleContent} />
+      <HatoQrScanner onDecoded={(text) => handleContent(text, INVALID_SCAN_MESSAGE)} />
 
       <form
         className="gan-form"
         noValidate
         onSubmit={(event) => {
           event.preventDefault();
-          handleContent(manual);
+          handleContent(codigo, INVALID_CODE_MESSAGE);
         }}
       >
-        <FormField label="O escribe el enlace o código del QR">
+        <FormField label="Código de chapeta">
           <input
             type="text"
-            value={manual}
+            value={codigo}
+            placeholder="AGX-7KM4-P2XZ"
             autoComplete="off"
-            autoCapitalize="none"
+            autoCapitalize="characters"
             spellCheck={false}
-            onChange={(event) => setManual(event.target.value)}
+            inputMode="text"
+            onChange={(event) => setCodigo(event.target.value)}
           />
         </FormField>
         <div className="gan-hato-actions">
-          <button type="submit" className="gan-secondary-button">Buscar animal</button>
+          <button type="submit" className="gan-submit">Buscar</button>
         </div>
       </form>
 

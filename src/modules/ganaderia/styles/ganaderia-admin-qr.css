@@ -1,0 +1,222 @@
+/* SPRINT-3D11.3 (R1): Administración > QR Ganadería / Inventario de
+   chapetas. Misma paleta que ganaderia-admin.css. */
+
+.gan-aqr-tabs {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.2rem;
+}
+
+.gan-aqr-tabs button {
+  border: 1px solid rgba(231, 245, 236, 0.18);
+  background: #06110c;
+  color: rgba(231, 245, 236, 0.75);
+  border-radius: 999px;
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.gan-aqr-tabs button.is-active {
+  border-color: rgba(57, 255, 20, 0.6);
+  color: #e7f5ec;
+}
+
+.gan-aqr-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.gan-aqr-card {
+  border: 1px solid rgba(231, 245, 236, 0.14);
+  border-radius: 1rem;
+  background: #06110c;
+  padding: 1.2rem;
+  margin-bottom: 1rem;
+  min-width: 0;
+}
+
+.gan-aqr-card h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+}
+
+.gan-aqr-card h4 {
+  margin: 1rem 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+.gan-aqr-form {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.gan-aqr-form label,
+.gan-aqr-radios {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: rgba(231, 245, 236, 0.8);
+}
+
+.gan-aqr-radios {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.gan-aqr-radios label {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.gan-aqr-form input[type='text'],
+.gan-aqr-form input[type='number'],
+.gan-aqr-form select,
+.gan-aqr-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid rgba(231, 245, 236, 0.2);
+  background: #020807;
+  color: #e7f5ec;
+  border-radius: 0.6rem;
+  padding: 0.55rem 0.7rem;
+  font: inherit;
+}
+
+.gan-aqr-subform {
+  border-top: 1px solid rgba(231, 245, 236, 0.12);
+  margin-top: 1rem;
+  padding-top: 0.6rem;
+}
+
+.gan-aqr-inline {
+  display: flex;
+  gap: 0.7rem;
+}
+
+.gan-aqr-inline label {
+  flex: 1;
+}
+
+.gan-aqr-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.8rem 0;
+}
+
+.gan-aqr-primary,
+.gan-aqr-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 0.55rem 1rem;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.gan-aqr-primary {
+  border: 1px solid #39ff14;
+  background: #39ff14;
+  color: #020807;
+}
+
+.gan-aqr-secondary {
+  border: 1px solid rgba(231, 245, 236, 0.22);
+  background: transparent;
+  color: #e7f5ec;
+}
+
+.gan-aqr-primary:disabled,
+.gan-aqr-secondary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.gan-aqr-hint {
+  margin: 0.2rem 0 0.6rem;
+  font-size: 0.8rem;
+  color: rgba(231, 245, 236, 0.6);
+}
+
+.gan-aqr-msg {
+  margin: 0.4rem 0;
+  font-size: 0.85rem;
+}
+
+.gan-aqr-msg-error { color: #ff8a8a; }
+.gan-aqr-msg-success { color: #7dff5f; }
+.gan-aqr-msg-info { color: rgba(231, 245, 236, 0.75); }
+
+.gan-aqr-dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.6rem;
+  margin: 0;
+}
+
+.gan-aqr-dl dt {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(231, 245, 236, 0.55);
+}
+
+.gan-aqr-dl dd {
+  margin: 0.15rem 0 0;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.gan-aqr-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.gan-aqr-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.gan-aqr-rows button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: 0.4rem;
+  text-align: left;
+  border: 1px solid rgba(231, 245, 236, 0.12);
+  background: #020807;
+  color: #e7f5ec;
+  border-radius: 0.6rem;
+  padding: 0.55rem 0.7rem;
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.gan-aqr-rows button.is-selected {
+  border-color: rgba(57, 255, 20, 0.6);
+}
+
+.gan-aqr-list {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.82rem;
+  color: rgba(231, 245, 236, 0.8);
+}
+
+@media (max-width: 640px) {
+  .gan-admin-main { padding: 1rem; }
+}

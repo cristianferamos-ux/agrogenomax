@@ -2,7 +2,7 @@ import pg from 'pg';
 
 const APP = 'AGX_BUSINESS_DATABASE_URL_TEST';
 const ADMIN = 'AGX_BUSINESS_INTEGRATION_ADMIN_DATABASE_URL';
-const TABLES = ['predios', 'catalogo_categorias_productivas', 'catalogo_razas', 'animales', 'animal_pesajes', 'animal_eventos', 'animal_identificadores'];
+const TABLES = ['predios', 'catalogo_categorias_productivas', 'catalogo_razas', 'animales', 'animal_pesajes', 'animal_eventos', 'qr_lotes', 'qr_chapetas'];
 
 export function validateAnimalesIntegrationEnv(env) {
   if (env.AGX_ALLOW_DISPOSABLE_DB_TESTS !== 'yes') {

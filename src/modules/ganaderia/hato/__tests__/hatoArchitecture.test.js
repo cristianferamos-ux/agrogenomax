@@ -126,7 +126,7 @@ test('rutas: /ganaderia/animales, /animales/nuevo y /animales/:animalId montan e
   assert.match(ganaderiaAppCode, /<Route path="animal\/\*" element=\{<Navigate to="\/ganaderia\/animales" replace \/>\} \/>/);
   // SPRINT-3D11.3 (R1): el escáner y el resolver QR son del módulo nuevo.
   assert.match(ganaderiaAppCode, /<Route path="escanear-qr" element=\{<HatoEscanearQrPage \/>\} \/>/);
-  assert.match(ganaderiaAppCode, /<Route path="qr\/:token" element=\{<HatoQrResolverPage \/>\} \/>/);
+  assert.match(ganaderiaAppCode, /<Route path="qr\/:valor" element=\{<HatoQrResolverPage \/>\} \/>/);
 });
 
 test('sidebar: "Mis animales" y "Registrar animal" apuntan al módulo nuevo', () => {

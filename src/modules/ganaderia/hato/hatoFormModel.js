@@ -288,6 +288,15 @@ const ERROR_MESSAGES = Object.freeze({
   INVALID_PESO: 'Revisa el peso y cómo lo obtuviste.',
   INVALID_ORIGEN: 'Revisa el origen del animal.',
   IDENTIDAD_REQUERIDA: 'Escribe al menos el número de chapeta o el nombre del animal.',
+  // SPRINT-3D11.3 (R1): chapetas QR.
+  QR_NOT_FOUND: 'Esta chapeta no pertenece a tu cuenta o el código no es válido.',
+  QR_YA_ASOCIADO: 'Esta chapeta ya está asociada a otro animal.',
+  QR_NO_OPERATIVO: 'Esta chapeta está fuera de uso (revocada, dañada o reemplazada).',
+  QR_NO_ACTIVO: 'El animal no tiene una chapeta activa.',
+  ANIMAL_YA_TIENE_QR: 'El animal ya tiene una chapeta activa: usa Reemplazar.',
+  INVALID_CODIGO: 'Revisa el código de la chapeta (forma AGX-7KM4-P2XZ).',
+  INVALID_CODIGO_NUEVO: 'Revisa el código de la chapeta nueva (forma AGX-7KM4-P2XZ).',
+  INVALID_MOTIVO: 'Escribe el motivo (máximo 500 caracteres).',
 });
 
 export const GENERIC_ERROR_MESSAGE = 'No fue posible completar la acción en este momento. Intenta nuevamente.';

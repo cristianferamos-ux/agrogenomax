@@ -79,6 +79,34 @@ export async function withOrganizacionTransaction(organizacionId, fn) {
   }
 }
 
+/**
+ * SPRINT-3D11.3 (R1): transacción en contexto Super Admin del inventario
+ * QR (app.agx_qr_admin = 'on', local a la transacción; ver policies de
+ * 0023). Solo la usan rutas detrás de createRequireGanaderiaSuperAdmin.
+ * app.current_org_id arranca vacío; una operación sobre una chapeta ya
+ * asignada lo fija explícitamente a la organización de esa chapeta.
+ *
+ * @param {(client: import('pg').PoolClient) => Promise<any>} fn
+ * @returns {Promise<any>}
+ */
+export async function withQrAdminTransaction(fn) {
+  const pool = getAgxBusinessPool();
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+    await client.query("SELECT set_config('app.agx_qr_admin', 'on', true), set_config('app.current_org_id', '', true)");
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 // Mismo patrón de cierre idempotente que server/db.js#closeMainDbPool.
 let poolClosingState = null; // { pool, promise } | null
 

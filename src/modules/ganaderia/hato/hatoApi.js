@@ -35,25 +35,38 @@ export function anularAnimal(animalId, motivo) {
   return postJsonWithCsrf(`${BASE}/animales/${encodeURIComponent(animalId)}/anular`, { motivo });
 }
 
-// SPRINT-3D11.3 (R1): QR seguro del animal.
+// SPRINT-3D11.3 (R1): chapetas QR de la organización (asignadas por el
+// Super Admin). La organización nunca genera chapetas ni ve el stock central.
+export function resolveQrToken(token) {
+  return getJsonWithSession(`${BASE}/qr/token/${encodeURIComponent(token)}`);
+}
+
+export function resolveQrCodigo(codigo) {
+  return getJsonWithSession(`${BASE}/qr/codigo/${encodeURIComponent(codigo)}`);
+}
+
+export function listChapetas({ estado } = {}) {
+  return getJsonWithSession(`${BASE}/qr/chapetas${estado ? `?estado=${encodeURIComponent(estado)}` : ''}`);
+}
+
+export function registrarAnimalConChapeta(codigo, body) {
+  return postJsonWithCsrf(`${BASE}/qr/chapetas/${encodeURIComponent(codigo)}/registrar-animal`, body);
+}
+
 export function getAnimalQr(animalId) {
   return getJsonWithSession(`${BASE}/animales/${encodeURIComponent(animalId)}/qr`);
 }
 
-export function asignarQr(animalId) {
-  return postJsonWithCsrf(`${BASE}/animales/${encodeURIComponent(animalId)}/qr`, {});
+export function asociarQr(animalId, codigoVisible) {
+  return postJsonWithCsrf(`${BASE}/animales/${encodeURIComponent(animalId)}/qr/asociar`, { codigoVisible });
 }
 
-export function revocarQr(animalId, motivo) {
-  return postJsonWithCsrf(`${BASE}/animales/${encodeURIComponent(animalId)}/qr/revocar`, { motivo });
+export function reemplazarQr(animalId, { codigoNuevo, motivo }) {
+  return postJsonWithCsrf(`${BASE}/animales/${encodeURIComponent(animalId)}/qr/reemplazar`, { codigoNuevo, motivo });
 }
 
-export function reemplazarQr(animalId, { motivo, clientOperationId }) {
-  return postJsonWithCsrf(`${BASE}/animales/${encodeURIComponent(animalId)}/qr/reemplazar`, { motivo, clientOperationId });
-}
-
-export function resolveQr(token) {
-  return getJsonWithSession(`${BASE}/qr/${encodeURIComponent(token)}`);
+export function bajaQr(animalId, { causa, motivo }) {
+  return postJsonWithCsrf(`${BASE}/animales/${encodeURIComponent(animalId)}/qr/baja`, { causa, motivo });
 }
 
 export function listRazas() {

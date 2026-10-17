@@ -51,12 +51,13 @@ test('App.jsx: /qr/:codigo renderiza HatoQrEntradaPublica (ni GanaderiaApp ni gu
   assert.match(appCode, /import HatoQrEntradaPublica from '\.\/modules\/ganaderia\/hato\/HatoQrEntradaPublica\.jsx';/);
 });
 
-test('HatoQrEntradaPublica.jsx: sin API -- solo redirige un token válido a /ganaderia/qr/:token o muestra QrNoDisponiblePage', () => {
+test('HatoQrEntradaPublica.jsx: sin API -- solo redirige un token o código de chapeta al resolver privado o muestra QrNoDisponiblePage', () => {
   const entryCode = stripComments(read(path.join(GANADERIA_DIR, 'hato', 'HatoQrEntradaPublica.jsx')));
   for (const forbidden of [/fetch\(/, /ganaderiaApi/, /ganaderiaAuthedRequest/, /hatoApi/, /\/api\//, /useEffect/, /resolveQr/]) {
     assert.doesNotMatch(entryCode, forbidden);
   }
-  assert.match(entryCode, /if \(isQrToken\(codigo\)\) return <Navigate to=\{qrResolverPath\(codigo\)\} replace \/>;/);
+  assert.match(entryCode, /const parsed = parseQrContent\(codigo\);/);
+  assert.match(entryCode, /if \(parsed\.kind !== 'invalid'\) return <Navigate to=\{qrResolverPath\(parsed\)\} replace \/>;/);
   assert.match(entryCode, /return <QrNoDisponiblePage \/>;/);
 });
 

@@ -209,97 +209,104 @@ function translateUniqueViolation(error) {
  * negocio (chapeta duplicada, paso 3).
  */
 export async function createAnimalIdempotente(organizacionId, value, { actorCuentaId, now = new Date() } = {}) {
+  return withOrganizacionTransaction(organizacionId, (client) =>
+    createAnimalInTransaction(client, organizacionId, value, { actorCuentaId, now }));
+}
+
+/**
+ * Núcleo de createAnimalIdempotente sobre una transacción YA abierta con
+ * app.current_org_id fijado. SPRINT-3D11.3: lo reutiliza el registro con
+ * chapeta QR para crear el animal y asociar la chapeta atómicamente.
+ */
+export async function createAnimalInTransaction(client, organizacionId, value, { actorCuentaId, now = new Date() } = {}) {
   const creationIntentHash = computeCreationIntentHash(value);
+  await client.query('select pg_advisory_xact_lock(hashtext($1))', [
+    `ganaderia_animal_create:${organizacionId}:${value.clientOperationId}`,
+  ]);
 
-  return withOrganizacionTransaction(organizacionId, async (client) => {
-    await client.query('select pg_advisory_xact_lock(hashtext($1))', [
-      `ganaderia_animal_create:${organizacionId}:${value.clientOperationId}`,
-    ]);
-
-    const existingResult = await client.query(
-      `select animal_id::text as animal_id, creation_intent_hash
-         from agx.animales
-        where organizacion_id = $1 and client_operation_id = $2`,
-      [organizacionId, value.clientOperationId],
-    );
-    const existing = existingResult.rows[0];
-    if (existing) {
-      if (existing.creation_intent_hash !== creationIntentHash) {
-        throw semanticError(
-          'CLIENT_OPERATION_ID_REUSED',
-          409,
-          'Esta operación ya registró un animal con datos distintos. Revisa tu lista de animales.',
-        );
-      }
-      return { animal: await fetchAnimal(client, existing.animal_id), yaExistia: true };
-    }
-
-    await assertPredioActivo(client, value.predioId);
-    if (value.razaPrincipalId) await assertRazaDisponible(client, value.razaPrincipalId);
-    if (value.categoriaProductivaId) await assertCategoriaDisponible(client, value.categoriaProductivaId, value.sexo);
-
-    const hoy = resolveFechaHoyNegocio(now);
-    const edadReferenciaFecha = value.nacimientoTipo === 'APROXIMADA' ? hoy : null;
-
-    let animalId;
-    try {
-      const inserted = await client.query(
-        `insert into agx.animales
-           (organizacion_id, predio_id, numero_visual, nombre, sexo,
-            nacimiento_tipo, fecha_nacimiento, edad_aproximada_meses, edad_referencia_fecha,
-            raza_tipo, raza_principal_id, raza_otro_nombre, cruce_descripcion,
-            categoria_productiva_id, origen_tipo, procedencia, fecha_ingreso, observaciones,
-            client_operation_id, creation_intent_hash)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
-         returning animal_id::text as animal_id`,
-        [
-          organizacionId,
-          value.predioId,
-          value.numeroVisual,
-          value.nombre,
-          value.sexo,
-          value.nacimientoTipo,
-          value.fechaNacimiento,
-          value.edadAproximadaMeses,
-          edadReferenciaFecha,
-          value.razaTipo,
-          value.razaPrincipalId,
-          value.razaOtroNombre,
-          value.cruceDescripcion,
-          value.categoriaProductivaId,
-          value.origenTipo,
-          value.procedencia,
-          value.fechaIngreso,
-          value.observaciones,
-          value.clientOperationId,
-          creationIntentHash,
-        ],
+  const existingResult = await client.query(
+    `select animal_id::text as animal_id, creation_intent_hash
+       from agx.animales
+      where organizacion_id = $1 and client_operation_id = $2`,
+    [organizacionId, value.clientOperationId],
+  );
+  const existing = existingResult.rows[0];
+  if (existing) {
+    if (existing.creation_intent_hash !== creationIntentHash) {
+      throw semanticError(
+        'CLIENT_OPERATION_ID_REUSED',
+        409,
+        'Esta operación ya registró un animal con datos distintos. Revisa tu lista de animales.',
       );
-      animalId = inserted.rows[0].animal_id;
-    } catch (error) {
-      throw translateUniqueViolation(error);
     }
+    return { animal: await fetchAnimal(client, existing.animal_id), yaExistia: true };
+  }
 
-    let pesajeInicialId = null;
-    if (value.pesoInicialKg !== null) {
-      const pesaje = await client.query(
-        `insert into agx.animal_pesajes (organizacion_id, animal_id, fecha, peso_kg, metodo, origen, actor_cuenta_id)
-         values ($1, $2, $3, $4, $5, 'REGISTRO_INICIAL', $6)
-         returning pesaje_id::text as pesaje_id`,
-        [organizacionId, animalId, hoy, value.pesoInicialKg, value.pesoInicialMetodo, actorCuentaId],
-      );
-      pesajeInicialId = pesaje.rows[0].pesaje_id;
-    }
+  await assertPredioActivo(client, value.predioId);
+  if (value.razaPrincipalId) await assertRazaDisponible(client, value.razaPrincipalId);
+  if (value.categoriaProductivaId) await assertCategoriaDisponible(client, value.categoriaProductivaId, value.sexo);
 
-    // Auditoría únicamente -- el protocolo de reintento no lee este evento.
-    await client.query(
-      `insert into agx.animal_eventos (organizacion_id, animal_id, tipo_evento, metadata_json, actor_cuenta_id)
-       values ($1, $2, 'REGISTRADO', $3::jsonb, $4)`,
-      [organizacionId, animalId, JSON.stringify({ intentHash: creationIntentHash, pesajeInicialId }), actorCuentaId],
+  const hoy = resolveFechaHoyNegocio(now);
+  const edadReferenciaFecha = value.nacimientoTipo === 'APROXIMADA' ? hoy : null;
+
+  let animalId;
+  try {
+    const inserted = await client.query(
+      `insert into agx.animales
+         (organizacion_id, predio_id, numero_visual, nombre, sexo,
+          nacimiento_tipo, fecha_nacimiento, edad_aproximada_meses, edad_referencia_fecha,
+          raza_tipo, raza_principal_id, raza_otro_nombre, cruce_descripcion,
+          categoria_productiva_id, origen_tipo, procedencia, fecha_ingreso, observaciones,
+          client_operation_id, creation_intent_hash)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+       returning animal_id::text as animal_id`,
+      [
+        organizacionId,
+        value.predioId,
+        value.numeroVisual,
+        value.nombre,
+        value.sexo,
+        value.nacimientoTipo,
+        value.fechaNacimiento,
+        value.edadAproximadaMeses,
+        edadReferenciaFecha,
+        value.razaTipo,
+        value.razaPrincipalId,
+        value.razaOtroNombre,
+        value.cruceDescripcion,
+        value.categoriaProductivaId,
+        value.origenTipo,
+        value.procedencia,
+        value.fechaIngreso,
+        value.observaciones,
+        value.clientOperationId,
+        creationIntentHash,
+      ],
     );
+    animalId = inserted.rows[0].animal_id;
+  } catch (error) {
+    throw translateUniqueViolation(error);
+  }
 
-    return { animal: await fetchAnimal(client, animalId), yaExistia: false };
-  });
+  let pesajeInicialId = null;
+  if (value.pesoInicialKg !== null) {
+    const pesaje = await client.query(
+      `insert into agx.animal_pesajes (organizacion_id, animal_id, fecha, peso_kg, metodo, origen, actor_cuenta_id)
+       values ($1, $2, $3, $4, $5, 'REGISTRO_INICIAL', $6)
+       returning pesaje_id::text as pesaje_id`,
+      [organizacionId, animalId, hoy, value.pesoInicialKg, value.pesoInicialMetodo, actorCuentaId],
+    );
+    pesajeInicialId = pesaje.rows[0].pesaje_id;
+  }
+
+  // Auditoría únicamente -- el protocolo de reintento no lee este evento.
+  await client.query(
+    `insert into agx.animal_eventos (organizacion_id, animal_id, tipo_evento, metadata_json, actor_cuenta_id)
+     values ($1, $2, 'REGISTRADO', $3::jsonb, $4)`,
+    [organizacionId, animalId, JSON.stringify({ intentHash: creationIntentHash, pesajeInicialId }), actorCuentaId],
+  );
+
+  return { animal: await fetchAnimal(client, animalId), yaExistia: false };
 }
 
 // Columnas corregibles: clave camelCase del valor normalizado -> columna.
@@ -449,6 +456,30 @@ export async function anularAnimal(organizacionId, animalId, { motivo, actorCuen
        values ($1, $2, 'ANULADO', $3::jsonb, $4)`,
       [organizacionId, animalId, JSON.stringify({ motivo }), actorCuentaId],
     );
+
+    // SPRINT-3D11.3 (R1): la chapeta QR de un animal anulado deja de ser un
+    // identificador operativo -- pasa a REVOCADO en la misma transacción
+    // (historial conservado; el código no se reutiliza).
+    const chapeta = await client.query(
+      `update agx.qr_chapetas
+          set estado = 'REVOCADO', revocado_at = now(), revocado_por = $2,
+              motivo = 'Animal anulado', updated_at = now()
+        where animal_id = $1 and estado = 'ASIGNADO_ANIMAL'
+        returning qr_id::text as qr_id, codigo_visible`,
+      [animalId, actorCuentaId],
+    );
+    for (const row of chapeta.rows) {
+      await client.query(
+        `insert into agx.qr_chapeta_eventos (qr_id, organizacion_id, tipo_evento, metadata_json, actor_cuenta_id)
+         values ($1, $2, 'REVOCADA', $3::jsonb, $4)`,
+        [row.qr_id, organizacionId, JSON.stringify({ causa: 'ANIMAL_ANULADO', animalId: String(animalId) }), actorCuentaId],
+      );
+      await client.query(
+        `insert into agx.animal_eventos (organizacion_id, animal_id, tipo_evento, metadata_json, actor_cuenta_id)
+         values ($1, $2, 'QR_REVOCADO', $3::jsonb, $4)`,
+        [organizacionId, animalId, JSON.stringify({ qrId: row.qr_id, codigoVisible: row.codigo_visible, causa: 'ANIMAL_ANULADO' }), actorCuentaId],
+      );
+    }
 
     return { animal: await fetchAnimal(client, animalId), yaAnulado: false };
   });

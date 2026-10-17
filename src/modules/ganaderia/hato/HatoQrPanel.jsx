@@ -1,27 +1,19 @@
-// SPRINT-3D11.3 (R1): sección QR de la ficha del animal. Muestra el QR
-// ACTIVO (enlace /qr/<token>) y permite generar, reemplazar y revocar.
-// Solo POST con CSRF vía hatoApi.js; nunca reintenta automáticamente. El
-// reemplazo usa un clientOperationId fijo por formulario abierto: un
-// reintento manual tras un fallo de red no reemplaza dos veces.
+// SPRINT-3D11.3 (R1): sección "Chapeta QR" de la ficha del animal. La
+// organización NO genera chapetas: usa las que el Super Admin le asignó.
+//   * sin chapeta (animal activo): asociar una chapeta disponible por código;
+//   * con chapeta: reemplazar por otra disponible, o reportarla
+//     perdida/revocada o dañada (con motivo);
+//   * historial de chapetas del animal.
+// Solo POST con CSRF vía hatoApi.js; nunca reintenta automáticamente. Las
+// tres acciones son idempotentes en el servidor por estado.
 import { useCallback, useEffect, useState } from 'react';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
-import { asignarQr, getAnimalQr, reemplazarQr, revocarQr } from './hatoApi.js';
-import { GENERIC_ERROR_MESSAGE, newClientOperationId } from './hatoFormModel.js';
-import { qrPublicUrl } from './qrToken.js';
+import { asociarQr, bajaQr, getAnimalQr, reemplazarQr } from './hatoApi.js';
+import { messageForError } from './hatoFormModel.js';
+import { ESTADO_CHAPETA_LABELS, normalizeCodigoChapeta } from './qrToken.js';
 
-const QR_ERROR_MESSAGES = Object.freeze({
-  QR_NO_ACTIVO: 'El animal no tiene un QR activo.',
-  ANIMAL_ANULADO: 'Este registro está anulado: no admite un QR nuevo.',
-  ANIMAL_NOT_FOUND: 'Este animal no está disponible.',
-  CLIENT_OPERATION_ID_REUSED: 'Esta operación ya se usó. Recarga la página e inténtalo nuevamente.',
-  INVALID_MOTIVO: 'Escribe el motivo (máximo 500 caracteres).',
-});
-
-const ESTADO_LABELS = Object.freeze({ ACTIVO: 'Activo', REVOCADO: 'Revocado', REEMPLAZADO: 'Reemplazado' });
-
-function qrErrorMessage(code) {
-  return QR_ERROR_MESSAGES[code] ?? GENERIC_ERROR_MESSAGE;
-}
+const CODIGO_INVALIDO = 'Revisa el código de la chapeta (forma AGX-7KM4-P2XZ).';
+const MOTIVO_REQUERIDO = 'Escribe el motivo (máximo 500 caracteres).';
 
 function formatFecha(value) {
   if (!value) return '';
@@ -30,10 +22,11 @@ function formatFecha(value) {
 }
 
 export default function HatoQrPanel({ animalId, animalActivo }) {
-  const [state, setState] = useState({ status: 'loading', activo: null, historial: [] });
+  const [state, setState] = useState({ status: 'loading', activa: null, historial: [] });
   const [modo, setModo] = useState('ver');
+  const [codigo, setCodigo] = useState('');
   const [motivo, setMotivo] = useState('');
-  const [operationId, setOperationId] = useState(null);
+  const [causa, setCausa] = useState('REVOCADO');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [aviso, setAviso] = useState('');
@@ -42,10 +35,10 @@ export default function HatoQrPanel({ animalId, animalActivo }) {
     setState((current) => ({ ...current, status: 'loading' }));
     try {
       const { ok, data } = await getAnimalQr(animalId);
-      if (ok && data) setState({ status: 'ok', activo: data.activo ?? null, historial: data.historial ?? [] });
-      else setState({ status: 'error', activo: null, historial: [] });
+      if (ok && data) setState({ status: 'ok', activa: data.activa ?? null, historial: data.historial ?? [] });
+      else setState({ status: 'error', activa: null, historial: [] });
     } catch {
-      setState({ status: 'error', activo: null, historial: [] });
+      setState({ status: 'error', activa: null, historial: [] });
     }
   }, [animalId]);
 
@@ -54,10 +47,11 @@ export default function HatoQrPanel({ animalId, animalActivo }) {
   }, [load]);
 
   function abrir(nuevoModo) {
+    setCodigo('');
     setMotivo('');
+    setCausa('REVOCADO');
     setError('');
     setAviso('');
-    setOperationId(nuevoModo === 'reemplazar' ? newClientOperationId() : null);
     setModo(nuevoModo);
   }
 
@@ -72,58 +66,55 @@ export default function HatoQrPanel({ animalId, animalActivo }) {
         setAviso(mensajeExito);
         await load();
       } else {
-        setError(qrErrorMessage(data?.error));
+        setError(messageForError(data?.error));
       }
     } catch {
-      setError(GENERIC_ERROR_MESSAGE);
+      setError(messageForError(null));
     } finally {
       setSaving(false);
     }
   }
 
-  function generar() {
-    ejecutar(() => asignarQr(animalId), 'QR generado.');
-  }
-
   function confirmar(event) {
     event.preventDefault();
     const texto = motivo.trim();
+    if (modo === 'asociar' || modo === 'reemplazar') {
+      const codigoNormalizado = normalizeCodigoChapeta(codigo);
+      if (!codigoNormalizado) {
+        setError(CODIGO_INVALIDO);
+        return;
+      }
+      if (modo === 'asociar') {
+        ejecutar(() => asociarQr(animalId, codigoNormalizado), `Chapeta ${codigoNormalizado} asociada.`);
+        return;
+      }
+      if (!texto) {
+        setError(MOTIVO_REQUERIDO);
+        return;
+      }
+      ejecutar(
+        () => reemplazarQr(animalId, { codigoNuevo: codigoNormalizado, motivo: texto }),
+        `Chapeta reemplazada por ${codigoNormalizado}. La anterior ya no abre la ficha.`,
+      );
+      return;
+    }
     if (!texto) {
-      setError(QR_ERROR_MESSAGES.INVALID_MOTIVO);
+      setError(MOTIVO_REQUERIDO);
       return;
     }
-    if (modo === 'revocar') {
-      ejecutar(() => revocarQr(animalId, texto), 'QR revocado. El código anterior ya no abre la ficha.');
-      return;
-    }
-    if (!operationId) {
-      setError('No pudimos iniciar una operación segura. Recarga la página e inténtalo nuevamente.');
-      return;
-    }
-    ejecutar(() => reemplazarQr(animalId, { motivo: texto, clientOperationId: operationId }), 'QR reemplazado. Imprime el nuevo código.');
+    ejecutar(() => bajaQr(animalId, { causa, motivo: texto }), 'Chapeta dada de baja. Ya no abre la ficha.');
   }
 
-  async function copiarEnlace() {
-    const clipboard = globalThis.navigator?.clipboard;
-    if (!clipboard?.writeText) return;
-    try {
-      await clipboard.writeText(qrPublicUrl(state.activo.valor));
-      setAviso('Enlace copiado.');
-    } catch {
-      setAviso('');
-    }
-  }
-
-  const { activo, historial } = state;
-  const anteriores = historial.filter((item) => item.estado !== 'ACTIVO');
+  const { activa, historial } = state;
+  const anteriores = historial.filter((item) => item.estado !== 'ASIGNADO_ANIMAL');
 
   return (
     <section className="gan-hato-qr" aria-labelledby="gan-hato-qr-title">
-      <h3 id="gan-hato-qr-title">Código QR</h3>
-      {state.status === 'loading' ? <StatusMessage>Cargando QR...</StatusMessage> : null}
+      <h3 id="gan-hato-qr-title">Chapeta QR</h3>
+      {state.status === 'loading' ? <StatusMessage>Cargando chapeta...</StatusMessage> : null}
       {state.status === 'error' ? (
         <div className="gan-hato-actions">
-          <StatusMessage type="error">No fue posible cargar el QR del animal.</StatusMessage>
+          <StatusMessage type="error">No fue posible cargar la chapeta del animal.</StatusMessage>
           <button type="button" className="gan-secondary-button" onClick={load}>Reintentar</button>
         </div>
       ) : null}
@@ -131,45 +122,41 @@ export default function HatoQrPanel({ animalId, animalActivo }) {
 
       {state.status === 'ok' && modo === 'ver' ? (
         <>
-          {activo ? (
+          {activa ? (
             <div className="gan-hato-ficha">
               <div className="gan-ficha-row">
-                <span>Estado</span>
-                <strong>Activo desde {formatFecha(activo.asignadoAt)}</strong>
+                <span>Código</span>
+                <strong className="gan-hato-qr-codigo">{activa.codigoVisible}</strong>
               </div>
               <div className="gan-ficha-row">
-                <span>Enlace del QR</span>
-                <strong className="gan-hato-qr-link">{qrPublicUrl(activo.valor)}</strong>
+                <span>Asociada</span>
+                <strong>{formatFecha(activa.asignadoAnimalAt)}</strong>
               </div>
             </div>
           ) : (
-            <p className="gan-hato-hint">Este animal no tiene un QR activo.</p>
+            <p className="gan-hato-hint">Este animal no tiene una chapeta QR asociada.</p>
           )}
           {error ? <StatusMessage type="error">{error}</StatusMessage> : null}
-          <div className="gan-hato-actions">
-            {!activo && animalActivo ? (
-              <button type="button" className="gan-submit" onClick={generar} disabled={saving}>
-                {saving ? 'Generando...' : 'Generar QR'}
-              </button>
-            ) : null}
-            {activo ? (
-              <>
-                <button type="button" className="gan-secondary-button" onClick={copiarEnlace}>Copiar enlace</button>
-                {animalActivo ? (
-                  <button type="button" className="gan-secondary-button" onClick={() => abrir('reemplazar')}>Reemplazar QR</button>
-                ) : null}
-                <button type="button" className="gan-secondary-button" onClick={() => abrir('revocar')}>Revocar QR</button>
-              </>
-            ) : null}
-          </div>
+          {animalActivo ? (
+            <div className="gan-hato-actions">
+              {!activa ? (
+                <button type="button" className="gan-submit" onClick={() => abrir('asociar')}>Asociar chapeta</button>
+              ) : (
+                <>
+                  <button type="button" className="gan-secondary-button" onClick={() => abrir('reemplazar')}>Reemplazar chapeta</button>
+                  <button type="button" className="gan-secondary-button" onClick={() => abrir('baja')}>Reportar pérdida o daño</button>
+                </>
+              )}
+            </div>
+          ) : null}
           {anteriores.length > 0 ? (
             <details className="gan-hato-qr-historial">
-              <summary>Historial de QR ({anteriores.length})</summary>
+              <summary>Historial de chapetas ({anteriores.length})</summary>
               <ul>
                 {anteriores.map((item) => (
-                  <li key={item.identificadorId}>
-                    {ESTADO_LABELS[item.estado] ?? item.estado} el {formatFecha(item.revocadoAt)}
-                    {item.motivo ? ` — ${item.motivo}` : ''}
+                  <li key={item.qrId}>
+                    {item.codigoVisible} — {ESTADO_CHAPETA_LABELS[item.estado] ?? item.estado} el {formatFecha(item.revocadoAt)}
+                    {item.motivo ? ` (${item.motivo})` : ''}
                   </li>
                 ))}
               </ul>
@@ -178,21 +165,40 @@ export default function HatoQrPanel({ animalId, animalActivo }) {
         </>
       ) : null}
 
-      {state.status === 'ok' && (modo === 'revocar' || modo === 'reemplazar') ? (
+      {state.status === 'ok' && modo !== 'ver' ? (
         <form className="gan-form" onSubmit={confirmar} noValidate>
-          <StatusMessage type="info">
-            {modo === 'revocar'
-              ? 'Al revocar, el QR actual deja de abrir la ficha. El animal queda sin QR activo.'
-              : 'Al reemplazar, el QR actual deja de funcionar y se genera uno nuevo para imprimir.'}
-          </StatusMessage>
-          <FormField label="Motivo" required>
-            <textarea value={motivo} maxLength={500} rows={3} onChange={(event) => setMotivo(event.target.value)} disabled={saving} />
-          </FormField>
+          {modo === 'baja' ? (
+            <>
+              <StatusMessage type="info">La chapeta actual dejará de abrir la ficha. Luego puedes asociar otra.</StatusMessage>
+              <FormField label="Qué pasó" required>
+                <select value={causa} onChange={(event) => setCausa(event.target.value)} disabled={saving}>
+                  <option value="REVOCADO">Se perdió / ya no se usa</option>
+                  <option value="DANADO">Está dañada</option>
+                </select>
+              </FormField>
+            </>
+          ) : (
+            <FormField label={modo === 'asociar' ? 'Código de chapeta' : 'Código de la chapeta nueva'} required>
+              <input
+                type="text"
+                value={codigo}
+                placeholder="AGX-7KM4-P2XZ"
+                autoComplete="off"
+                autoCapitalize="characters"
+                spellCheck={false}
+                onChange={(event) => setCodigo(event.target.value)}
+                disabled={saving}
+              />
+            </FormField>
+          )}
+          {modo !== 'asociar' ? (
+            <FormField label="Motivo" required>
+              <textarea value={motivo} maxLength={500} rows={3} onChange={(event) => setMotivo(event.target.value)} disabled={saving} />
+            </FormField>
+          ) : null}
           {error ? <StatusMessage type="error">{error}</StatusMessage> : null}
           <div className="gan-hato-actions">
-            <button type="submit" className="gan-submit" disabled={saving}>
-              {saving ? 'Guardando...' : modo === 'revocar' ? 'Confirmar revocación' : 'Confirmar reemplazo'}
-            </button>
+            <button type="submit" className="gan-submit" disabled={saving}>{saving ? 'Guardando...' : 'Confirmar'}</button>
             <button type="button" className="gan-secondary-button" onClick={() => setModo('ver')} disabled={saving}>Cancelar</button>
           </div>
         </form>

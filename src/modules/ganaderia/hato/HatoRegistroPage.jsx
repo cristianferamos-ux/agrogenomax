@@ -6,12 +6,18 @@
 // cualquier error (red, 400, 409, 500) para que un reintento manual nunca
 // duplique; se descarta solo tras el éxito o al cancelar. Sin
 // localStorage/sessionStorage. Nunca hay reintento automático del POST.
+//
+// SPRINT-3D11.3 (R1): con ?chapeta=AGX-... (llega desde el resolver QR
+// cuando la chapeta está disponible) el registro usa
+// POST /api/ganaderia/qr/chapetas/:codigo/registrar-animal: animal +
+// asociación en UNA transacción (si falla, la chapeta sigue disponible) y,
+// al terminar, abre la ficha del animal.
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
 import { StatusMessage } from '../components/FormField.jsx';
 import HatoAnimalFields from './HatoAnimalFields.jsx';
-import { createAnimal } from './hatoApi.js';
+import { createAnimal, registrarAnimalConChapeta } from './hatoApi.js';
 import {
   INITIAL_ANIMAL_FORM,
   NETWORK_UNCERTAIN_MESSAGE,
@@ -25,12 +31,17 @@ import {
   validateAnimalForm,
 } from './hatoFormModel.js';
 import useHatoCatalogos from './useHatoCatalogos.js';
+import { normalizeCodigoChapeta } from './qrToken.js';
 import '../styles/ganaderia-hato.css';
 
 const FAILURE_NETWORK_ERROR = 'NETWORK_ERROR';
 
 export default function HatoRegistroPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const chapetaParam = searchParams.get('chapeta');
+  const chapeta = chapetaParam === null ? null : normalizeCodigoChapeta(chapetaParam);
+  const chapetaInvalida = chapetaParam !== null && !chapeta;
   const catalogos = useHatoCatalogos();
   const [form, setForm] = useState(INITIAL_ANIMAL_FORM);
   const [saving, setSaving] = useState(false);
@@ -79,7 +90,7 @@ export default function HatoRegistroPage() {
 
   async function handleSubmit(event) {
     event.preventDefault();
-    if (saving || operationReused) return;
+    if (saving || operationReused || chapetaInvalida) return;
 
     const problema = validateAnimalForm(form);
     if (problema) {
@@ -96,7 +107,15 @@ export default function HatoRegistroPage() {
     setError('');
     setFieldError('');
     try {
-      const { ok, status, data, failure } = await createAnimal(buildCreateAnimalBody(form, operationIdRef.current));
+      const body = buildCreateAnimalBody(form, operationIdRef.current);
+      const { ok, status, data, failure } = chapeta
+        ? await registrarAnimalConChapeta(chapeta, body)
+        : await createAnimal(body);
+      if (ok && data?.animal && chapeta) {
+        operationIdRef.current = null;
+        navigate(`/ganaderia/animales/${data.animal.animalId}`, { replace: true });
+        return;
+      }
       if (ok && data?.animal) {
         // 201 (creado) y 200 (yaExistia) son el mismo éxito para el productor.
         operationIdRef.current = null;
@@ -148,6 +167,16 @@ export default function HatoRegistroPage() {
         <span className="gan-eyebrow">Animales</span>
         <h2>Registrar animal</h2>
       </div>
+      {chapeta ? (
+        <StatusMessage type="info">
+          Chapeta <strong>{chapeta}</strong>: quedará asociada a este animal al registrarlo.
+        </StatusMessage>
+      ) : null}
+      {chapetaInvalida ? (
+        <StatusMessage type="error">
+          El código de chapeta no es válido. <Link to="/ganaderia/escanear-qr">Escanear de nuevo</Link>
+        </StatusMessage>
+      ) : null}
 
       {catalogos.status === 'loading' ? <StatusMessage>Cargando datos del formulario...</StatusMessage> : null}
       {catalogos.status === 'error' ? (
@@ -180,7 +209,7 @@ export default function HatoRegistroPage() {
             {operationReused ? (
               <button type="button" className="gan-submit" onClick={registrarOtro}>Registrar otro animal</button>
             ) : (
-              <button type="submit" className="gan-submit" disabled={saving}>
+              <button type="submit" className="gan-submit" disabled={saving || chapetaInvalida}>
                 {saving ? 'Registrando...' : 'Registrar animal'}
               </button>
             )}

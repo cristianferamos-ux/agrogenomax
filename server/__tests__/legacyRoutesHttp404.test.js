@@ -178,11 +178,14 @@ test('GET /api/ganaderia/predios/1/potreros sin sesión conserva 401 SESSION_REQ
 });
 
 // SPRINT-3D11.3 (R1): el QR nuevo vive bajo /api/ganaderia (sesión
-// obligatoria), nunca reabre /api/qr legacy.
+// obligatoria; inventario solo Super Admin), nunca reabre /api/qr legacy.
 for (const [method, routePath] of [
-  ['GET', '/api/ganaderia/qr/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'],
+  ['GET', '/api/ganaderia/qr/token/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'],
+  ['GET', '/api/ganaderia/qr/codigo/AGX-000003'],
   ['GET', '/api/ganaderia/animales/1/qr'],
-  ['POST', '/api/ganaderia/animales/1/qr'],
+  ['POST', '/api/ganaderia/animales/1/qr/asociar'],
+  ['GET', '/api/ganaderia/admin/qr/lotes'],
+  ['POST', '/api/ganaderia/admin/qr/lotes'],
 ]) {
   test(`${method} ${routePath} sin sesión -> 401 SESSION_REQUIRED (QR nuevo, no legacy)`, async () => {
     const { status, json } = await request(method, routePath);

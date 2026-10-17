@@ -32,8 +32,9 @@ function ComingSoon({ title }) {
 // /api/ganaderia/animales). Los ids legacy no se traducen: animal/*,
 // animales/listado redirigen a la lista nueva.
 //
-// SPRINT-3D11.3 (R1): escanear-qr y qr/:token montan el flujo QR seguro de
-// hato/ (solo /api/ganaderia/qr y /api/ganaderia/animales/:id/qr).
+// SPRINT-3D11.3 (R1): escanear-qr y qr/:valor (token o código de chapeta)
+// montan el flujo QR de hato/ (solo /api/ganaderia/qr y
+// /api/ganaderia/animales/:id/qr).
 export default function GanaderiaApp() {
   return (
     <GanaderiaShell>
@@ -47,7 +48,7 @@ export default function GanaderiaApp() {
         <Route path="animales/:animalId" element={<HatoDetallePage />} />
         <Route path="animales/*" element={<Navigate to="/ganaderia/animales" replace />} />
         <Route path="escanear-qr" element={<HatoEscanearQrPage />} />
-        <Route path="qr/:token" element={<HatoQrResolverPage />} />
+        <Route path="qr/:valor" element={<HatoQrResolverPage />} />
         <Route path="animal/*" element={<Navigate to="/ganaderia/animales" replace />} />
         <Route path="proximamente/:modulo" element={<ComingSoon title="Módulo no disponible todavía" />} />
       </Routes>
