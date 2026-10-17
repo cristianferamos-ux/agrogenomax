@@ -246,7 +246,8 @@ test('RequireGanaderiaAuth.jsx: la rama loading y la rama anonymous retornan exp
 });
 
 test('RequireGanaderiaAuth.jsx: redirige a /ganaderia/login con replace (nunca deja la entrada privada en el historial)', () => {
-  assert.match(guardSource, /<Navigate to="\/ganaderia\/login" replace \/>/);
+  // SPRINT-3D11.3 (R1): el único state permitido es la lista blanca QR.
+  assert.match(guardSource, /<Navigate to="\/ganaderia\/login" replace state=\{loginReturnState\(location\.pathname\)\} \/>/);
 });
 
 // ---------------------------------------------------------------------

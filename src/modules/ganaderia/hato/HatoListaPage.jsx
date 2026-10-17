@@ -77,6 +77,7 @@ export default function HatoListaPage() {
         <span className="gan-eyebrow">Animales</span>
         <h2>Mis animales</h2>
         <Link className="gan-submit gan-hato-cta" to="/ganaderia/animales/nuevo">Registrar animal</Link>
+        <Link className="gan-secondary-button gan-hato-cta" to="/ganaderia/escanear-qr">Escanear QR</Link>
       </div>
 
       <form className="gan-hato-toolbar" onSubmit={buscar} role="search">

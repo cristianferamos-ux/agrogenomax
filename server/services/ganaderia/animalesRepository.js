@@ -103,7 +103,7 @@ export function serializeAnimal(row) {
   };
 }
 
-async function fetchAnimal(client, animalId) {
+export async function fetchAnimal(client, animalId) {
   const result = await client.query(`${ANIMAL_SELECT} where a.animal_id = $1`, [animalId]);
   return result.rows[0] ? serializeAnimal(result.rows[0]) : null;
 }

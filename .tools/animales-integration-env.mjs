@@ -2,7 +2,7 @@ import pg from 'pg';
 
 const APP = 'AGX_BUSINESS_DATABASE_URL_TEST';
 const ADMIN = 'AGX_BUSINESS_INTEGRATION_ADMIN_DATABASE_URL';
-const TABLES = ['predios', 'catalogo_categorias_productivas', 'catalogo_razas', 'animales', 'animal_pesajes', 'animal_eventos'];
+const TABLES = ['predios', 'catalogo_categorias_productivas', 'catalogo_razas', 'animales', 'animal_pesajes', 'animal_eventos', 'animal_identificadores'];
 
 export function validateAnimalesIntegrationEnv(env) {
   if (env.AGX_ALLOW_DISPOSABLE_DB_TESTS !== 'yes') {
@@ -56,7 +56,7 @@ export async function requireAnimalesIntegrationEnv(env = process.env, createPoo
       }
       const missing = TABLES.filter((name) => !rows.some((row) => row.name === name && row.relation));
       if (missing.length) {
-        throw new Error(`Faltan tablas requeridas en la conexión ${kind}: ${missing.join(', ')}. Verifique las migraciones hasta 0022; este comando no las ejecuta.`);
+        throw new Error(`Faltan tablas requeridas en la conexión ${kind}: ${missing.join(', ')}. Verifique las migraciones hasta 0023; este comando no las ejecuta.`);
       }
     }
   } finally {

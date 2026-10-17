@@ -35,6 +35,27 @@ export function anularAnimal(animalId, motivo) {
   return postJsonWithCsrf(`${BASE}/animales/${encodeURIComponent(animalId)}/anular`, { motivo });
 }
 
+// SPRINT-3D11.3 (R1): QR seguro del animal.
+export function getAnimalQr(animalId) {
+  return getJsonWithSession(`${BASE}/animales/${encodeURIComponent(animalId)}/qr`);
+}
+
+export function asignarQr(animalId) {
+  return postJsonWithCsrf(`${BASE}/animales/${encodeURIComponent(animalId)}/qr`, {});
+}
+
+export function revocarQr(animalId, motivo) {
+  return postJsonWithCsrf(`${BASE}/animales/${encodeURIComponent(animalId)}/qr/revocar`, { motivo });
+}
+
+export function reemplazarQr(animalId, { motivo, clientOperationId }) {
+  return postJsonWithCsrf(`${BASE}/animales/${encodeURIComponent(animalId)}/qr/reemplazar`, { motivo, clientOperationId });
+}
+
+export function resolveQr(token) {
+  return getJsonWithSession(`${BASE}/qr/${encodeURIComponent(token)}`);
+}
+
 export function listRazas() {
   return getJsonWithSession(`${BASE}/catalogo-razas`);
 }

@@ -36,7 +36,10 @@ const sidebarCode = stripComments(read(path.join(GANADERIA_DIR, 'components', 'G
 const demoSource = read(path.join(GANADERIA_DIR, 'pages', 'GanaderiaDemo.jsx'));
 
 test('hato/ contiene las 3 páginas, el cliente y el modelo esperados', () => {
-  for (const name of ['HatoListaPage.jsx', 'HatoRegistroPage.jsx', 'HatoDetallePage.jsx', 'hatoApi.js', 'hatoFormModel.js']) {
+  for (const name of [
+    'HatoListaPage.jsx', 'HatoRegistroPage.jsx', 'HatoDetallePage.jsx', 'hatoApi.js', 'hatoFormModel.js',
+    'HatoEscanearQrPage.jsx', 'HatoQrResolverPage.jsx', 'HatoQrPanel.jsx', 'HatoQrScanner.jsx', 'HatoQrEntradaPublica.jsx', 'qrToken.js',
+  ]) {
     assert.ok(hatoFiles.includes(name), `falta hato/${name}`);
   }
 });
@@ -44,7 +47,10 @@ test('hato/ contiene las 3 páginas, el cliente y el modelo esperados', () => {
 test('ningún archivo de hato/ importa el cliente legacy ni páginas legacy de animales/QR', () => {
   for (const [name, code] of Object.entries(hatoSources)) {
     assert.doesNotMatch(code, /ganaderiaApi/, `${name} no debe usar api/ganaderiaApi.js`);
-    assert.doesNotMatch(code, /from ['"]\.\.\/(animales|qr)\//, `${name} no debe importar animales/ o qr/ legacy`);
+    // Única excepción (3D11.3): la página estática QrNoDisponiblePage, sin API.
+    const legacyImports = [...code.matchAll(/from ['"]\.\.\/(animales|qr)\/([^'"]+)['"]/g)].map((m) => `${m[1]}/${m[2]}`);
+    assert.deepEqual(legacyImports.filter((imp) => imp !== 'qr/QrNoDisponiblePage.jsx'), [], `${name} no debe importar animales/ o qr/ legacy`);
+    assert.doesNotMatch(code, /normalizeQrCode|\bQrScanner\b/, `${name} no debe usar el escáner/normalizador legacy`);
     assert.doesNotMatch(code, /AnimalesListPage|AnimalFichaBasica|QrEntryPage|lookupQr/, name);
   }
 });
@@ -118,7 +124,9 @@ test('rutas: /ganaderia/animales, /animales/nuevo y /animales/:animalId montan e
   assert.match(ganaderiaAppCode, /<Route path="animales\/nuevo" element=\{<HatoRegistroPage \/>\} \/>/);
   assert.match(ganaderiaAppCode, /<Route path="animales\/:animalId" element=\{<HatoDetallePage \/>\} \/>/);
   assert.match(ganaderiaAppCode, /<Route path="animal\/\*" element=\{<Navigate to="\/ganaderia\/animales" replace \/>\} \/>/);
-  assert.match(ganaderiaAppCode, /<Route path="escanear-qr" element=\{<Navigate to="\/ganaderia\/animales" replace \/>\} \/>/);
+  // SPRINT-3D11.3 (R1): el escáner y el resolver QR son del módulo nuevo.
+  assert.match(ganaderiaAppCode, /<Route path="escanear-qr" element=\{<HatoEscanearQrPage \/>\} \/>/);
+  assert.match(ganaderiaAppCode, /<Route path="qr\/:token" element=\{<HatoQrResolverPage \/>\} \/>/);
 });
 
 test('sidebar: "Mis animales" y "Registrar animal" apuntan al módulo nuevo', () => {

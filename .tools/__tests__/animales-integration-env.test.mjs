@@ -43,7 +43,7 @@ for (const failingKind of ['app', 'admin', 'missing', 'ok']) {
     if (failingKind === 'ok') await requireAnimalesIntegrationEnv(env, factory);
     else await assert.rejects(requireAnimalesIntegrationEnv(env, factory), (error) => {
       assert.doesNotMatch(error.message, /PRIVATE_CONNECTION_DETAILS/);
-      assert.match(error.message, failingKind === 'missing' ? /animal_eventos.*0022/ : new RegExp(`conexión ${failingKind}`));
+      assert.match(error.message, failingKind === 'missing' ? /animal_eventos.*0023/ : new RegExp(`conexión ${failingKind}`));
       return true;
     });
     assert.ok(pools.every((pool) => pool.ended));

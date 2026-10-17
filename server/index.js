@@ -29,6 +29,7 @@ import createGanaderiaPotreroCicloPastoreoRouter from './routes/ganaderiaPotrero
 import createGanaderiaCatalogoPasturasRouter from './routes/ganaderiaCatalogoPasturas.js';
 import createGanaderiaCategoriasProductivasRouter from './routes/ganaderiaCategoriasProductivas.js';
 import createGanaderiaAnimalesRouter from './routes/ganaderiaAnimales.js';
+import { createGanaderiaAnimalQrRouter, createGanaderiaQrResolverRouter } from './routes/ganaderiaAnimalQr.js';
 import createGanaderiaCatalogoRazasRouter from './routes/ganaderiaCatalogoRazas.js';
 import createHealthRouter from './routes/health.js';
 
@@ -274,6 +275,26 @@ app.use(
 app.use(
   '/api/ganaderia/categorias-productivas',
   createGanaderiaCategoriasProductivasRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
+
+// SPRINT-3D11.3 (R1): QR seguro del animal (Postgres-AGX-Business, 0023).
+// Montado ANTES del router de animales para que /animales/:id/qr no pase
+// por él. Sesión con organización + CSRF. Nunca /api/qr legacy.
+app.use(
+  '/api/ganaderia/animales/:animalId/qr',
+  createGanaderiaAnimalQrRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
+app.use(
+  '/api/ganaderia/qr',
+  createGanaderiaQrResolverRouter({
     appEnv: appConfig.appEnv,
     csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
     allowedOrigins: appConfig.cors.allowedOrigins,

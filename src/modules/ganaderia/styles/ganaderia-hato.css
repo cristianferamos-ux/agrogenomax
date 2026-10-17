@@ -186,3 +186,26 @@
     flex: 1 1 100%;
   }
 }
+
+/* SPRINT-3D11.3 (R1): sección QR de la ficha. */
+.gan-hato-qr {
+  margin-top: 1.5rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.gan-hato-qr h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.gan-hato-qr-link {
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+}
+
+.gan-hato-qr-historial ul {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+}

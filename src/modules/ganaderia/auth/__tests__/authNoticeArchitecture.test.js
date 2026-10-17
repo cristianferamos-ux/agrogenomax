@@ -111,14 +111,18 @@ for (const [name, code, setter] of [
   });
 }
 
-// 16/17 -- GanaderiaLogin intacto, sin return path.
-test('sin return path: ningún archivo de auth/ usa location.state/from/returnTo/redirectTo', () => {
+// 16/17 -- sin return path genérico. SPRINT-3D11.3 (R1): única excepción,
+// la lista blanca QR de auth/loginReturnPath.js (resolver
+// /ganaderia/qr/<token> y escáner); ningún otro destino ni URL absoluta.
+test('return path: solo la lista blanca QR (loginReturnPath.js); sin returnTo/redirectTo', () => {
   for (const file of fs.readdirSync(AUTH_DIR).filter((f) => /\.(js|jsx)$/.test(f))) {
     const code = stripComments(read(path.join(AUTH_DIR, file)));
     assert.doesNotMatch(code, /location\.state|returnTo|redirectTo|state: \{ from/, file);
   }
   const loginCode = stripComments(read(path.join(GANADERIA_DIR, 'pages', 'GanaderiaLogin.jsx')));
-  assert.doesNotMatch(loginCode, /location\.state|returnTo|redirectTo/);
+  assert.doesNotMatch(loginCode, /returnTo|redirectTo/);
+  assert.deepEqual([...loginCode.matchAll(/location\.state/g)].length, 1, 'location.state solo se lee una vez');
+  assert.match(loginCode, /safeLoginReturnPath\(location\.state\?\.from\) \?\? '\/ganaderia\/dashboard'/);
 });
 
 test('modelo de UI: JS puro, sin React/window', () => {

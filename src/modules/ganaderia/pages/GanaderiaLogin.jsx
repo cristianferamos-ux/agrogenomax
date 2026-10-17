@@ -6,8 +6,9 @@
 // aquí) -- same-origin, cookie HttpOnly manejada por el navegador, sin
 // localStorage/sessionStorage (§6).
 import { useState } from 'react';
-import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useGanaderiaAuth } from '../auth/GanaderiaAuthContext.jsx';
+import { safeLoginReturnPath } from '../auth/loginReturnPath.js';
 import '../styles/ganaderia-login.css';
 
 const GENERIC_CREDENTIALS_MESSAGE = 'Correo o contraseña incorrectos.';
@@ -26,6 +27,7 @@ function resolveErrorMessage(status) {
 export default function GanaderiaLogin() {
   const { status, rolInterno, refresh } = useGanaderiaAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -63,7 +65,11 @@ export default function GanaderiaLogin() {
       }
 
       const freshSession = await refresh();
-      const destination = freshSession?.rolInterno === 'super_admin' ? '/ganaderia/admin' : '/ganaderia/dashboard';
+      // SPRINT-3D11.3 (R1): un QR escaneado sin sesión vuelve a resolverse
+      // tras el login; cualquier otro origen sigue yendo al dashboard.
+      const destination = freshSession?.rolInterno === 'super_admin'
+        ? '/ganaderia/admin'
+        : safeLoginReturnPath(location.state?.from) ?? '/ganaderia/dashboard';
       navigate(destination, { replace: true });
     } catch {
       setErrorMessage(GENERIC_NETWORK_MESSAGE);

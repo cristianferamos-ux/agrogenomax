@@ -3,12 +3,13 @@
 // optimista con fechaActualizacionEsperada) + anulación de un registro
 // erróneo (POST .../anular, terminal). No es la ficha completa (3D11.4):
 // sin línea de tiempo, pesajes manuales ni sanidad. Predio y peso no se
-// corrigen aquí.
+// corrigen aquí. SPRINT-3D11.3 (R1): incluye la sección QR (HatoQrPanel).
 import { useCallback, useEffect, useState } from 'react';
 import { Navigate, useParams } from 'react-router-dom';
 import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
 import HatoAnimalFields from './HatoAnimalFields.jsx';
+import HatoQrPanel from './HatoQrPanel.jsx';
 import { anularAnimal, corregirAnimal, getAnimal } from './hatoApi.js';
 import {
   GENERIC_ERROR_MESSAGE,
@@ -211,6 +212,7 @@ export default function HatoDetallePage() {
                   </button>
                 </div>
               ) : null}
+              <HatoQrPanel animalId={animal.animalId} animalActivo={animal.estado === 'ACTIVO'} />
             </>
           ) : null}
 

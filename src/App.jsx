@@ -46,7 +46,7 @@ import RequireGanaderiaAuth from './modules/ganaderia/auth/RequireGanaderiaAuth.
 import RequireGanaderiaSuperAdmin from './modules/ganaderia/auth/RequireGanaderiaSuperAdmin.jsx';
 import GanaderiaAdminShell from './modules/ganaderia/admin/GanaderiaAdminShell.jsx';
 import GanaderiaAdminCrearCuenta from './modules/ganaderia/admin/GanaderiaAdminCrearCuenta.jsx';
-import QrNoDisponiblePage from './modules/ganaderia/qr/QrNoDisponiblePage.jsx';
+import HatoQrEntradaPublica from './modules/ganaderia/hato/HatoQrEntradaPublica.jsx';
 import CatastroXApp from './modules/catastrox/CatastroXApp.jsx';
 import AgroGenomaXHome from './components/home/AgroGenomaXHome.jsx';
 
@@ -286,7 +286,10 @@ function App() {
             real (GET /api/ganaderia/auth/session), nunca estado viejo del
             navegador (§8/§11). /qr/:codigo permanece público y AJENO a este
             provider/guard -- SPRINT-3D11.SECURITY-LEGACY: renderiza una
-            página estática (QrNoDisponiblePage), sin consultar ninguna API. */}
+            página estática (QrNoDisponiblePage), sin consultar ninguna API.
+            SPRINT-3D11.3 (R1): HatoQrEntradaPublica solo redirige un token
+            QR AGX al resolver privado /ganaderia/qr/:token; nunca consulta
+            la API desde la ruta pública. */}
         <Route
           path="/ganaderia/login"
           element={
@@ -342,7 +345,7 @@ function App() {
           }
         />
         <Route path="/catastrox/*" element={<CatastroXApp />} />
-        <Route path="/qr/:codigo" element={<QrNoDisponiblePage />} />
+        <Route path="/qr/:codigo" element={<HatoQrEntradaPublica />} />
       </Routes>
     </BrowserRouter>
   );

@@ -8,9 +8,11 @@ try {
   process.exitCode = await runTestFiles([
     'server/services/__tests__/animalesSchemaIntegration.test.js',
     'server/services/__tests__/animalesRepositoryIntegration.test.js',
+    'server/services/__tests__/animalQrIntegration.test.js',
   ], { requiredPasses: {
     'server/services/__tests__/animalesSchemaIntegration.test.js': 24,
     'server/services/__tests__/animalesRepositoryIntegration.test.js': 27,
+    'server/services/__tests__/animalQrIntegration.test.js': 18,
   } });
 } catch (error) {
   console.error(error.message);
