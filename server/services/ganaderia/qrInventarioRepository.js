@@ -1,11 +1,13 @@
-// SPRINT-3D11.3 (R1) -- inventario central de chapetas QR, contexto
-// Super Admin (withQrAdminTransaction, app.agx_qr_admin = 'on'). Solo lo
-// invocan rutas detrás de createRequireGanaderiaSuperAdmin
-// (server/routes/ganaderiaAdminQr.js). Ninguna organización llega aquí.
+// SPRINT-3D11.3 (R1) -- inventario central de chapetas QR. Corre SIEMPRE
+// con el rol PostgreSQL agx_qr_admin (withQrAdminTransaction de
+// server/db/agxQrAdminPool.js, conexión propia) -- agx_app no tiene ningún
+// privilegio sobre el inventario global. Solo lo invocan rutas detrás de
+// createRequireGanaderiaSuperAdmin (server/routes/ganaderiaAdminQr.js).
 //
 // Flujo: crear lote (genera códigos + tokens) -> GENERADO -> EN_FABRICACION
 // -> EN_STOCK -> asignar (todo o parte) a una organización -> CERRADO.
-import { withQrAdminTransaction } from '../../db/agxBusinessPool.js';
+import { withQrAdminTransaction } from '../../db/agxQrAdminPool.js';
+import { decryptQrToken, encryptQrToken, loadQrTokenKey, QR_TOKEN_CLAVE_VERSION } from './qrTokenCrypto.js';
 import {
   generateCodigoLote,
   generateCodigoVisible,
@@ -110,9 +112,9 @@ async function insertLoteRow(client, { tipo, cantidad, estado, urlBase, proveedo
  * Inserta `cantidad` chapetas QR_AGX en el lote. Códigos y tokens se
  * generan en rondas; las colisiones (código visible o hash de token ya
  * existentes) se descartan con ON CONFLICT DO NOTHING y se regeneran
- * solo las faltantes. El token en claro va a qr_chapeta_tokens.
+ * solo las faltantes. El token solo se persiste CIFRADO (qr_chapeta_tokens).
  */
-async function generarChapetas(client, { loteId, cantidad, codeGenerator, tokenGenerator }) {
+async function generarChapetas(client, { loteId, cantidad, codeGenerator, tokenGenerator, key }) {
   let pendientes = cantidad;
   for (let round = 1; round <= MAX_GENERATION_ROUNDS && pendientes > 0; round += 1) {
     const codigos = new Set();
@@ -130,14 +132,18 @@ async function generarChapetas(client, { loteId, cantidad, codeGenerator, tokenG
       `insert into agx.qr_chapetas (lote_id, tipo, codigo_visible, token_hash)
        select $1, 'QR_AGX', codigo, hash from unnest($2::text[], $3::text[]) as t(codigo, hash)
        on conflict do nothing
-       returning qr_id::text as qr_id, token_hash`,
+       returning qr_id::text as qr_id, codigo_visible, token_hash`,
       [loteId, codigoList, hashList],
     );
     if (inserted.rows.length > 0) {
       await client.query(
-        `insert into agx.qr_chapeta_tokens (qr_id, token)
-         select qr_id, token from unnest($1::bigint[], $2::text[]) as t(qr_id, token)`,
-        [inserted.rows.map((row) => row.qr_id), inserted.rows.map((row) => tokens.get(row.token_hash))],
+        `insert into agx.qr_chapeta_tokens (qr_id, token_cifrado, clave_version)
+         select qr_id, cifrado, $3 from unnest($1::bigint[], $2::bytea[]) as t(qr_id, cifrado)`,
+        [
+          inserted.rows.map((row) => row.qr_id),
+          inserted.rows.map((row) => encryptQrToken(tokens.get(row.token_hash), row.codigo_visible, key)),
+          QR_TOKEN_CLAVE_VERSION,
+        ],
       );
     }
     pendientes -= inserted.rows.length;
@@ -145,10 +151,14 @@ async function generarChapetas(client, { loteId, cantidad, codeGenerator, tokenG
   if (pendientes > 0) throw new Error('QR_CHAPETA_GENERATION_EXHAUSTED');
 }
 
-/** POST /admin/qr/lotes -- crea un lote QR_AGX y genera sus chapetas. Idempotente por clientOperationId. */
+/**
+ * POST /admin/qr/lotes -- crea un lote QR_AGX y genera sus chapetas.
+ * Idempotente por clientOperationId. urlBase = AGX_QR_PUBLIC_ORIGIN (lo
+ * resuelve la ruta desde la configuración del servidor, nunca del navegador).
+ */
 export async function crearLote(
   { cantidad, proveedor, observaciones, urlBase, clientOperationId },
-  { actorCuentaId, codeGenerator = generateCodigoVisible, tokenGenerator = generateQrToken },
+  { actorCuentaId, codeGenerator = generateCodigoVisible, tokenGenerator = generateQrToken, key = loadQrTokenKey() },
 ) {
   return withQrAdminTransaction(async (client) => {
     await client.query('select pg_advisory_xact_lock(hashtext($1))', [`agx_qr_lote:${clientOperationId}`]);
@@ -158,7 +168,7 @@ export async function crearLote(
     const loteId = await insertLoteRow(client, {
       tipo: 'QR_AGX', cantidad, estado: 'GENERADO', urlBase, proveedor, observaciones, actorCuentaId, clientOperationId,
     });
-    await generarChapetas(client, { loteId, cantidad, codeGenerator, tokenGenerator });
+    await generarChapetas(client, { loteId, cantidad, codeGenerator, tokenGenerator, key });
     await insertLoteEvento(client, { loteId, tipoEvento: 'GENERADO', metadata: { cantidad }, actorCuentaId });
     return { lote: serializeLote(await fetchLote(client, loteId)), yaExistia: false };
   });
@@ -449,18 +459,28 @@ export async function reemplazarChapetaAdmin(qrId, { codigoNuevo, motivo }, { ac
   });
 }
 
-/** Filas del archivo del proveedor (incluye el token en claro: solo Super Admin). */
-export async function exportLoteProveedor(loteId) {
+/**
+ * Filas del archivo del proveedor. Descifra cada token en memoria (nunca lo
+ * persiste en claro); un cifrado manipulado o movido de fila falla el tag GCM.
+ */
+export async function exportLoteProveedor(loteId, { key } = {}) {
   return withQrAdminTransaction(async (client) => {
     const lote = await fetchLote(client, loteId);
     if (!lote) return null;
     const result = await client.query(
-      `select c.codigo_visible, t.token
+      `select c.codigo_visible, t.token_cifrado
          from agx.qr_chapetas c
          left join agx.qr_chapeta_tokens t on t.qr_id = c.qr_id
         where c.lote_id = $1 order by c.qr_id`,
       [loteId],
     );
-    return { lote: serializeLote(lote), chapetas: result.rows.map((r) => ({ codigoVisible: r.codigo_visible, token: r.token })) };
+    const claveActiva = lote.tipo === 'QR_AGX' ? key ?? loadQrTokenKey() : null;
+    return {
+      lote: serializeLote(lote),
+      chapetas: result.rows.map((r) => ({
+        codigoVisible: r.codigo_visible,
+        token: r.token_cifrado ? decryptQrToken(r.token_cifrado, r.codigo_visible, claveActiva) : null,
+      })),
+    };
   });
 }

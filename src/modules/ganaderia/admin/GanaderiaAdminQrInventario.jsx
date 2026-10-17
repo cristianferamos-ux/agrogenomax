@@ -442,7 +442,7 @@ function BuscarChapetas({ lotes, organizaciones, nombreOrg, refreshKey, onChange
       <div className="gan-aqr-card">
         <form className="gan-aqr-form" onSubmit={buscar} noValidate>
           <h3>Buscar chapetas</h3>
-          <label><span>Código visible</span><input type="text" placeholder="AGX-7KM4-P2XZ" value={filtros.codigo} onChange={set('codigo')} /></label>
+          <label><span>Código visible</span><input type="text" placeholder="AGX-7KM4-P2XZ-R" value={filtros.codigo} onChange={set('codigo')} /></label>
           <label>
             <span>Estado</span>
             <select value={filtros.estado} onChange={set('estado')}>

@@ -23,7 +23,7 @@ function semanticError(code, status, message) {
 // Fechas como texto (sin conversión de zona horaria del driver) y
 // updated_at con microsegundos: es la precondición de concurrencia
 // optimista que el cliente devuelve al corregir.
-const ANIMAL_SELECT = `
+export const ANIMAL_SELECT = `
   select a.animal_id::text as animal_id,
          a.predio_id::text as predio_id,
          p.nombre_predio,

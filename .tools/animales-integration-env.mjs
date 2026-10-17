@@ -2,6 +2,8 @@ import pg from 'pg';
 
 const APP = 'AGX_BUSINESS_DATABASE_URL_TEST';
 const ADMIN = 'AGX_BUSINESS_INTEGRATION_ADMIN_DATABASE_URL';
+// SPRINT-3D11.3 (R1): rol agx_qr_admin (inventario QR global, 0023).
+const QR_ADMIN = 'AGX_BUSINESS_QR_ADMIN_DATABASE_URL_TEST';
 const TABLES = ['predios', 'catalogo_categorias_productivas', 'catalogo_razas', 'animales', 'animal_pesajes', 'animal_eventos', 'qr_lotes', 'qr_chapetas'];
 
 export function validateAnimalesIntegrationEnv(env) {
@@ -12,7 +14,7 @@ export function validateAnimalesIntegrationEnv(env) {
   if (!expectedDb || !/^[a-z][a-z0-9_]*_test$/.test(expectedDb)) {
     throw new Error('AGX_DISPOSABLE_TEST_DB_NAME debe identificar una base de pruebas terminada en _test.');
   }
-  const endpoints = [APP, ADMIN].map((name) => {
+  const endpoints = [APP, ADMIN, QR_ADMIN].map((name) => {
     if (!env[name]?.trim()) throw new Error(`${name} es obligatoria para la integración real de animales.`);
     let endpoint;
     try {
@@ -28,14 +30,15 @@ export function validateAnimalesIntegrationEnv(env) {
     }
     return endpoint;
   });
-  if (endpoints[0].port !== endpoints[1].port || endpoints[0].database !== endpoints[1].database) {
-    throw new Error('Las conexiones app y admin deben apuntar a la misma base desechable y puerto.');
+  if (endpoints.some((endpoint) => endpoint.port !== endpoints[0].port || endpoint.database !== endpoints[0].database)) {
+    throw new Error('Las conexiones app, admin y QR admin deben apuntar a la misma base desechable y puerto.');
   }
   if (endpoints.some((endpoint) => endpoint.database !== expectedDb)) {
     throw new Error('La base conectada no coincide con AGX_DISPOSABLE_TEST_DB_NAME.');
   }
   if (endpoints[0].user !== 'agx_app') throw new Error(`${APP} debe usar el rol agx_app para comprobar RLS.`);
-  return { app: env[APP], admin: env[ADMIN] };
+  if (endpoints[2].user !== 'agx_qr_admin') throw new Error(`${QR_ADMIN} debe usar el rol agx_qr_admin.`);
+  return { app: env[APP], admin: env[ADMIN], qrAdmin: env[QR_ADMIN] };
 }
 
 export async function requireAnimalesIntegrationEnv(env = process.env, createPool = (options) => new pg.Pool(options)) {

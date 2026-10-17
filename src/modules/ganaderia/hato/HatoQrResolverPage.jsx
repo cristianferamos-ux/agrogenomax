@@ -7,11 +7,14 @@
 //   revocada / dañada / reemplazada -> estado controlado (410)
 // Formato inválido -> estado controlado sin consultar la API. La entrada
 // del historial se reemplaza al navegar (el token no queda en el historial).
+// SPRINT-3D11.3 (R1): con el dispositivo preparado resuelve primero contra
+// la copia local (sin red): token por SHA-256, código por su valor.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
 import { StatusMessage } from '../components/FormField.jsx';
 import { resolveQrCodigo, resolveQrToken } from './hatoApi.js';
-import { parseQrContent, qrResolutionOutcome } from './qrToken.js';
+import { ESTADO_CHAPETA_LABELS, parseQrContent, qrResolutionOutcome } from './qrToken.js';
+import { useGanaderiaOffline } from '../offline/GanaderiaOfflineProvider.jsx';
 import '../styles/ganaderia-hato.css';
 
 export default function HatoQrResolverPage() {
@@ -21,17 +24,42 @@ export default function HatoQrResolverPage() {
   const valido = kind !== 'invalid';
   const clave = kind === 'token' ? parsed.token : parsed.codigo;
   const [outcome, setOutcome] = useState(valido ? { status: 'loading' } : { status: 'not_found' });
+  const offline = useGanaderiaOffline();
+  const local = offline.preparado && offline.repo ? offline.repo : null;
+  const online = offline.online;
 
   const resolve = useCallback(async () => {
     if (!valido) return;
     setOutcome({ status: 'loading' });
+    // SPRINT-3D11.3 (R1) offline-first: primero la copia local (funciona sin
+    // red). Un código que NO está en el dispositivo no se da por inválido:
+    // con red se verifica en el servidor; sin red se informa.
+    if (local) {
+      try {
+        const localResult = await local.resolverLocal(kind === 'token' ? { kind, token: clave } : { kind, codigo: clave });
+        if (localResult.resultado === 'ANIMAL' || localResult.resultado === 'DISPONIBLE') {
+          setOutcome({ status: 'found', to: localResult.to });
+          return;
+        }
+        if (localResult.resultado === 'NO_OPERATIVA') {
+          setOutcome({ status: 'no_operativa', estado: ESTADO_CHAPETA_LABELS[localResult.estado] ?? 'Fuera de uso' });
+          return;
+        }
+      } catch {
+        // Copia local ilegible: se intenta con el servidor.
+      }
+      if (!online) {
+        setOutcome({ status: 'desconocida_offline' });
+        return;
+      }
+    }
     try {
       const response = kind === 'token' ? await resolveQrToken(clave) : await resolveQrCodigo(clave);
       setOutcome(qrResolutionOutcome(response));
     } catch {
-      setOutcome({ status: 'error' });
+      setOutcome(local ? { status: 'desconocida_offline' } : { status: 'error' });
     }
-  }, [clave, kind, valido]);
+  }, [clave, kind, valido, local, online]);
 
   useEffect(() => {
     resolve();
@@ -55,6 +83,9 @@ export default function HatoQrResolverPage() {
         <StatusMessage type="error">
           Esta chapeta está fuera de uso ({outcome.estado}). Usa otra chapeta disponible.
         </StatusMessage>
+      ) : null}
+      {outcome.status === 'desconocida_offline' ? (
+        <StatusMessage type="info">Código no disponible en este dispositivo. Conéctese para verificarlo.</StatusMessage>
       ) : null}
       {outcome.status === 'error' ? (
         <div className="gan-hato-actions">

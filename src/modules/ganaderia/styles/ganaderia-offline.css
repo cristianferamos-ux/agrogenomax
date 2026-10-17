@@ -1,0 +1,82 @@
+/* SPRINT-3D11.3 (R1): indicador de sincronización y conflictos offline. */
+
+.gan-offline-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 1rem;
+  padding: 0.55rem 0.9rem;
+  margin-bottom: 0.8rem;
+  border-radius: 0.7rem;
+  font-size: 0.82rem;
+  border: 1px solid rgba(231, 245, 236, 0.18);
+  background: #06110c;
+  color: #e7f5ec;
+}
+
+.gan-offline-bar strong {
+  letter-spacing: 0.04em;
+}
+
+.gan-offline-sincronizado strong { color: #7dff5f; }
+.gan-offline-offline { border-color: rgba(255, 200, 80, 0.55); }
+.gan-offline-offline strong { color: #ffc850; }
+.gan-offline-sincronizando strong,
+.gan-offline-pendientes strong { color: #9fd3ff; }
+.gan-offline-conflicto,
+.gan-offline-error { border-color: rgba(255, 138, 138, 0.6); }
+.gan-offline-conflicto strong,
+.gan-offline-error strong { color: #ff8a8a; }
+
+.gan-offline-bar-actions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.gan-offline-bar-actions a,
+.gan-offline-bar-actions button {
+  font: inherit;
+  font-size: 0.8rem;
+  color: #e7f5ec;
+  background: transparent;
+  border: 1px solid rgba(231, 245, 236, 0.25);
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.gan-offline-conflictos ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.8rem;
+}
+
+.gan-offline-conflicto {
+  display: grid;
+  gap: 0.35rem;
+  border: 1px solid rgba(255, 138, 138, 0.35);
+  border-radius: 0.8rem;
+  padding: 0.8rem;
+}
+
+.gan-hato-badge-sync {
+  font-size: 0.72rem;
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid rgba(159, 211, 255, 0.5);
+  color: #9fd3ff;
+}
+
+.gan-hato-badge-conflicto {
+  border-color: rgba(255, 138, 138, 0.6);
+  color: #ff8a8a;
+}
+
+@media (max-width: 640px) {
+  .gan-offline-bar-actions { margin-left: 0; }
+}

@@ -143,6 +143,9 @@ const DEMO_PROHIBITED_EXACT_VARIABLES = Object.freeze([
   'AGX_BUSINESS_DATABASE_URL',
   'AGX_CSRF_SERVER_SECRET',
   'AGX_AUTH_FINGERPRINT_SECRET',
+  // SPRINT-3D11.3 (R1): inventario QR -- mismo criterio.
+  'AGX_BUSINESS_QR_ADMIN_DATABASE_URL',
+  'AGX_QR_TOKEN_ENCRYPTION_KEY',
   'API_BACKEND_URL',
   'VITE_API_URL',
   'VITE_AGX_API_URL',
@@ -660,6 +663,71 @@ export function validateEnv(appEnv, source = process.env) {
     );
   }
 
+  // SPRINT-3D11.3 (R1): inventario QR. Las tres variables son opcionales al
+  // arrancar (sin ellas el resto del servidor funciona y las rutas Super
+  // Admin del inventario responden 503 fail-closed), pero dondequiera que
+  // estén presentes deben ser válidas:
+  //   * AGX_QR_TOKEN_ENCRYPTION_KEY -- AES-256-GCM del token QR para
+  //     reimpresión. Clave PROPIA: nunca igual a ninguna otra clave/secreto.
+  //   * AGX_QR_PUBLIC_ORIGIN -- dominio canónico impreso en el QR
+  //     (<origen>/qr/<token>); https pública en staging/production.
+  //   * AGX_BUSINESS_QR_ADMIN_DATABASE_URL -- conexión del rol
+  //     agx_qr_admin (0023), distinta de AGX_BUSINESS_DATABASE_URL.
+  if (isNonEmpty(source.AGX_QR_TOKEN_ENCRYPTION_KEY)) {
+    const rawKey = source.AGX_QR_TOKEN_ENCRYPTION_KEY;
+    if (rawKey !== rawKey.trim() || !STRICT_BASE64_32_BYTES_PATTERN.test(rawKey) || Buffer.from(rawKey, 'base64').length !== 32) {
+      throw new ConfigurationError(
+        "AGX_QR_TOKEN_ENCRYPTION_KEY debe ser base64 estándar canónico de exactamente 32 bytes (AES-256) -- 43 caracteres válidos más un '=' de padding, sin espacios.",
+        { code: 'INSECURE_VALUE', environment: appEnv, variable: 'AGX_QR_TOKEN_ENCRYPTION_KEY' },
+      );
+    }
+    for (const otherVariable of [
+      'AGX_CSRF_SERVER_SECRET',
+      'AGX_AUTH_FINGERPRINT_SECRET',
+      'CATASTROX_PII_ENCRYPTION_KEY',
+      'CATASTROX_VERIFY_HANDLE_KEY',
+      'CATASTROX_CHECKOUT_IDENTITY_KEY',
+      'CATASTROX_TEMP_ACCESS_TOKEN_KEY',
+    ]) {
+      if (source[otherVariable] === rawKey) {
+        throw new ConfigurationError(
+          `AGX_QR_TOKEN_ENCRYPTION_KEY debe ser una clave independiente -- nunca el mismo valor que ${otherVariable}.`,
+          { code: 'INSECURE_VALUE', environment: appEnv, variable: 'AGX_QR_TOKEN_ENCRYPTION_KEY' },
+        );
+      }
+    }
+  }
+
+  if (isNonEmpty(source.AGX_QR_PUBLIC_ORIGIN)) {
+    const raw = source.AGX_QR_PUBLIC_ORIGIN;
+    let parsedOrigin = null;
+    try {
+      const url = new URL(raw);
+      if ((url.protocol === 'https:' || url.protocol === 'http:') && url.origin === raw) parsedOrigin = url.origin;
+    } catch {
+      parsedOrigin = null;
+    }
+    const publicOk = appEnv === 'staging' || appEnv === 'production'
+      ? Boolean(parsedOrigin) && Boolean(resolvePublicOriginForEnvironment(raw, appEnv))
+      : Boolean(parsedOrigin);
+    if (!publicOk) {
+      throw new ConfigurationError(
+        'AGX_QR_PUBLIC_ORIGIN debe ser un origen exacto (esquema://host[:puerto], sin ruta ni barra final); https pública en staging/production.',
+        { code: 'INSECURE_VALUE', environment: appEnv, variable: 'AGX_QR_PUBLIC_ORIGIN' },
+      );
+    }
+  }
+
+  if (
+    isNonEmpty(source.AGX_BUSINESS_QR_ADMIN_DATABASE_URL) &&
+    source.AGX_BUSINESS_QR_ADMIN_DATABASE_URL === source.AGX_BUSINESS_DATABASE_URL
+  ) {
+    throw new ConfigurationError(
+      'AGX_BUSINESS_QR_ADMIN_DATABASE_URL debe ser una conexión distinta de AGX_BUSINESS_DATABASE_URL (rol agx_qr_admin, nunca agx_app).',
+      { code: 'INSECURE_VALUE', environment: appEnv, variable: 'AGX_BUSINESS_QR_ADMIN_DATABASE_URL' },
+    );
+  }
+
   // BFF-001 (ACCESO-001, ADR-009 §9.2): AGX_AUTH_DATABASE_URL (rol
   // agx_auth, plano seguridad) y AGX_BUSINESS_DATABASE_URL (rol agx_app,
   // plano negocio) -- dos conexiones físicamente separadas, nunca
@@ -855,6 +923,7 @@ export function validateEnv(appEnv, source = process.env) {
       // dominio de staging/demo.
       AGX_AUTH_DATABASE_URL: source.AGX_AUTH_DATABASE_URL,
       AGX_BUSINESS_DATABASE_URL: source.AGX_BUSINESS_DATABASE_URL,
+      AGX_BUSINESS_QR_ADMIN_DATABASE_URL: source.AGX_BUSINESS_QR_ADMIN_DATABASE_URL,
     };
 
     for (const [variable, value] of Object.entries(connectionValues)) {

@@ -12,7 +12,7 @@ import { parseQrContent, qrResolverPath } from './qrToken.js';
 import '../styles/ganaderia-hato.css';
 
 const INVALID_SCAN_MESSAGE = 'El QR leído no es una chapeta AgroGenomaX.';
-const INVALID_CODE_MESSAGE = 'Revisa el código: tiene la forma AGX-7KM4-P2XZ.';
+const INVALID_CODE_MESSAGE = 'Revisa el código: tiene la forma AGX-7KM4-P2XZ-R (la última letra es de control).';
 
 export default function HatoEscanearQrPage() {
   const navigate = useNavigate();
@@ -54,7 +54,7 @@ export default function HatoEscanearQrPage() {
           <input
             type="text"
             value={codigo}
-            placeholder="AGX-7KM4-P2XZ"
+            placeholder="AGX-7KM4-P2XZ-R"
             autoComplete="off"
             autoCapitalize="characters"
             spellCheck={false}

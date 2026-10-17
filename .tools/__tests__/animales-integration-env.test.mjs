@@ -4,18 +4,23 @@ import { validateAnimalesIntegrationEnv, requireAnimalesIntegrationEnv } from '.
 
 const APP = 'AGX_BUSINESS_DATABASE_URL_TEST';
 const ADMIN = 'AGX_BUSINESS_INTEGRATION_ADMIN_DATABASE_URL';
-const env = { AGX_ALLOW_DISPOSABLE_DB_TESTS: 'yes', AGX_DISPOSABLE_TEST_DB_NAME: 'agx_test', [APP]: 'postgres://agx_app@127.0.0.1:55436/agx_test', [ADMIN]: 'postgres://postgres@127.0.0.1:55436/agx_test' };
-for (const name of [APP, ADMIN]) {
+const QR_ADMIN = 'AGX_BUSINESS_QR_ADMIN_DATABASE_URL_TEST';
+const env = { AGX_ALLOW_DISPOSABLE_DB_TESTS: 'yes', AGX_DISPOSABLE_TEST_DB_NAME: 'agx_test', [APP]: 'postgres://agx_app@127.0.0.1:55436/agx_test', [ADMIN]: 'postgres://postgres@127.0.0.1:55436/agx_test', [QR_ADMIN]: 'postgres://agx_qr_admin@127.0.0.1:55436/agx_test' };
+for (const name of [APP, ADMIN, QR_ADMIN]) {
   for (const value of [undefined, '', '   ', 'invalid', 'https://localhost/db', 'postgres://user@production.invalid/db']) {
     test(`configuración rechazada: ${name} (${String(value)})`, () => {
       assert.throws(() => validateAnimalesIntegrationEnv({ ...env, [name]: value }), new RegExp(name));
     });
   }
 }
-test('ignora la URL runtime/producción y valida exclusivamente las dos variables de prueba', () => {
+test('ignora la URL runtime/producción y valida exclusivamente las variables de prueba', () => {
   assert.deepEqual(validateAnimalesIntegrationEnv({ ...env, AGX_BUSINESS_DATABASE_URL: 'postgres://production.invalid/live' }), {
-    app: env[APP], admin: env[ADMIN],
+    app: env[APP], admin: env[ADMIN], qrAdmin: env[QR_ADMIN],
   });
+});
+test('SPRINT-3D11.3: la conexión QR admin debe usar el rol agx_qr_admin en la misma base', () => {
+  assert.throws(() => validateAnimalesIntegrationEnv({ ...env, [QR_ADMIN]: env[QR_ADMIN].replace('agx_qr_admin', 'agx_app') }), /rol agx_qr_admin/);
+  assert.throws(() => validateAnimalesIntegrationEnv({ ...env, [QR_ADMIN]: env[QR_ADMIN].replace('agx_test', 'otra_test') }), /misma base/);
 });
 test('rechaza destinos distintos y un rol app administrativo', () => {
   assert.throws(() => validateAnimalesIntegrationEnv({ ...env, [ADMIN]: env[ADMIN].replace('agx_test', 'other') }), /misma base/);
@@ -55,6 +60,7 @@ test('rechaza host remoto sobreescrito por query string antes de conectar', () =
   ...env,
   AGX_BUSINESS_DATABASE_URL_TEST: `${app}?host=production.invalid`,
   AGX_BUSINESS_INTEGRATION_ADMIN_DATABASE_URL: 'postgres://postgres@127.0.0.1:55436/agx_test',
+  AGX_BUSINESS_QR_ADMIN_DATABASE_URL_TEST: 'postgres://agx_qr_admin@127.0.0.1:55436/agx_test',
  }), /loopback/);
 });
 

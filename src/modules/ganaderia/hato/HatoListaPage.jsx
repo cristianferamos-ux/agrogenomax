@@ -1,17 +1,40 @@
 // SPRINT-3D11.2: "Mis animales" -- GET /api/ganaderia/animales. Tarjetas
 // con chapeta/nombre, sexo, raza o cruce, categoría, último peso (≈ si fue
 // estimado) y predio. Sin ids técnicos. Por defecto solo ACTIVO.
+//
+// SPRINT-3D11.3 (R1): local-first -- con el dispositivo preparado la lista
+// sale de la copia local (abre sin red, al instante) e incluye los animales
+// registrados sin señal con su estado de sincronización.
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
 import { StatusMessage } from '../components/FormField.jsx';
 import { listAnimales, listPrediosActivos } from './hatoApi.js';
 import { formatEdad, formatIdentidad, formatPeso, formatRaza, formatSexo } from './hatoFormModel.js';
+import { useGanaderiaOffline } from '../offline/GanaderiaOfflineProvider.jsx';
+import '../styles/ganaderia-offline.css';
 import '../styles/ganaderia-hato.css';
 
 const PAGE_SIZE = 50;
 
+/** Ruta de ficha: id del servidor o 'local:<uuid>' para un registro aún no sincronizado. */
+export function animalRouteId(animal) {
+  return animal.animalId ?? `local:${animal.localUuid}`;
+}
+
+function SyncBadge({ animal }) {
+  if (!animal.estadoSync || animal.estadoSync === 'SINCRONIZADO') return null;
+  const conflicto = animal.estadoSync === 'CONFLICTO' || animal.estadoSync === 'RECHAZADO';
+  return (
+    <span className={`gan-hato-badge-sync${conflicto ? ' gan-hato-badge-conflicto' : ''}`}>
+      {conflicto ? 'Conflicto de sincronización' : 'Pendiente de sincronizar'}
+    </span>
+  );
+}
+
 export default function HatoListaPage() {
+  const offline = useGanaderiaOffline();
+  const local = offline.preparado && offline.repo ? offline.repo : null;
   const [predios, setPredios] = useState([]);
   const [filtros, setFiltros] = useState({ predioId: '', q: '', estado: 'ACTIVO' });
   const [busqueda, setBusqueda] = useState('');
@@ -20,7 +43,10 @@ export default function HatoListaPage() {
 
   useEffect(() => {
     let active = true;
-    listPrediosActivos()
+    const fuente = local
+      ? local.listPredios().then((lista) => ({ ok: true, data: { predios: lista } }))
+      : listPrediosActivos();
+    fuente
       .then(({ ok, data }) => {
         if (active && ok && Array.isArray(data?.predios)) setPredios(data.predios);
       })
@@ -28,9 +54,18 @@ export default function HatoListaPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [local]);
 
   const load = useCallback(async () => {
+    if (local) {
+      try {
+        const animales = await local.listAnimales(filtros);
+        setState({ status: 'ok', animales, total: animales.length, origen: 'local' });
+      } catch {
+        setState({ status: 'error', animales: [], total: 0 });
+      }
+      return;
+    }
     setState((current) => ({ ...current, status: 'loading' }));
     try {
       const { ok, data } = await listAnimales({ ...filtros, limit: PAGE_SIZE, offset: 0 });
@@ -42,11 +77,13 @@ export default function HatoListaPage() {
     } catch {
       setState({ status: 'error', animales: [], total: 0 });
     }
-  }, [filtros]);
+  }, [filtros, local]);
 
   useEffect(() => {
     load();
-  }, [load]);
+    // Copia local: se refresca sola cuando la sincronización la actualiza.
+    return local ? local.subscribe(load) : undefined;
+  }, [load, local]);
 
   async function cargarMas() {
     if (loadingMore) return;
@@ -131,8 +168,8 @@ export default function HatoListaPage() {
           <p className="gan-hato-hint">{state.total} {state.total === 1 ? 'animal' : 'animales'}</p>
           <ul className="gan-hato-list">
             {state.animales.map((animal) => (
-              <li key={animal.animalId}>
-                <Link className="gan-hato-card" to={`/ganaderia/animales/${animal.animalId}`}>
+              <li key={animal.animalId ?? animal.localUuid}>
+                <Link className="gan-hato-card" to={`/ganaderia/animales/${animalRouteId(animal)}`}>
                   <div className="gan-hato-card-head">
                     <strong>{formatIdentidad(animal)}</strong>
                     <span>{formatSexo(animal.sexo)}</span>
@@ -144,6 +181,7 @@ export default function HatoListaPage() {
                     <span>{formatPeso(animal.ultimoPeso)}</span>
                     <span>{animal.predioNombre}</span>
                     {animal.estado === 'ANULADO' ? <span className="gan-hato-badge">Anulado</span> : null}
+                    <SyncBadge animal={animal} />
                   </div>
                 </Link>
               </li>

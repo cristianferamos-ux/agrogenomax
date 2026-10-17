@@ -35,6 +35,8 @@ import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
 import GanaderiaApp from './modules/ganaderia/GanaderiaApp.jsx';
 import GanaderiaLandingComercial from './modules/ganaderia/GanaderiaLandingComercial.jsx';
 import GanaderiaDashboard from './modules/ganaderia/pages/GanaderiaDashboard.jsx';
+import { GanaderiaOfflineProvider } from './modules/ganaderia/offline/GanaderiaOfflineProvider.jsx';
+import OfflineStatusBar from './modules/ganaderia/offline/OfflineStatusBar.jsx';
 import GanaderiaAccess from './modules/ganaderia/pages/GanaderiaAccess.jsx';
 import GanaderiaDemo from './modules/ganaderia/pages/GanaderiaDemo.jsx';
 import GanaderiaLogin from './modules/ganaderia/pages/GanaderiaLogin.jsx';
@@ -304,7 +306,11 @@ function App() {
           element={
             <GanaderiaAuthProvider>
               <RequireGanaderiaAuth>
-                <GanaderiaDashboard />
+                {/* SPRINT-3D11.3 (R1): indicador offline también en el inicio. */}
+                <GanaderiaOfflineProvider>
+                  <OfflineStatusBar />
+                  <GanaderiaDashboard />
+                </GanaderiaOfflineProvider>
               </RequireGanaderiaAuth>
             </GanaderiaAuthProvider>
           }

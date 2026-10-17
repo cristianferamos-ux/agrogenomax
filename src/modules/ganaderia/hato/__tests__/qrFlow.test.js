@@ -30,7 +30,7 @@ function stripComments(source) {
 
 const code = (name) => stripComments(read(path.join(HATO_DIR, name)));
 const TOKEN = 'aB3_-xYz09QwErTyUiOpAsDfGhJkLzXc';
-const CODIGO = 'AGX-7KM4-P2XZ';
+const CODIGO = 'AGX-7KM4-P2XZ-R';
 
 // ---------------------------------------------------------------------
 // Escaneo y digitación
@@ -47,10 +47,13 @@ test('escaneo: URL /qr/<token> o token suelto -> token, conservando mayúsculas/
 });
 
 test('digitación: código visible tolerante (minúsculas, espacios, sin guiones) -> código canónico', () => {
-  for (const raw of [CODIGO, 'agx-7km4-p2xz', ' agx 7km4 p2xz ', '7KM4P2XZ', '7km4-p2xz', 'AGX7KM4P2XZ']) {
+  for (const raw of [CODIGO, 'agx-7km4-p2xz-r', ' agx 7km4 p2xz r ', '7KM4P2XZR', '7km4-p2xz-r', 'AGX7KM4P2XZR']) {
     assert.deepEqual(parseQrContent(raw), { kind: 'codigo', codigo: CODIGO }, raw);
   }
-  assert.equal(normalizeCodigoChapeta('AGXB2345'), 'AGX-AGXB-2345');
+  assert.equal(normalizeCodigoChapeta('AGXB2345B'), 'AGX-AGXB-2345-B');
+  for (const typo of ['AGX-7KM4-P2XZ-S', 'AGX-7KN4-P2XZ-R', 'AGX-7K4M-P2XZ-R', 'AGX-7KM4-P2XZ']) {
+    assert.deepEqual(parseQrContent(typo), { kind: 'invalid' }, `error de digitación detectado sin red: ${typo}`);
+  }
 });
 
 test('legacy: AGX-000003 (digitado o en URL legacy /qr/AGX-000003) -> código, se resuelve igual que uno nuevo', () => {

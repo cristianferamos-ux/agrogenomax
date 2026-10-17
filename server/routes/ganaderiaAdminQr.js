@@ -3,7 +3,8 @@
 // EXACTAMENTE la autorización del panel admin existente
 // (createRequireGanaderiaIdentity + createRequireGanaderiaSuperAdmin +
 // CSRF en mutaciones). Una cuenta cliente recibe 403 en toda la superficie.
-// Opera en contexto withQrAdminTransaction (qrInventarioRepository.js).
+// La base de datos se opera con el rol agx_qr_admin (conexión propia,
+// server/db/agxQrAdminPool.js); agx_app nunca toca el inventario global.
 import { Router } from 'express';
 import {
   createRequireGanaderiaCsrf,
@@ -49,14 +50,15 @@ function sendSemanticError(res, error) {
   return false;
 }
 
-// Dominio impreso en el QR = origen del panel admin que crea el lote. En
-// un POST, createRequireGanaderiaCsrf ya exigió que Origin (o Referer)
-// pertenezca a allowedOrigins.
-export function resolveQrUrlBase(req) {
-  const origin = req.headers.origin;
-  if (typeof origin === 'string' && origin && origin !== 'null') return origin;
+// Dominio impreso en el QR: SIEMPRE la configuración del servidor
+// (AGX_QR_PUBLIC_ORIGIN, validada en server/config/env.js), nunca Origin,
+// Referer ni nada enviado por el navegador. Sin variable -> 503 fail-closed.
+export function resolveQrPublicOrigin(source = process.env) {
+  const raw = source.AGX_QR_PUBLIC_ORIGIN;
+  if (typeof raw !== 'string' || raw === '') return null;
   try {
-    return new URL(req.headers.referer).origin;
+    const url = new URL(raw);
+    return url.origin === raw && (url.protocol === 'https:' || url.protocol === 'http:') ? raw : null;
   } catch {
     return null;
   }
@@ -100,9 +102,9 @@ export default function createGanaderiaAdminQrRouter({ appEnv, csrfServerSecret,
 
   router.post('/lotes', handler(async (req, res) => {
     const value = validateCrearLoteBody(req.body);
-    const urlBase = resolveQrUrlBase(req);
+    const urlBase = resolveQrPublicOrigin();
     if (!urlBase) {
-      res.status(400).json({ error: 'ORIGIN_REQUIRED' });
+      res.status(503).json({ error: 'QR_PUBLIC_ORIGIN_NOT_CONFIGURED' });
       return;
     }
     const { lote, yaExistia } = await crearLote({ ...value, urlBase }, actor(req));

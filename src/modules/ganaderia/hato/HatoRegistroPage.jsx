@@ -19,6 +19,7 @@ import { StatusMessage } from '../components/FormField.jsx';
 import HatoAnimalFields from './HatoAnimalFields.jsx';
 import { createAnimal, registrarAnimalConChapeta } from './hatoApi.js';
 import {
+  GENERIC_ERROR_MESSAGE,
   INITIAL_ANIMAL_FORM,
   NETWORK_UNCERTAIN_MESSAGE,
   OPERATION_UNAVAILABLE_MESSAGE,
@@ -32,9 +33,16 @@ import {
 } from './hatoFormModel.js';
 import useHatoCatalogos from './useHatoCatalogos.js';
 import { normalizeCodigoChapeta } from './qrToken.js';
+import { useGanaderiaOffline } from '../offline/GanaderiaOfflineProvider.jsx';
 import '../styles/ganaderia-hato.css';
 
 const FAILURE_NETWORK_ERROR = 'NETWORK_ERROR';
+const CODIGO_NO_DISPONIBLE_MESSAGE = 'Código no disponible en este dispositivo. Conéctese para verificarlo.';
+const LOCAL_ERROR_MESSAGES = Object.freeze({
+  QR_NO_EN_DISPOSITIVO: CODIGO_NO_DISPONIBLE_MESSAGE,
+  QR_NO_DISPONIBLE: 'Esta chapeta ya no está disponible en este dispositivo.',
+  QR_CODIGO_INVALIDO: 'El código de chapeta no es válido.',
+});
 
 export default function HatoRegistroPage() {
   const navigate = useNavigate();
@@ -43,6 +51,8 @@ export default function HatoRegistroPage() {
   const chapeta = chapetaParam === null ? null : normalizeCodigoChapeta(chapetaParam);
   const chapetaInvalida = chapetaParam !== null && !chapeta;
   const catalogos = useHatoCatalogos();
+  const offline = useGanaderiaOffline();
+  const local = offline.preparado && offline.repo ? offline.repo : null;
   const [form, setForm] = useState(INITIAL_ANIMAL_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -106,6 +116,40 @@ export default function HatoRegistroPage() {
     setSaving(true);
     setError('');
     setFieldError('');
+
+    // SPRINT-3D11.3 (R1) offline-first: con el dispositivo preparado el
+    // registro SIEMPRE se guarda primero en el dispositivo (animal local +
+    // reserva de la chapeta + operación en el outbox, una transacción
+    // local) y abre la ficha local; la sincronización automática lo envía
+    // al servidor (mismo clientOperationId -> sin duplicados).
+    if (local) {
+      const body = buildCreateAnimalBody(form, operationIdRef.current);
+      const chapetaEnDispositivo = chapeta ? await local.getChapetaPorCodigo(chapeta) : null;
+      if (!chapeta || chapetaEnDispositivo || !offline.online) {
+        try {
+          if (chapeta && !chapetaEnDispositivo) {
+            setError(CODIGO_NO_DISPONIBLE_MESSAGE);
+            return;
+          }
+          const numero = String(body.numeroVisual ?? '').trim().toLowerCase();
+          if (numero && (await local.listAnimales({ estado: 'ACTIVO' })).some((a) => String(a.numeroVisual ?? '').trim().toLowerCase() === numero)) {
+            setFieldError(messageForError('ANIMAL_NUMERO_VISUAL_DUPLICADO'));
+            return;
+          }
+          const { localUuid } = await local.registrarAnimalLocal({ body, chapetaCodigo: chapeta });
+          operationIdRef.current = null;
+          navigate(`/ganaderia/animales/local:${localUuid}`, { replace: true });
+        } catch (localError) {
+          setError(LOCAL_ERROR_MESSAGES[localError?.code] ?? GENERIC_ERROR_MESSAGE);
+        } finally {
+          setSaving(false);
+        }
+        return;
+      }
+      // Chapeta que aún no está en el dispositivo y hay red: se verifica y
+      // registra directamente en el servidor (flujo en línea de abajo).
+    }
+
     try {
       const body = buildCreateAnimalBody(form, operationIdRef.current);
       const { ok, status, data, failure } = chapeta

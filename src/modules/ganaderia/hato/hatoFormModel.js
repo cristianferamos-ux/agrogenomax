@@ -294,8 +294,8 @@ const ERROR_MESSAGES = Object.freeze({
   QR_NO_OPERATIVO: 'Esta chapeta está fuera de uso (revocada, dañada o reemplazada).',
   QR_NO_ACTIVO: 'El animal no tiene una chapeta activa.',
   ANIMAL_YA_TIENE_QR: 'El animal ya tiene una chapeta activa: usa Reemplazar.',
-  INVALID_CODIGO: 'Revisa el código de la chapeta (forma AGX-7KM4-P2XZ).',
-  INVALID_CODIGO_NUEVO: 'Revisa el código de la chapeta nueva (forma AGX-7KM4-P2XZ).',
+  INVALID_CODIGO: 'Revisa el código de la chapeta (forma AGX-7KM4-P2XZ-R).',
+  INVALID_CODIGO_NUEVO: 'Revisa el código de la chapeta nueva (forma AGX-7KM4-P2XZ-R).',
   INVALID_MOTIVO: 'Escribe el motivo (máximo 500 caracteres).',
 });
 

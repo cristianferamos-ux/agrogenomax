@@ -12,7 +12,7 @@ import { asociarQr, bajaQr, getAnimalQr, reemplazarQr } from './hatoApi.js';
 import { messageForError } from './hatoFormModel.js';
 import { ESTADO_CHAPETA_LABELS, normalizeCodigoChapeta } from './qrToken.js';
 
-const CODIGO_INVALIDO = 'Revisa el código de la chapeta (forma AGX-7KM4-P2XZ).';
+const CODIGO_INVALIDO = 'Revisa el código de la chapeta (forma AGX-7KM4-P2XZ-R).';
 const MOTIVO_REQUERIDO = 'Escribe el motivo (máximo 500 caracteres).';
 
 function formatFecha(value) {
@@ -182,7 +182,7 @@ export default function HatoQrPanel({ animalId, animalActivo }) {
               <input
                 type="text"
                 value={codigo}
-                placeholder="AGX-7KM4-P2XZ"
+                placeholder="AGX-7KM4-P2XZ-R"
                 autoComplete="off"
                 autoCapitalize="characters"
                 spellCheck={false}

@@ -2,12 +2,17 @@
 // Postgres/PostGIS REAL (0000-0023 aplicadas): lotes (Super Admin),
 // asignación a organizaciones, resolución por token y por código visible,
 // registro atómico animal + chapeta, revocación, reemplazo, animal anulado,
-// colisiones, concurrencia, RLS, trigger de transiciones y grants.
+// colisiones, concurrencia, RLS por ROL (agx_app vs agx_qr_admin), trigger
+// de transiciones, grants y cifrado del token.
 //
-// Lee EXCLUSIVAMENTE AGX_BUSINESS_DATABASE_URL_TEST (agx_app) y
-// AGX_BUSINESS_INTEGRATION_ADMIN_DATABASE_URL; se auto-omite si no están
-// configuradas. Los códigos legacy usados son sintéticos (AGX-9xxxxx).
+// Lee EXCLUSIVAMENTE AGX_BUSINESS_DATABASE_URL_TEST (agx_app),
+// AGX_BUSINESS_QR_ADMIN_DATABASE_URL_TEST (agx_qr_admin) y
+// AGX_BUSINESS_INTEGRATION_ADMIN_DATABASE_URL (superusuario de la base
+// desechable); se auto-omite si no están configuradas. La clave de cifrado
+// es efímera (AGX_QR_TOKEN_ENCRYPTION_KEY_TEST o aleatoria). Los códigos
+// legacy usados son sintéticos (AGX-9xxxxx).
 delete process.env.AGX_BUSINESS_DATABASE_URL;
+delete process.env.AGX_BUSINESS_QR_ADMIN_DATABASE_URL;
 
 import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -24,14 +29,20 @@ let chapetasRepo;
 let inventario;
 let codigos;
 let businessDb;
+let qrAdminDb;
+let qrAdminPool;
 
 try {
   const testConnectionString = process.env.AGX_BUSINESS_DATABASE_URL_TEST;
   const adminConnectionString = process.env.AGX_BUSINESS_INTEGRATION_ADMIN_DATABASE_URL;
-  if (!testConnectionString || !adminConnectionString) {
-    throw new Error('AGX_BUSINESS_DATABASE_URL_TEST/AGX_BUSINESS_INTEGRATION_ADMIN_DATABASE_URL no configuradas');
+  const qrAdminConnectionString = process.env.AGX_BUSINESS_QR_ADMIN_DATABASE_URL_TEST;
+  if (!testConnectionString || !adminConnectionString || !qrAdminConnectionString) {
+    throw new Error('conexiones de prueba no configuradas');
   }
   process.env.AGX_BUSINESS_DATABASE_URL = testConnectionString;
+  process.env.AGX_BUSINESS_QR_ADMIN_DATABASE_URL = qrAdminConnectionString;
+  process.env.AGX_QR_TOKEN_ENCRYPTION_KEY = process.env.AGX_QR_TOKEN_ENCRYPTION_KEY_TEST || crypto.randomBytes(32).toString('base64');
+  qrAdminPool = new pg.Pool({ connectionString: qrAdminConnectionString, max: 2 });
   const { getConfig } = await import('../../config/env.js');
   getConfig({ APP_ENV: 'development' }, {});
 
@@ -49,12 +60,15 @@ if (dbAvailable) {
   inventario = await import('../ganaderia/qrInventarioRepository.js');
   codigos = await import('../ganaderia/qrCodigos.js');
   businessDb = await import('../../db/agxBusinessPool.js');
+  qrAdminDb = await import('../../db/agxQrAdminPool.js');
 }
 
 after(async () => {
   await adminPool?.end().catch(() => {});
   await appPool?.end().catch(() => {});
+  await qrAdminPool?.end().catch(() => {});
   businessDb?.closeAgxBusinessPool?.();
+  await qrAdminDb?.closeAgxQrAdminPool?.();
 });
 
 const HOY = resolveFechaHoyNegocio();
@@ -120,12 +134,26 @@ async function estadoDe(codigo) {
   return (await adminPool.query('select estado, organizacion_id, animal_id::text as animal_id from agx.qr_chapetas where codigo_visible = $1', [codigo])).rows[0];
 }
 
-async function asApp(org, fn, { admin = false } = {}) {
+/** agx_app con app.current_org_id; intentarGuc simula un ataque SET al antiguo GUC. */
+async function asApp(org, fn, { intentarGuc = false } = {}) {
   const client = await appPool.connect();
   try {
     await client.query('begin');
     await client.query("select set_config('app.current_org_id', $1, true)", [org]);
-    if (admin) await client.query("select set_config('app.agx_qr_admin', 'on', true)");
+    if (intentarGuc) await client.query("select set_config('app.agx_qr_admin', 'on', true)");
+    return await fn(client);
+  } finally {
+    await client.query('rollback').catch(() => {});
+    client.release();
+  }
+}
+
+/** Rol agx_qr_admin directo (transacción revertida). */
+async function asQrAdmin(fn, org = '') {
+  const client = await qrAdminPool.connect();
+  try {
+    await client.query('begin');
+    await client.query("select set_config('app.current_org_id', $1, true)", [org]);
     return await fn(client);
   } finally {
     await client.query('rollback').catch(() => {});
@@ -171,15 +199,42 @@ describe('SPRINT-3D11.3: inventario QR contra Postgres real', { skip: !dbAvailab
     assert.equal(new Set(chapetas.map((c) => c.codigoVisible)).size, 200);
     assert.equal(new Set(chapetas.map((c) => c.token)).size, 200);
     for (const c of chapetas) {
-      assert.match(c.codigoVisible, /^AGX-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/);
+      assert.match(c.codigoVisible, /^AGX-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]$/);
+      assert.ok(codigos.isCodigoNuevoValido(c.codigoVisible), 'dígito de control válido');
       assert.match(c.token, /^[A-Za-z0-9_-]{32}$/);
       assert.ok(!c.token.includes(c.codigoVisible.replace(/-/g, '').slice(3)), 'el token no deriva del código');
     }
+    const porCodigo = new Map(chapetas.map((c) => [c.codigoVisible, c.token]));
     const rows = await adminPool.query(
-      'select c.codigo_visible, c.token_hash, t.token from agx.qr_chapetas c join agx.qr_chapeta_tokens t using (qr_id) where c.lote_id = $1',
+      'select c.codigo_visible, c.token_hash, t.token_cifrado, t.clave_version from agx.qr_chapetas c join agx.qr_chapeta_tokens t using (qr_id) where c.lote_id = $1',
       [lote.loteId],
     );
-    for (const row of rows.rows) assert.equal(row.token_hash, codigos.hashQrToken(row.token));
+    assert.equal(rows.rows.length, 200);
+    for (const row of rows.rows) {
+      const token = porCodigo.get(row.codigo_visible);
+      assert.equal(row.token_hash, codigos.hashQrToken(token));
+      assert.equal(row.token_cifrado.length, 60);
+      assert.equal(row.clave_version, 1);
+      assert.ok(!row.token_cifrado.toString('latin1').includes(token), 'el token nunca se guarda en claro');
+    }
+    const columnas = await adminPool.query(
+      "select column_name from information_schema.columns where table_schema = 'agx' and table_name = 'qr_chapeta_tokens'",
+    );
+    assert.ok(!columnas.rows.some((c) => c.column_name === 'token'), 'no existe columna de token en claro');
+  });
+
+  test('cifrado del token: AES-256-GCM atado a la chapeta; otra clave o cifrado movido de fila no descifra; sin clave 503', async () => {
+    const crypt = await import('../ganaderia/qrTokenCrypto.js');
+    const lote = await crearLote(2);
+    const rows = (await adminPool.query(
+      'select c.codigo_visible, t.token_cifrado from agx.qr_chapetas c join agx.qr_chapeta_tokens t using (qr_id) where c.lote_id = $1 order by c.qr_id',
+      [lote.loteId],
+    )).rows;
+    const key = crypt.loadQrTokenKey();
+    assert.match(crypt.decryptQrToken(rows[0].token_cifrado, rows[0].codigo_visible, key), /^[A-Za-z0-9_-]{32}$/);
+    assert.throws(() => crypt.decryptQrToken(rows[0].token_cifrado, rows[1].codigo_visible, key));
+    assert.throws(() => crypt.decryptQrToken(rows[0].token_cifrado, rows[0].codigo_visible, crypto.randomBytes(32)));
+    assert.throws(() => crypt.loadQrTokenKey({}), (error) => error.code === 'QR_KEY_NOT_CONFIGURED' && error.status === 503);
   });
 
   test('crear lote es idempotente por clientOperationId (doble clic -> un solo lote)', async () => {
@@ -194,15 +249,16 @@ describe('SPRINT-3D11.3: inventario QR contra Postgres real', { skip: !dbAvailab
 
   test('colisiones: códigos visibles repetidos o ya existentes se regeneran; el lote queda completo', async () => {
     const previo = (await inventario.exportLoteProveedor((await crearLote(1)).loteId)).chapetas[0].codigoVisible;
-    const secuencia = [previo, previo, 'AGX-ZZZZ-ZZZ2'];
+    const fijo = `AGX-ZZZZ-ZZZ2-${codigos.digitoControl('ZZZZZZZ2')}`;
+    const secuencia = [previo, previo, fijo];
     const codeGenerator = () => secuencia.shift() ?? codigos.generateCodigoVisible();
-    const existente = await adminPool.query("select 1 from agx.qr_chapetas where codigo_visible = 'AGX-ZZZZ-ZZZ2'");
+    const existente = await adminPool.query('select 1 from agx.qr_chapetas where codigo_visible = $1', [fijo]);
     const lote = await crearLote(3, { codeGenerator });
     const { chapetas } = await inventario.exportLoteProveedor(lote.loteId);
     assert.equal(chapetas.length, 3);
     assert.ok(!chapetas.some((c) => c.codigoVisible === previo), 'nunca reutiliza un código existente');
     assert.equal(new Set(chapetas.map((c) => c.codigoVisible)).size, 3);
-    if (existente.rowCount === 0) assert.ok(chapetas.some((c) => c.codigoVisible === 'AGX-ZZZZ-ZZZ2'));
+    if (existente.rowCount === 0) assert.ok(chapetas.some((c) => c.codigoVisible === fijo));
   });
 
   test('estados del lote: GENERADO -> EN_FABRICACION -> EN_STOCK -> CERRADO; saltos/retrocesos 409', async () => {
@@ -472,19 +528,32 @@ describe('SPRINT-3D11.3: inventario QR contra Postgres real', { skip: !dbAvailab
   });
 
   // ---------------------------------------------------------------------
-  // RLS, trigger y grants (agx_app directo)
+  // Frontera por ROL: agx_app vs agx_qr_admin
   // ---------------------------------------------------------------------
 
-  test('RLS: la organización nunca ve lotes, tokens, stock central ni asignaciones ajenas', async () => {
+  test('agx_app no tiene NINGÚN privilegio sobre lotes, tokens ni eventos de lote -- ni siquiera con SET app.agx_qr_admin', async () => {
+    const orgA = orgId();
+    await chapetasDe(orgA, 1);
+    for (const intentarGuc of [false, true]) {
+      for (const table of ['qr_lotes', 'qr_chapeta_tokens', 'qr_lote_eventos']) {
+        await asApp(orgA, (client) => expectPgError(client.query(`select count(*) from agx.${table}`), '42501'), { intentarGuc });
+      }
+      // Stock central: invisible aun "pidiendo" contexto admin por GUC.
+      await asApp(orgA, async (client) => {
+        const visibles = await client.query("select count(*)::int as n from agx.qr_chapetas where estado = 'EN_INVENTARIO' or organizacion_id is distinct from $1", [orgA]);
+        assert.equal(visibles.rows[0].n, 0);
+      }, { intentarGuc });
+    }
+    const funcion = await adminPool.query("select count(*)::int as n from pg_proc where proname = 'qr_admin_context'");
+    assert.equal(funcion.rows[0].n, 0, 'no existe frontera basada en GUC');
+  });
+
+  test('RLS: la organización ve solo sus chapetas y asignaciones; sin contexto, nada', async () => {
     const orgA = orgId();
     const orgB = orgId();
     await chapetasDe(orgA, 2);
     await chapetasDe(orgB, 1);
     await asApp(orgA, async (client) => {
-      for (const table of ['qr_lotes', 'qr_chapeta_tokens', 'qr_lote_eventos']) {
-        assert.equal((await client.query(`select count(*)::int as n from agx.${table}`)).rows[0].n, 0, table);
-      }
-      assert.equal((await client.query('select count(*)::int as n from agx.qr_chapetas where organizacion_id is distinct from $1', [orgA])).rows[0].n, 0);
       assert.equal((await client.query('select count(*)::int as n from agx.qr_chapetas')).rows[0].n, 2);
       assert.equal((await client.query('select count(*)::int as n from agx.qr_asignaciones where organizacion_id <> $1', [orgA])).rows[0].n, 0);
     });
@@ -499,7 +568,7 @@ describe('SPRINT-3D11.3: inventario QR contra Postgres real', { skip: !dbAvailab
     for (const row of flags.rows) assert.deepEqual([row.relrowsecurity, row.relforcerowsecurity], [true, true], row.relname);
   });
 
-  test('RLS + trigger: la organización no crea chapetas, no las mueve a otra organización ni revierte estados', async () => {
+  test('agx_app no crea chapetas ni cambia su organización; no revierte estados', async () => {
     const orgA = orgId();
     const orgB = orgId();
     const [c] = await chapetasDe(orgA);
@@ -507,17 +576,17 @@ describe('SPRINT-3D11.3: inventario QR contra Postgres real', { skip: !dbAvailab
     const loteId = (await adminPool.query('select lote_id from agx.qr_chapetas where codigo_visible = $1', [c.codigo])).rows[0].lote_id;
     await asApp(orgA, (client) => expectPgError(
       client.query(
-        "insert into agx.qr_chapetas (lote_id, tipo, codigo_visible, token_hash) values ($1, 'QR_AGX', 'AGX-ZZZZ-ZZZZ', $2)",
-        [loteId, 'a'.repeat(64)],
+        "insert into agx.qr_chapetas (lote_id, tipo, codigo_visible, token_hash) values ($1, 'QR_AGX', $2, $3)",
+        [loteId, codigos.generateCodigoVisible(), 'a'.repeat(64)],
       ),
       '42501',
-    ));
-    // El trigger rechaza antes que el WITH CHECK de RLS: ambas capas lo impiden.
-    await asApp(orgA, (client) => expectPgError(
-      client.query('update agx.qr_chapetas set organizacion_id = $2 where codigo_visible = $1', [c.codigo, orgB]),
-      '23514',
-      'qr_chapetas_organizacion_inmutable_check',
-    ));
+    ), { intentarGuc: true });
+    for (const assignment of ['organizacion_id = $2', 'asignacion_id = null', 'asignado_organizacion_at = now()']) {
+      await asApp(orgA, (client) => expectPgError(
+        client.query(`update agx.qr_chapetas set ${assignment} where codigo_visible = $1`, assignment.includes('$2') ? [c.codigo, orgB] : [c.codigo]),
+        '42501',
+      ));
+    }
     await chapetasRepo.asociarChapetaAAnimal(orgA, animalId, c.codigo, { actorCuentaId: ACTOR });
     await asApp(orgA, (client) => expectPgError(
       client.query(
@@ -533,34 +602,53 @@ describe('SPRINT-3D11.3: inventario QR contra Postgres real', { skip: !dbAvailab
     });
   });
 
-  test('trigger: identidad inmutable, organización inmutable y asignación solo en contexto Super Admin', async () => {
+  test('trigger: identidad y organización inmutables incluso para agx_qr_admin; sacar del inventario exige el rol agx_qr_admin', async () => {
     const orgA = orgId();
-    const lote = await crearLote(1);
-    const central = (await inventario.exportLoteProveedor(lote.loteId)).chapetas[0];
-    // agx_app ni siquiera tiene grant sobre codigo_visible (42501); el
-    // trigger protege también frente a un rol con privilegios (admin DB).
-    await asApp(orgA, (client) => expectPgError(
-      client.query("update agx.qr_chapetas set codigo_visible = 'AGX-ZZZZ-ZZZY' where codigo_visible = $1", [central.codigoVisible]),
+    const lote = await loteEnStock(2);
+    const [central, otra] = (await inventario.exportLoteProveedor(lote.loteId)).chapetas;
+    await asQrAdmin((client) => expectPgError(
+      client.query('update agx.qr_chapetas set codigo_visible = $2 where codigo_visible = $1', [central.codigoVisible, codigos.generateCodigoVisible()]),
       '42501',
-    ), { admin: true });
-    const adminClient = await adminPool.connect();
+    ));
+    // Un rol con todos los privilegios (superusuario de la base de pruebas)
+    // tampoco puede sacar una chapeta del inventario: no es agx_qr_admin.
+    const su = await adminPool.connect();
     try {
-      await adminClient.query('begin');
+      await su.query('begin');
       await expectPgError(
-        adminClient.query("update agx.qr_chapetas set codigo_visible = 'AGX-ZZZZ-ZZZY' where codigo_visible = $1", [central.codigoVisible]),
+        su.query('update agx.qr_chapetas set codigo_visible = $2 where codigo_visible = $1', [central.codigoVisible, codigos.generateCodigoVisible()]),
         '23514',
         'qr_chapetas_inmutable_check',
       );
     } finally {
-      await adminClient.query('rollback').catch(() => {});
-      adminClient.release();
+      await su.query('rollback').catch(() => {});
+      su.release();
+    }
+    const su2 = await adminPool.connect();
+    try {
+      await su2.query('begin');
+      const asig = await su2.query(
+        "insert into agx.qr_asignaciones (organizacion_id, lote_id, cantidad, asignado_por, client_operation_id) values ($1, $2, 1, $3, $4) returning asignacion_id",
+        [orgA, lote.loteId, ACTOR, crypto.randomUUID()],
+      );
+      await expectPgError(
+        su2.query(
+          "update agx.qr_chapetas set estado = 'ASIGNADO_ORGANIZACION', organizacion_id = $2, asignacion_id = $3, asignado_organizacion_at = now() where codigo_visible = $1",
+          [otra.codigoVisible, orgA, asig.rows[0].asignacion_id],
+        ),
+        '23514',
+        'qr_chapetas_transicion_check',
+      );
+    } finally {
+      await su2.query('rollback').catch(() => {});
+      su2.release();
     }
     const [asignada] = await chapetasDe(orgA);
-    await asApp(orgA, (client) => expectPgError(
+    await asQrAdmin((client) => expectPgError(
       client.query('update agx.qr_chapetas set organizacion_id = $2 where codigo_visible = $1', [asignada.codigo, orgId()]),
       '23514',
       'qr_chapetas_organizacion_inmutable_check',
-    ), { admin: true });
+    ));
     await asApp(orgA, (client) => expectPgError(
       client.query("update agx.qr_chapetas set estado = 'REVOCADO', revocado_at = now(), revocado_por = $2, motivo = 'x' where codigo_visible = $1", [asignada.codigo, ACTOR])
         .then(() => client.query("update agx.qr_chapetas set estado = 'ASIGNADO_ORGANIZACION', revocado_at = null, revocado_por = null, motivo = null where codigo_visible = $1", [asignada.codigo])),
@@ -569,37 +657,48 @@ describe('SPRINT-3D11.3: inventario QR contra Postgres real', { skip: !dbAvailab
     ));
   });
 
-  test('grants: agx_app sin DELETE en ninguna tabla QR; columnas de identidad no actualizables', async () => {
+  test('grants: ningún rol de aplicación tiene DELETE; agx_qr_admin no altera identidad; el pool admin exige el rol agx_qr_admin', async () => {
     const org = orgId();
     for (const table of ['qr_lotes', 'qr_asignaciones', 'qr_chapetas', 'qr_chapeta_tokens', 'qr_chapeta_eventos', 'qr_lote_eventos']) {
-      await asApp(org, (client) => expectPgError(client.query(`delete from agx.${table}`), '42501'), { admin: true });
+      await asApp(org, (client) => expectPgError(client.query(`delete from agx.${table}`), '42501'));
+      await asQrAdmin((client) => expectPgError(client.query(`delete from agx.${table}`), '42501'));
     }
     for (const assignment of ["codigo_visible = 'x'", "token_hash = 'x'", 'lote_id = lote_id', "tipo = 'QR_LEGACY'"]) {
-      await asApp(org, (client) => expectPgError(client.query(`update agx.qr_chapetas set ${assignment}`), '42501'), { admin: true });
+      await asQrAdmin((client) => expectPgError(client.query(`update agx.qr_chapetas set ${assignment}`), '42501'));
     }
+    await asQrAdmin((client) => expectPgError(client.query("update agx.animales set nombre = 'x'"), '42501'));
+    const role = await qrAdminPool.query('select current_user as r, (select rolbypassrls from pg_roles where rolname = current_user) as bypass');
+    assert.deepEqual(role.rows[0], { r: 'agx_qr_admin', bypass: false });
   });
 
-  test('esquema: formato de código por tipo y consistencia de estado', async () => {
+  test('esquema: dígito de control validado en la base; formato por tipo y consistencia de estado', async () => {
     const lote = await crearLote(1);
+    const valido = codigos.generateCodigoVisible();
+    const alfabeto = codigos.CODIGO_ALFABETO;
+    const malControl = `${valido.slice(0, -1)}${alfabeto[(alfabeto.indexOf(valido.at(-1)) + 1) % 32]}`;
     const cases = [
-      ["'QR_AGX'", "'AGX-0000-0000'", `'${'a'.repeat(64)}'`, 'qr_chapetas_formato_check'],
-      ["'QR_AGX'", "'AGX-ABCD-EFGH'", 'null', 'qr_chapetas_formato_check'],
+      ["'QR_AGX'", `'${malControl}'`, `'${'a'.repeat(64)}'`, 'qr_chapetas_formato_check'],
+      ["'QR_AGX'", "'AGX-0000-0000-0'", `'${'a'.repeat(64)}'`, 'qr_chapetas_formato_check'],
+      ["'QR_AGX'", `'${valido.slice(0, -2)}'`, `'${'a'.repeat(64)}'`, 'qr_chapetas_formato_check'],
+      ["'QR_AGX'", `'${codigos.generateCodigoVisible()}'`, 'null', 'qr_chapetas_formato_check'],
       ["'QR_AGX'", "'AGX-000123'", `'${'b'.repeat(64)}'`, 'qr_chapetas_formato_check'],
     ];
     for (const [tipo, codigo, hash, constraint] of cases) {
-      await asApp('', (client) => expectPgError(
+      await asQrAdmin((client) => expectPgError(
         client.query(`insert into agx.qr_chapetas (lote_id, tipo, codigo_visible, token_hash) values ($1, ${tipo}, ${codigo}, ${hash})`, [lote.loteId]),
         '23514',
         constraint,
-      ), { admin: true });
+      ));
     }
-    await asApp('', (client) => expectPgError(
+    await asQrAdmin((client) => expectPgError(
       client.query(
-        `insert into agx.qr_chapetas (lote_id, tipo, codigo_visible, token_hash, estado) values ($1, 'QR_AGX', 'AGX-ABCD-EFGH', $2, 'ASIGNADO_ANIMAL')`,
-        [lote.loteId, 'c'.repeat(64)],
+        `insert into agx.qr_chapetas (lote_id, tipo, codigo_visible, token_hash, estado) values ($1, 'QR_AGX', $2, $3, 'ASIGNADO_ANIMAL')`,
+        [lote.loteId, codigos.generateCodigoVisible(), 'c'.repeat(64)],
       ),
       '23514',
       'qr_chapetas_estado_consistencia_check',
-    ), { admin: true });
+    ));
+    const sql = await adminPool.query('select agx.fn_qr_codigo_control_ok($1) as a, agx.fn_qr_codigo_control_ok($2) as b', [valido, malControl]);
+    assert.deepEqual(sql.rows[0], { a: true, b: false });
   });
 });

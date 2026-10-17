@@ -7,45 +7,92 @@
 --
 --   agx.qr_lotes           inventario central (sin organizacion_id)
 --   agx.qr_asignaciones    entregas lote -> organización (completas o parciales)
---   agx.qr_chapetas        chapeta física: código visible + hash del token
---   agx.qr_chapeta_tokens  token en claro (solo Super Admin: archivo proveedor)
+--   agx.qr_chapetas        chapeta física: código visible con dígito de control + SHA-256 del token
+--   agx.qr_chapeta_tokens  token CIFRADO (AES-256-GCM) para reimprimir el archivo del proveedor
 --   agx.qr_chapeta_eventos historial por chapeta
 --   agx.qr_lote_eventos    historial por lote
 --
--- Contextos RLS (FORCE en todas las tablas):
---   * organización: app.current_org_id (withOrganizacionTransaction) -> solo
---     filas con su organizacion_id; nunca stock central, lotes ni tokens.
---   * Super Admin: app.agx_qr_admin = 'on' (withQrAdminTransaction, solo
---     tras createRequireGanaderiaSuperAdmin) -> inventario completo.
---   Ambos son set_config locales a la transacción fijados por el servidor.
+-- AUTORIZACIÓN -- separación por ROL de PostgreSQL, no por GUC:
+--   * agx_qr_admin (rol nuevo, conexión propia AGX_BUSINESS_QR_ADMIN_DATABASE_URL,
+--     solo usada por /api/ganaderia/admin/qr tras createRequireGanaderiaSuperAdmin):
+--     inventario completo vía policies `TO agx_qr_admin`. Sobre animales y
+--     animal_eventos solo actúa bajo app.current_org_id de la chapeta tratada
+--     (policies tenant existentes de 0022).
+--   * agx_app (conexión normal de la aplicación): SIN privilegio alguno sobre
+--     qr_lotes, qr_chapeta_tokens ni qr_lote_eventos; sobre qr_chapetas solo
+--     SELECT/UPDATE de sus filas (organizacion_id = app.current_org_id) y sin
+--     INSERT; nunca puede fijar organizacion_id. Ningún SET/set_config le da
+--     acceso global: no hay policy ni grant que dependa de un GUC para ello.
+--   * El trigger de transiciones exige current_user = 'agx_qr_admin' para
+--     sacar una chapeta del inventario central.
 --
--- Transiciones de agx.qr_chapetas garantizadas por trigger (no solo app):
---   EN_INVENTARIO --(admin)--> ASIGNADO_ORGANIZACION --> ASIGNADO_ANIMAL
---   EN_INVENTARIO --(admin)--> REVOCADO | DANADO
+-- Transiciones de agx.qr_chapetas (trigger, no solo app):
+--   EN_INVENTARIO --(agx_qr_admin)--> ASIGNADO_ORGANIZACION --> ASIGNADO_ANIMAL
+--   EN_INVENTARIO --(agx_qr_admin)--> REVOCADO | DANADO
 --   ASIGNADO_ORGANIZACION --> REVOCADO | DANADO
 --   ASIGNADO_ANIMAL --> REVOCADO | DANADO | REEMPLAZADO
 --   REVOCADO, DANADO, REEMPLAZADO: terminales.
 --   organizacion_id y animal_id, una vez fijados, son inmutables.
 --
+-- Código visible QR_AGX: AGX-XXXX-XXXX-C sobre 32 símbolos sin O/0/I/1; C =
+-- dígito de control Luhn mod 32 (detecta toda sustitución de un carácter y
+-- casi toda transposición adyacente). Validado también aquí
+-- (agx.fn_qr_codigo_control_ok). QR_LEGACY: AGX-000000 histórico, sin control.
+--
 -- QR_LEGACY: solo modelo + importación controlada vía endpoint Super Admin.
 -- Esta migración NO inserta ningún código.
 --
--- Requiere 0000-0022. Nunca ejecutar contra Railway sin autorización
--- explícita separada.
+-- Requiere 0000-0022 y la variable psql agx_qr_admin_password:
+--   psql -1 -v ON_ERROR_STOP=1 -v agx_qr_admin_password=... -f 0023_qr_inventario_chapetas.sql
+-- Nunca ejecutar contra Railway sin autorización explícita separada.
 
-create or replace function agx.qr_admin_context() returns boolean
-  language sql stable
-  as $$ select coalesce(current_setting('app.agx_qr_admin', true), '') = 'on' $$;
+-- ---------------------------------------------------------------------
+-- Rol administrativo QR (mismo patrón que agx_app en 0000).
+-- ---------------------------------------------------------------------
+select not exists (select 1 from pg_roles where rolname = 'agx_qr_admin') as should_create_agx_qr_admin \gset
+\if :should_create_agx_qr_admin
+  create role agx_qr_admin login password :'agx_qr_admin_password'
+    nosuperuser nocreatedb nocreaterole noinherit nobypassrls noreplication;
+\else
+  \echo 'agx_qr_admin ya existe -- se omite la creación (la contraseña existente no se modifica aquí).'
+\endif
 
-comment on function agx.qr_admin_context() is
-  'SPRINT-3D11.3: true solo dentro de withQrAdminTransaction (Super Admin). Lo fija el servidor, local a la transacción.';
+select format('grant connect on database %I to agx_qr_admin', current_database()) \gexec
+grant usage on schema agx to agx_qr_admin;
 
-alter function agx.qr_admin_context() owner to agx_owner;
-grant execute on function agx.qr_admin_context() to agx_app;
+-- ---------------------------------------------------------------------
+-- Dígito de control del código visible.
+-- ---------------------------------------------------------------------
+create or replace function agx.fn_qr_codigo_control_ok(codigo text) returns boolean
+  language plpgsql immutable strict
+  as $$
+declare
+  alfabeto constant text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  cuerpo text;
+  factor integer := 1;
+  suma integer := 0;
+  sumando integer;
+  i integer;
+begin
+  if codigo !~ '^AGX-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]$' then
+    return false;
+  end if;
+  cuerpo := replace(substr(codigo, 5), '-', '');
+  for i in reverse 9..1 loop
+    sumando := factor * (strpos(alfabeto, substr(cuerpo, i, 1)) - 1);
+    factor := case when factor = 2 then 1 else 2 end;
+    suma := suma + (sumando / 32) + (sumando % 32);
+  end loop;
+  return suma % 32 = 0;
+end
+$$;
+
+alter function agx.fn_qr_codigo_control_ok(text) owner to agx_owner;
 
 -- ---------------------------------------------------------------------
 -- agx.qr_lotes -- inventario central. Estados físicos del lote; el grado
 -- de asignación (parcial/total) se DERIVA de sus chapetas, no se guarda.
+-- url_base = AGX_QR_PUBLIC_ORIGIN vigente al crear el lote (dominio impreso).
 -- ---------------------------------------------------------------------
 create table agx.qr_lotes (
   lote_id bigserial primary key,
@@ -77,7 +124,7 @@ create table agx.qr_lotes (
 );
 
 comment on table agx.qr_lotes is
-  'Lotes de chapetas QR (SPRINT-3D11.3). Inventario central: solo contexto Super Admin. Sin DELETE.';
+  'Lotes de chapetas QR (SPRINT-3D11.3). Inventario central: solo rol agx_qr_admin. Sin DELETE.';
 
 -- ---------------------------------------------------------------------
 -- agx.qr_asignaciones -- cada entrega comercial de chapetas a una
@@ -138,10 +185,10 @@ create table agx.qr_chapetas (
   constraint qr_chapetas_estado_check check (estado in (
     'EN_INVENTARIO', 'ASIGNADO_ORGANIZACION', 'ASIGNADO_ANIMAL', 'REVOCADO', 'DANADO', 'REEMPLAZADO'
   )),
-  -- Código visible: QR_AGX alfanumérico sin O/0/I/1 (AGX-7KM4-P2XZ) +
-  -- token; QR_LEGACY consecutivo histórico (AGX-000003), sin token.
+  -- QR_AGX: AGX-7KM4-P2XZ-C con dígito de control válido + token_hash;
+  -- QR_LEGACY: consecutivo histórico AGX-000003, sin token.
   constraint qr_chapetas_formato_check check (
-    (tipo = 'QR_AGX' and codigo_visible ~ '^AGX-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$'
+    (tipo = 'QR_AGX' and agx.fn_qr_codigo_control_ok(codigo_visible)
       and token_hash is not null and token_hash ~ '^[0-9a-f]{64}$')
     or (tipo = 'QR_LEGACY' and codigo_visible ~ '^AGX-[0-9]{6}$' and token_hash is null)
   ),
@@ -167,13 +214,14 @@ create table agx.qr_chapetas (
 );
 
 comment on table agx.qr_chapetas is
-  'Chapetas QR físicas (SPRINT-3D11.3). Solo token_hash (SHA-256); el token en claro vive en qr_chapeta_tokens. Transiciones e inmutabilidad por trigger. Sin DELETE.';
+  'Chapetas QR físicas (SPRINT-3D11.3). Solo token_hash (SHA-256); el token solo existe cifrado en qr_chapeta_tokens. Transiciones e inmutabilidad por trigger. Sin DELETE.';
 
 -- Una chapeta operativa por animal.
 create unique index qr_chapetas_un_activa_por_animal_idx
   on agx.qr_chapetas (animal_id) where estado = 'ASIGNADO_ANIMAL';
 create index qr_chapetas_lote_idx on agx.qr_chapetas (lote_id, qr_id);
 create index qr_chapetas_organizacion_estado_idx on agx.qr_chapetas (organizacion_id, estado);
+create index qr_chapetas_organizacion_updated_idx on agx.qr_chapetas (organizacion_id, updated_at);
 create index qr_chapetas_animal_idx on agx.qr_chapetas (animal_id);
 
 create or replace function agx.fn_qr_chapetas_guard() returns trigger
@@ -199,7 +247,8 @@ begin
 
   if new.estado is distinct from old.estado then
     if not (
-      (old.estado = 'EN_INVENTARIO' and new.estado in ('ASIGNADO_ORGANIZACION', 'REVOCADO', 'DANADO') and agx.qr_admin_context())
+      (old.estado = 'EN_INVENTARIO' and new.estado in ('ASIGNADO_ORGANIZACION', 'REVOCADO', 'DANADO')
+        and current_user = 'agx_qr_admin')
       or (old.estado = 'ASIGNADO_ORGANIZACION' and new.estado in ('ASIGNADO_ANIMAL', 'REVOCADO', 'DANADO'))
       or (old.estado = 'ASIGNADO_ANIMAL' and new.estado in ('REVOCADO', 'DANADO', 'REEMPLAZADO'))
     ) then
@@ -226,20 +275,24 @@ create trigger qr_chapetas_guard
   for each row execute function agx.fn_qr_chapetas_guard();
 
 -- ---------------------------------------------------------------------
--- agx.qr_chapeta_tokens -- token en claro para reimprimir/descargar el
--- archivo del proveedor. Solo contexto Super Admin; jamás una organización.
+-- agx.qr_chapeta_tokens -- token CIFRADO para reimprimir el archivo del
+-- proveedor. Formato v1: iv(12) || tag(16) || ciphertext(32) con
+-- AES-256-GCM, clave AGX_QR_TOKEN_ENCRYPTION_KEY y AAD
+-- 'agx-qr-token:v1:<codigo_visible>' (un cifrado no se puede mover a otra
+-- chapeta). Solo agx_qr_admin; jamás agx_app.
 -- ---------------------------------------------------------------------
 create table agx.qr_chapeta_tokens (
   qr_id bigint primary key references agx.qr_chapetas (qr_id),
-  token varchar(32) not null,
+  token_cifrado bytea not null,
+  clave_version smallint not null default 1,
   created_at timestamptz not null default now(),
 
-  constraint qr_chapeta_tokens_token_key unique (token),
-  constraint qr_chapeta_tokens_formato_check check (token ~ '^[A-Za-z0-9_-]{32}$')
+  constraint qr_chapeta_tokens_formato_check check (octet_length(token_cifrado) = 60),
+  constraint qr_chapeta_tokens_clave_version_check check (clave_version = 1)
 );
 
 comment on table agx.qr_chapeta_tokens is
-  'Token QR en claro (SPRINT-3D11.3), separado de qr_chapetas: RLS solo Super Admin. Append-only.';
+  'Token QR cifrado AES-256-GCM (SPRINT-3D11.3), separado de qr_chapetas. Solo rol agx_qr_admin. Append-only.';
 
 -- ---------------------------------------------------------------------
 -- Historial (append-only).
@@ -279,7 +332,7 @@ create table agx.qr_lote_eventos (
 create index qr_lote_eventos_lote_idx on agx.qr_lote_eventos (lote_id, ocurrido_en);
 
 -- ---------------------------------------------------------------------
--- Owner, RLS FORCE, policies, grants.
+-- Owner, RLS FORCE, policies.
 -- ---------------------------------------------------------------------
 alter table agx.qr_lotes owner to agx_owner;
 alter table agx.qr_asignaciones owner to agx_owner;
@@ -301,57 +354,71 @@ alter table agx.qr_chapeta_eventos force row level security;
 alter table agx.qr_lote_eventos enable row level security;
 alter table agx.qr_lote_eventos force row level security;
 
--- Solo Super Admin.
+-- Rol administrativo: inventario completo.
 create policy qr_lotes_admin on agx.qr_lotes
-  for all using (agx.qr_admin_context()) with check (agx.qr_admin_context());
+  for all to agx_qr_admin using (true) with check (true);
 create policy qr_chapeta_tokens_admin on agx.qr_chapeta_tokens
-  for all using (agx.qr_admin_context()) with check (agx.qr_admin_context());
+  for all to agx_qr_admin using (true) with check (true);
 create policy qr_lote_eventos_admin on agx.qr_lote_eventos
-  for all using (agx.qr_admin_context()) with check (agx.qr_admin_context());
-
--- Super Admin + lectura de la propia organización.
+  for all to agx_qr_admin using (true) with check (true);
 create policy qr_asignaciones_admin on agx.qr_asignaciones
-  for all using (agx.qr_admin_context()) with check (agx.qr_admin_context());
-create policy qr_asignaciones_tenant_read on agx.qr_asignaciones
-  for select using (organizacion_id = nullif(current_setting('app.current_org_id', true), '')::uuid);
-
--- Super Admin + la organización ve/actualiza SOLO sus chapetas (WITH
--- CHECK impide moverlas a otra organización; nunca inserta).
+  for all to agx_qr_admin using (true) with check (true);
 create policy qr_chapetas_admin on agx.qr_chapetas
-  for all using (agx.qr_admin_context()) with check (agx.qr_admin_context());
-create policy qr_chapetas_tenant_read on agx.qr_chapetas
-  for select using (organizacion_id = nullif(current_setting('app.current_org_id', true), '')::uuid);
-create policy qr_chapetas_tenant_update on agx.qr_chapetas
-  for update
-  using (organizacion_id = nullif(current_setting('app.current_org_id', true), '')::uuid)
-  with check (organizacion_id = nullif(current_setting('app.current_org_id', true), '')::uuid);
-
+  for all to agx_qr_admin using (true) with check (true);
 create policy qr_chapeta_eventos_admin on agx.qr_chapeta_eventos
-  for all using (agx.qr_admin_context()) with check (agx.qr_admin_context());
+  for all to agx_qr_admin using (true) with check (true);
+
+-- Organización (agx_app): solo filas propias. WITH CHECK impide moverlas a
+-- otra organización; agx_app no tiene INSERT sobre qr_chapetas.
+create policy qr_asignaciones_tenant_read on agx.qr_asignaciones
+  for select to agx_app
+  using (organizacion_id = nullif(current_setting('app.current_org_id', true), '')::uuid);
+create policy qr_chapetas_tenant_read on agx.qr_chapetas
+  for select to agx_app
+  using (organizacion_id = nullif(current_setting('app.current_org_id', true), '')::uuid);
+create policy qr_chapetas_tenant_update on agx.qr_chapetas
+  for update to agx_app
+  using (organizacion_id = nullif(current_setting('app.current_org_id', true), '')::uuid)
+  with check (organizacion_id = nullif(current_setting('app.current_org_id', true), '')::uuid);
 create policy qr_chapeta_eventos_tenant on agx.qr_chapeta_eventos
-  for all
+  for all to agx_app
   using (organizacion_id = nullif(current_setting('app.current_org_id', true), '')::uuid)
   with check (organizacion_id = nullif(current_setting('app.current_org_id', true), '')::uuid);
 
--- Sin DELETE en ninguna tabla. UPDATE solo en columnas de estado.
-grant select, insert on agx.qr_lotes to agx_app;
-grant update (estado, proveedor, observaciones, updated_at) on agx.qr_lotes to agx_app;
-grant select, insert on agx.qr_asignaciones to agx_app;
-grant select, insert on agx.qr_chapetas to agx_app;
+-- ---------------------------------------------------------------------
+-- Grants. Sin DELETE en ninguna tabla para ningún rol de aplicación.
+-- ---------------------------------------------------------------------
+-- agx_qr_admin: inventario completo.
+grant select, insert on agx.qr_lotes, agx.qr_asignaciones, agx.qr_chapetas,
+  agx.qr_chapeta_tokens, agx.qr_chapeta_eventos, agx.qr_lote_eventos to agx_qr_admin;
+grant update (estado, proveedor, observaciones, updated_at) on agx.qr_lotes to agx_qr_admin;
 grant update (
   estado, organizacion_id, asignacion_id, animal_id,
   asignado_organizacion_at, asignado_animal_at,
   revocado_at, revocado_por, motivo, reemplazado_por, updated_at
-) on agx.qr_chapetas to agx_app;
-grant select, insert on agx.qr_chapeta_tokens to agx_app;
-grant select, insert on agx.qr_chapeta_eventos to agx_app;
-grant select, insert on agx.qr_lote_eventos to agx_app;
+) on agx.qr_chapetas to agx_qr_admin;
+grant usage, select on sequence agx.qr_lotes_lote_id_seq, agx.qr_asignaciones_asignacion_id_seq,
+  agx.qr_chapetas_qr_id_seq, agx.qr_chapeta_eventos_evento_id_seq, agx.qr_lote_eventos_evento_id_seq,
+  agx.animal_eventos_evento_id_seq to agx_qr_admin;
+-- Animal de una chapeta asignada: solo bajo app.current_org_id de esa
+-- chapeta (policies tenant de 0022). UPDATE(updated_at) existe solo para
+-- poder bloquear la fila (SELECT ... FOR UPDATE) en un reemplazo; el
+-- repositorio administrativo nunca la modifica.
+grant select on agx.animales to agx_qr_admin;
+grant update (updated_at) on agx.animales to agx_qr_admin;
+grant select, insert on agx.animal_eventos to agx_qr_admin;
+grant execute on function agx.fn_qr_codigo_control_ok(text) to agx_qr_admin;
 
-grant usage, select on sequence agx.qr_lotes_lote_id_seq to agx_app;
-grant usage, select on sequence agx.qr_asignaciones_asignacion_id_seq to agx_app;
-grant usage, select on sequence agx.qr_chapetas_qr_id_seq to agx_app;
+-- agx_app: uso por la organización. Nada sobre lotes, tokens ni eventos de lote.
+grant select on agx.qr_asignaciones to agx_app;
+grant select on agx.qr_chapetas to agx_app;
+grant update (
+  estado, animal_id, asignado_animal_at,
+  revocado_at, revocado_por, motivo, reemplazado_por, updated_at
+) on agx.qr_chapetas to agx_app;
+grant select, insert on agx.qr_chapeta_eventos to agx_app;
 grant usage, select on sequence agx.qr_chapeta_eventos_evento_id_seq to agx_app;
-grant usage, select on sequence agx.qr_lote_eventos_evento_id_seq to agx_app;
+grant execute on function agx.fn_qr_codigo_control_ok(text) to agx_app;
 
 grant all privileges on agx.qr_lotes, agx.qr_asignaciones, agx.qr_chapetas,
   agx.qr_chapeta_tokens, agx.qr_chapeta_eventos, agx.qr_lote_eventos to agx_owner;

@@ -4,8 +4,14 @@
 // erróneo (POST .../anular, terminal). No es la ficha completa (3D11.4):
 // sin línea de tiempo, pesajes manuales ni sanidad. Predio y peso no se
 // corrigen aquí. SPRINT-3D11.3 (R1): incluye la sección QR (HatoQrPanel).
+//
+// SPRINT-3D11.3 (R1) offline-first: con el dispositivo preparado la ficha
+// sale primero de la copia local (abre sin red) y, con red, se refresca del
+// servidor. /animales/local:<uuid> muestra un registro aún no sincronizado;
+// cuando el servidor confirma su animal_id redirige a /animales/<animal_id>.
+// Corregir, anular y gestionar la chapeta requieren conexión.
 import { useCallback, useEffect, useState } from 'react';
-import { Navigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useParams } from 'react-router-dom';
 import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
 import HatoAnimalFields from './HatoAnimalFields.jsx';
@@ -27,6 +33,7 @@ import {
   validateAnimalForm,
 } from './hatoFormModel.js';
 import useHatoCatalogos from './useHatoCatalogos.js';
+import { useGanaderiaOffline } from '../offline/GanaderiaOfflineProvider.jsx';
 import '../styles/ganaderia-hato.css';
 
 function Row({ label, children }) {
@@ -45,7 +52,11 @@ function formatNacimiento(animal) {
 
 export default function HatoDetallePage() {
   const { animalId } = useParams();
-  const idValido = /^[1-9]\d{0,17}$/.test(String(animalId));
+  const idValido = /^(?:[1-9]\d{0,17}|local:[0-9a-f-]{36})$/i.test(String(animalId));
+  const esLocal = String(animalId).startsWith('local:');
+  const offline = useGanaderiaOffline();
+  const local = offline.preparado && offline.repo ? offline.repo : null;
+  const [chapetaLocal, setChapetaLocal] = useState(null);
   const catalogos = useHatoCatalogos({ conPredios: false });
   const [state, setState] = useState({ status: 'loading', animal: null });
   const [modo, setModo] = useState('ver');
@@ -57,21 +68,47 @@ export default function HatoDetallePage() {
 
   const load = useCallback(async () => {
     if (!idValido) return;
-    setState((current) => ({ ...current, status: 'loading' }));
+    let localEncontrado = false;
+    if (local) {
+      const animalLocal = await local.getAnimal(animalId).catch(() => null);
+      if (animalLocal?.redirectTo) {
+        setState({ status: 'redirect', animal: null, to: animalLocal.redirectTo });
+        return;
+      }
+      if (animalLocal) {
+        localEncontrado = true;
+        setState({ status: 'ok', animal: animalLocal, origen: 'local' });
+        setChapetaLocal(await local.getChapetaDeAnimal(animalLocal).catch(() => null));
+      }
+    }
+    if (esLocal) {
+      if (!localEncontrado) setState({ status: 'not_found', animal: null });
+      return;
+    }
+    if (!localEncontrado) setState((current) => ({ ...current, status: 'loading' }));
     try {
       const { ok, status, data } = await getAnimal(animalId);
-      if (ok && data?.animal) setState({ status: 'ok', animal: data.animal });
-      else setState({ status: status === 404 ? 'not_found' : 'error', animal: null });
+      if (ok && data?.animal) setState({ status: 'ok', animal: data.animal, origen: 'servidor' });
+      else if (!localEncontrado) setState({ status: status === 404 ? 'not_found' : 'error', animal: null });
     } catch {
-      setState({ status: 'error', animal: null });
+      // Sin red: se mantiene la copia local si existe.
+      if (!localEncontrado) setState({ status: 'error', animal: null });
     }
-  }, [animalId, idValido]);
+  }, [animalId, idValido, esLocal, local]);
 
   useEffect(() => {
     load();
   }, [load]);
 
+  // Copia local: refleja la sincronización (p. ej. local -> animal_id).
+  useEffect(() => (local && esLocal ? local.subscribe(load) : undefined), [local, esLocal, load]);
+
   if (!idValido) return <Navigate to="/ganaderia/animales" replace />;
+  if (state.status === 'redirect') return <Navigate to={`/ganaderia/animales/${state.to}`} replace />;
+
+  // Corregir, anular y gestionar la chapeta exigen conexión y un animal ya
+  // confirmado por el servidor.
+  const accionesDisponibles = !esLocal && offline.online;
 
   const { animal } = state;
 
@@ -177,6 +214,15 @@ export default function HatoDetallePage() {
             <StatusMessage type="error">Registro anulado. Motivo: {animal.estadoMotivo}</StatusMessage>
           ) : null}
           {aviso ? <StatusMessage type="success">{aviso}</StatusMessage> : null}
+          {animal.estadoSync === 'PENDIENTE' ? (
+            <StatusMessage type="info">Registrado en este dispositivo. Se enviará automáticamente al recuperar la conexión.</StatusMessage>
+          ) : null}
+          {animal.estadoSync === 'CONFLICTO' || animal.estadoSync === 'RECHAZADO' ? (
+            <StatusMessage type="error">
+              No se pudo sincronizar este registro. Se conserva en el dispositivo.{' '}
+              <Link to="/ganaderia/sincronizacion">Resolver</Link>
+            </StatusMessage>
+          ) : null}
 
           {modo === 'ver' ? (
             <>
@@ -193,7 +239,10 @@ export default function HatoDetallePage() {
                 {animal.observaciones ? <Row label="Observaciones">{animal.observaciones}</Row> : null}
               </div>
               {error ? <StatusMessage type="error">{error}</StatusMessage> : null}
-              {animal.estado === 'ACTIVO' ? (
+              {animal.estado === 'ACTIVO' && !accionesDisponibles && !esLocal ? (
+                <p className="gan-hato-hint">Corregir, anular o cambiar la chapeta requiere conexión.</p>
+              ) : null}
+              {animal.estado === 'ACTIVO' && accionesDisponibles ? (
                 <div className="gan-hato-actions">
                   <button type="button" className="gan-submit" onClick={abrirCorreccion} disabled={catalogos.status !== 'ok'}>
                     Corregir datos
@@ -212,7 +261,20 @@ export default function HatoDetallePage() {
                   </button>
                 </div>
               ) : null}
-              <HatoQrPanel animalId={animal.animalId} animalActivo={animal.estado === 'ACTIVO'} />
+              {accionesDisponibles ? (
+                <HatoQrPanel animalId={animal.animalId} animalActivo={animal.estado === 'ACTIVO'} />
+              ) : (
+                <section className="gan-hato-qr">
+                  <h3>Chapeta QR</h3>
+                  <p className="gan-hato-hint">
+                    {chapetaLocal
+                      ? `${chapetaLocal.codigoVisible}${chapetaLocal.reservaLocalUuid ? ' (asociación pendiente de sincronizar)' : ''}`
+                      : animal.chapetaCodigo
+                        ? `${animal.chapetaCodigo} (asociación pendiente de sincronizar)`
+                        : 'Sin chapeta asociada en este dispositivo.'}
+                  </p>
+                </section>
+              )}
             </>
           ) : null}
 

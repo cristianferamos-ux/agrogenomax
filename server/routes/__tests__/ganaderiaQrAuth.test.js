@@ -16,6 +16,8 @@ import express from 'express';
 
 import createGanaderiaAdminQrRouter from '../ganaderiaAdminQr.js';
 import { createGanaderiaAnimalQrRouter, createGanaderiaQrRouter } from '../ganaderiaAnimalQr.js';
+import createGanaderiaSyncRouter from '../ganaderiaSync.js';
+import { __resetAgxQrAdminPoolForTests } from '../../db/agxQrAdminPool.js';
 import { getAgxAuthPool, __resetAgxAuthPoolForTests } from '../../db/agxAuthPool.js';
 import { computeCsrfToken, hashSessionSecret, sessionCookieName } from '../../security/ganaderiaSession.js';
 import { __resetAgxBusinessPoolForTests } from '../../db/agxBusinessPool.js';
@@ -38,11 +40,14 @@ const TOKEN_SHAPE = 'A'.repeat(32);
 before(() => {
   delete process.env.DATABASE_URL;
   delete process.env.AGX_BUSINESS_DATABASE_URL;
+  delete process.env.AGX_BUSINESS_QR_ADMIN_DATABASE_URL;
+  delete process.env.AGX_QR_PUBLIC_ORIGIN;
 });
 
 beforeEach(() => {
   __resetAgxAuthPoolForTests();
   __resetAgxBusinessPoolForTests();
+  __resetAgxQrAdminPoolForTests();
   __resetValidationStateForTests();
   getConfig({ APP_ENV: 'development' }, {});
 });
@@ -53,6 +58,7 @@ function startApp() {
   app.use('/api/ganaderia/admin/qr', createGanaderiaAdminQrRouter(ROUTER_CONFIG));
   app.use('/api/ganaderia/animales/:animalId/qr', createGanaderiaAnimalQrRouter(ROUTER_CONFIG));
   app.use('/api/ganaderia/qr', createGanaderiaQrRouter(ROUTER_CONFIG));
+  app.use('/api/ganaderia/sync', createGanaderiaSyncRouter(ROUTER_CONFIG));
   app.use(notFound);
   app.use(errorHandler);
   return new Promise((resolve) => {
@@ -142,7 +148,7 @@ const ADMIN_SURFACE = [
   ['GET', '/admin/qr/chapetas/1'],
   ['POST', '/admin/qr/chapetas/1/revocar', { motivo: 'x' }],
   ['POST', '/admin/qr/chapetas/1/danada', { motivo: 'x' }],
-  ['POST', '/admin/qr/chapetas/1/reemplazar', { codigoNuevo: 'AGX-7KM4-P2XZ', motivo: 'x' }],
+  ['POST', '/admin/qr/chapetas/1/reemplazar', { codigoNuevo: 'AGX-7KM4-P2XZ-R', motivo: 'x' }],
 ];
 
 describe('SPRINT-3D11.3: Super Admin -- autorización del panel existente', () => {
@@ -177,13 +183,13 @@ describe('SPRINT-3D11.3: Super Admin -- validación antes de tocar la base', () 
     ['lote: sin clientOperationId', 'POST', '/admin/qr/lotes', { cantidad: 10 }, 400, 'INVALID_CLIENT_OPERATION_ID'],
     ['lote: urlBase del cliente', 'POST', '/admin/qr/lotes', { cantidad: 10, clientOperationId: OP_ID, urlBase: 'https://evil.example' }, 400, 'FORBIDDEN_FIELDS'],
     ['lote: tokens del cliente', 'POST', '/admin/qr/lotes', { cantidad: 10, clientOperationId: OP_ID, tokens: [] }, 400, 'FORBIDDEN_FIELDS'],
-    ['legacy: formato nuevo', 'POST', '/admin/qr/lotes/importar-legacy', { codigos: ['AGX-7KM4-P2XZ'], clientOperationId: OP_ID }, 400, 'INVALID_CODIGOS'],
+    ['legacy: formato nuevo', 'POST', '/admin/qr/lotes/importar-legacy', { codigos: ['AGX-7KM4-P2XZ-R'], clientOperationId: OP_ID }, 400, 'INVALID_CODIGOS'],
     ['legacy: repetidos', 'POST', '/admin/qr/lotes/importar-legacy', { codigos: ['AGX-000001', 'agx-000001'], clientOperationId: OP_ID }, 400, 'INVALID_CODIGOS'],
     ['legacy: vacío', 'POST', '/admin/qr/lotes/importar-legacy', { codigos: [], clientOperationId: OP_ID }, 400, 'INVALID_CODIGOS'],
     ['estado: GENERADO', 'POST', '/admin/qr/lotes/1/estado', { estado: 'GENERADO' }, 400, 'INVALID_ESTADO'],
     ['estado: loteId inválido', 'POST', '/admin/qr/lotes/abc/estado', { estado: 'EN_STOCK' }, 400, 'INVALID_LOTE_ID'],
     ['asignar: organización inválida', 'POST', '/admin/qr/lotes/1/asignar', { organizacionId: 'x', clientOperationId: OP_ID }, 400, 'INVALID_ORGANIZACION'],
-    ['asignar: cantidad y códigos', 'POST', '/admin/qr/lotes/1/asignar', { organizacionId: ORG_ID, cantidad: 1, codigos: ['AGX-7KM4-P2XZ'], clientOperationId: OP_ID }, 400, 'INVALID_SELECCION'],
+    ['asignar: cantidad y códigos', 'POST', '/admin/qr/lotes/1/asignar', { organizacionId: ORG_ID, cantidad: 1, codigos: ['AGX-7KM4-P2XZ-R'], clientOperationId: OP_ID }, 400, 'INVALID_SELECCION'],
     ['asignar: organización inexistente', 'POST', '/admin/qr/lotes/1/asignar', { organizacionId: ORG_INEXISTENTE, clientOperationId: OP_ID }, 404, 'ORGANIZACION_NOT_FOUND'],
     ['revocar: sin motivo', 'POST', '/admin/qr/chapetas/1/revocar', {}, 400, 'INVALID_MOTIVO'],
     ['reemplazar: código inválido', 'POST', '/admin/qr/chapetas/1/reemplazar', { codigoNuevo: 'XYZ', motivo: 'x' }, 400, 'INVALID_CODIGO_NUEVO'],
@@ -203,12 +209,12 @@ describe('SPRINT-3D11.3: Super Admin -- validación antes de tocar la base', () 
 
 const TENANT_SURFACE = [
   ['GET', `/qr/token/${TOKEN_SHAPE}`],
-  ['GET', '/qr/codigo/AGX-7KM4-P2XZ'],
+  ['GET', '/qr/codigo/AGX-7KM4-P2XZ-R-R'],
   ['GET', '/qr/chapetas'],
-  ['POST', '/qr/chapetas/AGX-7KM4-P2XZ/registrar-animal', {}],
+  ['POST', '/qr/chapetas/AGX-7KM4-P2XZ-R/registrar-animal', {}],
   ['GET', '/animales/1/qr'],
-  ['POST', '/animales/1/qr/asociar', { codigoVisible: 'AGX-7KM4-P2XZ' }],
-  ['POST', '/animales/1/qr/reemplazar', { codigoNuevo: 'AGX-7KM4-P2XZ', motivo: 'x' }],
+  ['POST', '/animales/1/qr/asociar', { codigoVisible: 'AGX-7KM4-P2XZ-R' }],
+  ['POST', '/animales/1/qr/reemplazar', { codigoNuevo: 'AGX-7KM4-P2XZ-R', motivo: 'x' }],
   ['POST', '/animales/1/qr/baja', { causa: 'REVOCADO', motivo: 'x' }],
 ];
 
@@ -232,12 +238,12 @@ describe('SPRINT-3D11.3: organización -- sesión y CSRF', () => {
 describe('SPRINT-3D11.3: organización -- validación antes de tocar la base', () => {
   const cases = [
     ['asociar: código inválido', 'POST', '/animales/1/qr/asociar', { codigoVisible: 'AGX-0000-0000' }, 400, 'INVALID_CODIGO'],
-    ['asociar: organizacionId del cliente', 'POST', '/animales/1/qr/asociar', { codigoVisible: 'AGX-7KM4-P2XZ', organizacionId: ORG_ID }, 400, 'FORBIDDEN_FIELDS'],
-    ['asociar: animalId inválido', 'POST', '/animales/abc/qr/asociar', { codigoVisible: 'AGX-7KM4-P2XZ' }, 400, 'INVALID_ANIMAL_ID'],
-    ['reemplazar: sin motivo', 'POST', '/animales/1/qr/reemplazar', { codigoNuevo: 'AGX-7KM4-P2XZ' }, 400, 'INVALID_MOTIVO'],
+    ['asociar: organizacionId del cliente', 'POST', '/animales/1/qr/asociar', { codigoVisible: 'AGX-7KM4-P2XZ-R', organizacionId: ORG_ID }, 400, 'FORBIDDEN_FIELDS'],
+    ['asociar: animalId inválido', 'POST', '/animales/abc/qr/asociar', { codigoVisible: 'AGX-7KM4-P2XZ-R' }, 400, 'INVALID_ANIMAL_ID'],
+    ['reemplazar: sin motivo', 'POST', '/animales/1/qr/reemplazar', { codigoNuevo: 'AGX-7KM4-P2XZ-R' }, 400, 'INVALID_MOTIVO'],
     ['baja: causa inválida', 'POST', '/animales/1/qr/baja', { causa: 'REEMPLAZADO', motivo: 'x' }, 400, 'INVALID_CAUSA'],
     ['registrar: código inválido', 'POST', '/qr/chapetas/HOLA/registrar-animal', {}, 400, 'INVALID_CODIGO'],
-    ['registrar: cuerpo de animal inválido', 'POST', '/qr/chapetas/AGX-7KM4-P2XZ/registrar-animal', { foo: 1 }, 400, 'FORBIDDEN_FIELDS'],
+    ['registrar: cuerpo de animal inválido', 'POST', '/qr/chapetas/AGX-7KM4-P2XZ-R/registrar-animal', { foo: 1 }, 400, 'FORBIDDEN_FIELDS'],
     ['listar: estado EN_INVENTARIO (stock central)', 'GET', '/qr/chapetas?estado=EN_INVENTARIO', undefined, 400, 'INVALID_QUERY'],
   ];
   for (const [name, method, path, body, expectedStatus, expectedError] of cases) {
@@ -258,4 +264,65 @@ describe('SPRINT-3D11.3: organización -- validación antes de tocar la base', (
       assert.deepEqual(json, { error: 'QR_NOT_FOUND' });
     });
   }
+});
+
+describe('SPRINT-3D11.3: dígito de control -- un error de digitación nunca llega a la base', () => {
+  test('asociar con dígito de control incorrecto -> 400 INVALID_CODIGO', async () => {
+    const { status, json } = await call('POST', '/animales/1/qr/asociar', { codigoVisible: 'AGX-7KM4-P2XZ-S' });
+    assert.equal(status, 400);
+    assert.equal(json.error, 'INVALID_CODIGO');
+  });
+  for (const codigo of ['AGX-7KM4-P2XZ-S', 'AGX-7KM4-P2ZX-R', 'AGX-7KM4-P2XZ', 'AGX-7KN4-P2XZ-R']) {
+    test(`GET /qr/codigo/${codigo} (control inválido) -> 404 sin consultar la base`, async () => {
+      const { status, json } = await call('GET', `/qr/codigo/${codigo}`);
+      assert.equal(status, 404);
+      assert.deepEqual(json, { error: 'QR_NOT_FOUND' });
+    });
+  }
+});
+
+describe('SPRINT-3D11.3: configuración del inventario QR -- fail-closed', () => {
+  const lote = { cantidad: 10, clientOperationId: OP_ID };
+  test('crear lote sin AGX_QR_PUBLIC_ORIGIN -> 503 (el dominio nunca sale del navegador)', async () => {
+    const { status, json } = await call('POST', '/admin/qr/lotes', { body: lote, superAdmin: true });
+    assert.equal(status, 503);
+    assert.equal(json.error, 'QR_PUBLIC_ORIGIN_NOT_CONFIGURED');
+  });
+  test('crear lote con origen pero sin clave de cifrado -> 503 QR_KEY_NOT_CONFIGURED; con clave y sin conexión agx_qr_admin -> 503 QR_ADMIN_DB_NOT_CONFIGURED', async () => {
+    process.env.AGX_QR_PUBLIC_ORIGIN = 'https://agrogenomax.com';
+    try {
+      const sinClave = await call('POST', '/admin/qr/lotes', { body: lote, superAdmin: true });
+      assert.equal(sinClave.status, 503);
+      assert.equal(sinClave.json.error, 'QR_KEY_NOT_CONFIGURED');
+      process.env.AGX_QR_TOKEN_ENCRYPTION_KEY = crypto.randomBytes(32).toString('base64');
+      const sinDb = await call('POST', '/admin/qr/lotes', { body: lote, superAdmin: true });
+      assert.equal(sinDb.status, 503);
+      assert.equal(sinDb.json.error, 'QR_ADMIN_DB_NOT_CONFIGURED');
+    } finally {
+      delete process.env.AGX_QR_PUBLIC_ORIGIN;
+      delete process.env.AGX_QR_TOKEN_ENCRYPTION_KEY;
+    }
+  });
+  test('un Origin malicioso no cambia el dominio impreso: sigue exigiendo AGX_QR_PUBLIC_ORIGIN', async () => {
+    const { status } = await call('POST', '/admin/qr/lotes', { body: lote, superAdmin: true });
+    assert.equal(status, 503);
+  });
+});
+
+describe('SPRINT-3D11.3: /api/ganaderia/sync/pull', () => {
+  test('sin sesión -> 401', async () => {
+    const { status, json } = await call('GET', '/sync/pull', { session: false });
+    assert.equal(status, 401);
+    assert.equal(json.error, 'SESSION_REQUIRED');
+  });
+  test('parámetro desconocido -> 400 INVALID_QUERY', async () => {
+    const { status, json } = await call('GET', '/sync/pull?organizacionId=x');
+    assert.equal(status, 400);
+    assert.equal(json.error, 'INVALID_QUERY');
+  });
+  test('cursor ilegible -> 400 INVALID_CURSOR sin consultar la base', async () => {
+    const { status, json } = await call('GET', '/sync/pull?cursor=nope');
+    assert.equal(status, 400);
+    assert.equal(json.error, 'INVALID_CURSOR');
+  });
 });

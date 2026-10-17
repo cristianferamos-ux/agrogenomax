@@ -2,33 +2,54 @@
 // digitación). Módulo puro, sin red. Reemplaza qr/normalizeQrCode.js
 // (legacy), que pasaba todo a MAYÚSCULAS y corrompería el token base64url.
 //   * QR escaneado -> https://<dominio>/qr/<token> (token secreto, 32 chars)
-//   * Código visible impreso -> AGX-7KM4-P2XZ (nuevo) o AGX-000003 (legacy)
-// Ambos se resuelven SOLO contra /api/ganaderia/qr/* bajo la organización
-// de la sesión. Misma normalización de código que el servidor (qrCodigos.js).
+//   * Código visible impreso -> AGX-7KM4-P2XZ-R (nuevo, con dígito de control
+//     Luhn mod 32 validable sin red) o AGX-000003 (legacy)
+// Ambos se resuelven contra la copia local (offline) o /api/ganaderia/qr/*
+// bajo la organización de la sesión. Misma normalización y control que el
+// servidor (server/services/ganaderia/qrCodigos.js) y SQL.
 
 export const QR_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32}$/;
-export const CODIGO_VISIBLE_PATTERN = /^AGX-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/;
+export const CODIGO_VISIBLE_PATTERN = /^AGX-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]$/;
 export const CODIGO_LEGACY_PATTERN = /^AGX-[0-9]{6}$/;
+const CODIGO_ALFABETO = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const QR_PATH_PATTERN = /^\/(?:ganaderia\/)?qr\/([^/?#]+)\/?$/;
 
 export function isQrToken(value) {
   return typeof value === 'string' && QR_TOKEN_PATTERN.test(value);
 }
 
-export function isCodigoChapeta(value) {
-  return typeof value === 'string' && (CODIGO_VISIBLE_PATTERN.test(value) || CODIGO_LEGACY_PATTERN.test(value));
+/** Luhn mod 32 sobre cuerpo + control (mismo algoritmo que el servidor y SQL). */
+export function controlValido(cuerpoConControl) {
+  let factor = 1;
+  let suma = 0;
+  for (let i = cuerpoConControl.length - 1; i >= 0; i -= 1) {
+    const index = CODIGO_ALFABETO.indexOf(cuerpoConControl[i]);
+    if (index < 0) return false;
+    const sumando = factor * index;
+    factor = factor === 2 ? 1 : 2;
+    suma += Math.floor(sumando / 32) + (sumando % 32);
+  }
+  return suma % 32 === 0;
 }
 
-/** "agx 7km4 p2xz", "7KM4P2XZ", "000003" -> código canónico o null. */
+export function isCodigoChapeta(value) {
+  if (typeof value !== 'string') return false;
+  if (CODIGO_LEGACY_PATTERN.test(value)) return true;
+  return CODIGO_VISIBLE_PATTERN.test(value) && controlValido(value.slice(4).replace(/-/g, ''));
+}
+
+/**
+ * "agx 7km4 p2xz r", "7KM4P2XZR", "000003" -> código canónico o null. Un
+ * error de digitación (dígito de control que no cuadra) -> null, sin red.
+ */
 export function normalizeCodigoChapeta(rawValue) {
   if (typeof rawValue !== 'string') return null;
   const compact = rawValue.toUpperCase().replace(/[\s_-]+/g, '');
   if (compact.length === 0 || compact.length > 16) return null;
-  const conPrefijo = compact.startsWith('AGX') && (compact.length === 11 || compact.length === 9);
-  const body = conPrefijo ? compact.slice(3) : compact;
-  if (/^[0-9]{6}$/.test(body)) return `AGX-${body}`;
-  if (/^[A-HJ-NP-Z2-9]{8}$/.test(body)) return `AGX-${body.slice(0, 4)}-${body.slice(4)}`;
-  return null;
+  if (/^(?:AGX)?[0-9]{6}$/.test(compact)) return `AGX-${compact.slice(-6)}`;
+  const body = compact.length === 12 && compact.startsWith('AGX') ? compact.slice(3) : compact;
+  if (!/^[A-HJ-NP-Z2-9]{9}$/.test(body) || !controlValido(body)) return null;
+  return `AGX-${body.slice(0, 4)}-${body.slice(4, 8)}-${body.slice(8)}`;
 }
 
 function classify(value) {
