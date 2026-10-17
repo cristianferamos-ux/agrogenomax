@@ -23,7 +23,15 @@ import CatastroXMap from '../../catastrox/components/CatastroXMap.jsx';
 import GanaderiaPredioMiniMap from './GanaderiaPredioMiniMap.jsx';
 import PotreroRegistrationPanel from '../potreros/PotreroRegistrationPanel.jsx';
 import PotrerosByPredioPanel from '../potreros/PotrerosByPredioPanel.jsx';
+import { useGanaderiaOffline } from '../offline/GanaderiaOfflineProvider.jsx';
+import { cargarPrediosLocalFirst } from './prediosLocalFirst.js';
 import '../../catastrox/styles/catastrox.css';
+
+// SPRINT-3D11.3 (R1) offline-first: con el dispositivo preparado la lista y
+// la consulta de predios (y de sus potreros) salen de la copia local y
+// funcionan sin red. Registrar/archivar/restaurar predios, registrar
+// potreros, el mapa satelital y la búsqueda CatastroX requieren conexión.
+const SIN_CONEXION_MESSAGE = 'Sin conexión: consultas los datos guardados en este dispositivo. Registrar o modificar requiere conexión.';
 
 const GENERIC_SEARCH_ERROR = 'No fue posible consultar el predio en este momento. Intenta nuevamente.';
 const GENERIC_SAVE_ERROR = 'No fue posible registrar el predio en este momento. Intenta nuevamente.';
@@ -153,12 +161,24 @@ export default function PrediosPage() {
   // SPRINT-3D9.2: "Ver archivados" -- único punto de acceso explícito para
   // ver predios ARCHIVADO; la vista normal (false) siempre queda activa.
   const [mostrarArchivadosPredios, setMostrarArchivadosPredios] = useState(false);
+  const offline = useGanaderiaOffline();
+  const localRepo = offline.preparado && offline.repo ? offline.repo : null;
+  const sinConexion = !offline.online;
 
   async function reloadRegisteredPredios() {
     setPrediosListLoading(true);
     setPrediosListError('');
     try {
-      const predios = await fetchRegisteredPrediosList(mostrarArchivadosPredios);
+      const { predios } = await cargarPrediosLocalFirst({
+        local: localRepo,
+        online: !sinConexion,
+        incluirArchivados: mostrarArchivadosPredios,
+        fetchRemote: fetchRegisteredPrediosList,
+        onLocal: (lista) => {
+          setRegisteredPredios(lista);
+          setPrediosListLoading(false);
+        },
+      });
       setRegisteredPredios(predios);
     } catch {
       setPrediosListError(LIST_ERROR_MESSAGE);
@@ -169,7 +189,7 @@ export default function PrediosPage() {
 
   useEffect(() => {
     reloadRegisteredPredios();
-  }, [mostrarArchivadosPredios]);
+  }, [mostrarArchivadosPredios, localRepo, sinConexion]);
 
   // 'search' | 'manual' | 'result' | 'saved'
   const [screen, setScreen] = useState('search');
@@ -469,14 +489,26 @@ export default function PrediosPage() {
           </button>
         </div>
 
+        {sinConexion ? <StatusMessage type="info">{SIN_CONEXION_MESSAGE}</StatusMessage> : null}
         <MisPrediosSection
           loading={prediosListLoading}
           error={prediosListError}
           predios={registeredPredios}
           onArchivoChanged={reloadRegisteredPredios}
+          sinConexion={sinConexion}
+          localRepo={localRepo}
         />
       </div>
 
+      {sinConexion ? (
+        <div className="gan-panel">
+          <div className="gan-section-heading">
+            <span className="gan-eyebrow">Registrar nuevo predio</span>
+            <h2>Requiere conexión</h2>
+          </div>
+          <StatusMessage type="info">La búsqueda en CatastroX y el registro de predios necesitan Internet.</StatusMessage>
+        </div>
+      ) : (
       <div className="gan-panel">
         <div className="gan-section-heading">
           <span className="gan-eyebrow">Registrar nuevo predio</span>
@@ -549,6 +581,7 @@ export default function PrediosPage() {
           </div>
         ) : null}
       </div>
+      )}
     </div>
   );
 }
@@ -559,7 +592,7 @@ export default function PrediosPage() {
 // card usa EXCLUSIVAMENTE campos que el GET realmente entrega -- nunca
 // predioId, organizacionId ni geometry cruda como texto.
 // ---------------------------------------------------------------------
-function MisPrediosSection({ loading, error, predios, onArchivoChanged }) {
+function MisPrediosSection({ loading, error, predios, onArchivoChanged, sinConexion = false, localRepo = null }) {
   if (loading) {
     return <StatusMessage>Cargando tus predios registrados...</StatusMessage>;
   }
@@ -575,7 +608,13 @@ function MisPrediosSection({ loading, error, predios, onArchivoChanged }) {
   return (
     <div className="gan-card-grid gan-predios-grid">
       {predios.map((item) => (
-        <PredioCard key={item.predioId} predio={item} onArchivoChanged={onArchivoChanged} />
+        <PredioCard
+          key={item.predioId}
+          predio={item}
+          onArchivoChanged={onArchivoChanged}
+          sinConexion={sinConexion}
+          localRepo={localRepo}
+        />
       ))}
     </div>
   );
@@ -590,7 +629,37 @@ function MisPrediosSection({ loading, error, predios, onArchivoChanged }) {
 // SPRINT-3D4 §2/§3: cada card fija su propio predioId -- "Registrar
 // potrero"/"Ver potreros" actúan EXCLUSIVAMENTE sobre el predio de ESTA
 // card (nunca un selector global, nunca estado compartido entre cards).
-function PredioCard({ predio, onArchivoChanged }) {
+// SPRINT-3D11.3 (R1): potreros del predio desde la copia local (sin red).
+function PotrerosLocales({ localRepo, predioId }) {
+  const [potreros, setPotreros] = useState(null);
+  useEffect(() => {
+    let active = true;
+    (localRepo ? localRepo.listPotreros(predioId) : Promise.resolve([]))
+      .then((lista) => {
+        if (active) setPotreros(lista.filter((p) => p.estado !== 'ARCHIVADO'));
+      })
+      .catch(() => {
+        if (active) setPotreros([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [localRepo, predioId]);
+  if (potreros === null) return <StatusMessage>Cargando potreros guardados...</StatusMessage>;
+  if (potreros.length === 0) return <p className="gan-empty-text">No hay potreros guardados en este dispositivo.</p>;
+  return (
+    <div className="gan-stack">
+      {potreros.map((potrero) => (
+        <div key={potrero.potreroId} className="gan-ficha-row">
+          <span>{potrero.nombre}</span>
+          <strong>{potrero.areaHa === null || potrero.areaHa === undefined ? '—' : formatAreaHa(potrero.areaHa)}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PredioCard({ predio, onArchivoChanged, sinConexion = false, localRepo = null }) {
   // null | 'registrar' | 'ver' -- expansión inline dentro de la MISMA
   // tarjeta, nunca una lista plana que mezcle potreros de otros predios.
   const [activePanel, setActivePanel] = useState(null);
@@ -693,7 +762,9 @@ function PredioCard({ predio, onArchivoChanged }) {
           </div>
         </div>
         <div className="gan-predio-map-wrap">
-          {predio.tieneGeometria ? (
+          {predio.tieneGeometria && sinConexion ? (
+            <div className="gan-predio-map-empty">Mapa disponible con conexión.</div>
+          ) : predio.tieneGeometria ? (
             <GanaderiaPredioMiniMap predioId={predio.predioId} />
           ) : (
             <div className="gan-predio-map-empty">Mapa no disponible para este predio.</div>
@@ -702,13 +773,15 @@ function PredioCard({ predio, onArchivoChanged }) {
       </div>
 
       <div className="gan-predio-card-actions">
-        <button type="button" className="gan-secondary-button" onClick={toggleRegistrar} disabled={archivado}>
-          Registrar potrero
-        </button>
+        {!sinConexion ? (
+          <button type="button" className="gan-secondary-button" onClick={toggleRegistrar} disabled={archivado}>
+            Registrar potrero
+          </button>
+        ) : null}
         <button type="button" className="gan-secondary-button" onClick={toggleVer}>
           Ver potreros
         </button>
-        {!archivado ? (
+        {sinConexion ? null : !archivado ? (
           <button type="button" className="gan-back-inline" onClick={() => { setMostrarArchivar(true); setMotivoArchivar(''); setArchivoError(''); }}>
             Eliminar predio
           </button>
@@ -738,7 +811,7 @@ function PredioCard({ predio, onArchivoChanged }) {
       ) : null}
       <StatusMessage type="error">{!mostrarArchivar ? archivoError : ''}</StatusMessage>
 
-      {activePanel === 'registrar' ? (
+      {activePanel === 'registrar' && !sinConexion ? (
         <PotreroRegistrationPanel
           predioId={predio.predioId}
           predioNombre={predio.nombrePredio}
@@ -747,7 +820,9 @@ function PredioCard({ predio, onArchivoChanged }) {
         />
       ) : null}
 
-      {activePanel === 'ver' ? (
+      {activePanel === 'ver' && sinConexion ? <PotrerosLocales localRepo={localRepo} predioId={predio.predioId} /> : null}
+
+      {activePanel === 'ver' && !sinConexion ? (
         <PotrerosByPredioPanel
           predioId={predio.predioId}
           refreshKey={potrerosRefreshKey}

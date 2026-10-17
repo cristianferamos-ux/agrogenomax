@@ -4,8 +4,30 @@
     {
       "name": "frontend-aislado-4299",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "--port", "4299", "--strictPort"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "4299",
+        "--strictPort"
+      ],
       "port": 4299
+    },
+    {
+      "name": "frontend-preview-sw-4300",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "preview",
+        "--",
+        "--port",
+        "4300",
+        "--strictPort",
+        "--host",
+        "127.0.0.1"
+      ],
+      "port": 4300
     }
   ]
 }

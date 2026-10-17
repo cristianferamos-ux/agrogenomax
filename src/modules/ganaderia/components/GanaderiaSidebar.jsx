@@ -21,13 +21,14 @@ function rolLabel(rol) {
 
 // SPRINT-3D11.SECURITY-LEGACY: sin enlaces a los flujos legacy de
 // animales/QR/potreros (backend desmontado). Los potreros se registran
-// desde la tarjeta de cada predio; "Mis animales" lleva a un placeholder
-// hasta el módulo nuevo (3D11.2).
+// desde la tarjeta de cada predio. SPRINT-3D11.2: "Mis animales" y
+// "Registrar animal" llevan al módulo nuevo (hato/, /api/ganaderia/animales).
 const navItems = [
   { label: 'Home comercial', icon: Home, to: '/' },
   { label: 'Inicio', icon: LayoutDashboard, to: '/ganaderia/dashboard' },
   { label: 'Registro de Predio', icon: MapPin, to: '/ganaderia/predios' },
   { label: 'Mis animales', icon: Beef, to: '/ganaderia/animales' },
+  { label: 'Registrar animal', icon: ClipboardList, to: '/ganaderia/animales/nuevo' },
   { label: 'Reportes', icon: FileBarChart, to: '/ganaderia/proximamente/reportes' },
 ];
 

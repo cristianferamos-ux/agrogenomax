@@ -28,6 +28,11 @@ import createGanaderiaPotreroDescansoReentradaRouter from './routes/ganaderiaPot
 import createGanaderiaPotreroCicloPastoreoRouter from './routes/ganaderiaPotreroCicloPastoreo.js';
 import createGanaderiaCatalogoPasturasRouter from './routes/ganaderiaCatalogoPasturas.js';
 import createGanaderiaCategoriasProductivasRouter from './routes/ganaderiaCategoriasProductivas.js';
+import createGanaderiaAnimalesRouter from './routes/ganaderiaAnimales.js';
+import { createGanaderiaAnimalQrRouter, createGanaderiaQrRouter } from './routes/ganaderiaAnimalQr.js';
+import createGanaderiaAdminQrRouter from './routes/ganaderiaAdminQr.js';
+import createGanaderiaSyncRouter from './routes/ganaderiaSync.js';
+import createGanaderiaCatalogoRazasRouter from './routes/ganaderiaCatalogoRazas.js';
 import createHealthRouter from './routes/health.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -131,6 +136,18 @@ app.use('/api/catastrox/payments', catastroxPaymentsRouter);
 app.use(
   '/api/ganaderia/admin',
   createGanaderiaAdminRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
+
+// SPRINT-3D11.3 (R1): Administración > inventario de chapetas QR. Misma
+// autorización que /api/ganaderia/admin (identidad + super_admin + CSRF);
+// la base se opera con el rol agx_qr_admin (AGX_BUSINESS_QR_ADMIN_DATABASE_URL).
+app.use(
+  '/api/ganaderia/admin/qr',
+  createGanaderiaAdminQrRouter({
     appEnv: appConfig.appEnv,
     csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
     allowedOrigins: appConfig.cors.allowedOrigins,
@@ -272,6 +289,58 @@ app.use(
 app.use(
   '/api/ganaderia/categorias-productivas',
   createGanaderiaCategoriasProductivasRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
+
+// SPRINT-3D11.3 (R1): uso de chapetas QR por la organización
+// (Postgres-AGX-Business, 0023). /animales/:id/qr montado ANTES del router
+// de animales para que no pase por él. Sesión con organización + CSRF.
+// Nunca /api/qr legacy.
+app.use(
+  '/api/ganaderia/animales/:animalId/qr',
+  createGanaderiaAnimalQrRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
+app.use(
+  '/api/ganaderia/qr',
+  createGanaderiaQrRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
+
+// SPRINT-3D11.3 (R1): PULL de la sincronización offline-first (sesión con
+// organización). El PUSH usa los endpoints de escritura idempotentes.
+app.use(
+  '/api/ganaderia/sync',
+  createGanaderiaSyncRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
+
+// SPRINT-3D11.2: registro manual de animales y catálogo de razas
+// (Postgres-AGX-Business, 0022). Sesión con organización + CSRF. Nunca
+// /api/animales, /api/qr ni /api/razas legacy.
+app.use(
+  '/api/ganaderia/animales',
+  createGanaderiaAnimalesRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
+app.use(
+  '/api/ganaderia/catalogo-razas',
+  createGanaderiaCatalogoRazasRouter({
     appEnv: appConfig.appEnv,
     csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
     allowedOrigins: appConfig.cors.allowedOrigins,

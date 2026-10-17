@@ -27,7 +27,8 @@ const codeOnly = stripComments(source);
 test('PrediosPage.jsx: useEffect llama a reloadRegisteredPredios al montar (y cuando cambia el toggle "Ver archivados", SPRINT-3D9.2)', () => {
   assert.match(
     codeOnly,
-    /useEffect\(\(\) => \{\s*reloadRegisteredPredios\(\);\s*\}, \[mostrarArchivadosPredios\]\);/,
+    // SPRINT-3D11.3 (R1): también recarga al cambiar la copia local o la conectividad.
+    /useEffect\(\(\) => \{\s*reloadRegisteredPredios\(\);\s*\}, \[mostrarArchivadosPredios, localRepo, sinConexion\]\);/,
   );
 });
 
@@ -135,8 +136,11 @@ test('MisPrediosSection: si error, muestra StatusMessage type="error" con el men
 // ---------------------------------------------------------------------
 
 test('PrediosPage.jsx: el panel "Registrar nuevo predio" se renderiza incondicionalmente -- nunca detrás de un guard de prediosListError/prediosListLoading', () => {
-  const registerPanel = source.match(/<span className="gan-eyebrow">Registrar nuevo predio<\/span>[\s\S]*?<\/div>\s*<\/div>\s*\);/)?.[0] ?? '';
+  // SPRINT-3D11.3 (R1): el único guard del panel es la conectividad (sin red
+  // se muestra "Requiere conexión"); nunca el estado de la lista.
+  const registerPanel = source.match(/\) : \(\s*<div className="gan-panel">\s*<div className="gan-section-heading">\s*<span className="gan-eyebrow">Registrar nuevo predio<\/span>[\s\S]*?<\/div>\s*\)\}\s*<\/div>\s*\);/)?.[0] ?? '';
   assert.ok(registerPanel, 'debe existir el panel de registro');
+  assert.match(source, /\{sinConexion \? \(\s*<div className="gan-panel">[\s\S]{0,200}Requiere conexión/);
   assert.doesNotMatch(registerPanel.slice(0, 50), /prediosListError/);
   // El bloque que envuelve el heading no depende de {!prediosListError && ...}
   assert.doesNotMatch(source, /\{!prediosListError[\s\S]{0,80}Registrar nuevo predio/);

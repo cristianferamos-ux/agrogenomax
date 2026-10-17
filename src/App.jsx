@@ -35,6 +35,8 @@ import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
 import GanaderiaApp from './modules/ganaderia/GanaderiaApp.jsx';
 import GanaderiaLandingComercial from './modules/ganaderia/GanaderiaLandingComercial.jsx';
 import GanaderiaDashboard from './modules/ganaderia/pages/GanaderiaDashboard.jsx';
+import { GanaderiaOfflineProvider } from './modules/ganaderia/offline/GanaderiaOfflineProvider.jsx';
+import OfflineStatusBar from './modules/ganaderia/offline/OfflineStatusBar.jsx';
 import GanaderiaAccess from './modules/ganaderia/pages/GanaderiaAccess.jsx';
 import GanaderiaDemo from './modules/ganaderia/pages/GanaderiaDemo.jsx';
 import GanaderiaLogin from './modules/ganaderia/pages/GanaderiaLogin.jsx';
@@ -46,7 +48,8 @@ import RequireGanaderiaAuth from './modules/ganaderia/auth/RequireGanaderiaAuth.
 import RequireGanaderiaSuperAdmin from './modules/ganaderia/auth/RequireGanaderiaSuperAdmin.jsx';
 import GanaderiaAdminShell from './modules/ganaderia/admin/GanaderiaAdminShell.jsx';
 import GanaderiaAdminCrearCuenta from './modules/ganaderia/admin/GanaderiaAdminCrearCuenta.jsx';
-import QrNoDisponiblePage from './modules/ganaderia/qr/QrNoDisponiblePage.jsx';
+import GanaderiaAdminQrInventario from './modules/ganaderia/admin/GanaderiaAdminQrInventario.jsx';
+import HatoQrEntradaPublica from './modules/ganaderia/hato/HatoQrEntradaPublica.jsx';
 import CatastroXApp from './modules/catastrox/CatastroXApp.jsx';
 import AgroGenomaXHome from './components/home/AgroGenomaXHome.jsx';
 
@@ -286,7 +289,10 @@ function App() {
             real (GET /api/ganaderia/auth/session), nunca estado viejo del
             navegador (§8/§11). /qr/:codigo permanece público y AJENO a este
             provider/guard -- SPRINT-3D11.SECURITY-LEGACY: renderiza una
-            página estática (QrNoDisponiblePage), sin consultar ninguna API. */}
+            página estática (QrNoDisponiblePage), sin consultar ninguna API.
+            SPRINT-3D11.3 (R1): HatoQrEntradaPublica solo redirige un token
+            QR AGX al resolver privado /ganaderia/qr/:token; nunca consulta
+            la API desde la ruta pública. */}
         <Route
           path="/ganaderia/login"
           element={
@@ -300,7 +306,11 @@ function App() {
           element={
             <GanaderiaAuthProvider>
               <RequireGanaderiaAuth>
-                <GanaderiaDashboard />
+                {/* SPRINT-3D11.3 (R1): indicador offline también en el inicio. */}
+                <GanaderiaOfflineProvider>
+                  <OfflineStatusBar />
+                  <GanaderiaDashboard />
+                </GanaderiaOfflineProvider>
               </RequireGanaderiaAuth>
             </GanaderiaAuthProvider>
           }
@@ -331,6 +341,18 @@ function App() {
             </GanaderiaAuthProvider>
           }
         />
+        {/* SPRINT-3D11.3 (R1): inventario central de chapetas QR -- mismo
+            guard super_admin que el resto de /ganaderia/admin. */}
+        <Route
+          path="/ganaderia/admin/qr"
+          element={
+            <GanaderiaAuthProvider>
+              <RequireGanaderiaSuperAdmin>
+                <GanaderiaAdminQrInventario />
+              </RequireGanaderiaSuperAdmin>
+            </GanaderiaAuthProvider>
+          }
+        />
         <Route
           path="/ganaderia/*"
           element={
@@ -342,7 +364,7 @@ function App() {
           }
         />
         <Route path="/catastrox/*" element={<CatastroXApp />} />
-        <Route path="/qr/:codigo" element={<QrNoDisponiblePage />} />
+        <Route path="/qr/:codigo" element={<HatoQrEntradaPublica />} />
       </Routes>
     </BrowserRouter>
   );

@@ -36,6 +36,8 @@ const server = await createServer({
   plugins: [react()],
   server: { middlewareMode: true },
   appType: 'custom',
+  // Este runner solo carga SSR: evita escanear HTML del navegador al cerrar.
+  optimizeDeps: { noDiscovery: true, include: [] },
 });
 
 try {

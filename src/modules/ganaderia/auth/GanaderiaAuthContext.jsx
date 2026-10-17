@@ -14,6 +14,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import GanaderiaAuthNotice from './GanaderiaAuthNotice.jsx';
 import { nextAuthNotice, subscribeAuthNotice } from './ganaderiaAuthNoticeSignal.js';
 import { dismissAuthNotice, shouldAcceptAuthNotice } from './ganaderiaAuthUiModel.js';
+import { clearOfflineSession, isNetworkFailure, loadOfflineSession } from './offlineSessionBridge.js';
 
 const GanaderiaAuthContext = createContext(null);
 
@@ -63,10 +64,15 @@ export function GanaderiaAuthProvider({ children }) {
   // prioridad vía nextAuthNotice. Nunca dispara refresh/logout/redirect.
   const [authNotice, setAuthNotice] = useState(null);
   const statusRef = useRef(status);
+  const sessionRef = useRef(session);
 
   useEffect(() => {
     statusRef.current = status;
   }, [status]);
+
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
 
   useEffect(() => {
     return subscribeAuthNotice((kind) => {
@@ -84,6 +90,9 @@ export function GanaderiaAuthProvider({ children }) {
   // instancia del Provider (ver GanaderiaAuthNotice.jsx) -- sin esto el
   // login vería un 'authenticated' obsoleto y rebotaría al dashboard.
   const endSessionLocally = useCallback(() => {
+    // SPRINT-3D11.3 (R1): fin de sesión -> sin perfil offline; la base
+    // local de la organización se purga si no tiene cambios pendientes.
+    clearOfflineSession(sessionRef.current?.organizacionActiva?.organizacionId);
     // Sincrónico: una respuesta tardía que llegue antes del próximo commit
     // ya no puede reabrir el aviso.
     statusRef.current = 'anonymous';
@@ -105,13 +114,16 @@ export function GanaderiaAuthProvider({ children }) {
       setStatus(deriveStatus(payload));
       setAuthNotice(null);
       return payload;
-    } catch {
+    } catch (error) {
       // Fallo de red/backend al consultar sesión -- nunca se asume
       // autenticado ante un error; se trata como anónimo (fail-closed).
-      setSession(null);
-      setStatus('anonymous');
+      // SPRINT-3D11.3 (R1): única excepción, SIN respuesta del servidor y
+      // con perfil offline vigente -> modo offline (solo datos locales).
+      const offlinePayload = isNetworkFailure(error) ? await loadOfflineSession() : null;
+      setSession(offlinePayload);
+      setStatus(offlinePayload ? deriveStatus(offlinePayload) : 'anonymous');
       setAuthNotice(null);
-      return null;
+      return offlinePayload;
     }
   }, []);
 
@@ -123,16 +135,36 @@ export function GanaderiaAuthProvider({ children }) {
         if (!active) return;
         setSession(payload);
         setStatus(deriveStatus(payload));
-      } catch {
+      } catch (error) {
+        const offlinePayload = isNetworkFailure(error) ? await loadOfflineSession() : null;
         if (!active) return;
-        setSession(null);
-        setStatus('anonymous');
+        setSession(offlinePayload);
+        setStatus(offlinePayload ? deriveStatus(offlinePayload) : 'anonymous');
       }
     })();
     return () => {
       active = false;
     };
   }, []);
+
+  // SPRINT-3D11.3 (R1): en modo offline, al volver la red se revalida la
+  // sesión contra el servidor SIN pantalla de carga (no se pierde lo que el
+  // usuario está escribiendo). Si el servidor ya no reconoce la sesión ->
+  // anónimo (login); lo pendiente sigue en el outbox de la organización.
+  useEffect(() => {
+    if (!session?.offline || typeof window === 'undefined') return undefined;
+    const revalidar = async () => {
+      try {
+        const payload = await fetchSession();
+        setSession(payload);
+        setStatus(deriveStatus(payload));
+      } catch {
+        // Sigue sin red: se mantiene el modo offline.
+      }
+    };
+    window.addEventListener('online', revalidar);
+    return () => window.removeEventListener('online', revalidar);
+  }, [session?.offline]);
 
   const value = useMemo(
     () => ({
@@ -142,6 +174,8 @@ export function GanaderiaAuthProvider({ children }) {
       rolInterno: session?.rolInterno ?? null, // 'super_admin' | otro rol interno | null
       organizacionActiva: session?.organizacionActiva ?? null,
       organizacionesDisponibles: session?.organizacionesDisponibles ?? [],
+      // SPRINT-3D11.3 (R1): true solo en modo offline (sin respuesta del servidor).
+      offline: Boolean(session?.offline),
       refresh,
       endSessionLocally,
     }),
