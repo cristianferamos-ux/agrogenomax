@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   sendRecoveryEmail,
+  sendActivationEmail,
   resolveGanaderiaPublicOrigin,
   buildRestablecerContrasenaUrl,
 } from '../emailSender.js';
@@ -19,6 +20,11 @@ let savedEnv;
 beforeEach(() => {
   savedEnv = {};
   for (const key of ENV_KEYS) savedEnv[key] = process.env[key];
+  // Ningún test puede llegar a la red real: cada prueba que despacha
+  // sustituye fetch con stubFetch().
+  globalThis.fetch = async () => {
+    throw new Error('FETCH_REAL_PROHIBIDO_EN_TESTS');
+  };
 });
 
 afterEach(() => {
@@ -140,15 +146,64 @@ describe('AUTH-RECOVERY-002: sendRecoveryEmail() -- gate por ambiente (mismo cri
     assert.equal(getCalls(), 0);
   });
 
-  test('production no está habilitado en este lote -> EMAIL_PROVIDER_NOT_CONFIGURED, jamás llama a fetch', async () => {
-    const { getCalls } = stubFetch(() => jsonResponse(200, { id: 'msg_1' }));
-    process.env.APP_ENV = 'production';
-    process.env.EMAIL_PROVIDER = 'resend';
-    process.env.RESEND_API_KEY = 're_synthetic_test_key_1234567890';
+  // HOTFIX-EMAIL-PRODUCTION: production + EMAIL_PROVIDER=resend despacha de
+  // verdad (recuperación y activación); `fetch` siempre simulado.
+  test('production + EMAIL_PROVIDER=resend -> proveedor real (recuperación): delivered:true, una sola llamada a Resend', async () => {
+    setStagingEnv({ APP_ENV: 'production', EMAIL_FROM: 'AgroGenomaX <no-reply@mail.agrogenomax.com>' });
+    let capturedUrl = null;
+    let capturedBody = null;
+    const { getCalls } = stubFetch((url, options) => {
+      capturedUrl = url;
+      capturedBody = JSON.parse(options.body);
+      return jsonResponse(200, { id: 'msg_prod' });
+    });
 
-    const result = await sendRecoveryEmail({ to: 'x@y.test', recoveryUrl: 'https://x.test/r' });
-    assert.equal(result.delivered, false);
-    assert.equal(result.errorCode, 'EMAIL_PROVIDER_NOT_CONFIGURED');
+    const result = await sendRecoveryEmail({ to: 'operador@fincaa.test', recoveryUrl: 'https://agrogenomax.com/ganaderia/restablecer-contrasena?token=abc123' });
+    assert.deepEqual(result, { delivered: true, provider: 'resend', errorCode: null });
+    assert.equal(getCalls(), 1);
+    assert.equal(capturedUrl, 'https://api.resend.com/emails');
+    assert.equal(capturedBody.from, 'AgroGenomaX <no-reply@mail.agrogenomax.com>');
+  });
+
+  test('production + EMAIL_PROVIDER=resend -> proveedor real (activación inicial)', async () => {
+    setStagingEnv({ APP_ENV: 'production', EMAIL_FROM: 'AgroGenomaX <no-reply@mail.agrogenomax.com>' });
+    const { getCalls } = stubFetch(() => jsonResponse(200, { id: 'msg_act' }));
+
+    const result = await sendActivationEmail({ to: 'qa@fincaa.test', activationUrl: 'https://agrogenomax.com/ganaderia/restablecer-contrasena?token=abc', nombre: 'QA' });
+    assert.deepEqual(result, { delivered: true, provider: 'resend', errorCode: null });
+    assert.equal(getCalls(), 1);
+  });
+
+  test('ambientes no autorizados (demo, desconocido, vacío) -> stub EMAIL_PROVIDER_NOT_CONFIGURED, jamás llama a fetch', async () => {
+    const { getCalls } = stubFetch(() => jsonResponse(200, { id: 'msg_1' }));
+    for (const appEnv of ['demo', 'preview', '']) {
+      setStagingEnv({ APP_ENV: appEnv });
+      const console_ = captureConsole();
+      const result = await sendRecoveryEmail({ to: 'x@y.test', recoveryUrl: 'https://x.test/r' });
+      console_.restore();
+      assert.equal(result.delivered, false, appEnv);
+      assert.equal(result.provider, 'stub', appEnv);
+      assert.equal(result.errorCode, 'EMAIL_PROVIDER_NOT_CONFIGURED', appEnv);
+    }
+    assert.equal(getCalls(), 0);
+  });
+
+  test('production sin configuración de Resend -> fallo seguro sin llamar a fetch', async () => {
+    const { getCalls } = stubFetch(() => jsonResponse(200, { id: 'msg_1' }));
+    const casos = [
+      [{ EMAIL_PROVIDER: '' }, 'EMAIL_PROVIDER_NOT_CONFIGURED'],
+      [{ EMAIL_PROVIDER: 'sendgrid' }, 'EMAIL_PROVIDER_UNSUPPORTED'],
+      [{ RESEND_API_KEY: '' }, 'EMAIL_API_KEY_MISSING'],
+      [{ EMAIL_FROM: 'AgroGenomaX <no-reply@localhost>' }, 'EMAIL_FROM_INVALID'],
+    ];
+    for (const [overrides, errorCode] of casos) {
+      setStagingEnv({ APP_ENV: 'production', EMAIL_FROM: 'AgroGenomaX <no-reply@mail.agrogenomax.com>', ...overrides });
+      const console_ = captureConsole();
+      const result = await sendRecoveryEmail({ to: 'x@y.test', recoveryUrl: 'https://x.test/r' });
+      console_.restore();
+      assert.equal(result.delivered, false, errorCode);
+      assert.equal(result.errorCode, errorCode);
+    }
     assert.equal(getCalls(), 0);
   });
 
