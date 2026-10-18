@@ -78,6 +78,7 @@
   "server/services/__tests__/potrerosRepositoryIntegration.test.js",
   "server/health/__tests__/dbReadiness.test.js",
   "server/health/__tests__/domainReadiness.test.js",
+  "server/health/__tests__/ganaderiaReadinessDatabases.test.js",
   "server/health/__tests__/healthRouter.test.js",
   "server/health/__tests__/liveness.test.js",
   "server/health/__tests__/monitorAuth.test.js",

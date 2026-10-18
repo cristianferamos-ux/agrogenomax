@@ -1,15 +1,15 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { evaluateGanaderiaReadiness } from '../ganaderiaReadiness.js';
+import { evaluateLegacyAgxReadiness } from '../ganaderiaReadiness.js';
 import { evaluateCatastroxReadiness } from '../catastroxReadiness.js';
 
 // LOTE-007 (ADR-012 §6/§7/§19): dependencias inyectadas -- nunca se
 // importa/conecta un pool real de PostgreSQL/PostGIS en estas pruebas.
 
-describe('LOTE-007: server/health/ganaderiaReadiness.js', () => {
+describe('LOTE-007: server/health/ganaderiaReadiness.js -- evaluateLegacyAgxReadiness (Postgres legacy, también GET /api/health/db)', () => {
   test('getPool ausente de DATABASE_URL se clasifica como not_configured', async () => {
-    const result = await evaluateGanaderiaReadiness({
+    const result = await evaluateLegacyAgxReadiness({
       getPool: () => {
         const error = new Error('DATABASE_URL no está configurada.');
         error.code = 'AGX_DB_NOT_CONFIGURED';
@@ -20,7 +20,7 @@ describe('LOTE-007: server/health/ganaderiaReadiness.js', () => {
   });
 
   test('checker exitoso reporta ok con el nombre de dependencia agx', async () => {
-    const result = await evaluateGanaderiaReadiness({
+    const result = await evaluateLegacyAgxReadiness({
       getPool: () => ({ id: 'agx-pool' }),
       checker: async () => ({ ok: true, code: 'ok' }),
     });
@@ -28,7 +28,7 @@ describe('LOTE-007: server/health/ganaderiaReadiness.js', () => {
   });
 
   test('checker con fallo propaga el código clasificado', async () => {
-    const result = await evaluateGanaderiaReadiness({
+    const result = await evaluateLegacyAgxReadiness({
       getPool: () => ({ id: 'agx-pool' }),
       checker: async () => ({ ok: false, code: 'pool_exhausted' }),
     });
@@ -37,7 +37,7 @@ describe('LOTE-007: server/health/ganaderiaReadiness.js', () => {
 
   test('checker recibe una función run que consulta el esquema agx de forma parametrizada', async () => {
     let receivedRun;
-    await evaluateGanaderiaReadiness({
+    await evaluateLegacyAgxReadiness({
       getPool: () => ({ id: 'agx-pool' }),
       checker: async (_pool, options) => {
         receivedRun = options?.run;
@@ -59,7 +59,7 @@ describe('LOTE-007: server/health/ganaderiaReadiness.js', () => {
 
   test('esquema agx ausente clasifica schema_missing vía la query real', async () => {
     let receivedRun;
-    await evaluateGanaderiaReadiness({
+    await evaluateLegacyAgxReadiness({
       getPool: () => ({ id: 'agx-pool' }),
       checker: async (_pool, options) => {
         receivedRun = options.run;
@@ -73,7 +73,7 @@ describe('LOTE-007: server/health/ganaderiaReadiness.js', () => {
 
   test('run de ganadería propaga timeoutMs como query_timeout', async () => {
     let receivedRun;
-    await evaluateGanaderiaReadiness({
+    await evaluateLegacyAgxReadiness({
       getPool: () => ({ id: 'agx-pool' }),
       checker: async (_pool, options) => {
         receivedRun = options.run;

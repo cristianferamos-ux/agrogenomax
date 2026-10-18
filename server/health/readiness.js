@@ -14,11 +14,13 @@ import { evaluateCatastroxReadiness } from './catastroxReadiness.js';
 function sendDomainReadiness(res, checkName, result) {
   res.setHeader('Cache-Control', 'no-store');
   res.status(result.ok ? 200 : 503).json({
-    status: result.ok ? 'ok' : 'unavailable',
+    status: result.ok ? (result.degraded ? 'degraded' : 'ok') : 'unavailable',
     check: checkName,
     timestamp: new Date().toISOString(),
     dependency: result.dependency,
     ...(result.ok ? {} : { code: result.code }),
+    // FASE-14: estado por base de Ganadería (solo ok|error|not_configured).
+    ...(result.checks ? { checks: result.checks } : {}),
   });
 }
 
@@ -61,8 +63,9 @@ export function createGeneralReadinessHandler({ ganaderiaDeps, catastroxDeps } =
       timestamp: new Date().toISOString(),
       domains: {
         ganaderia: {
-          status: ganaderia.ok ? 'ok' : 'unavailable',
+          status: ganaderia.ok ? (ganaderia.degraded ? 'degraded' : 'ok') : 'unavailable',
           ...(ganaderia.ok ? {} : { code: ganaderia.code }),
+          ...(ganaderia.checks ? { checks: ganaderia.checks } : {}),
         },
         catastrox: {
           status: catastrox.ok ? 'ok' : 'unavailable',
