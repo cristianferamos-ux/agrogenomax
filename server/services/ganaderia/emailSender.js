@@ -9,8 +9,8 @@
 // forma independiente, no importada):
 // - development/test JAMÁS llaman a un proveedor real, sin importar
 //   EMAIL_PROVIDER -- gate por APP_ENV.
-// - production no habilita Resend automáticamente (misma decisión
-//   pendiente que CatastroX, sin resolver aquí).
+// - production habilita Resend para Ganadería (HOTFIX-EMAIL-PRODUCTION);
+//   CatastroX mantiene su propio gate, sin cambios.
 // - Nunca se loguea el correo completo, el token/enlace de recuperación,
 //   la API key ni el cuerpo de la respuesta del proveedor -- solo
 //   provider + errorCode del set cerrado de abajo.
@@ -340,14 +340,17 @@ async function sendViaResend({ to, subject, html, text }) {
   return { delivered: true, provider: 'resend', errorCode: null };
 }
 
-const REAL_PROVIDER_ENABLED_ENVIRONMENTS = new Set(['staging']);
+// HOTFIX-EMAIL-PRODUCTION: production habilitado para Ganadería (activación
+// inicial y recuperación). El gate de CatastroX
+// (server/services/catastrox/emailSender.js) es independiente y no cambia.
+const REAL_PROVIDER_ENABLED_ENVIRONMENTS = new Set(['staging', 'production']);
 
 /**
  * Punto único de despacho (gate de ambiente + proveedor) compartido por
  * sendRecoveryEmail y sendActivationEmail (SPRINT-2-CLIENT-PROVISIONING)
  * -- mismo comportamiento fail-closed para ambos: development/test NUNCA
- * llaman a un proveedor real, production sigue sin habilitarlo, solo
- * staging despacha de verdad. Nunca lanza.
+ * llaman a un proveedor real; solo staging y production despachan de
+ * verdad (con EMAIL_PROVIDER=resend). Nunca lanza.
  */
 async function dispatchGanaderiaEmail({ to, subject, html, text }) {
   const appEnv = String(process.env.APP_ENV || '').trim().toLowerCase();
