@@ -20,9 +20,10 @@ const SERVER_ERROR_MESSAGE =
 const SUCCESS_MESSAGE = 'Cuenta provisionada. Se envió el enlace de activación al correo del cliente.';
 // MICROAUDITORÍA (caso B, DB OK + EMAIL FAIL): ambos casos son éxito de
 // provisionamiento -- nunca se trata como si hubiera fallado la creación,
-// nunca invita a "volver a crear la cuenta" (causaría 409).
+// nunca invita a "volver a crear la cuenta" (causaría 409). No existe un
+// reenvío de activación: el camino real es "Recuperar acceso" en el login.
 const SUCCESS_EMAIL_FAILED_MESSAGE =
-  'Cuenta creada, pero no pudimos enviar el correo de activación. No vuelvas a crear la cuenta; podrás reenviar la activación posteriormente.';
+  'Cuenta creada, pero no pudimos enviar el correo de activación. No vuelvas a crear la cuenta. La persona puede usar "Recuperar acceso" desde la pantalla de inicio de sesión para establecer su contraseña.';
 
 function resolveErrorMessage(status, body) {
   if (status === 409) return 'Ya existe una cuenta asociada a este correo.';

@@ -3,6 +3,7 @@
   "functions/api/catastrox/__tests__/corsRelay.test.js",
   "functions/api/ganaderia/__tests__/ganaderiaRelay.test.js",
   "functions/qr/__tests__/legacyQrRedirect.test.js",
+  "functions/ganaderia/__tests__/canonicalGanaderiaRedirect.test.js",
   "server/__tests__/architecture/noSrcImports.test.js",
   "server/__tests__/architecture/legacyRoutersUnmounted.test.js",
   "server/__tests__/legacyRoutesHttp404.test.js",
