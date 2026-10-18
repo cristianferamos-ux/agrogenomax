@@ -4,9 +4,11 @@
 // deja de ser placeholder -- navega a /ganaderia/admin/crear-cuenta. Los
 // otros 3 módulos (clientes/organizaciones, activaciones pendientes,
 // cuentas existentes) siguen fuera de alcance, sin lógica todavía.
+// SPRINT-3D11.3 (R1): "QR Ganadería / Inventario de chapetas" navega a
+// /ganaderia/admin/qr (mismo guard RequireGanaderiaSuperAdmin).
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Building2, LogOut, ShieldCheck, UserPlus, Users } from 'lucide-react';
+import { Building2, LogOut, QrCode, ShieldCheck, UserPlus, Users } from 'lucide-react';
 import { useGanaderiaAuth } from '../auth/GanaderiaAuthContext.jsx';
 import { performGanaderiaLogout } from '../auth/ganaderiaAuthedRequest.js';
 import { resolveLogoutUiAction } from '../auth/ganaderiaAuthUiModel.js';
@@ -33,6 +35,12 @@ const adminModules = [
     label: 'Cuentas existentes',
     text: 'Listado de cuentas ya provisionadas.',
     icon: Users,
+  },
+  {
+    label: 'QR Ganadería / Inventario de chapetas',
+    text: 'Lotes de chapetas QR, stock, asignación a organizaciones y archivo para el proveedor.',
+    icon: QrCode,
+    to: '/ganaderia/admin/qr',
   },
 ];
 

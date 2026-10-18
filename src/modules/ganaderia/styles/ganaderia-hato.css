@@ -1,0 +1,211 @@
+/* SPRINT-3D11.2: módulo de animales (hato) -- smartphone-first, reutiliza
+   la base gan-* de src/styles.css y solo agrega lo propio del módulo. */
+
+.gan-hato .gan-form {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.gan-hato-fields {
+  display: grid;
+  gap: 1rem;
+}
+
+.gan-hato-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.gan-hato-hint {
+  margin: -0.4rem 0 0;
+  color: #8b96a5;
+  font-size: 0.85rem;
+}
+
+.gan-hato-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.gan-hato-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 44px;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 0.55rem;
+  cursor: pointer;
+}
+
+.gan-hato-choice.is-selected {
+  border-color: #9cff1a;
+  background: rgba(156, 255, 26, 0.08);
+}
+
+.gan-field .gan-hato-choice input {
+  width: auto;
+  margin: 0;
+  accent-color: #9cff1a;
+}
+
+.gan-field .gan-hato-choice span {
+  color: #e6edf3;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.gan-hato-more {
+  display: grid;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.gan-hato-more summary {
+  color: #00d8ff;
+  font-weight: 700;
+  cursor: pointer;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+
+.gan-hato-more[open] {
+  gap: 1rem;
+}
+
+.gan-hato-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+.gan-hato-cta {
+  margin-top: 0.75rem;
+  text-decoration: none;
+}
+
+.gan-hato-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto auto;
+  gap: 0.6rem;
+  margin: 1rem 0;
+  align-items: center;
+}
+
+.gan-hato-toolbar input,
+.gan-hato-toolbar select {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 0.55rem;
+  background: rgba(255, 255, 255, 0.04);
+  color: #e6edf3;
+  padding: 0 0.75rem;
+}
+
+.gan-hato-list {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0.5rem 0 1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.gan-hato-card {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 0.65rem;
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  text-decoration: none;
+}
+
+.gan-hato-card:hover,
+.gan-hato-card:focus-visible {
+  border-color: rgba(0, 216, 255, 0.45);
+}
+
+.gan-hato-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: baseline;
+}
+
+.gan-hato-card-head strong {
+  font-size: 1.05rem;
+  overflow-wrap: anywhere;
+}
+
+.gan-hato-card-head span {
+  color: #a7b3c2;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.gan-hato-card-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.9rem;
+  color: #a7b3c2;
+  font-size: 0.88rem;
+}
+
+.gan-hato-badge {
+  color: #ffb4a8;
+  font-weight: 700;
+}
+
+.gan-hato-ficha {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+@media (max-width: 640px) {
+  .gan-hato-row,
+  .gan-hato-ficha {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .gan-hato-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .gan-hato-actions > * {
+    flex: 1 1 100%;
+  }
+}
+
+/* SPRINT-3D11.3 (R1): sección QR de la ficha. */
+.gan-hato-qr {
+  margin-top: 1.5rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.gan-hato-qr h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.gan-hato-qr-codigo {
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+}
+
+.gan-hato-qr-historial ul {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+}

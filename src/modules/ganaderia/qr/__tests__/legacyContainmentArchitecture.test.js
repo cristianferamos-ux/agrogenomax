@@ -41,11 +41,24 @@ const DEAD_LEGACY_LINKS = [
 // Ruta pública /qr/:codigo
 // ---------------------------------------------------------------------
 
-test('App.jsx: /qr/:codigo renderiza QrNoDisponiblePage (ya no GanaderiaApp)', () => {
+// SPRINT-3D11.3 (R1): /qr/:codigo monta HatoQrEntradaPublica, que solo
+// redirige un token QR AGX al resolver privado y en cualquier otro caso
+// renderiza QrNoDisponiblePage. Ninguna de las dos consulta la API.
+test('App.jsx: /qr/:codigo renderiza HatoQrEntradaPublica (ni GanaderiaApp ni guard)', () => {
   const qrRoute = appCode.match(/<Route path="\/qr\/:codigo"[^\n]*\/>/)?.[0] ?? '';
-  assert.match(qrRoute, /element=\{<QrNoDisponiblePage \/>\}/);
+  assert.match(qrRoute, /element=\{<HatoQrEntradaPublica \/>\}/);
   assert.doesNotMatch(qrRoute, /GanaderiaApp|RequireGanaderiaAuth/);
-  assert.match(appCode, /import QrNoDisponiblePage from '\.\/modules\/ganaderia\/qr\/QrNoDisponiblePage\.jsx';/);
+  assert.match(appCode, /import HatoQrEntradaPublica from '\.\/modules\/ganaderia\/hato\/HatoQrEntradaPublica\.jsx';/);
+});
+
+test('HatoQrEntradaPublica.jsx: sin API -- solo redirige un token o código de chapeta al resolver privado o muestra QrNoDisponiblePage', () => {
+  const entryCode = stripComments(read(path.join(GANADERIA_DIR, 'hato', 'HatoQrEntradaPublica.jsx')));
+  for (const forbidden of [/fetch\(/, /ganaderiaApi/, /ganaderiaAuthedRequest/, /hatoApi/, /\/api\//, /useEffect/, /resolveQr/]) {
+    assert.doesNotMatch(entryCode, forbidden);
+  }
+  assert.match(entryCode, /const parsed = parseQrContent\(codigo\);/);
+  assert.match(entryCode, /if \(parsed\.kind !== 'invalid'\) return <Navigate to=\{qrResolverPath\(parsed\)\} replace \/>;/);
+  assert.match(entryCode, /return <QrNoDisponiblePage \/>;/);
 });
 
 test('QrNoDisponiblePage.jsx: estática -- sin fetch, sin API, sin leer el código de la URL', () => {
@@ -86,9 +99,12 @@ test('GanaderiaApp.jsx: no importa ni monta páginas legacy de animales/QR/potre
 test('GanaderiaApp.jsx: las rutas legacy redirigen (nunca vuelven a montar las páginas)', () => {
   assert.match(ganaderiaAppCode, /<Route path="potreros" element=\{<Navigate to="\/ganaderia\/predios" replace \/>\} \/>/);
   assert.match(ganaderiaAppCode, /<Route path="animales\/\*" element=\{<Navigate to="\/ganaderia\/animales" replace \/>\} \/>/);
-  assert.match(ganaderiaAppCode, /<Route path="escanear-qr" element=\{<Navigate to="\/ganaderia\/animales" replace \/>\} \/>/);
+  // SPRINT-3D11.3 (R1): escanear-qr ya no redirige -- monta el escáner nuevo de hato/.
+  assert.match(ganaderiaAppCode, /<Route path="escanear-qr" element=\{<HatoEscanearQrPage \/>\} \/>/);
   assert.match(ganaderiaAppCode, /<Route path="animal\/\*" element=\{<Navigate to="\/ganaderia\/animales" replace \/>\} \/>/);
-  assert.match(ganaderiaAppCode, /<Route path="animales" element=\{<ComingSoon /);
+  // SPRINT-3D11.2: /ganaderia/animales ya no es un placeholder: monta el
+  // módulo nuevo (hato/), nunca una página legacy.
+  assert.match(ganaderiaAppCode, /<Route path="animales" element=\{<HatoListaPage \/>\} \/>/);
   assert.match(ganaderiaAppCode, /<Route path="predios" element=\{<PrediosPage \/>\} \/>/);
 });
 
@@ -140,8 +156,19 @@ test('Demo: GanaderiaDemo.jsx no recibe código de contención ni APIs reales', 
   }
 });
 
-test('Demo: los Functions estáticos de Cloudflare siguen presentes (fuera de alcance)', () => {
-  for (const file of ['functions/api/animales/[id].js', 'functions/api/qr/[codigo].js', 'functions/_data/agxStatic.js']) {
-    assert.ok(fs.existsSync(path.join(REPO_ROOT, file)), `${file} debe seguir existiendo`);
+test('Cloudflare: los Functions legacy de animales/QR no son desplegables', () => {
+  const forbiddenDeployableFiles = [
+    'functions/api/animales/[id].js',
+    'functions/api/animales/[id]/razas.js',
+    'functions/api/qr/[codigo].js',
+    'functions/_data/agxStatic.js',
+  ];
+
+  for (const file of forbiddenDeployableFiles) {
+    assert.equal(
+      fs.existsSync(path.join(REPO_ROOT, file)),
+      false,
+      `${file} no debe existir dentro de functions/`,
+    );
   }
 });

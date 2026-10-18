@@ -1,8 +1,11 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import agxOfflinePlugin from './vite.agx-offline.js';
 
 export default defineConfig({
-  plugins: [react()],
+  // SPRINT-3D11.3 (R1): agxOfflinePlugin emite agx-precache.json y el
+  // bundle del PUSH del Service Worker (offline-first de Ganadería).
+  plugins: [react(), agxOfflinePlugin()],
   server: {
     host: '127.0.0.1',
     // LOTE 019-C (temporal): permite el Host publico del tunel Cloudflare Quick

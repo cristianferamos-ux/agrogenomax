@@ -1,4 +1,4 @@
-import { Beef, FileBarChart, MapPin, Sprout } from 'lucide-react';
+import { Beef, ClipboardList, FileBarChart, MapPin, Sprout } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ganaderiaApi } from '../api/ganaderiaApi.js';
@@ -23,9 +23,15 @@ const operationCards = [
   },
   {
     label: 'Mis animales',
-    text: 'El módulo de animales está en preparación.',
+    text: 'Consulta los animales registrados en tus predios.',
     icon: Beef,
     to: '/ganaderia/animales',
+  },
+  {
+    label: 'Registrar animal',
+    text: 'Registra un animal en pocos segundos: chapeta o nombre, sexo y predio.',
+    icon: ClipboardList,
+    to: '/ganaderia/animales/nuevo',
   },
   {
     label: 'Reportes',
@@ -131,8 +137,8 @@ export default function GanaderiaDashboard() {
             <span className="gan-dash-badge">Operación de campo</span>
             <h2>Operación ganadera desde campo.</h2>
             <p>
-              Primero registra el predio y completa su información básica. Luego registra los potreros. El registro
-              de animales estará disponible próximamente.
+              Primero registra el predio y completa su información básica. Luego registra los potreros. Después
+              registra tus animales en el predio donde están.
             </p>
           </div>
 

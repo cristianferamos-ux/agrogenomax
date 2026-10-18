@@ -30,6 +30,8 @@ const server = await createServer({
   configFile: path.resolve(projectRoot, 'vite.config.js'),
   server: { middlewareMode: true },
   appType: 'custom',
+  // Este runner solo carga SSR: evita escanear HTML del navegador al cerrar.
+  optimizeDeps: { noDiscovery: true, include: [] },
 });
 
 try {

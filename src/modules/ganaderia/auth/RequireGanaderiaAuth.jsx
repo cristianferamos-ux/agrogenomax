@@ -1,13 +1,15 @@
 // AUTH-FRONT-001 §9: guard de rutas privadas. Mientras la sesión está en
 // resolución muestra un loading -- NUNCA renderiza contenido privado
 // primero y redirige después (evita el flash de contenido privado, §9).
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useGanaderiaAuth } from './GanaderiaAuthContext.jsx';
 import OrganizacionRequerida from './OrganizacionRequerida.jsx';
+import { loginReturnState } from './loginReturnPath.js';
 import '../styles/ganaderia-login.css';
 
 export default function RequireGanaderiaAuth({ children }) {
   const { status, rolInterno } = useGanaderiaAuth();
+  const location = useLocation();
 
   // Orden de las ramas: loading primero -- ninguna rama posterior puede
   // ejecutarse antes de que esta retorne, así que el contenido privado
@@ -21,8 +23,10 @@ export default function RequireGanaderiaAuth({ children }) {
     );
   }
 
+  // SPRINT-3D11.3 (R1): solo el flujo QR conserva su ruta para volver
+  // tras el login (lista blanca en loginReturnPath.js).
   if (status === 'anonymous') {
-    return <Navigate to="/ganaderia/login" replace />;
+    return <Navigate to="/ganaderia/login" replace state={loginReturnState(location.pathname)} />;
   }
 
   if (status === 'authenticated_without_org') {

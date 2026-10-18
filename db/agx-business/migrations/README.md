@@ -121,3 +121,26 @@ es exclusivo del script dedicado, no del archivo de test en sí.
 ```bash
 docker rm -f agx-business-integration-pg
 ```
+
+## 0023 -- inventario QR (SPRINT-3D11.3 R1)
+
+`0023_qr_inventario_chapetas.sql` crea el rol PostgreSQL **`agx_qr_admin`**
+(única conexión con acceso al inventario QR global; `agx_app` no tiene
+privilegios sobre lotes, tokens ni eventos de lote). Requiere la variable
+`psql` `agx_qr_admin_password` y se aplica en UNA transacción:
+
+```bash
+psql "$ADMIN_URL" -1 -v ON_ERROR_STOP=1 \
+  -v agx_qr_admin_password="$AGX_QR_ADMIN_PASSWORD" \
+  -f db/agx-business/migrations/0023_qr_inventario_chapetas.sql
+```
+
+El backend usa ese rol vía `AGX_BUSINESS_QR_ADMIN_DATABASE_URL` (distinta de
+`AGX_BUSINESS_DATABASE_URL`), y además necesita `AGX_QR_TOKEN_ENCRYPTION_KEY`
+(AES-256-GCM, 32 bytes base64, clave propia) y `AGX_QR_PUBLIC_ORIGIN`
+(dominio impreso en el QR). Sin ellas el servidor arranca y las rutas
+`/api/ganaderia/admin/qr` responden 503.
+
+Integración local (además de las dos URLs de siempre):
+`AGX_BUSINESS_QR_ADMIN_DATABASE_URL_TEST=postgres://agx_qr_admin:...@127.0.0.1:<puerto>/<base>_test`
+(`npm run test:ganaderia-animales-integration` la exige y valida el rol).
