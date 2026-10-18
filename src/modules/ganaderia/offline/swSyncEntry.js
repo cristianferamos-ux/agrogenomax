@@ -12,7 +12,7 @@ import { createIndexedDbStorage, openIndexedDb } from './storage.js';
 import { createLocalRepo } from './localRepo.js';
 import { createSyncEngine } from './syncEngine.js';
 import { leerPerfilOffline } from './offlineSession.js';
-import { browserTransport } from './browserOffline.js';
+import { browserTransport, createNavigatorLock, syncLockName } from './browserOffline.js';
 
 export async function pushDesdeServiceWorker() {
   const device = createIndexedDbStorage(await openIndexedDb(indexedDB, DEVICE_DB_NAME, DEVICE_DB_VERSION, DEVICE_STORES));
@@ -23,7 +23,16 @@ export async function pushDesdeServiceWorker() {
     const storage = createIndexedDbStorage(await openIndexedDb(indexedDB, orgDbName(perfil.organizacionId), ORG_DB_VERSION, ORG_STORES));
     try {
       const repo = createLocalRepo(storage, { organizacionId: perfil.organizacionId, deviceId: dispositivo.deviceId });
-      const engine = createSyncEngine({ repo, transport: browserTransport, isOnline: () => self.navigator?.onLine !== false });
+      // `self.navigator.onLine` solo descarta lo evidente: si miente, el
+      // envío falla como fallo de RED y no suma intento ni backoff. El mismo
+      // lock por organización que la página (Web Locks también existe en el
+      // SW de Chromium); sin él, la idempotencia del servidor protege.
+      const engine = createSyncEngine({
+        repo,
+        transport: browserTransport,
+        isOnline: () => self.navigator?.onLine !== false,
+        lock: createNavigatorLock(syncLockName(perfil.organizacionId), self.navigator?.locks),
+      });
       return await engine.syncNow({ motivo: 'background-sync' });
     } finally {
       await storage.close();

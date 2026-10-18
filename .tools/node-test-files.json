@@ -162,6 +162,7 @@
   "src/modules/ganaderia/hato/__tests__/hatoFormModel.test.js",
   "src/modules/ganaderia/hato/__tests__/qrFlow.test.js",
   "src/modules/ganaderia/offline/__tests__/offlineSync.test.js",
+  "src/modules/ganaderia/offline/__tests__/syncReconnect.test.js",
   "src/modules/ganaderia/offline/__tests__/serviceWorker.test.js",
   "src/modules/ganaderia/offline/__tests__/serviceWorkerCatastroxRegression.test.js",
   "src/modules/ganaderia/offline/__tests__/offlineArchitecture.test.js",

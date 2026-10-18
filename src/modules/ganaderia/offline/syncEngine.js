@@ -10,15 +10,33 @@
 //
 // Clasificación de la respuesta de una operación:
 //   2xx                               -> SINCRONIZADO (se aplica y se elimina)
-//   red / no enviada / 408 / 429 / 5xx -> ERROR_REINTENTABLE con backoff; corta el PUSH
+//   red / no enviada (status 0)       -> ERROR_REINTENTABLE tipo 'red': NO suma intento ni
+//                                        backoff exponencial; reintento fijo corto y, al volver
+//                                        la red (online / visible), inmediato
+//   408 / 429 / 5xx                   -> ERROR_REINTENTABLE tipo 'http' con backoff; corta el PUSH
 //   sesión expirada / CSRF            -> vuelve a PENDIENTE; el ciclo se detiene (requiere login)
 //   409 / 404 / 410                   -> CONFLICTO (dato incompatible: se conserva todo)
 //   otros 4xx (400 validación)        -> RECHAZADO (requiere corrección del usuario)
 // Una operación idempotente repetida (200 yaExistia) es un éxito más.
-import { OUTBOX_ESTADOS, backoffMs, estaLista, ordenarOutbox } from './outbox.js';
+//
+// Concurrencia (FASE-14): un `lock` opcional (navigator.locks, clave por
+// organización) serializa los motores de varias pestañas y del Service
+// Worker. Sin lock, la idempotencia del servidor sigue evitando duplicados.
+import { OUTBOX_ESTADOS, backoffMs, estaLista, esErrorDeRed, ordenarOutbox } from './outbox.js';
 import { handlerFor } from './operationHandlers.js';
 
 const PULL_PATH = '/api/ganaderia/sync/pull';
+/** Reintento fijo tras un fallo de red (sin crecer): la red suele volver sola. */
+export const RED_REINTENTO_MS = 30_000;
+/** Sin lock exclusivo, una operación SINCRONIZANDO más reciente puede estar enviándose en otro motor. */
+export const SINCRONIZANDO_LEASE_MS = 2 * 60_000;
+
+const FALLOS_SIN_ENVIO = new Set(['NETWORK_ERROR', 'REQUEST_NOT_SENT']);
+
+/** Fallo de transporte: sin respuesta HTTP (fetch lanzó o /csrf sin red). Nunca un 5xx. */
+export function esFalloDeRed(result) {
+  return Boolean(result) && !result.ok && (result.status ?? 0) === 0 && (result.failure === undefined || FALLOS_SIN_ENVIO.has(result.failure));
+}
 
 export const RUN_RESULT = Object.freeze({
   OK: 'OK',
@@ -55,8 +73,10 @@ export function classifyResult(result) {
  * @param {() => boolean} [deps.isOnline]
  * @param {() => Date} [deps.now]
  * @param {() => number} [deps.random]
+ * @param {((fn: () => Promise<string>, opciones: { esperar: boolean }) => Promise<string>) | null} [deps.lock]
+ *   sección crítica entre motores (createNavigatorLock); null = sin coordinación
  */
-export function createSyncEngine({ repo, transport, isOnline = () => true, now = () => new Date(), random = Math.random }) {
+export function createSyncEngine({ repo, transport, isOnline = () => true, now = () => new Date(), random = Math.random, lock = null }) {
   let running = null;
   const listeners = new Set();
   const state = { enCurso: false, ultimoResultado: null, sesionRequerida: false, redCaidaAt: null };
@@ -75,11 +95,17 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
     return updated;
   }
 
-  async function push({ forzar }) {
+  async function push({ forzar, exclusivo }) {
     // Recuperación: una operación que quedó SINCRONIZANDO (pestaña cerrada,
-    // corte a mitad) se reenvía -- es idempotente en el servidor.
+    // corte a mitad) se reenvía -- es idempotente en el servidor. Con el lock
+    // exclusivo nadie más puede estar enviándola; sin él, solo pasado el
+    // lease (evita reenviar lo que otra pestaña está enviando ahora).
+    const limiteLease = now().getTime() - SINCRONIZANDO_LEASE_MS;
     for (const op of await repo.listOutbox()) {
-      if (op.estado === OUTBOX_ESTADOS.SINCRONIZANDO) await guardarOp(op, { estado: OUTBOX_ESTADOS.PENDIENTE });
+      if (op.estado !== OUTBOX_ESTADOS.SINCRONIZANDO) continue;
+      if (exclusivo || !op.updatedAt || new Date(op.updatedAt).getTime() <= limiteLease) {
+        await guardarOp(op, { estado: OUTBOX_ESTADOS.PENDIENTE });
+      }
     }
     const pendientes = ordenarOutbox(await repo.listOutbox());
     const bloqueadas = new Set();
@@ -115,15 +141,25 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
         await guardarOp(op, { estado: OUTBOX_ESTADOS.PENDIENTE, intentos: original.intentos, ultimoError: error });
         return RUN_RESULT.SESION_REQUERIDA;
       }
+      if (clase === 'REINTENTABLE' && esFalloDeRed(result)) {
+        // Sin red: no cuenta como intento ni hace crecer la espera.
+        await guardarOp(op, {
+          estado: OUTBOX_ESTADOS.ERROR_REINTENTABLE,
+          intentos: original.intentos,
+          ultimoError: { ...error, tipo: 'red' },
+          siguienteIntentoAt: new Date(now().getTime() + RED_REINTENTO_MS).toISOString(),
+        });
+        // Sin red no tiene sentido seguir: el resto espera al próximo ciclo.
+        return RUN_RESULT.OFFLINE;
+      }
       if (clase === 'REINTENTABLE') {
         const espera = backoffMs(op.intentos, random);
         await guardarOp(op, {
           estado: OUTBOX_ESTADOS.ERROR_REINTENTABLE,
-          ultimoError: error,
+          ultimoError: { ...error, tipo: 'http' },
           siguienteIntentoAt: new Date(now().getTime() + espera).toISOString(),
         });
-        // Sin red no tiene sentido seguir: el resto espera al próximo ciclo.
-        return error.status === 0 ? RUN_RESULT.OFFLINE : RUN_RESULT.ERROR;
+        return RUN_RESULT.ERROR;
       }
       await repo.marcarOperacionBloqueada(op, {
         estado: clase === 'CONFLICTO' ? OUTBOX_ESTADOS.CONFLICTO : OUTBOX_ESTADOS.RECHAZADO,
@@ -155,7 +191,7 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
     return result.status === 0 ? RUN_RESULT.OFFLINE : RUN_RESULT.ERROR;
   }
 
-  async function run({ forzar = false, soloPush = false } = {}) {
+  async function run({ forzar = false, soloPush = false } = {}, { exclusivo = false } = {}) {
     if (!isOnline()) {
       state.ultimoResultado = RUN_RESULT.OFFLINE;
       emit();
@@ -165,7 +201,7 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
     emit();
     let resultado;
     try {
-      resultado = await push({ forzar });
+      resultado = await push({ forzar, exclusivo });
       if (resultado === RUN_RESULT.OK && !soloPush) resultado = await pull();
     } catch (error) {
       resultado = RUN_RESULT.ERROR;
@@ -181,12 +217,39 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
   }
 
   return {
-    /** Un solo ciclo a la vez; llamadas concurrentes comparten la promesa. */
-    syncNow(options) {
-      if (!running) running = run(options).finally(() => {
-        running = null;
-      });
+    /**
+     * Un solo ciclo a la vez en este motor; llamadas concurrentes comparten
+     * la promesa. Con `lock`, además, un solo motor por organización: los
+     * disparos automáticos ceden (EN_CURSO) si otro motor está sincronizando
+     * y los forzados (preparar / "Sincronizar ahora") esperan su turno.
+     */
+    syncNow(options = {}) {
+      if (!running) {
+        const ciclo = lock
+          ? lock(() => run(options, { exclusivo: true }), { esperar: Boolean(options.forzar) })
+          : run(options);
+        running = ciclo.finally(() => {
+          running = null;
+        });
+      }
       return running;
+    },
+    /**
+     * Red recuperada (online / visible con red): las operaciones que solo
+     * esperan por un fallo de RED vuelven a estar listas ya. Un 408/429/5xx
+     * conserva su backoff. Devuelve cuántas se adelantaron.
+     */
+    async reactivarFallosDeRed() {
+      if (!isOnline()) return 0;
+      const ahora = now().toISOString();
+      let adelantadas = 0;
+      for (const op of await repo.listOutbox()) {
+        if (op.estado !== OUTBOX_ESTADOS.ERROR_REINTENTABLE || !esErrorDeRed(op)) continue;
+        if (op.siguienteIntentoAt && op.siguienteIntentoAt <= ahora) continue;
+        await guardarOp(op, { siguienteIntentoAt: ahora });
+        adelantadas += 1;
+      }
+      return adelantadas;
     },
     subscribe(listener) {
       listeners.add(listener);
