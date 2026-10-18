@@ -10,6 +10,19 @@ import {
 // LOTE-007 (ADR-012 §5.3/§7): handlers ejercitados con req/res simulados y
 // dependencias inyectadas -- nunca abren PostgreSQL/PostGIS reales.
 
+// FASE-14: Ganadería consulta cuatro pools (business, auth, legacy, qrAdmin);
+// todos simulados con el mismo checker salvo que la prueba indique otra cosa.
+function ganaderiaDeps(checker, overrides = {}) {
+  return {
+    getBusinessPool: () => ({ id: 'business' }),
+    getAuthPool: () => ({ id: 'auth' }),
+    getLegacyPool: () => ({ id: 'legacy' }),
+    getQrAdminPool: () => ({ id: 'qrAdmin' }),
+    checker,
+    ...overrides,
+  };
+}
+
 function fakeRes() {
   const res = {
     statusCode: null,
@@ -32,7 +45,7 @@ function fakeRes() {
 describe('LOTE-007: server/health/readiness.js -- ready/ganaderia', () => {
   test('dependencia sana responde 200 con Cache-Control no-store', async () => {
     const handler = createGanaderiaReadinessHandler({
-      deps: { getPool: () => ({}), checker: async () => ({ ok: true, code: 'ok' }) },
+      deps: ganaderiaDeps(async () => ({ ok: true, code: 'ok' })),
     });
     const res = fakeRes();
     await handler({}, res);
@@ -45,10 +58,7 @@ describe('LOTE-007: server/health/readiness.js -- ready/ganaderia', () => {
 
   test('dependencia caída responde 503 con causa clasificada, sin error.message crudo', async () => {
     const handler = createGanaderiaReadinessHandler({
-      deps: {
-        getPool: () => ({}),
-        checker: async () => ({ ok: false, code: 'database_unreachable' }),
-      },
+      deps: ganaderiaDeps(async () => ({ ok: false, code: 'database_unreachable' })),
     });
     const res = fakeRes();
     await handler({}, res);
@@ -83,7 +93,7 @@ describe('LOTE-007: server/health/readiness.js -- ready/catastrox', () => {
 describe('LOTE-007: server/health/readiness.js -- ready (general, resumen por dominio)', () => {
   test('ambos dominios sanos responde 200 status ok', async () => {
     const handler = createGeneralReadinessHandler({
-      ganaderiaDeps: { getPool: () => ({}), checker: async () => ({ ok: true, code: 'ok' }) },
+      ganaderiaDeps: ganaderiaDeps(async () => ({ ok: true, code: 'ok' })),
       catastroxDeps: { getPool: () => ({}), checker: async () => ({ ok: true, code: 'ok' }) },
     });
     const res = fakeRes();
@@ -96,10 +106,7 @@ describe('LOTE-007: server/health/readiness.js -- ready (general, resumen por do
 
   test('Ganadería caída y CatastroX sano: responde degraded, catastrox permanece ok (independencia)', async () => {
     const handler = createGeneralReadinessHandler({
-      ganaderiaDeps: {
-        getPool: () => ({}),
-        checker: async () => ({ ok: false, code: 'database_unreachable' }),
-      },
+      ganaderiaDeps: ganaderiaDeps(async () => ({ ok: false, code: 'database_unreachable' })),
       catastroxDeps: { getPool: () => ({}), checker: async () => ({ ok: true, code: 'ok' }) },
     });
     const res = fakeRes();
@@ -114,7 +121,7 @@ describe('LOTE-007: server/health/readiness.js -- ready (general, resumen por do
 
   test('CatastroX caído y Ganadería sana: responde degraded, ganaderia permanece ok (independencia)', async () => {
     const handler = createGeneralReadinessHandler({
-      ganaderiaDeps: { getPool: () => ({}), checker: async () => ({ ok: true, code: 'ok' }) },
+      ganaderiaDeps: ganaderiaDeps(async () => ({ ok: true, code: 'ok' })),
       catastroxDeps: {
         getPool: () => ({}),
         checker: async () => ({ ok: false, code: 'schema_missing' }),
@@ -130,7 +137,7 @@ describe('LOTE-007: server/health/readiness.js -- ready (general, resumen por do
 
   test('ambos dominios caídos: responde 503 degraded con ambas causas', async () => {
     const handler = createGeneralReadinessHandler({
-      ganaderiaDeps: { getPool: () => ({}), checker: async () => ({ ok: false, code: 'pool_exhausted' }) },
+      ganaderiaDeps: ganaderiaDeps(async () => ({ ok: false, code: 'pool_exhausted' })),
       catastroxDeps: { getPool: () => ({}), checker: async () => ({ ok: false, code: 'not_configured' }) },
     });
     const res = fakeRes();

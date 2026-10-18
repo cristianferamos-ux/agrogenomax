@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { schema } from '../db.js';
 import { createMonitorAuthMiddleware } from '../health/monitorAuth.js';
-import { evaluateGanaderiaReadiness } from '../health/ganaderiaReadiness.js';
+import { evaluateLegacyAgxReadiness } from '../health/ganaderiaReadiness.js';
 import {
   createGeneralReadinessHandler,
   createGanaderiaReadinessHandler,
@@ -34,7 +34,7 @@ export default function createHealthRouter({ healthMonitorToken } = {}) {
   // `ready/ganaderia`, misma clasificación de causas -- se retira una vez
   // verificado que no queda ningún consumidor dependiendo de ella.
   router.get('/db', monitorAuth, async (_req, res) => {
-    const result = await evaluateGanaderiaReadiness();
+    const result = await evaluateLegacyAgxReadiness();
     res.setHeader('Cache-Control', 'no-store');
     if (!result.ok) {
       res.status(503).json({ ok: false, database: 'unavailable', code: result.code });
