@@ -108,11 +108,15 @@ test('MICROAUDITORÍA 6: emailDelivered true -> mensaje de envío exitoso', () =
   );
 });
 
-test('MICROAUDITORÍA 7: emailDelivered false -> mensaje de advertencia exacto pedido', () => {
+test('MICROAUDITORÍA 7: emailDelivered false -> mensaje de advertencia exacto: remite a "Recuperar acceso", nunca promete un reenvío inexistente', () => {
   assert.match(
     crearCuentaSource,
-    /const SUCCESS_EMAIL_FAILED_MESSAGE =\s*\n?\s*'Cuenta creada, pero no pudimos enviar el correo de activación\. No vuelvas a crear la cuenta; podrás reenviar la activación posteriormente\.'/,
+    /const SUCCESS_EMAIL_FAILED_MESSAGE =\s*\n?\s*'Cuenta creada, pero no pudimos enviar el correo de activación\. No vuelvas a crear la cuenta\. La persona puede usar "Recuperar acceso" desde la pantalla de inicio de sesión para establecer su contraseña\.'/,
   );
+  assert.doesNotMatch(stripComments(crearCuentaSource), /reenviar/i);
+  // El enlace al que remite el mensaje existe con ese nombre exacto.
+  const loginSource = fs.readFileSync(path.join(ADMIN_DIR, '..', 'pages', 'GanaderiaLogin.jsx'), 'utf8');
+  assert.match(loginSource, /<Link to="\/ganaderia\/recuperar-acceso">Recuperar acceso<\/Link>/);
 });
 
 test('MICROAUDITORÍA 8: emailDelivered false sigue siendo la rama de ÉXITO (submitted=true), nunca la rama de error -- no reintenta ni limpia el formulario como si hubiera fallado la creación', () => {
