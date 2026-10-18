@@ -14,7 +14,9 @@
 //   createdAt, updatedAt  ISO
 //   estado              PENDIENTE | SINCRONIZANDO | SINCRONIZADO | ERROR_REINTENTABLE | CONFLICTO | RECHAZADO
 //   intentos            número de envíos realizados
-//   ultimoError         { codigo, mensaje, status } | null
+//   ultimoError         { codigo, mensaje, status, tipo? } | null
+//                       tipo (FASE-14, opcional): 'red' (sin respuesta) | 'http' (408/429/5xx).
+//                       Operaciones anteriores sin `tipo` se interpretan por status (0 = red).
 //   siguienteIntentoAt  ISO | null (backoff)
 //   deviceId            dispositivo que la creó
 // SINCRONIZADO es transitorio: al confirmarse, la operación se elimina del
@@ -63,6 +65,14 @@ export function newOperation({ tipoOperacion, entidad, localUuid, clientOperatio
 /** Orden de envío: por creación (las dependencias entre entidades se respetan). */
 export function ordenarOutbox(operations) {
   return [...operations].sort((a, b) => (a.createdAt === b.createdAt ? a.operationId.localeCompare(b.operationId) : a.createdAt.localeCompare(b.createdAt)));
+}
+
+/** El último fallo fue de red (no un 408/429/5xx). Compatible con operaciones sin `tipo`. */
+export function esErrorDeRed(op) {
+  const error = op?.ultimoError;
+  if (!error) return false;
+  if (error.tipo) return error.tipo === 'red';
+  return (error.status ?? 0) === 0;
 }
 
 export function estaLista(op, now, { forzar = false } = {}) {

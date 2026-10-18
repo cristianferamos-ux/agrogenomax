@@ -302,8 +302,10 @@ test('12-13. la conexión cae a mitad del sync (servidor confirmó, respuesta pe
   assert.equal(await device.engine.syncNow(), RUN_RESULT.OFFLINE);
   const [op] = await device.repo.listOutbox();
   assert.equal(op.estado, OUTBOX_ESTADOS.ERROR_REINTENTABLE);
-  assert.equal(op.intentos, 1);
-  assert.ok(op.siguienteIntentoAt, 'backoff programado');
+  // FASE-14: un fallo de RED no cuenta como intento ni hace crecer la espera.
+  assert.equal(op.intentos, 0);
+  assert.equal(op.ultimoError.tipo, 'red');
+  assert.ok(op.siguienteIntentoAt, 'reintento corto programado');
   assert.equal(server.animales.length, 1, 'el servidor sí confirmó');
   assert.ok(await device.engine.proximoReintentoAt());
 
@@ -320,7 +322,8 @@ test('12b. una operación que quedó SINCRONIZANDO (app cerrada a mitad) se reen
   await preparar(device);
   await device.repo.registrarAnimalLocal({ body: body() });
   const [op] = await device.repo.listOutbox();
-  await device.repo.putOperacion({ ...op, estado: OUTBOX_ESTADOS.SINCRONIZANDO });
+  // App cerrada a mitad hace rato (más que el lease): sin lock, se recupera.
+  await device.repo.putOperacion({ ...op, estado: OUTBOX_ESTADOS.SINCRONIZANDO, updatedAt: new Date(Date.now() - 5 * 60_000).toISOString() });
   assert.equal(await device.engine.syncNow(), RUN_RESULT.OK);
   assert.equal(server.animales.length, 1);
   assert.deepEqual(await device.repo.listOutbox(), []);

@@ -8,6 +8,7 @@ import { createIndexedDbStorage, deleteIndexedDb, openIndexedDb } from './storag
 import { createLocalRepo } from './localRepo.js';
 import { createSyncEngine } from './syncEngine.js';
 import { OUTBOX_ESTADOS } from './outbox.js';
+import { RUN_RESULT } from './syncEngine.js';
 
 export const browserTransport = Object.freeze({
   postJson: (path, body) => postJsonWithCsrf(path, body),
@@ -45,9 +46,29 @@ export function isNavigatorOnline() {
   return typeof navigator === 'undefined' ? true : navigator.onLine !== false;
 }
 
+export function syncLockName(organizacionId) {
+  return `agx-sync-${organizacionId}`;
+}
+
+/**
+ * FASE-14: sección crítica best-effort entre pestañas y Service Worker del
+ * mismo origen (Web Locks API). Disparos automáticos: si otro motor tiene
+ * el lock, ceden (EN_CURSO) en lugar de enviar la misma cola en paralelo.
+ * Forzados: esperan su turno. Sin `locks` (navegadores antiguos) devuelve
+ * null y el motor funciona como antes; la idempotencia del servidor sigue
+ * evitando duplicados.
+ */
+export function createNavigatorLock(nombre, locks = globalThis.navigator?.locks) {
+  if (!locks || typeof locks.request !== 'function') return null;
+  return (fn, { esperar = false } = {}) => (esperar
+    ? locks.request(nombre, () => fn())
+    : locks.request(nombre, { ifAvailable: true }, (adquirido) => (adquirido ? fn() : RUN_RESULT.EN_CURSO)));
+}
+
 export async function createBrowserOffline({ organizacionId, deviceId, isOnline = isNavigatorOnline }) {
   const storage = await openOrgStorage(organizacionId);
   const repo = createLocalRepo(storage, { organizacionId, deviceId });
-  const engine = createSyncEngine({ repo, transport: browserTransport, isOnline });
+  const lock = createNavigatorLock(syncLockName(organizacionId));
+  const engine = createSyncEngine({ repo, transport: browserTransport, isOnline, lock });
   return { storage, repo, engine };
 }

@@ -76,9 +76,21 @@ export function startAutoSync({
     removers.push(() => target.removeEventListener(type, handler));
   };
 
-  listen(win, 'online', () => trigger('online'));
+  // FASE-14: al recuperar la red, lo que solo esperaba por un fallo de RED
+  // sale ya (sin esperar su siguienteIntentoAt); un 408/429/5xx conserva su
+  // backoff. reactivarFallosDeRed no hace nada si el motor está sin red.
+  async function reconectar(motivo) {
+    try {
+      await engine.reactivarFallosDeRed?.();
+    } catch {
+      // nunca bloquea el disparo
+    }
+    return trigger(motivo);
+  }
+
+  listen(win, 'online', () => reconectar('online'));
   listen(doc, 'visibilitychange', () => {
-    if (doc.visibilityState === 'visible') trigger('visible');
+    if (doc.visibilityState === 'visible') reconectar('visible');
   });
   listen(serviceWorker, 'message', (event) => {
     if (event?.data?.type === 'AGX_SYNC_REQUEST') trigger('background-sync');
