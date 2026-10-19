@@ -48,6 +48,7 @@
   "server/services/__tests__/animalesSchemaIntegration.test.js",
   "server/services/__tests__/animalesRepositoryIntegration.test.js",
   "server/services/__tests__/qrCodigos.test.js",
+  "server/services/__tests__/qrFabricacionPaquete.test.js",
   "server/services/__tests__/qrInventarioIntegration.test.js",
   "server/services/__tests__/syncPullIntegration.test.js",
   "server/routes/__tests__/ganaderiaPotreroRecomendacionPastoreoAuth.test.js",

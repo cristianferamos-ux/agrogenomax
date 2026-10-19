@@ -702,3 +702,65 @@ describe('SPRINT-3D11.3: inventario QR contra Postgres real', { skip: !dbAvailab
     assert.deepEqual(sql.rows[0], { a: true, b: false });
   });
 });
+
+describe('FASE 15: paquete de fabricación contra Postgres real (solo lectura)', { skip: !dbAvailable }, () => {
+  async function snapshot(loteId) {
+    const q = async (sql) => (await adminPool.query(sql, [loteId])).rows;
+    return {
+      lote: await q('select * from agx.qr_lotes where lote_id = $1'),
+      chapetas: await q('select * from agx.qr_chapetas where lote_id = $1 order by qr_id'),
+      tokens: await q('select t.* from agx.qr_chapeta_tokens t join agx.qr_chapetas c on c.qr_id = t.qr_id where c.lote_id = $1 order by t.qr_id'),
+      eventosLote: await q('select * from agx.qr_lote_eventos where lote_id = $1 order by evento_id'),
+      eventosChapeta: await q('select e.* from agx.qr_chapeta_eventos e join agx.qr_chapetas c on c.qr_id = e.qr_id where c.lote_id = $1 order by e.evento_id'),
+    };
+  }
+
+  test('34. lote de 10: paquete verificado (token ↔ token_hash, QR ↔ url_qr) y la exportación NO modifica lote, chapetas, tokens ni eventos', async () => {
+    const { buildPaqueteFabricacion, prepararFabricacion } = await import('../ganaderia/qrFabricacionPaquete.js');
+    const lote = await crearLote(10);
+    const antes = await snapshot(lote.loteId);
+
+    const data = await inventario.exportLoteProveedor(lote.loteId);
+    assert.equal(data.chapetas.length, 10);
+    for (const c of data.chapetas) assert.equal(codigos.hashQrToken(c.token), c.tokenHash);
+    const paquete = await buildPaqueteFabricacion(data);
+    assert.equal(Object.keys(paquete.files).filter((p) => p.startsWith('front/')).length, 10);
+    assert.ok(paquete.files['back/agrogenomax-back.svg']);
+    const { items } = prepararFabricacion(data);
+    for (const item of items) assert.equal(item.url, `${URL_BASE}/qr/${data.chapetas.find((c) => c.codigoVisible === item.codigoVisible).token}`);
+
+    const una = await inventario.exportChapetaProveedor(data.chapetas[3].qrId);
+    assert.equal(una.chapeta.codigoVisible, data.chapetas[3].codigoVisible);
+    assert.equal(una.chapeta.token, data.chapetas[3].token);
+    prepararFabricacion({ lote: una.lote, chapetas: [una.chapeta] }, { cantidadEsperada: 1 });
+
+    assert.deepEqual(await snapshot(lote.loteId), antes);
+  });
+
+  test('36. token_cifrado movido a otra fila no descifra (AAD) y aborta el export', async () => {
+    const lote = await crearLote(2);
+    const filas = (await adminPool.query(
+      `select c.qr_id, t.token_cifrado from agx.qr_chapetas c join agx.qr_chapeta_tokens t on t.qr_id = c.qr_id
+        where c.lote_id = $1 order by c.qr_id`, [lote.loteId])).rows;
+    // Manipulación deliberada SOLO en la base desechable (superusuario): intercambia los cifrados.
+    await adminPool.query('update agx.qr_chapeta_tokens set token_cifrado = $1 where qr_id = $2', [filas[1].token_cifrado, filas[0].qr_id]);
+    await assert.rejects(inventario.exportLoteProveedor(lote.loteId));
+  });
+
+  test('exportación en transacción READ ONLY (Postgres rechaza escrituras) y lote legacy sin tokens', async () => {
+    const { withQrAdminTransaction } = await import('../../db/agxQrAdminPool.js');
+    await assert.rejects(
+      withQrAdminTransaction(async (client) => {
+        await client.query('SET TRANSACTION READ ONLY');
+        assert.equal((await client.query('show transaction_read_only')).rows[0].transaction_read_only, 'on');
+        await client.query("update agx.qr_lotes set observaciones = 'x' where false");
+      }),
+      (error) => error.code === '25006',
+    );
+    const base = 900000 + Math.floor(Math.random() * 90000);
+    const { lote } = await inventario.importarLoteLegacy({ codigos: [`AGX-${base}`], observaciones: null, clientOperationId: crypto.randomUUID() }, SUPERADMIN);
+    const data = await inventario.exportLoteProveedor(lote.loteId);
+    assert.equal(data.lote.tipo, 'QR_LEGACY');
+    assert.equal(data.chapetas[0].token, null);
+  });
+});

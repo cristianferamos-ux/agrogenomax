@@ -2,7 +2,8 @@
 // chapetas (/ganaderia/admin/qr, RequireGanaderiaSuperAdmin). Mismo layout
 // administrativo propio que el resto del panel (nunca el sidebar de
 // cliente). Lotes: crear (genera códigos + tokens), avanzar estado físico,
-// descargar archivo del proveedor, asignar todo o parte a una
+// descargar el paquete de fabricación láser (ZIP con SVG maestros, PDF
+// vectorial, manifest y checksums), asignar todo o parte a una
 // organización. Chapetas: buscar por código/estado/lote/organización, ver
 // organización + animal + historial, revocar, marcar dañada, reemplazar.
 // Importación legacy controlada (AGX-000001...). Cada formulario usa un
@@ -21,7 +22,9 @@ import {
   importarLegacy,
   listLotes,
   listOrganizaciones,
-  proveedorUrl,
+  arteSvgUrl,
+  descargarPaqueteFabricacion,
+  fabricacionUrl,
   reemplazarChapeta,
 } from './adminQrApi.js';
 import {
@@ -124,6 +127,72 @@ function CrearLoteForm({ onCreated }) {
 // ---------------------------------------------------------------------
 // Detalle de lote: estado, descargas, asignación
 // ---------------------------------------------------------------------
+
+async function sha256DelArchivo(blob) {
+  const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// FASE 15: paquete de fabricación. El SHA-256 que anuncia el servidor se
+// compara con el calculado en el navegador antes de entregar el archivo.
+function DescargasFabricacion({ loteId }) {
+  const [descargando, setDescargando] = useState(false);
+  const [error, setError] = useState('');
+  const [sha, setSha] = useState(null);
+
+  async function descargarPaquete() {
+    if (descargando) return;
+    setDescargando(true);
+    setError('');
+    setSha(null);
+    try {
+      const result = await descargarPaqueteFabricacion(loteId);
+      if (!result.ok) {
+        setError(adminQrErrorMessage(result.data));
+        return;
+      }
+      const calculado = await sha256DelArchivo(result.blob);
+      if (!result.sha256Servidor || calculado !== result.sha256Servidor) {
+        setError('El archivo descargado no coincide con el SHA-256 del servidor. No lo uses; vuelve a descargarlo.');
+        return;
+      }
+      const href = URL.createObjectURL(result.blob);
+      const enlace = document.createElement('a');
+      enlace.href = href;
+      enlace.download = result.filename;
+      document.body.appendChild(enlace);
+      enlace.click();
+      enlace.remove();
+      setTimeout(() => URL.revokeObjectURL(href), 60_000);
+      setSha({ filename: result.filename, valor: calculado });
+    } catch {
+      setError(adminQrErrorMessage(null));
+    } finally {
+      setDescargando(false);
+    }
+  }
+
+  return (
+    <div className="gan-aqr-subform">
+      <h4>Fabricación láser</h4>
+      <div className="gan-aqr-actions">
+        <button type="button" className="gan-aqr-primary" onClick={descargarPaquete} disabled={descargando}>
+          {descargando ? 'Preparando paquete...' : 'Descargar paquete de fabricación'}
+        </button>
+        <a className="gan-aqr-secondary" href={fabricacionUrl(loteId, 'pdf')}>Descargar PDF de referencia</a>
+        <a className="gan-aqr-secondary" href={fabricacionUrl(loteId, 'manifest')}>Descargar manifest (CSV)</a>
+        <a className="gan-aqr-secondary" href={fabricacionUrl(loteId, 'html')}>Vista previa HTML</a>
+      </div>
+      <Msg type="error">{error}</Msg>
+      {sha ? (
+        <Msg type="success">
+          {sha.filename} descargado y verificado. SHA-256: <span className="gan-aqr-mono">{sha.valor}</span>
+        </Msg>
+      ) : null}
+      <p className="gan-aqr-hint">Los maestros de grabado son los SVG del paquete (frente por chapeta + reverso común). El proveedor no debe regenerar el QR; fabricar primero UNA muestra. Enviar el ZIP cifrado y la contraseña por otro canal.</p>
+    </div>
+  );
+}
 
 function LoteDetalle({ loteId, organizaciones, nombreOrg, onChanged }) {
   const [detalle, setDetalle] = useState(null);
@@ -249,13 +318,8 @@ function LoteDetalle({ loteId, organizaciones, nombreOrg, onChanged }) {
         {lote.estado !== 'CERRADO' ? (
           <button type="button" className="gan-aqr-secondary" onClick={() => cambiarEstado('CERRADO')} disabled={saving}>Cerrar lote</button>
         ) : null}
-        {lote.tipo === 'QR_AGX' ? (
-          <>
-            <a className="gan-aqr-secondary" href={proveedorUrl(loteId, 'csv')}>Descargar CSV proveedor</a>
-            <a className="gan-aqr-secondary" href={proveedorUrl(loteId, 'html')}>Descargar hoja imprimible (PDF)</a>
-          </>
-        ) : null}
       </div>
+      {lote.tipo === 'QR_AGX' ? <DescargasFabricacion loteId={loteId} /> : null}
 
       {lote.estado === 'EN_STOCK' && lote.stock.enInventario > 0 ? (
         <form className="gan-aqr-form gan-aqr-subform" onSubmit={asignar} noValidate>
@@ -378,6 +442,11 @@ function ChapetaDetalle({ qrId, nombreOrg, onChanged }) {
       </dl>
       <Msg type="success">{aviso}</Msg>
       <Msg type="error">{error}</Msg>
+      {chapeta.tipo === 'QR_AGX' ? (
+        <div className="gan-aqr-actions">
+          <a className="gan-aqr-secondary" href={arteSvgUrl(qrId)}>Descargar SVG maestro (frente)</a>
+        </div>
+      ) : null}
       {activa && !accion ? (
         <div className="gan-aqr-actions">
           <button type="button" className="gan-aqr-secondary" onClick={() => setAccion('REVOCADO')}>Revocar</button>
