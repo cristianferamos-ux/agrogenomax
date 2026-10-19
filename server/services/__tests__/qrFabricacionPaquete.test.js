@@ -450,9 +450,10 @@ describe('FASE 15: manifest, PDF, checksums y ZIP (lote simulado de 10)', async 
     const readme = paquete.files['README_PROVEEDOR.txt'].toString('utf8');
     for (const regla of ['<codigo_visible>-front.svg', 'agrogenomax-back.svg', 'Respetar frente y reverso', 'al 100 %', 'NO redimensionar ni deformar',
       'NO invertir colores', 'NO suavizar', 'NO convertir los módulos del QR en contornos/strokes', 'NO regenerar el QR',
-      'NO modificar la URL', 'DEL MISMO ARCHIVO', 'UNA SOLA muestra física', 'Borrar el ZIP', '60.0 x 30.7 mm']) {
+      'NO modificar la URL', 'DEL MISMO ARCHIVO', 'cantidad autorizada por escrito por AgroGenomaX', 'podrá solicitar una muestra física', 'Borrar el ZIP', '60.0 x 30.7 mm']) {
       assert.ok(readme.includes(regla), regla);
     }
+    assert.doesNotMatch(readme, /UNA SOLA muestra/);
   });
 
   test('buildReferenciaPdf reutilizable con el mismo preparado', async () => {
