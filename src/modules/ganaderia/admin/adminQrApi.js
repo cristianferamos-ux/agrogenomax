@@ -1,7 +1,7 @@
 // SPRINT-3D11.3 (R1): cliente del inventario QR (Super Admin). Habla SOLO
 // con /api/ganaderia/admin/qr (y sus subrutas) vía el cliente autenticado compartido
 // (sesión + CSRF). Ningún POST se reintenta automáticamente.
-import { getJsonWithSession, postJsonWithCsrf } from '../auth/ganaderiaAuthedRequest.js';
+import { getFileWithSession, getJsonWithSession, postJsonWithCsrf } from '../auth/ganaderiaAuthedRequest.js';
 
 const BASE = '/api/ganaderia/admin/qr';
 const id = (value) => encodeURIComponent(value);
@@ -34,9 +34,33 @@ export function asignarLote(loteId, body) {
   return postJsonWithCsrf(`${BASE}/lotes/${id(loteId)}/asignar`, body);
 }
 
+const FABRICACION_ARCHIVOS = Object.freeze({
+  paquete: 'paquete.zip',
+  pdf: 'referencia.pdf',
+  manifest: 'manifest.csv',
+  html: 'proveedor.html',
+});
+
 /** Descarga directa (GET same-origin con cookie de sesión). */
-export function proveedorUrl(loteId, formato) {
-  return `${BASE}/lotes/${id(loteId)}/proveedor.${formato === 'html' ? 'html' : 'csv'}`;
+export function fabricacionUrl(loteId, archivo) {
+  return `${BASE}/lotes/${id(loteId)}/${FABRICACION_ARCHIVOS[archivo] ?? FABRICACION_ARCHIVOS.manifest}`;
+}
+
+export function arteSvgUrl(qrId) {
+  return `${BASE}/chapetas/${id(qrId)}/arte.svg`;
+}
+
+/**
+ * Paquete de fabricación (ZIP) vía el cliente autenticado: devuelve el
+ * archivo y el SHA-256 anunciado por el servidor (X-Content-SHA256) para
+ * compararlo con el calculado en el navegador.
+ */
+export async function descargarPaqueteFabricacion(loteId) {
+  const result = await getFileWithSession(fabricacionUrl(loteId, 'paquete'));
+  if (!result.ok) return result;
+  const disposition = result.headers.get('Content-Disposition') ?? '';
+  const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? 'paquete-fabricacion.zip';
+  return { ...result, filename, sha256Servidor: result.headers.get('X-Content-SHA256') };
 }
 
 export function buscarChapetas({ codigo, loteId, estado, organizacionId } = {}) {

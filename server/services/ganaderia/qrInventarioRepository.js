@@ -463,24 +463,44 @@ export async function reemplazarChapetaAdmin(qrId, { codigoNuevo, motivo }, { ac
  * Filas del archivo del proveedor. Descifra cada token en memoria (nunca lo
  * persiste en claro); un cifrado manipulado o movido de fila falla el tag GCM.
  */
+// FASE 15: la exportación es SOLO LECTURA -- transacción READ ONLY (Postgres
+// rechaza cualquier escritura) y sin eventos.
+const EXPORT_CHAPETA_SELECT = `select c.qr_id::text as qr_id, c.lote_id::text as lote_id, c.codigo_visible, c.token_hash, t.token_cifrado
+   from agx.qr_chapetas c
+   left join agx.qr_chapeta_tokens t on t.qr_id = c.qr_id`;
+
+function exportRow(r, claveActiva) {
+  return {
+    qrId: r.qr_id,
+    codigoVisible: r.codigo_visible,
+    tokenHash: r.token_hash,
+    token: r.token_cifrado ? decryptQrToken(r.token_cifrado, r.codigo_visible, claveActiva) : null,
+  };
+}
+
 export async function exportLoteProveedor(loteId, { key } = {}) {
   return withQrAdminTransaction(async (client) => {
+    await client.query('SET TRANSACTION READ ONLY');
     const lote = await fetchLote(client, loteId);
     if (!lote) return null;
-    const result = await client.query(
-      `select c.codigo_visible, t.token_cifrado
-         from agx.qr_chapetas c
-         left join agx.qr_chapeta_tokens t on t.qr_id = c.qr_id
-        where c.lote_id = $1 order by c.qr_id`,
-      [loteId],
-    );
+    const result = await client.query(`${EXPORT_CHAPETA_SELECT} where c.lote_id = $1 order by c.qr_id`, [loteId]);
     const claveActiva = lote.tipo === 'QR_AGX' ? key ?? loadQrTokenKey() : null;
     return {
       lote: serializeLote(lote),
-      chapetas: result.rows.map((r) => ({
-        codigoVisible: r.codigo_visible,
-        token: r.token_cifrado ? decryptQrToken(r.token_cifrado, r.codigo_visible, claveActiva) : null,
-      })),
+      chapetas: result.rows.map((r) => exportRow(r, claveActiva)),
     };
+  });
+}
+
+/** Una sola chapeta (SVG maestro individual), mismo descifrado con AAD. */
+export async function exportChapetaProveedor(qrId, { key } = {}) {
+  return withQrAdminTransaction(async (client) => {
+    await client.query('SET TRANSACTION READ ONLY');
+    const result = await client.query(`${EXPORT_CHAPETA_SELECT} where c.qr_id = $1`, [qrId]);
+    const row = result.rows[0];
+    if (!row) return null;
+    const lote = await fetchLote(client, row.lote_id);
+    const claveActiva = lote.tipo === 'QR_AGX' ? key ?? loadQrTokenKey() : null;
+    return { lote: serializeLote(lote), chapeta: exportRow(row, claveActiva) };
   });
 }

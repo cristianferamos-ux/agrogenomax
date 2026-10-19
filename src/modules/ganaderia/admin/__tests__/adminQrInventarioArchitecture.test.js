@@ -76,11 +76,21 @@ test('cliente admin: solo /api/ganaderia/admin/qr vía cliente autenticado compa
 });
 
 test('página: crear lote, estados, descargas proveedor, asignación total/parcial, búsqueda, baja/daño/reemplazo, legacy', () => {
-  for (const call of ['crearLote(', 'cambiarEstadoLote(', "proveedorUrl(loteId, 'csv')", "proveedorUrl(loteId, 'html')",
+  for (const call of ['crearLote(', 'cambiarEstadoLote(', 'descargarPaqueteFabricacion(loteId)', "fabricacionUrl(loteId, 'pdf')",
+    "fabricacionUrl(loteId, 'manifest')", 'arteSvgUrl(qrId)',
     'asignarLote(', 'buscarChapetas(', 'bajaChapeta(', 'reemplazarChapeta(', 'importarLegacy(']) {
     assert.ok(pageCode.includes(call), call);
   }
   for (const modo of ["setModo('todo')", "setModo('cantidad')", "setModo('codigos')"]) assert.ok(pageCode.includes(modo), modo);
+});
+
+test('página (FASE 15): botones de fabricación láser; sin el botón engañoso "hoja imprimible (PDF)" que descargaba HTML', () => {
+  for (const label of ['Descargar paquete de fabricación', 'Descargar PDF de referencia', 'Descargar manifest (CSV)',
+    'Descargar SVG maestro', 'Vista previa HTML']) {
+    assert.ok(pageCode.includes(label), label);
+  }
+  assert.doesNotMatch(pageCode, /hoja imprimible|CSV proveedor/);
+  assert.match(pageCode, /calculado !== result.sha256Servidor/);
 });
 
 test('página: cada formulario usa un clientOperationId propio, renovado tras el éxito; sin storage', () => {

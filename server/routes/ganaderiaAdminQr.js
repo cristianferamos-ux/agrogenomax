@@ -28,6 +28,7 @@ import {
   buscarChapetas,
   cambiarEstadoLote,
   crearLote,
+  exportChapetaProveedor,
   exportLoteProveedor,
   getChapetaAdmin,
   getLote,
@@ -35,7 +36,14 @@ import {
   listLotes,
   reemplazarChapetaAdmin,
 } from '../services/ganaderia/qrInventarioRepository.js';
-import { buildProveedorCsv, buildProveedorHtml } from '../services/ganaderia/qrProveedorExport.js';
+import { buildProveedorHtml } from '../services/ganaderia/qrProveedorExport.js';
+import {
+  buildManifestCsv,
+  buildPaqueteFabricacion,
+  buildReferenciaPdf,
+  prepararFabricacion,
+} from '../services/ganaderia/qrFabricacionPaquete.js';
+import { FabricacionVerificationError } from '../services/ganaderia/qrFabricacionGeometria.js';
 import { isOrganizacionActiva, listOrganizacionesActivas } from '../services/ganaderia/qrOrganizaciones.js';
 
 function sendSemanticError(res, error) {
@@ -82,7 +90,105 @@ function requireId(res, value, code) {
   return false;
 }
 
-export default function createGanaderiaAdminQrRouter({ appEnv, csrfServerSecret, allowedOrigins } = {}) {
+// FASE 15 -- descargas de fabricación (montadas DETRÁS de sesión + Super
+// Admin + CSRF del router). Solo lectura. Toda salida pasa por la
+// verificación de prepararFabricacion: ante cualquier diferencia se aborta
+// (500 EXPORT_VERIFICATION_FAILED) sin entregar un paquete parcial. Las
+// dependencias se inyectan solo en tests.
+function sendAttachment(res, { filename, type, body, csp }) {
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  if (csp) res.setHeader('Content-Security-Policy', csp);
+  res.type(type).send(body);
+}
+
+function logVerificacion(error, ref) {
+  if (error instanceof FabricacionVerificationError) {
+    console.error(`[ganaderia-admin-qr] export abortado (${ref}): ${error.detalle}`);
+  }
+}
+
+export function createFabricacionExportHandlers({
+  loadLote = exportLoteProveedor,
+  loadChapeta = exportChapetaProveedor,
+} = {}) {
+  async function loteExportable(req, res) {
+    if (!requireId(res, req.params.loteId, 'INVALID_LOTE_ID')) return null;
+    const data = await loadLote(req.params.loteId);
+    if (!data) {
+      res.status(404).json({ error: 'LOTE_NOT_FOUND' });
+      return null;
+    }
+    if (data.lote.tipo !== 'QR_AGX') {
+      res.status(409).json({ error: 'LOTE_LEGACY_SIN_ARCHIVO' });
+      return null;
+    }
+    return data;
+  }
+
+  function verificado(fn) {
+    return async (req, res) => {
+      try {
+        await fn(req, res);
+      } catch (error) {
+        logVerificacion(error, req.params.loteId ? `lote ${req.params.loteId}` : `qr ${req.params.qrId}`);
+        throw error;
+      }
+    };
+  }
+
+  return {
+    paqueteZip: verificado(async (req, res) => {
+      const data = await loteExportable(req, res);
+      if (!data) return;
+      const paquete = await buildPaqueteFabricacion(data);
+      res.setHeader('X-Content-SHA256', paquete.sha256);
+      sendAttachment(res, { filename: paquete.filename, type: 'application/zip', body: paquete.buffer });
+    }),
+    referenciaPdf: verificado(async (req, res) => {
+      const data = await loteExportable(req, res);
+      if (!data) return;
+      const pdf = await buildReferenciaPdf(prepararFabricacion(data));
+      sendAttachment(res, { filename: `${data.lote.codigoLote}-referencia.pdf`, type: 'application/pdf', body: pdf });
+    }),
+    manifestCsv: verificado(async (req, res) => {
+      const data = await loteExportable(req, res);
+      if (!data) return;
+      sendAttachment(res, {
+        filename: `${data.lote.codigoLote}-manifest.csv`,
+        type: 'text/csv; charset=utf-8',
+        body: buildManifestCsv(prepararFabricacion(data)),
+      });
+    }),
+    vistaPreviaHtml: verificado(async (req, res) => {
+      const data = await loteExportable(req, res);
+      if (!data) return;
+      prepararFabricacion(data);
+      sendAttachment(res, {
+        filename: `${data.lote.codigoLote}-vista-previa.html`,
+        type: 'text/html; charset=utf-8',
+        body: buildProveedorHtml(data),
+        csp: "default-src 'none'; style-src 'unsafe-inline'; img-src data:",
+      });
+    }),
+    arteSvg: verificado(async (req, res) => {
+      if (!requireId(res, req.params.qrId, 'INVALID_QR_ID')) return;
+      const data = await loadChapeta(req.params.qrId);
+      if (!data) {
+        res.status(404).json({ error: 'QR_NOT_FOUND' });
+        return;
+      }
+      if (data.lote.tipo !== 'QR_AGX') {
+        res.status(409).json({ error: 'LOTE_LEGACY_SIN_ARCHIVO' });
+        return;
+      }
+      const [item] = prepararFabricacion({ lote: data.lote, chapetas: [data.chapeta] }, { cantidadEsperada: 1 }).items;
+      sendAttachment(res, { filename: item.filename, type: 'image/svg+xml', body: item.svg, csp: "default-src 'none'" });
+    }),
+  };
+}
+
+export default function createGanaderiaAdminQrRouter({ appEnv, csrfServerSecret, allowedOrigins, fabricacionLoaders } = {}) {
   const router = Router();
 
   router.use(createRequireGanaderiaIdentity({ appEnv }));
@@ -144,30 +250,12 @@ export default function createGanaderiaAdminQrRouter({ appEnv, csrfServerSecret,
     res.status(result.yaExistia ? 200 : 201).json({ ok: true, ...result });
   }));
 
-  async function sendExport(req, res, format) {
-    if (!requireId(res, req.params.loteId, 'INVALID_LOTE_ID')) return;
-    const data = await exportLoteProveedor(req.params.loteId);
-    if (!data) {
-      res.status(404).json({ error: 'LOTE_NOT_FOUND' });
-      return;
-    }
-    if (data.lote.tipo !== 'QR_AGX') {
-      res.status(409).json({ error: 'LOTE_LEGACY_SIN_ARCHIVO' });
-      return;
-    }
-    const filename = `${data.lote.codigoLote}-proveedor.${format}`;
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    if (format === 'csv') {
-      res.type('text/csv; charset=utf-8').send(buildProveedorCsv(data));
-    } else {
-      res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src data:");
-      res.type('text/html; charset=utf-8').send(await buildProveedorHtml(data));
-    }
-  }
-
-  router.get('/lotes/:loteId/proveedor.csv', handler((req, res) => sendExport(req, res, 'csv')));
-  router.get('/lotes/:loteId/proveedor.html', handler((req, res) => sendExport(req, res, 'html')));
+  const fabricacion = createFabricacionExportHandlers(fabricacionLoaders);
+  router.get('/lotes/:loteId/paquete.zip', handler(fabricacion.paqueteZip));
+  router.get('/lotes/:loteId/referencia.pdf', handler(fabricacion.referenciaPdf));
+  router.get('/lotes/:loteId/manifest.csv', handler(fabricacion.manifestCsv));
+  router.get('/lotes/:loteId/proveedor.html', handler(fabricacion.vistaPreviaHtml));
+  router.get('/chapetas/:qrId/arte.svg', handler(fabricacion.arteSvg));
 
   router.get('/chapetas', handler(async (req, res) => {
     const filtros = validateBuscarChapetasQuery(req.query);

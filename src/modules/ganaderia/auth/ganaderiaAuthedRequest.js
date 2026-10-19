@@ -209,3 +209,17 @@ export async function getJsonWithSession(path) {
   }
   return { ok: response.ok, status: response.status, data };
 }
+
+// GET autenticado de un archivo binario (descargas del Super Admin): mismo
+// aviso ante 401; si la respuesta no es OK, `data` trae el JSON de error.
+export async function getFileWithSession(path) {
+  const response = await fetch(path, { credentials: 'include' });
+  if (!response.ok) {
+    const data = await parseJson(response);
+    if (isSessionExpiredResponse(response.status, data)) {
+      emitAuthNotice(AUTH_NOTICE_KINDS.SESSION_EXPIRED);
+    }
+    return { ok: false, status: response.status, data, headers: response.headers };
+  }
+  return { ok: true, status: response.status, blob: await response.blob(), headers: response.headers };
+}

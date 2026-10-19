@@ -20,7 +20,7 @@ import {
   isQrToken,
   normalizeCodigoVisible,
 } from '../ganaderia/qrCodigos.js';
-import { buildProveedorCsv, buildProveedorHtml, qrUrl } from '../ganaderia/qrProveedorExport.js';
+import { buildProveedorHtml, qrUrl } from '../ganaderia/qrProveedorExport.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const source = fs.readFileSync(path.join(here, '..', 'ganaderia', 'qrCodigos.js'), 'utf8');
@@ -136,18 +136,16 @@ const CHAPETAS = [
   { codigoVisible: 'AGX-4TR8-N6CW-H', token: 'Zz9-_yXw8VuTsRqPoNmLkJiHgFeDcBa7' },
 ];
 
-test('archivo proveedor CSV: lote, código visible y URL /qr/<token> por chapeta', () => {
-  const csv = buildProveedorCsv({ lote: LOTE, chapetas: CHAPETAS });
-  const lines = csv.trim().split('\r\n');
-  assert.equal(lines[0], 'codigo_lote,codigo_visible,url_qr');
-  assert.equal(lines[1], '"LQR-20261017-ABCD","AGX-7KM4-P2XZ-R","https://agrogenomax.com/qr/aB3_-xYz09QwErTyUiOpAsDfGhJkLzXc"');
-  assert.equal(lines.length, 3);
+test('url_qr: <url_base>/qr/<token> (el código visible no es el token)', () => {
   assert.equal(qrUrl(LOTE.urlBase, CHAPETAS[0].token), 'https://agrogenomax.com/qr/aB3_-xYz09QwErTyUiOpAsDfGhJkLzXc');
 });
 
-test('archivo proveedor HTML imprimible: marca, código visible y QR SVG por chapeta, sin scripts', async () => {
-  const html = await buildProveedorHtml({ lote: LOTE, chapetas: CHAPETAS });
+test('vista previa HTML: marca, código visible y QR (Q, quiet zone 4, 30 mm, solo rellenos) por chapeta, sin scripts', () => {
+  const html = buildProveedorHtml({ lote: LOTE, chapetas: CHAPETAS });
   assert.equal((html.match(/<svg/g) || []).length, 2);
+  assert.equal((html.match(/width="30mm" height="30mm" viewBox="0 0 45 45"/g) || []).length, 2);
+  assert.doesNotMatch(html, /stroke=|<image/);
+  assert.match(html, /NO es el archivo de fabricación/);
   assert.equal((html.match(/AGROGENOMAX/g) || []).length, 2);
   assert.ok(html.includes('AGX-7KM4-P2XZ-R') && html.includes('AGX-4TR8-N6CW-H'));
   assert.ok(html.includes('LQR-20261017-ABCD'));

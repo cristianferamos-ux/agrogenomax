@@ -72,6 +72,8 @@ const ERROR_MESSAGES = Object.freeze({
   INVALID_MOTIVO: 'Escribe el motivo (máximo 500 caracteres).',
   CLIENT_OPERATION_ID_REUSED: 'Esta operación ya se usó. Recarga la página.',
   SUPERADMIN_REQUIRED: 'Tu cuenta no tiene permisos de administración.',
+  EXPORT_VERIFICATION_FAILED: 'La verificación del paquete de fabricación falló; no se generó ningún archivo.',
+  LOTE_LEGACY_SIN_ARCHIVO: 'Los lotes legacy no tienen archivo de fabricación.',
 });
 
 export function adminQrErrorMessage(data) {

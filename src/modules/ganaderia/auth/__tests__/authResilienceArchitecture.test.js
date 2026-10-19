@@ -107,7 +107,7 @@ test('helper nunca reintenta: sin bucles ni setTimeout alrededor de fetch', () =
   assert.doesNotMatch(code, /\bwhile\s*\(/);
   assert.doesNotMatch(code, /setTimeout|setInterval/);
   assert.doesNotMatch(code, /retry/i);
-  assert.equal((code.match(/\bfetch\(/g) || []).length, 4); // /csrf, POST, logout (F3b), GET
+  assert.equal((code.match(/\bfetch\(/g) || []).length, 5); // /csrf, POST, logout (F3b), GET, GET archivo (FASE 15)
 });
 
 test('fetchCsrfToken tiene una única implementación y el Context la re-exporta', () => {
