@@ -117,7 +117,8 @@ describe('FASE 15: tamaño del QR frente a la superficie útil 60 × 30.7 mm', (
 });
 
 describe('FASE 15: FRENTE -- SVG maestro por chapeta', () => {
-  const { chapetas } = fixtureLote(1);
+  // Chapeta base determinista (sin aleatoriedad en las aserciones geométricas).
+  const chapetas = [{ codigoVisible: 'AGX-7KM4-P2XZ-R', token: TOKENS_FIJOS[1], tokenHash: hashQrToken(TOKENS_FIJOS[1]) }];
   const { url, arte, svg } = frenteDe(chapetas[0].codigoVisible, chapetas[0].token);
   const L = arte.layout;
 
@@ -183,11 +184,65 @@ describe('FASE 15: FRENTE -- SVG maestro por chapeta', () => {
     assert.equal(cruza, false);
   });
 
-  test('13-14. código visible en paths (nunca como texto), altura 3 mm ≥ mínimo 2.5 mm; peor caso del alfabeto sin reducir', () => {
+  // Fixtures DETERMINISTAS (nunca un código aleatorio): la fuente tiene
+  // descendente en "Q", así que la caja total no es la altura de mayúscula.
+  const CODIGO_SIN_DESCENDENTES = 'AGX-7KM4-P2XZ-R';
+  const CODIGO_CON_Q = 'AGX-QK4Q-P2QZ-R';
+  const codigoMm = (codigoVisible) => {
+    const a = buildChapetaArte({ codigoVisible, url });
+    const u = a.layout.unidadesPorMm;
+    const b = a.codigo.bbox;
+    return {
+      arte: a,
+      sobreBaselineMm: (a.layout.codigoBaseline - b.y1) / u,
+      bajoBaselineMm: (b.y2 - a.layout.codigoBaseline) / u,
+      margenInferiorRealMm: (a.layout.alto - b.y2) / u,
+    };
+  };
+
+  test('13. código visible en paths (nunca como texto)', () => {
     assert.ok(!svg.includes(chapetas[0].codigoVisible));
-    assert.equal(arte.codigo.capMm, 3);
-    const altoMm = (arte.codigo.bbox.y2 - arte.codigo.bbox.y1) / L.unidadesPorMm;
-    assert.ok(altoMm >= FRENTE_LAYOUT.codigo.capMinimoMm && altoMm <= 3.2, String(altoMm));
+    for (const codigo of [CODIGO_SIN_DESCENDENTES, CODIGO_CON_Q]) {
+      const s = frenteDe(codigo, TOKENS_FIJOS[0]).svg;
+      assert.ok(!s.includes(codigo));
+      assert.doesNotMatch(s, /<text|<tspan/);
+    }
+  });
+
+  test('14a. altura de mayúscula (sobre la línea base) ≈ 3 mm ≥ mínimo 2.5 mm, con y sin Q', () => {
+    for (const codigo of [CODIGO_SIN_DESCENDENTES, CODIGO_CON_Q]) {
+      const m = codigoMm(codigo);
+      assert.equal(m.arte.codigo.capMm, 3, codigo);
+      assert.ok(m.sobreBaselineMm >= FRENTE_LAYOUT.codigo.capMinimoMm, `${codigo}: ${m.sobreBaselineMm}`);
+      assert.ok(m.sobreBaselineMm <= 3.2, `${codigo}: ${m.sobreBaselineMm}`);
+    }
+  });
+
+  test('14b. caja real con descendentes: el código completo queda dentro del lienzo y fuera de la zona del QR', () => {
+    for (const codigo of [CODIGO_SIN_DESCENDENTES, CODIGO_CON_Q]) {
+      const { arte: a } = codigoMm(codigo);
+      const b = a.codigo.bbox;
+      const q = a.layout.qr;
+      assert.ok(b.x1 >= 0 && b.y1 >= 0 && b.x2 <= a.layout.ancho && b.y2 <= a.layout.alto, codigo);
+      assert.ok(b.y1 >= q.y + q.lado, codigo);
+    }
+    const sinQ = codigoMm(CODIGO_SIN_DESCENDENTES);
+    assert.ok(sinQ.bajoBaselineMm < 0.1, String(sinQ.bajoBaselineMm));
+    assert.ok(sinQ.margenInferiorRealMm >= FRENTE_LAYOUT.margenInferiorMinMm, String(sinQ.margenInferiorRealMm));
+  });
+
+  test('14c. HALLAZGO documentado: con "Q" el margen inferior real queda POR DEBAJO del objetivo de 0.8 mm', () => {
+    // La cola de la "Q" baja ~0.76 mm bajo la línea base y el layout calcula el
+    // margen inferior desde la línea base. El arte sigue dentro del lienzo
+    // (14b), pero el margen real es ~0.44 mm. Se corregirá en un PR
+    // geométrico separado; este test fija el comportamiento ACTUAL para que
+    // ese cambio sea explícito.
+    const conQ = codigoMm(CODIGO_CON_Q);
+    assert.ok(conQ.bajoBaselineMm > 0.7 && conQ.bajoBaselineMm < 0.8, String(conQ.bajoBaselineMm));
+    assert.ok(conQ.margenInferiorRealMm > 0.4 && conQ.margenInferiorRealMm < FRENTE_LAYOUT.margenInferiorMinMm, String(conQ.margenInferiorRealMm));
+  });
+
+  test('peor caso del alfabeto (todo W) cabe a 3 mm sin reducir', () => {
     const peor = buildChapetaArte({ codigoVisible: codigoPeorCaso(), url });
     assert.equal(peor.codigo.capMm, 3, 'AGX-WWWW-WWWW-W cabe a 3 mm');
     assert.ok(peor.codigo.bbox.x1 >= FRENTE_LAYOUT.margenLateralMinMm * L.unidadesPorMm);
@@ -450,9 +505,10 @@ describe('FASE 15: manifest, PDF, checksums y ZIP (lote simulado de 10)', async 
     const readme = paquete.files['README_PROVEEDOR.txt'].toString('utf8');
     for (const regla of ['<codigo_visible>-front.svg', 'agrogenomax-back.svg', 'Respetar frente y reverso', 'al 100 %', 'NO redimensionar ni deformar',
       'NO invertir colores', 'NO suavizar', 'NO convertir los módulos del QR en contornos/strokes', 'NO regenerar el QR',
-      'NO modificar la URL', 'DEL MISMO ARCHIVO', 'UNA SOLA muestra física', 'Borrar el ZIP', '60.0 x 30.7 mm']) {
+      'NO modificar la URL', 'DEL MISMO ARCHIVO', 'cantidad autorizada por escrito por AgroGenomaX', 'podrá solicitar una muestra física', 'Borrar el ZIP', '60.0 x 30.7 mm']) {
       assert.ok(readme.includes(regla), regla);
     }
+    assert.doesNotMatch(readme, /UNA SOLA muestra/);
   });
 
   test('buildReferenciaPdf reutilizable con el mismo preparado', async () => {
