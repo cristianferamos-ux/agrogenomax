@@ -90,6 +90,9 @@ test('página (FASE 15): botones de fabricación láser; sin el botón engañoso
     assert.ok(pageCode.includes(label), label);
   }
   assert.doesNotMatch(pageCode, /hoja imprimible|CSV proveedor/);
+  // Coherente con README_PROVEEDOR: sin muestra única obligatoria ni cantidad fija.
+  assert.ok(pageCode.includes('cantidad autorizada por escrito por AgroGenomaX'));
+  assert.doesNotMatch(pageCode, /fabricar primero UNA muestra|primero una muestra|UNA muestra/i);
   assert.match(pageCode, /calculado !== result.sha256Servidor/);
 });
 
