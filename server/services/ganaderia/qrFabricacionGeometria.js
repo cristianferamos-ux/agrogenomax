@@ -1,11 +1,18 @@
-// FASE 15 -- modelo geométrico ÚNICO del arte de fabricación láser de una
-// chapeta QR_AGX. El SVG maestro, el PDF de referencia y la vista previa
-// HTML consumen exactamente esta geometría (nunca QRCode.toString).
+// FASE 15 -- modelo geométrico ÚNICO del arte de fabricación láser de las
+// chapetas QR_AGX (dos caras). El SVG maestro, el PDF de referencia y la
+// vista previa HTML consumen exactamente esta geometría (nunca
+// QRCode.toString).
 //
-// Sistema de coordenadas: 1 unidad = 1 módulo QR. El QR completo (símbolo +
-// quiet zone) mide N = size + 2·margin unidades = QR_EXPORT.sizeMm mm, así
-// que las coordenadas de los módulos son enteras y el tamaño físico exacto
-// sale de width/height (mm) frente al viewBox (unidades).
+// Superficie útil física medida de la chapeta: 60.0 × 30.7 mm por cara.
+//   FRENTE (variable, una por chapeta): SOLO el QR centrado y debajo el
+//     código visible. Sin marca, sin web, sin elementos comerciales.
+//   REVERSO (común a todo el lote): identidad AgroGenomaX en contornos.
+//
+// Frente -- sistema de coordenadas: 1 unidad = 1 módulo QR. El QR completo
+// (símbolo + quiet zone) mide N = size + 2·margin unidades = QR_EXPORT.sizeMm
+// mm, así que los módulos tienen coordenadas enteras y el tamaño físico
+// exacto sale de width/height (mm) frente al viewBox (unidades).
+// Reverso -- 1 unidad = 1 mm.
 //
 // Reglas del master: solo formas RELLENAS (fill #000000), sin stroke, sin
 // fondo, sin <image>, sin <text> (los textos son contornos de una fuente OFL
@@ -15,19 +22,42 @@ import fs from 'node:fs';
 import QRCode from 'qrcode';
 import opentype from 'opentype.js';
 
-export const QR_EXPORT = Object.freeze({ errorCorrectionLevel: 'Q', margin: 4, sizeMm: 30 });
+// Tamaño elegido: el MAYOR de los candidatos que cabe limpiamente en la
+// superficie útil con el código debajo (ver evaluarTamanoQr y el informe de
+// FASE 15: 24.5 y 25 mm dejan < 0.8 mm de margen inferior).
+export const QR_EXPORT = Object.freeze({ errorCorrectionLevel: 'Q', margin: 4, sizeMm: 24 });
+export const QR_TAMANOS_CANDIDATOS_MM = Object.freeze([23, 23.5, 24, 24.5, 25]);
 
-// Distribución del arte (mm). La fuente es proporcional: el código visible
-// usa capMm de altura de mayúscula y solo se reduce (nunca por debajo de
-// capMinimoMm) si no cabe en el ancho útil del lienzo.
-export const ARTE_LAYOUT = Object.freeze({
-  anchoMm: 50,
-  altoMm: 46,
-  margenLateralMm: 1.5,
-  qrTopMm: 6,
-  marca: Object.freeze({ texto: 'AGROGENOMAX', capMm: 2.2, baselineMm: 4.6 }),
-  codigo: Object.freeze({ capMm: 4, capMinimoMm: 3, separacionQrMm: 2 }),
+export const CHAPETA_AREA_UTIL_MM = Object.freeze({ ancho: 60, alto: 30.7 });
+
+// Frente (mm). El lienzo nunca supera maxAncho × maxAlto (tolerancia frente
+// a los bordes físicos de 60 × 30.7). El código visible usa capMm de altura
+// de mayúscula; solo se reduciría si no cabe a lo ancho y NUNCA por debajo
+// de capMinimoMm (en ese caso se aborta).
+export const FRENTE_LAYOUT = Object.freeze({
+  maxAnchoMm: 58,
+  maxAltoMm: 30,
+  margenSuperiorMinMm: 0.8,
+  separacionQrCodigoMm: 0.6,
+  margenInferiorMinMm: 0.8,
+  margenLateralMinMm: 1,
+  codigo: Object.freeze({ capMm: 3, capMinimoMm: 2.5 }),
 });
+
+// Reverso (mm): común a todas las chapetas. No existe logo vectorial oficial
+// en el repositorio (solo PNG/WEBP/JPEG), así que la identidad es tipográfica.
+export const REVERSO_LAYOUT = Object.freeze({
+  anchoMm: 58,
+  altoMm: 30,
+  margenMinMm: 1,
+  lineas: Object.freeze([
+    Object.freeze({ id: 'marca', texto: 'AgroGenomaX', capMm: 4.4, baselineMm: 8.8 }),
+    Object.freeze({ id: 'by-crh', texto: 'by CRH', capMm: 1.9, baselineMm: 13.4 }),
+    Object.freeze({ id: 'vertical', texto: 'Ganadería Inteligente', capMm: 3, baselineMm: 19.8 }),
+    Object.freeze({ id: 'web', texto: 'www.agrogenomax.com', capMm: 2.4, baselineMm: 25.6 }),
+  ]),
+});
+export const REVERSO_FILENAME = 'agrogenomax-back.svg';
 
 export const FUENTE_ARTE = 'IBM Plex Sans Condensed SemiBold (SIL OFL 1.1)';
 const FUENTE_URL = new URL('../../assets/fonts/IBMPlexSansCondensed-SemiBold.woff', import.meta.url);
@@ -97,17 +127,16 @@ function runsPathData(runs, ox, oy) {
   return runs.map((r) => `M${ox + r.x} ${oy + r.y}h${r.w}v1h-${r.w}z`).join('');
 }
 
-function fontSizeParaCap(capMm, unidadesPorMm) {
+function escalaCap(capMm) {
   const f = getFuente();
-  return (capMm / (f.tables.os2.sCapHeight / f.unitsPerEm)) * unidadesPorMm;
+  return capMm / (f.tables.os2.sCapHeight / f.unitsPerEm);
 }
 
 function anchoTextoMm(texto, capMm) {
-  const f = getFuente();
-  return (f.getAdvanceWidth(texto, 1000) / 1000) * (capMm / (f.tables.os2.sCapHeight / f.unitsPerEm));
+  return (getFuente().getAdvanceWidth(texto, 1000) / 1000) * escalaCap(capMm);
 }
 
-/** Código visible más ancho posible (AGX-XXXX-XXXX-C con el glifo más ancho) y su ancho a capMm. */
+/** Código visible más ancho posible (AGX-XXXX-XXXX-C con el glifo más ancho). */
 export function codigoPeorCaso() {
   const f = getFuente();
   let ancho = '';
@@ -119,77 +148,94 @@ export function codigoPeorCaso() {
       ancho = ch;
     }
   }
-  const peor = `AGX-${ancho.repeat(4)}-${ancho.repeat(4)}-${ancho}`;
-  return { codigo: peor, anchoMm: anchoTextoMm(peor, ARTE_LAYOUT.codigo.capMm) };
+  return `AGX-${ancho.repeat(4)}-${ancho.repeat(4)}-${ancho}`;
 }
 
-const layoutCache = new Map();
-/** Lienzo en unidades para un QR de `total` módulos; centra el QR en coordenadas enteras. */
-export function layoutLienzo(total) {
-  if (layoutCache.has(total)) return layoutCache.get(total);
-  const u = total / QR_EXPORT.sizeMm; // unidades por mm
-  let ancho = Math.ceil(ARTE_LAYOUT.anchoMm * u);
-  if ((ancho - total) % 2 !== 0) ancho += 1;
-  const alto = Math.ceil(ARTE_LAYOUT.altoMm * u);
+/**
+ * Distribución del frente para un QR de `total` módulos y `sizeMm` mm.
+ * Devuelve { cabe, motivo?, ...layout } sin lanzar: se usa también para
+ * evaluar tamaños candidatos.
+ */
+export function evaluarTamanoQr(total, sizeMm) {
+  const L = FRENTE_LAYOUT;
+  const u = total / sizeMm; // unidades (módulos) por mm
+  let ancho = Math.floor(L.maxAnchoMm * u + 1e-9);
+  if ((ancho - total) % 2 !== 0) ancho -= 1;
+  const alto = Math.floor(L.maxAltoMm * u + 1e-9);
   const qrX = (ancho - total) / 2;
-  const qrY = Math.ceil(ARTE_LAYOUT.qrTopMm * u);
-  const layout = Object.freeze({
+  const qrY = Math.ceil(L.margenSuperiorMinMm * u - 1e-9);
+  const codigoBaseline = qrY + total + (L.separacionQrCodigoMm + L.codigo.capMm) * u;
+  const layout = {
+    sizeMm,
     unidadesPorMm: u,
-    moduloMm: QR_EXPORT.sizeMm / total,
+    moduloMm: sizeMm / total,
     ancho,
     alto,
     anchoMm: ancho / u,
     altoMm: alto / u,
-    qr: Object.freeze({ x: qrX, y: qrY, lado: total }),
-    marcaBaseline: ARTE_LAYOUT.marca.baselineMm * u,
-    codigoBaseline: qrY + total + (ARTE_LAYOUT.codigo.separacionQrMm + ARTE_LAYOUT.codigo.capMm) * u,
-  });
-  layoutCache.set(total, layout);
-  return layout;
+    qr: { x: qrX, y: qrY, lado: total },
+    codigoBaseline,
+    margenes: {
+      superiorMm: qrY / u,
+      inferiorMm: (alto - codigoBaseline) / u,
+      lateralQrMm: qrX / u,
+    },
+  };
+  if (ancho < total + 2 * L.margenLateralMinMm * u) return { cabe: false, motivo: 'ANCHO_INSUFICIENTE', ...layout };
+  if (layout.margenes.inferiorMm < L.margenInferiorMinMm - 1e-9) return { cabe: false, motivo: 'MARGEN_INFERIOR_INSUFICIENTE', ...layout };
+  return { cabe: true, ...layout };
 }
 
-function textoCentrado(texto, capMm, baseline, layout) {
+const layoutCache = new Map();
+/** Layout del frente con QR_EXPORT.sizeMm; aborta si no cabe en la chapeta. */
+export function layoutFrente(total) {
+  if (layoutCache.has(total)) return layoutCache.get(total);
+  const evaluado = evaluarTamanoQr(total, QR_EXPORT.sizeMm);
+  if (!evaluado.cabe) fallo(`FRENTE_NO_CABE_${evaluado.motivo}`);
+  const { cabe, ...layout } = evaluado;
+  const congelado = Object.freeze({ ...layout, qr: Object.freeze(layout.qr), margenes: Object.freeze(layout.margenes) });
+  layoutCache.set(total, congelado);
+  return congelado;
+}
+
+function texto(texto, capMm, baseline, layout, centroX = layout.ancho / 2) {
   const f = getFuente();
-  const size = fontSizeParaCap(capMm, layout.unidadesPorMm);
+  const size = escalaCap(capMm) * layout.unidadesPorMm;
   const advance = f.getAdvanceWidth(texto, size);
-  const path = f.getPath(texto, (layout.ancho - advance) / 2, baseline, size);
-  const d = path.toPathData(DECIMALES);
+  const path = f.getPath(texto, centroX - advance / 2, baseline, size);
   const bb = path.getBoundingBox();
-  return { d, bbox: { x1: bb.x1, y1: bb.y1, x2: bb.x2, y2: bb.y2 } };
+  return { d: path.toPathData(DECIMALES), capMm, bbox: { x1: bb.x1, y1: bb.y1, x2: bb.x2, y2: bb.y2 } };
 }
 
-/** Altura de mayúscula (mm) del código visible: capMm, o menos si no cabe. */
+/** Altura de mayúscula (mm) del código visible: capMm, reducida solo si no cabe; nunca < capMinimoMm. */
 export function capCodigoMm(codigoVisible, layout) {
-  const { capMm, capMinimoMm } = ARTE_LAYOUT.codigo;
-  const util = layout.anchoMm - 2 * ARTE_LAYOUT.margenLateralMm;
+  const { capMm, capMinimoMm } = FRENTE_LAYOUT.codigo;
+  const util = layout.anchoMm - 2 * FRENTE_LAYOUT.margenLateralMinMm;
   const cap = Math.min(capMm, (capMm * util) / anchoTextoMm(codigoVisible, capMm));
   if (cap < capMinimoMm) fallo('CODIGO_VISIBLE_NO_CABE');
   return cap;
 }
 
-/** Contornos del código visible para un layout (usado al construir y al verificar). */
+/** Contornos del código visible centrados bajo el QR (usado al construir y al verificar). */
 export function codigoVisiblePath(codigoVisible, layout) {
-  return textoCentrado(codigoVisible, capCodigoMm(codigoVisible, layout), layout.codigoBaseline, layout);
+  return texto(codigoVisible, capCodigoMm(codigoVisible, layout), layout.codigoBaseline, layout);
 }
 
 /**
- * Modelo geométrico completo de una chapeta. Todas las coordenadas en
+ * Modelo geométrico del FRENTE de una chapeta. Todas las coordenadas en
  * unidades de módulo; mm = unidades / layout.unidadesPorMm.
  */
 export function buildChapetaArte({ codigoVisible, url }) {
   const matrix = buildQrMatrix(url);
-  const layout = layoutLienzo(matrix.total);
+  const layout = layoutFrente(matrix.total);
   const runs = matrixRuns(matrix);
-  const marca = textoCentrado(ARTE_LAYOUT.marca.texto, ARTE_LAYOUT.marca.capMm, layout.marcaBaseline, layout);
-  const codigo = codigoVisiblePath(codigoVisible, layout);
   return {
     codigoVisible,
     matrix,
     layout,
     runs,
     qrPathData: runsPathData(runs, layout.qr.x, layout.qr.y),
-    marca,
-    codigo,
+    codigo: codigoVisiblePath(codigoVisible, layout),
   };
 }
 
@@ -197,13 +243,15 @@ function fmt(n) {
   return Number(n.toFixed(4)).toString();
 }
 
-/** SVG maestro (arte completo) de una chapeta. */
+function svgRaiz(layout) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="${fmt(layout.anchoMm)}mm" height="${fmt(layout.altoMm)}mm" viewBox="0 0 ${layout.ancho} ${layout.alto}" preserveAspectRatio="xMidYMid meet" shape-rendering="crispEdges">`;
+}
+
+/** SVG maestro del FRENTE (<codigo_visible>-front.svg): QR + código visible. */
 export function renderArteSvg(arte) {
-  const { layout } = arte;
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
-    `<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="${fmt(layout.anchoMm)}mm" height="${fmt(layout.altoMm)}mm" viewBox="0 0 ${layout.ancho} ${layout.alto}" preserveAspectRatio="xMidYMid meet" shape-rendering="crispEdges">`,
-    `<path id="marca" fill="#000000" d="${arte.marca.d}"/>`,
+    svgRaiz(arte.layout),
     `<path id="qr" fill="#000000" d="${arte.qrPathData}"/>`,
     `<path id="codigo-visible" fill="#000000" d="${arte.codigo.d}"/>`,
     '</svg>',
@@ -211,7 +259,32 @@ export function renderArteSvg(arte) {
   ].join('\n');
 }
 
-/** SVG solo-QR de 30 × 30 mm (vista previa HTML); misma matriz y mismos tramos. */
+/** Nombre del SVG maestro del frente. */
+export function frenteFilename(codigoVisible) {
+  return `${codigoVisible}-front.svg`;
+}
+
+let reversoCache = null;
+/** Modelo geométrico del REVERSO común (unidades = mm). */
+export function buildReversoArte() {
+  if (reversoCache) return reversoCache;
+  const layout = { unidadesPorMm: 1, ancho: REVERSO_LAYOUT.anchoMm, alto: REVERSO_LAYOUT.altoMm, anchoMm: REVERSO_LAYOUT.anchoMm, altoMm: REVERSO_LAYOUT.altoMm };
+  const lineas = REVERSO_LAYOUT.lineas.map((l) => ({ id: l.id, texto: l.texto, ...texto(l.texto, l.capMm, l.baselineMm, layout) }));
+  reversoCache = Object.freeze({ layout: Object.freeze(layout), lineas: Object.freeze(lineas) });
+  return reversoCache;
+}
+
+export function renderReversoSvg(reverso = buildReversoArte()) {
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    svgRaiz(reverso.layout),
+    ...reverso.lineas.map((l) => `<path id="${l.id}" fill="#000000" d="${l.d}"/>`),
+    '</svg>',
+    '',
+  ].join('\n');
+}
+
+/** SVG solo-QR de QR_EXPORT.sizeMm (vista previa HTML); misma matriz y mismos tramos. */
 export function renderQrSvg(url) {
   const matrix = buildQrMatrix(url);
   return `<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="${QR_EXPORT.sizeMm}mm" height="${QR_EXPORT.sizeMm}mm" viewBox="0 0 ${matrix.total} ${matrix.total}" preserveAspectRatio="xMidYMid meet" shape-rendering="crispEdges"><path fill="#000000" d="${runsPathData(matrixRuns(matrix), 0, 0)}"/></svg>`;
@@ -229,11 +302,11 @@ function pathData(svg, id) {
   return m ? m[1] : null;
 }
 
-/** Reconstruye la matriz (con quiet zone) leyendo NUESTRO SVG; null si el path no es canónico. */
+/** Reconstruye la matriz (con quiet zone) leyendo NUESTRO SVG del frente; null si el path no es canónico. */
 export function matrixFromArteSvg(svg, total) {
   const d = pathData(svg, 'qr');
   if (d === null) return null;
-  const layout = layoutLienzo(total);
+  const layout = layoutFrente(total);
   const bits = new Uint8Array(total * total);
   const re = /M(\d+) (\d+)h(\d+)v1h-(\d+)z/gy;
   let consumido = 0;
@@ -254,16 +327,25 @@ function cajasSeCruzan(a, b) {
   return a.x1 < b.x2 && a.x2 > b.x1 && a.y1 < b.y2 && a.y2 > b.y1;
 }
 
+function dentroDeAreaUtil(svg) {
+  const w = Number.parseFloat(atributo(svg, 'width'));
+  const h = Number.parseFloat(atributo(svg, 'height'));
+  return w > 0 && h > 0 && w <= CHAPETA_AREA_UTIL_MM.ancho && h <= CHAPETA_AREA_UTIL_MM.alto;
+}
+
 /**
- * Verificación independiente del SVG ya generado contra url_qr y el código
- * visible. Lanza FabricacionVerificationError ante cualquier diferencia.
+ * Verificación independiente del SVG del frente ya generado contra url_qr y
+ * el código visible. Lanza FabricacionVerificationError ante cualquier
+ * diferencia.
  */
 export function verificarArteSvg({ svg, url, codigoVisible }) {
   if (PROHIBIDO_SVG.test(svg)) fallo('SVG_CONTIENE_ELEMENTOS_PROHIBIDOS');
+  if ((svg.match(/<path /g) || []).length !== 2) fallo('FRENTE_ELEMENTOS_INESPERADOS');
   const esperada = buildQrMatrix(url);
-  const layout = layoutLienzo(esperada.total);
+  const layout = layoutFrente(esperada.total);
   if (atributo(svg, 'viewBox') !== `0 0 ${layout.ancho} ${layout.alto}`) fallo('SVG_VIEWBOX');
   if (atributo(svg, 'width') !== `${fmt(layout.anchoMm)}mm` || atributo(svg, 'height') !== `${fmt(layout.altoMm)}mm`) fallo('SVG_TAMANO_FISICO');
+  if (!dentroDeAreaUtil(svg)) fallo('FRENTE_EXCEDE_AREA_UTIL');
   if (Math.abs(layout.qr.lado / layout.unidadesPorMm - QR_EXPORT.sizeMm) > 1e-9) fallo('QR_TAMANO_FISICO');
   const reconstruida = matrixFromArteSvg(svg, esperada.total);
   if (!reconstruida) fallo('QR_PATH_NO_CANONICO');
@@ -273,11 +355,20 @@ export function verificarArteSvg({ svg, url, codigoVisible }) {
   const codigo = codigoVisiblePath(codigoVisible, layout);
   if (pathData(svg, 'codigo-visible') !== codigo.d) fallo('CODIGO_VISIBLE_GEOMETRIA');
   const zonaQr = { x1: layout.qr.x, y1: layout.qr.y, x2: layout.qr.x + layout.qr.lado, y2: layout.qr.y + layout.qr.lado };
-  const marca = textoCentrado(ARTE_LAYOUT.marca.texto, ARTE_LAYOUT.marca.capMm, layout.marcaBaseline, layout);
-  if (pathData(svg, 'marca') !== marca.d) fallo('MARCA_GEOMETRIA');
-  for (const caja of [codigo.bbox, marca.bbox]) {
-    if (cajasSeCruzan(caja, zonaQr)) fallo('TEXTO_INVADE_ZONA_QR');
-    if (caja.x1 < 0 || caja.y1 < 0 || caja.x2 > layout.ancho || caja.y2 > layout.alto) fallo('TEXTO_FUERA_DEL_LIENZO');
-  }
+  if (cajasSeCruzan(codigo.bbox, zonaQr)) fallo('TEXTO_INVADE_ZONA_QR');
+  if (codigo.bbox.x1 < 0 || codigo.bbox.y1 < 0 || codigo.bbox.x2 > layout.ancho || codigo.bbox.y2 > layout.alto) fallo('TEXTO_FUERA_DEL_LIENZO');
   return { version: esperada.version, ecc: esperada.ecc, moduleCount: esperada.total };
+}
+
+/** Verificación del reverso común: solo contornos rellenos, dentro del área útil, idéntico al modelo. */
+export function verificarReversoSvg(svg) {
+  if (PROHIBIDO_SVG.test(svg)) fallo('REVERSO_CONTIENE_ELEMENTOS_PROHIBIDOS');
+  if (svg !== renderReversoSvg()) fallo('REVERSO_DISTINTO_AL_MODELO');
+  if (!dentroDeAreaUtil(svg)) fallo('REVERSO_EXCEDE_AREA_UTIL');
+  const { layout, lineas } = buildReversoArte();
+  const m = REVERSO_LAYOUT.margenMinMm;
+  for (const l of lineas) {
+    if (l.bbox.x1 < m || l.bbox.y1 < m || l.bbox.x2 > layout.ancho - m || l.bbox.y2 > layout.alto - m) fallo('REVERSO_TEXTO_FUERA_DE_MARGEN');
+  }
+  return true;
 }

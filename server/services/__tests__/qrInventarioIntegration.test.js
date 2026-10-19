@@ -724,7 +724,8 @@ describe('FASE 15: paquete de fabricación contra Postgres real (solo lectura)',
     assert.equal(data.chapetas.length, 10);
     for (const c of data.chapetas) assert.equal(codigos.hashQrToken(c.token), c.tokenHash);
     const paquete = await buildPaqueteFabricacion(data);
-    assert.equal(Object.keys(paquete.files).filter((p) => p.startsWith('svg/')).length, 10);
+    assert.equal(Object.keys(paquete.files).filter((p) => p.startsWith('front/')).length, 10);
+    assert.ok(paquete.files['back/agrogenomax-back.svg']);
     const { items } = prepararFabricacion(data);
     for (const item of items) assert.equal(item.url, `${URL_BASE}/qr/${data.chapetas.find((c) => c.codigoVisible === item.codigoVisible).token}`);
 

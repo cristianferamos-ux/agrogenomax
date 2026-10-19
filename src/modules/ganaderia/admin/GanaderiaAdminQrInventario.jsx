@@ -189,7 +189,7 @@ function DescargasFabricacion({ loteId }) {
           {sha.filename} descargado y verificado. SHA-256: <span className="gan-aqr-mono">{sha.valor}</span>
         </Msg>
       ) : null}
-      <p className="gan-aqr-hint">El maestro de grabado son los SVG del paquete. El proveedor no debe regenerar el QR. Enviar el ZIP cifrado y la contraseña por otro canal.</p>
+      <p className="gan-aqr-hint">Los maestros de grabado son los SVG del paquete (frente por chapeta + reverso común). El proveedor no debe regenerar el QR; fabricar primero UNA muestra. Enviar el ZIP cifrado y la contraseña por otro canal.</p>
     </div>
   );
 }
@@ -444,7 +444,7 @@ function ChapetaDetalle({ qrId, nombreOrg, onChanged }) {
       <Msg type="error">{error}</Msg>
       {chapeta.tipo === 'QR_AGX' ? (
         <div className="gan-aqr-actions">
-          <a className="gan-aqr-secondary" href={arteSvgUrl(qrId)}>Descargar SVG maestro</a>
+          <a className="gan-aqr-secondary" href={arteSvgUrl(qrId)}>Descargar SVG maestro (frente)</a>
         </div>
       ) : null}
       {activa && !accion ? (

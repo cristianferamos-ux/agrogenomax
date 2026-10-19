@@ -373,7 +373,7 @@ describe('FASE 15: descargas de fabricación láser (Super Admin)', () => {
     ['/admin/qr/lotes/7/referencia.pdf', 'application/pdf', 'LQR-20261018-TEST-referencia.pdf'],
     ['/admin/qr/lotes/7/manifest.csv', 'text/csv; charset=utf-8', 'LQR-20261018-TEST-manifest.csv'],
     ['/admin/qr/lotes/7/proveedor.html', 'text/html; charset=utf-8', 'LQR-20261018-TEST-vista-previa.html'],
-    ['/admin/qr/chapetas/1/arte.svg', 'image/svg+xml; charset=utf-8', 'AGX-7KM4-P2XZ-R.svg'],
+    ['/admin/qr/chapetas/1/arte.svg', 'image/svg+xml; charset=utf-8', 'AGX-7KM4-P2XZ-R-front.svg'],
   ];
 
   for (const [path, type, filename] of ARCHIVOS) {
@@ -398,10 +398,10 @@ describe('FASE 15: descargas de fabricación láser (Super Admin)', () => {
     assert.equal(body.subarray(0, 2).toString('latin1'), 'PK');
   });
 
-  test('arte.svg: CSP default-src none y SVG maestro', async () => {
+  test('arte.svg: CSP default-src none y SVG maestro del FRENTE', async () => {
     const { headers, body } = await descargar('/admin/qr/chapetas/1/arte.svg');
     assert.equal(headers.get('content-security-policy'), "default-src 'none'");
-    assert.match(body.toString('utf8'), /<svg [^>]*width="50mm" height="46mm" viewBox="0 0 75 69"/);
+    assert.match(body.toString('utf8'), /<svg [^>]*width="57.0667mm" height="29.8667mm" viewBox="0 0 107 56"/);
   });
 
   for (const path of ['/admin/qr/lotes/8/paquete.zip', '/admin/qr/lotes/8/referencia.pdf', '/admin/qr/lotes/8/manifest.csv', '/admin/qr/chapetas/3/arte.svg']) {

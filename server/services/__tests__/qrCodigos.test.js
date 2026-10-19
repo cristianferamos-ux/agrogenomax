@@ -140,13 +140,13 @@ test('url_qr: <url_base>/qr/<token> (el código visible no es el token)', () => 
   assert.equal(qrUrl(LOTE.urlBase, CHAPETAS[0].token), 'https://agrogenomax.com/qr/aB3_-xYz09QwErTyUiOpAsDfGhJkLzXc');
 });
 
-test('vista previa HTML: marca, código visible y QR (Q, quiet zone 4, 30 mm, solo rellenos) por chapeta, sin scripts', () => {
+test('vista previa HTML: código visible y QR (Q, quiet zone 4, 24 mm, solo rellenos) por chapeta, sin scripts', () => {
   const html = buildProveedorHtml({ lote: LOTE, chapetas: CHAPETAS });
   assert.equal((html.match(/<svg/g) || []).length, 2);
-  assert.equal((html.match(/width="30mm" height="30mm" viewBox="0 0 45 45"/g) || []).length, 2);
+  assert.equal((html.match(/width="24mm" height="24mm" viewBox="0 0 45 45"/g) || []).length, 2);
   assert.doesNotMatch(html, /stroke=|<image/);
   assert.match(html, /NO es el archivo de fabricación/);
-  assert.equal((html.match(/AGROGENOMAX/g) || []).length, 2);
+  assert.doesNotMatch(html, /AGROGENOMAX/);
   assert.ok(html.includes('AGX-7KM4-P2XZ-R') && html.includes('AGX-4TR8-N6CW-H'));
   assert.ok(html.includes('LQR-20261017-ABCD'));
   assert.doesNotMatch(html, /<script/i);

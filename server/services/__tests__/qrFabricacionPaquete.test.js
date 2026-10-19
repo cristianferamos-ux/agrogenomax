@@ -1,25 +1,34 @@
-// FASE 15: paquete maestro de fabricación láser -- SVG maestro (solo
-// rellenos, tamaño físico real, quiet zone 4), PDF vectorial con la misma
-// geometría, manifest, checksums, ZIP y verificación que aborta el export.
+// FASE 15: paquete maestro de fabricación láser, chapeta de DOS caras
+// (superficie útil medida 60 × 30.7 mm). FRENTE variable: QR (Q, quiet zone
+// 4, 24 mm) + código visible debajo, solo rellenos. REVERSO común:
+// identidad AgroGenomaX en contornos. PDF vectorial con la misma geometría,
+// manifest, checksums, ZIP y verificación que aborta el export.
 // La decodificación usa jsQR sobre un raster en memoria de NUESTRO SVG
-// (independiente de la librería qrcode que generó la matriz).
+// (independiente de la librería qrcode), también con degradaciones.
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { DOMParser } from '@xmldom/xmldom';
-import jsQR from 'jsqr';
 import JSZip from 'jszip';
 
 import {
-  ARTE_LAYOUT,
+  CHAPETA_AREA_UTIL_MM,
+  FRENTE_LAYOUT,
   QR_EXPORT,
+  QR_TAMANOS_CANDIDATOS_MM,
+  REVERSO_FILENAME,
+  REVERSO_LAYOUT,
   buildChapetaArte,
   buildQrMatrix,
+  buildReversoArte,
   codigoPeorCaso,
+  evaluarTamanoQr,
   matrixFromArteSvg,
   renderArteSvg,
   renderQrSvg,
+  renderReversoSvg,
   verificarArteSvg,
+  verificarReversoSvg,
 } from '../ganaderia/qrFabricacionGeometria.js';
 import {
   MANIFEST_COLUMNS,
@@ -35,8 +44,11 @@ import {
 import { buildProveedorHtml, qrUrl } from '../ganaderia/qrProveedorExport.js';
 import { generateCodigoVisible, generateQrToken, hashQrToken } from '../ganaderia/qrCodigos.js';
 import { decryptQrToken, encryptQrToken } from '../ganaderia/qrTokenCrypto.js';
+import { ESCENARIOS, leerQr, morfologia, rasterSvg } from './qrRasterTestUtils.js';
 
 const URL_BASE = 'https://agrogenomax.com';
+// Tokens fijos (deterministas) para las pruebas de robustez.
+const TOKENS_FIJOS = [0, 1, 2].map((i) => crypto.createHash('sha256').update(`agx-fase15-robustez-${i}`).digest().subarray(0, 24).toString('base64url'));
 
 function fixtureLote(cantidad = 10) {
   const vistos = new Set();
@@ -54,39 +66,18 @@ function fixtureLote(cantidad = 10) {
   };
 }
 
-function svgDe(chapeta) {
-  const url = qrUrl(URL_BASE, chapeta.token);
-  return { url, svg: renderArteSvg(buildChapetaArte({ codigoVisible: chapeta.codigoVisible, url })) };
+function frenteDe(codigoVisible, token) {
+  const url = qrUrl(URL_BASE, token);
+  const arte = buildChapetaArte({ codigoVisible, url });
+  return { url, arte, svg: renderArteSvg(arte) };
 }
 
 function attr(svg, name) {
   return svg.match(new RegExp(`<svg [^>]*\\b${name}="([^"]*)"`))?.[1];
 }
 
-/** Raster RGBA en memoria del path QR de nuestro SVG (blanco = sin grabar). */
-function rasterQr(svg, pxPorModulo = 6) {
-  const [, , ancho, alto] = attr(svg, 'viewBox').split(' ').map(Number);
-  const d = svg.match(/<path id="qr" fill="#000000" d="([^"]*)"/)[1];
-  const w = ancho * pxPorModulo;
-  const h = alto * pxPorModulo;
-  const data = new Uint8ClampedArray(w * h * 4).fill(255);
-  for (const tramo of d.split('z').filter(Boolean)) {
-    const [, x, y, ww] = tramo.match(/^M(\d+) (\d+)h(\d+)v1h-\d+$/).map(Number);
-    for (let py = y * pxPorModulo; py < (y + 1) * pxPorModulo; py += 1) {
-      for (let px = x * pxPorModulo; px < (x + ww) * pxPorModulo; px += 1) {
-        const i = (py * w + px) * 4;
-        data[i] = 0;
-        data[i + 1] = 0;
-        data[i + 2] = 0;
-      }
-    }
-  }
-  return { data, w, h };
-}
-
 function textosPdf(pdf) {
-  const hex = [...pdf.matchAll(/<([0-9a-f]+)>/g)].map((m) => Buffer.from(m[1], 'hex').toString('latin1'));
-  return hex.join('');
+  return [...pdf.matchAll(/<([0-9a-f]+)>/g)].map((m) => Buffer.from(m[1], 'hex').toString('latin1')).join('');
 }
 
 /** Bloques de arte del PDF: q, translate, scale, ... Q -> tramos QR (x y w 1 re). */
@@ -101,46 +92,70 @@ function bloquesPdf(pdf) {
   return bloques;
 }
 
-describe('FASE 15: SVG maestro por chapeta', () => {
+function sinErroresXml(svg) {
+  const errores = [];
+  const doc = new DOMParser({ onError: (nivel, msg) => errores.push(`${nivel}: ${msg}`) }).parseFromString(svg, 'image/svg+xml');
+  assert.deepEqual(errores, []);
+  assert.equal(doc.documentElement.nodeName, 'svg');
+  assert.equal(doc.documentElement.getAttribute('xmlns'), 'http://www.w3.org/2000/svg');
+  return doc;
+}
+
+describe('FASE 15: tamaño del QR frente a la superficie útil 60 × 30.7 mm', () => {
+  test('10-11. se elige el MAYOR candidato que cabe limpiamente: 24 mm (0.5333 mm/módulo); 24.5 y 25 no caben', () => {
+    const evaluados = QR_TAMANOS_CANDIDATOS_MM.map((size) => ({ size, ...evaluarTamanoQr(45, size) }));
+    const caben = evaluados.filter((e) => e.cabe).map((e) => e.size);
+    assert.deepEqual(caben, [23, 23.5, 24]);
+    assert.equal(QR_EXPORT.sizeMm, Math.max(...caben));
+    assert.equal(QR_EXPORT.sizeMm, 24);
+    for (const e of evaluados.filter((x) => !x.cabe)) assert.equal(e.motivo, 'MARGEN_INFERIOR_INSUFICIENTE');
+    const elegido = evaluados.find((e) => e.size === 24);
+    assert.ok(Math.abs(elegido.moduloMm - 24 / 45) < 1e-12);
+    assert.ok(elegido.margenes.inferiorMm >= FRENTE_LAYOUT.margenInferiorMinMm);
+    assert.ok(elegido.margenes.superiorMm >= FRENTE_LAYOUT.margenSuperiorMinMm);
+  });
+});
+
+describe('FASE 15: FRENTE -- SVG maestro por chapeta', () => {
   const { chapetas } = fixtureLote(1);
-  const { url, svg } = svgDe(chapetas[0]);
+  const { url, arte, svg } = frenteDe(chapetas[0].codigoVisible, chapetas[0].token);
+  const L = arte.layout;
 
-  test('QR_EXPORT único: Q, quiet zone 4, 30 mm', () => {
-    assert.deepEqual({ ...QR_EXPORT }, { errorCorrectionLevel: 'Q', margin: 4, sizeMm: 30 });
+  test('QR_EXPORT único: Q, quiet zone 4, 24 mm', () => {
+    assert.deepEqual({ ...QR_EXPORT }, { errorCorrectionLevel: 'Q', margin: 4, sizeMm: 24 });
   });
 
-  test('1. XML válido (xmldom sin errores) con raíz <svg> SVG 1.1', () => {
-    const errores = [];
-    const doc = new DOMParser({ onError: (nivel, msg) => errores.push(`${nivel}: ${msg}`) }).parseFromString(svg, 'image/svg+xml');
-    assert.deepEqual(errores, []);
-    assert.equal(doc.documentElement.nodeName, 'svg');
-    assert.equal(doc.documentElement.getAttribute('xmlns'), 'http://www.w3.org/2000/svg');
-    assert.equal(doc.getElementsByTagName('path').length, 3);
+  test('XML válido con raíz <svg> y exactamente 2 paths (QR + código)', () => {
+    const doc = sinErroresXml(svg);
+    assert.equal(doc.getElementsByTagName('path').length, 2);
   });
 
-  test('2-4. sin <image>, sin stroke, sin <text>, sin filtros/degradados/estilos', () => {
-    assert.doesNotMatch(svg, /<image/i);
-    assert.doesNotMatch(svg, /stroke/i);
-    assert.doesNotMatch(svg, /<text|<tspan|font-family/i);
-    assert.doesNotMatch(svg, /filter|gradient|<style|<script|opacity|href=/i);
+  test('1. frente dentro de 60 × 30.7 mm (lienzo 57.0667 × 29.8667 mm, ≤ 58 × 30)', () => {
+    assert.equal(attr(svg, 'width'), '57.0667mm');
+    assert.equal(attr(svg, 'height'), '29.8667mm');
+    assert.equal(attr(svg, 'viewBox'), '0 0 107 56');
+    assert.ok(L.anchoMm <= FRENTE_LAYOUT.maxAnchoMm && L.altoMm <= FRENTE_LAYOUT.maxAltoMm);
+    assert.ok(L.anchoMm <= CHAPETA_AREA_UTIL_MM.ancho && L.altoMm <= CHAPETA_AREA_UTIL_MM.alto);
+    assert.equal(attr(svg, 'preserveAspectRatio'), 'xMidYMid meet');
+    assert.equal(attr(svg, 'shape-rendering'), 'crispEdges');
   });
 
-  test('5-6. todos los elementos son paths rellenos #000000; sin fondo ni <rect> blanco', () => {
-    const paths = [...svg.matchAll(/<path [^>]*>/g)].map((m) => m[0]);
-    assert.equal(paths.length, 3);
-    for (const p of paths) assert.match(p, /^<path id="(marca|qr|codigo-visible)" fill="#000000" d="/);
-    assert.doesNotMatch(svg, /<rect|#fff|white|fill="(?!#000000)/i);
-    const matrix = buildQrMatrix(url);
-    // La quiet zone queda vacía: ningún módulo en las 4 filas/columnas exteriores.
-    for (let y = 0; y < matrix.total; y += 1) {
-      for (let x = 0; x < matrix.total; x += 1) {
-        const enMargen = x < 4 || y < 4 || x >= matrix.total - 4 || y >= matrix.total - 4;
-        if (enMargen) assert.equal(matrix.bits[y * matrix.total + x], 0);
-      }
-    }
+  test('2-3. QR centrado horizontalmente; código visible centrado DEBAJO del QR', () => {
+    assert.deepEqual({ ...L.qr }, { x: 31, y: 2, lado: 45 });
+    assert.equal(L.qr.x * 2 + L.qr.lado, L.ancho);
+    const c = arte.codigo.bbox;
+    assert.ok(Math.abs((c.x1 + c.x2) / 2 - L.ancho / 2) < 0.25, 'código centrado');
+    assert.ok(c.y1 >= L.qr.y + L.qr.lado, 'código bajo la zona del QR');
+    assert.ok(c.y2 <= L.alto);
   });
 
-  test('7-11. ECC Q, versión 5, matriz 37×37, quiet zone 4, total 45×45 (URL de 59 caracteres)', () => {
+  test('4-5. sin marca, logo, web ni elementos comerciales en el frente', () => {
+    assert.doesNotMatch(svg, /id="(marca|by-crh|vertical|web)"/);
+    assert.equal((svg.match(/<path /g) || []).length, 2);
+    assert.deepEqual([...svg.matchAll(/<path id="([^"]+)"/g)].map((m) => m[1]), ['qr', 'codigo-visible']);
+  });
+
+  test('6-9. ECC Q, versión 5, matriz 37×37, quiet zone 4, total 45×45 (URL de 59 caracteres)', () => {
     assert.equal(url.length, 59);
     const matrix = buildQrMatrix(url);
     assert.equal(matrix.ecc, 'Q');
@@ -150,56 +165,55 @@ describe('FASE 15: SVG maestro por chapeta', () => {
     assert.equal(matrix.total, 45);
   });
 
-  test('12. tamaño físico real: QR = 30 mm exactos; lienzo 50 × 46 mm en mm', () => {
-    assert.equal(attr(svg, 'width'), '50mm');
-    assert.equal(attr(svg, 'height'), '46mm');
-    assert.equal(attr(svg, 'viewBox'), '0 0 75 69');
-    assert.equal(attr(svg, 'preserveAspectRatio'), 'xMidYMid meet');
-    assert.equal(attr(svg, 'shape-rendering'), 'crispEdges');
-    const mmPorUnidad = 50 / 75;
-    assert.equal(45 * mmPorUnidad, 30);
-    assert.ok(Math.abs(mmPorUnidad - 30 / 45) < 1e-12);
-    const arte = buildChapetaArte({ codigoVisible: chapetas[0].codigoVisible, url });
-    assert.deepEqual({ ...arte.layout.qr }, { x: 15, y: 9, lado: 45 });
+  test('10-11. QR de 24 mm exactos: 45 módulos de 0.5333 mm', () => {
+    assert.equal(L.qr.lado / L.unidadesPorMm, 24);
+    assert.ok(Math.abs(L.moduloMm - 0.533333) < 1e-6);
+    assert.ok(Math.abs(Number.parseFloat(attr(svg, 'width')) / L.ancho - L.moduloMm) < 1e-6);
   });
 
-  test('SVG solo-QR (vista previa): width/height 30mm, viewBox 0 0 45 45, misma matriz', () => {
-    const qrSvg = renderQrSvg(url);
-    assert.match(qrSvg, /^<svg [^>]*width="30mm" height="30mm" viewBox="0 0 45 45" preserveAspectRatio="xMidYMid meet" shape-rendering="crispEdges">/);
-    assert.doesNotMatch(qrSvg, /stroke|<image|<rect|#fff/i);
+  test('12. ningún elemento invade la quiet zone ni la zona del QR', () => {
+    const matrix = buildQrMatrix(url);
+    for (let y = 0; y < matrix.total; y += 1) {
+      for (let x = 0; x < matrix.total; x += 1) {
+        if (x < 4 || y < 4 || x >= matrix.total - 4 || y >= matrix.total - 4) assert.equal(matrix.bits[y * matrix.total + x], 0);
+      }
+    }
+    const c = arte.codigo.bbox;
+    const cruza = c.x1 < L.qr.x + L.qr.lado && c.x2 > L.qr.x && c.y1 < L.qr.y + L.qr.lado && c.y2 > L.qr.y;
+    assert.equal(cruza, false);
   });
 
-  test('13. codigo_visible correcto en paths (y nunca como texto); otro código no verifica', () => {
-    assert.doesNotThrow(() => verificarArteSvg({ svg, url, codigoVisible: chapetas[0].codigoVisible }));
+  test('13-14. código visible en paths (nunca como texto), altura 3 mm ≥ mínimo 2.5 mm; peor caso del alfabeto sin reducir', () => {
     assert.ok(!svg.includes(chapetas[0].codigoVisible));
+    assert.equal(arte.codigo.capMm, 3);
+    const altoMm = (arte.codigo.bbox.y2 - arte.codigo.bbox.y1) / L.unidadesPorMm;
+    assert.ok(altoMm >= FRENTE_LAYOUT.codigo.capMinimoMm && altoMm <= 3.2, String(altoMm));
+    const peor = buildChapetaArte({ codigoVisible: codigoPeorCaso(), url });
+    assert.equal(peor.codigo.capMm, 3, 'AGX-WWWW-WWWW-W cabe a 3 mm');
+    assert.ok(peor.codigo.bbox.x1 >= FRENTE_LAYOUT.margenLateralMinMm * L.unidadesPorMm);
+    assert.ok(peor.codigo.bbox.x2 <= L.ancho - FRENTE_LAYOUT.margenLateralMinMm * L.unidadesPorMm);
+  });
+
+  test('otro código visible no verifica (QR y código del mismo archivo)', () => {
     const otro = generateCodigoVisible();
     assert.notEqual(otro, chapetas[0].codigoVisible);
     assert.throws(() => verificarArteSvg({ svg, url, codigoVisible: otro }), { code: 'EXPORT_VERIFICATION_FAILED', detalle: 'CODIGO_VISIBLE_GEOMETRIA' });
   });
 
-  test('zona reservada 30 × 30 mm: marca y código fuera del QR y dentro del lienzo', () => {
-    const arte = buildChapetaArte({ codigoVisible: chapetas[0].codigoVisible, url });
-    const qr = arte.layout.qr;
-    for (const caja of [arte.marca.bbox, arte.codigo.bbox]) {
-      const cruza = caja.x1 < qr.x + qr.lado && caja.x2 > qr.x && caja.y1 < qr.y + qr.lado && caja.y2 > qr.y;
-      assert.equal(cruza, false);
-      assert.ok(caja.x1 >= 0 && caja.y1 >= 0 && caja.x2 <= arte.layout.ancho && caja.y2 <= arte.layout.alto);
-    }
-    assert.ok(arte.marca.bbox.y2 <= qr.y);
-    assert.ok(arte.codigo.bbox.y1 >= qr.y + qr.lado);
+  test('17-19. solo fill #000000: 0 stroke, 0 <image>, 0 <text>, sin fondo ni filtros', () => {
+    for (const p of [...svg.matchAll(/<path [^>]*>/g)].map((m) => m[0])) assert.match(p, /^<path id="(qr|codigo-visible)" fill="#000000" d="/);
+    assert.doesNotMatch(svg, /stroke/i);
+    assert.doesNotMatch(svg, /<image/i);
+    assert.doesNotMatch(svg, /<text|<tspan|font-family/i);
+    assert.doesNotMatch(svg, /<rect|#fff|white|filter|gradient|<style|<script|opacity|href=/i);
   });
 
-  test('código visible ~4 mm de alto; el peor caso del alfabeto (todo W) cabe sin bajar de 3 mm', () => {
-    const arte = buildChapetaArte({ codigoVisible: chapetas[0].codigoVisible, url });
-    const altoMm = (arte.codigo.bbox.y2 - arte.codigo.bbox.y1) / arte.layout.unidadesPorMm;
-    assert.ok(altoMm > 3 && altoMm <= ARTE_LAYOUT.codigo.capMm + 0.2, String(altoMm));
-    const peor = codigoPeorCaso();
-    const artePeor = buildChapetaArte({ codigoVisible: peor.codigo, url });
-    const anchoMm = (artePeor.codigo.bbox.x2 - artePeor.codigo.bbox.x1) / artePeor.layout.unidadesPorMm;
-    assert.ok(anchoMm <= ARTE_LAYOUT.anchoMm - 2 * ARTE_LAYOUT.margenLateralMm + 0.01, String(anchoMm));
+  test('SVG solo-QR (vista previa): 24mm × 24mm, viewBox 0 0 45 45, solo rellenos', () => {
+    assert.match(renderQrSvg(url), /^<svg [^>]*width="24mm" height="24mm" viewBox="0 0 45 45" preserveAspectRatio="xMidYMid meet" shape-rendering="crispEdges">/);
+    assert.doesNotMatch(renderQrSvg(url), /stroke|<image|<rect|#fff/i);
   });
 
-  test('18. el token no aparece como texto en el SVG ni en la vista previa HTML', () => {
+  test('el token no aparece en el SVG ni en la vista previa HTML', () => {
     assert.ok(!svg.includes(chapetas[0].token));
     assert.ok(!svg.includes(url));
     const html = buildProveedorHtml({ lote: { codigoLote: 'LQR-20261018-TEST', urlBase: URL_BASE }, chapetas });
@@ -207,70 +221,104 @@ describe('FASE 15: SVG maestro por chapeta', () => {
     assert.doesNotMatch(html, /<script/i);
   });
 
-  test('19. jsQR (independiente de qrcode) decodifica el raster de nuestro SVG a url_qr EXACTA', () => {
-    const { data, w, h } = rasterQr(svg);
-    const leido = jsQR(data, w, h, { inversionAttempts: 'dontInvert' });
-    assert.ok(leido, 'jsQR no encontró el QR');
-    assert.equal(leido.data, url);
-    assert.equal(leido.version, 5);
-  });
-
-  test('20. matriz reconstruida desde el SVG = matriz generada (bit a bit)', () => {
+  test('matriz reconstruida desde el SVG = matriz generada (bit a bit)', () => {
     const esperada = buildQrMatrix(url);
-    const reconstruida = matrixFromArteSvg(svg, esperada.total);
-    assert.ok(reconstruida);
-    assert.deepEqual(Array.from(reconstruida), Array.from(esperada.bits));
+    assert.deepEqual(Array.from(matrixFromArteSvg(svg, esperada.total)), Array.from(esperada.bits));
   });
 
-  test('SVG determinista: mismo input -> mismo archivo y mismo SHA-256', () => {
-    assert.equal(sha256Hex(svgDe(chapetas[0]).svg), sha256Hex(svg));
+  test('15. jsQR (independiente de qrcode) decodifica el frente completo rasterizado a url_qr EXACTA', () => {
+    assert.equal(leerQr(rasterSvg(svg, 10)), url);
+  });
+
+  test('SVG determinista: mismo input -> mismo archivo', () => {
+    assert.equal(sha256Hex(frenteDe(chapetas[0].codigoVisible, chapetas[0].token).svg), sha256Hex(svg));
+  });
+});
+
+describe('FASE 15: robustez digital del frente de 24 mm (jsQR, tokens fijos)', () => {
+  // Resolución simulada de cámara: 6 px/mm (≈ 3.2 px por módulo). La
+  // erosión/dilatación de 1 px se aplica a 16 px/mm (≈ 0.06 mm por lado de
+  // sangrado del láser, ~12 % del módulo).
+  const casos = TOKENS_FIJOS.map((token) => frenteDe('AGX-7KM4-P2XZ-R', token));
+  for (const escenario of ['limpio', 'contrasteBajo', 'desenfoque', 'inclinacion', 'combinado']) {
+    test(`16. ${escenario} a 6 px/mm -> url_qr exacta`, () => {
+      for (const { url, svg } of casos) assert.equal(leerQr(ESCENARIOS[escenario](rasterSvg(svg, 6))), url);
+    });
+  }
+  for (const modo of ['erosionar', 'dilatar']) {
+    test(`16. ${modo} ~0.06 mm por lado -> url_qr exacta`, () => {
+      for (const { url, svg } of casos) assert.equal(leerQr(morfologia(rasterSvg(svg, 16), modo)), url);
+    });
+  }
+  test('16. reducción de resolución: decodifica hasta 4.5 px/mm (≈ 2.4 px por módulo)', () => {
+    for (const { url, svg } of casos) assert.equal(leerQr(rasterSvg(svg, 4.5)), url);
+  });
+});
+
+describe('FASE 15: REVERSO común', () => {
+  const svg = renderReversoSvg();
+  const reverso = buildReversoArte();
+
+  test('20. reverso único y determinista (mismo archivo para todo el lote)', () => {
+    assert.equal(renderReversoSvg(), svg);
+    assert.equal(REVERSO_FILENAME, 'agrogenomax-back.svg');
+  });
+
+  test('21. reverso dentro de 60 × 30.7 mm (lienzo 58 × 30 mm) y textos con margen ≥ 1 mm', () => {
+    sinErroresXml(svg);
+    assert.equal(attr(svg, 'width'), '58mm');
+    assert.equal(attr(svg, 'height'), '30mm');
+    assert.equal(attr(svg, 'viewBox'), '0 0 58 30');
+    assert.equal(verificarReversoSvg(svg), true);
+    for (const l of reverso.lineas) {
+      assert.ok(l.bbox.x1 >= REVERSO_LAYOUT.margenMinMm && l.bbox.x2 <= 58 - REVERSO_LAYOUT.margenMinMm, l.id);
+      assert.ok(l.bbox.y1 >= REVERSO_LAYOUT.margenMinMm && l.bbox.y2 <= 30 - REVERSO_LAYOUT.margenMinMm, l.id);
+    }
+    // Las líneas no se solapan entre sí.
+    const ordenadas = [...reverso.lineas].sort((a, b) => a.bbox.y1 - b.bbox.y1);
+    for (let i = 1; i < ordenadas.length; i += 1) assert.ok(ordenadas[i].bbox.y1 > ordenadas[i - 1].bbox.y2 + 0.3, ordenadas[i].id);
+  });
+
+  test('identidad: AgroGenomaX, by CRH, Ganadería Inteligente, www.agrogenomax.com -- en contornos, sin QR', () => {
+    assert.deepEqual(reverso.lineas.map((l) => l.texto), ['AgroGenomaX', 'by CRH', 'Ganadería Inteligente', 'www.agrogenomax.com']);
+    assert.deepEqual([...svg.matchAll(/<path id="([^"]+)" fill="#000000"/g)].map((m) => m[1]), ['marca', 'by-crh', 'vertical', 'web']);
+    assert.doesNotMatch(svg, /stroke|<image|<text|<rect|#fff|white|href=/i);
+    assert.doesNotMatch(svg, /AgroGenomaX|agrogenomax\.com|Ganader/);
+    assert.equal(leerQr(rasterSvg(svg, 8)), null);
   });
 });
 
 describe('FASE 15: verificación previa aborta TODO el export', () => {
-  test('35. un módulo alterado, un token cuyo hash no coincide o un código duplicado abortan', () => {
+  test('35. módulo alterado, stroke, QR ajeno, hash distinto, duplicado, sin token, cantidad, legacy, origen', () => {
     const data = fixtureLote(3);
-    const { url, svg } = svgDe(data.chapetas[0]);
+    const { url, svg } = frenteDe(data.chapetas[0].codigoVisible, data.chapetas[0].token);
     const d = svg.match(/<path id="qr" fill="#000000" d="([^"]*)"/)[1];
     const alterado = svg.replace(d, d.replace(/h(\d+)v1h-\1z/, (m, w) => `h${Number(w) + 1}v1h-${Number(w) + 1}z`));
     assert.throws(() => verificarArteSvg({ svg: alterado, url, codigoVisible: data.chapetas[0].codigoVisible }), { code: 'EXPORT_VERIFICATION_FAILED' });
     assert.throws(() => verificarArteSvg({ svg: svg.replace('fill="#000000"', 'fill="#000000" stroke="#000000"'), url, codigoVisible: data.chapetas[0].codigoVisible }), { detalle: 'SVG_CONTIENE_ELEMENTOS_PROHIBIDOS' });
-    // QR de OTRA chapeta con el código de ésta -> no coincide.
-    assert.throws(() => verificarArteSvg({ svg, url: svgDe(data.chapetas[1]).url, codigoVisible: data.chapetas[0].codigoVisible }), { detalle: 'QR_MATRIZ_DISTINTA' });
+    assert.throws(() => verificarArteSvg({ svg, url: qrUrl(URL_BASE, data.chapetas[1].token), codigoVisible: data.chapetas[0].codigoVisible }), { detalle: 'QR_MATRIZ_DISTINTA' });
+    assert.throws(() => verificarReversoSvg(renderReversoSvg().replace('fill="#000000"', 'fill="#ffffff"')), { code: 'EXPORT_VERIFICATION_FAILED' });
 
-    const hashMalo = structuredClone(data);
-    hashMalo.chapetas[2].tokenHash = hashQrToken(generateQrToken());
-    assert.throws(() => prepararFabricacion(hashMalo), { code: 'EXPORT_VERIFICATION_FAILED', detalle: 'TOKEN_HASH_DISTINTO' });
-
-    const duplicado = structuredClone(data);
-    duplicado.chapetas[1].codigoVisible = duplicado.chapetas[0].codigoVisible;
-    assert.throws(() => prepararFabricacion(duplicado), { detalle: 'CODIGO_VISIBLE_DUPLICADO' });
-
-    const sinToken = structuredClone(data);
-    sinToken.chapetas[0].token = null;
-    assert.throws(() => prepararFabricacion(sinToken), { detalle: 'TOKEN_AUSENTE_O_INVALIDO' });
-
-    const incompleto = structuredClone(data);
-    incompleto.chapetas.pop();
-    assert.throws(() => prepararFabricacion(incompleto), { detalle: 'CANTIDAD_DISTINTA' });
-
-    const legacy = structuredClone(data);
-    legacy.lote.tipo = 'QR_LEGACY';
-    assert.throws(() => prepararFabricacion(legacy), { detalle: 'LOTE_NO_QR_AGX' });
-
-    const origen = structuredClone(data);
-    origen.lote.urlBase = 'https://agrogenomax.com/otra';
-    assert.throws(() => prepararFabricacion(origen), { detalle: 'URL_BASE_INVALIDA' });
+    const mutar = (fn) => {
+      const copia = structuredClone(data);
+      fn(copia);
+      return copia;
+    };
+    assert.throws(() => prepararFabricacion(mutar((c) => { c.chapetas[2].tokenHash = hashQrToken(generateQrToken()); })), { detalle: 'TOKEN_HASH_DISTINTO' });
+    assert.throws(() => prepararFabricacion(mutar((c) => { c.chapetas[1].codigoVisible = c.chapetas[0].codigoVisible; })), { detalle: 'CODIGO_VISIBLE_DUPLICADO' });
+    assert.throws(() => prepararFabricacion(mutar((c) => { c.chapetas[0].token = null; })), { detalle: 'TOKEN_AUSENTE_O_INVALIDO' });
+    assert.throws(() => prepararFabricacion(mutar((c) => { c.chapetas.pop(); })), { detalle: 'CANTIDAD_DISTINTA' });
+    assert.throws(() => prepararFabricacion(mutar((c) => { c.lote.tipo = 'QR_LEGACY'; })), { detalle: 'LOTE_NO_QR_AGX' });
+    assert.throws(() => prepararFabricacion(mutar((c) => { c.lote.urlBase = 'https://agrogenomax.com/otra'; })), { detalle: 'URL_BASE_INVALIDA' });
   });
 
-  test('35. buildPaqueteFabricacion rechaza sin generar ningún archivo', async () => {
+  test('35. buildPaqueteFabricacion rechaza sin generar ningún archivo ni filtrar el token', async () => {
     const data = fixtureLote(2);
     data.chapetas[1].tokenHash = 'f'.repeat(64);
     await assert.rejects(buildPaqueteFabricacion(data), (error) => {
       assert.equal(error.code, 'EXPORT_VERIFICATION_FAILED');
       assert.equal(error.status, 500);
-      assert.ok(!String(error.message).includes(data.chapetas[1].token));
-      assert.ok(!String(error.detalle).includes(data.chapetas[1].token));
+      assert.ok(!`${error.message} ${error.detalle}`.includes(data.chapetas[1].token));
       return true;
     });
   });
@@ -288,79 +336,81 @@ describe('FASE 15: manifest, PDF, checksums y ZIP (lote simulado de 10)', async 
   const data = fixtureLote(10);
   const preparado = prepararFabricacion(data);
   const paquete = await buildPaqueteFabricacion(data);
-  const pdfBuffer = paquete.files['pdf/LQR-20261018-TEST-referencia.pdf'];
-  const pdf = pdfBuffer.toString('latin1');
+  const pdf = paquete.files['pdf/LQR-20261018-TEST-referencia.pdf'].toString('latin1');
+  const backSha = sha256Hex(renderReversoSvg());
 
-  test('14-15. nombre <codigo_visible>.svg y SHA-256 del SVG correcto', () => {
+  test('nombre <codigo_visible>-front.svg y SHA-256 de cada frente correcto', () => {
     for (const item of preparado.items) {
-      assert.equal(item.filename, `${item.codigoVisible}.svg`);
-      assert.equal(item.svgSha256, sha256Hex(item.svg));
-      assert.equal(sha256Hex(paquete.files[`svg/${item.filename}`]), item.svgSha256);
+      assert.equal(item.filename, `${item.codigoVisible}-front.svg`);
+      assert.equal(sha256Hex(paquete.files[`front/${item.filename}`]), item.svgSha256);
     }
   });
 
-  test('16. manifest coherente: columnas, filas = archivos = cantidad, valores Q/5/45/30', () => {
+  test('22-23. manifest: svg_filename = frente; back_filename/back_sha256 comunes y correctos; Q/5/45/24', () => {
     const lines = buildManifestCsv(preparado).trimEnd().split('\r\n');
     assert.equal(lines[0], MANIFEST_COLUMNS.join(','));
-    assert.equal(lines[0], 'codigo_lote,codigo_visible,url_qr,svg_filename,svg_sha256,qr_version,ecc,module_count,physical_size_mm');
+    assert.equal(lines[0], 'codigo_lote,codigo_visible,url_qr,svg_filename,svg_sha256,qr_version,ecc,module_count,physical_size_mm,back_filename,back_sha256');
     assert.equal(lines.length - 1, 10);
     lines.slice(1).forEach((line, i) => {
-      const campos = line.slice(1, -1).split('","');
       const chapeta = data.chapetas[i];
-      assert.equal(campos.length, 9);
-      assert.match(line, /^"[^"]*"(,"[^"]*"){8}$/);
-      assert.deepEqual(campos, [
-        'LQR-20261018-TEST', chapeta.codigoVisible, `${URL_BASE}/qr/${chapeta.token}`, `${chapeta.codigoVisible}.svg`,
-        sha256Hex(paquete.files[`svg/${chapeta.codigoVisible}.svg`]), '5', 'Q', '45', '30',
+      assert.match(line, /^"[^"]*"(,"[^"]*"){10}$/);
+      assert.deepEqual(line.slice(1, -1).split('","'), [
+        'LQR-20261018-TEST', chapeta.codigoVisible, `${URL_BASE}/qr/${chapeta.token}`, `${chapeta.codigoVisible}-front.svg`,
+        sha256Hex(paquete.files[`front/${chapeta.codigoVisible}-front.svg`]), '5', 'Q', '45', '24', 'agrogenomax-back.svg', backSha,
       ]);
     });
-    assert.equal(paquete.files['manifest.csv'].toString('utf8'), buildManifestCsv(preparado));
+    assert.equal(sha256Hex(paquete.files['back/agrogenomax-back.svg']), backSha);
   });
 
-  test('17. 10 SVG únicos (nombre, contenido y hash)', () => {
-    const svgs = Object.keys(paquete.files).filter((p) => p.startsWith('svg/'));
+  test('10 frentes únicos (nombre, contenido y hash)', () => {
+    const svgs = Object.keys(paquete.files).filter((p) => p.startsWith('front/'));
     assert.equal(svgs.length, 10);
     assert.equal(new Set(svgs.map((p) => sha256Hex(paquete.files[p]))).size, 10);
   });
 
-  test('27. CSV sin formula injection: = + - @ tab neutralizados y todo entrecomillado', () => {
+  test('CSV sin formula injection: = + - @ tab neutralizados y todo entrecomillado', () => {
     assert.equal(csvField('=HYPERLINK("x")'), `"'=HYPERLINK(""x"")"`);
     for (const peligroso of ['+1', '-1', '@SUM(A1)', '\tx', '\rx']) assert.ok(csvField(peligroso).startsWith(`"'`));
     assert.equal(csvField('AGX-7KM4-P2XZ-R'), '"AGX-7KM4-P2XZ-R"');
   });
 
-  test('21. PDF 100 % vectorial: sin imágenes raster, con rellenos', () => {
+  test('26. PDF 100 % vectorial: sin imágenes raster, con rellenos', () => {
     assert.ok(pdf.startsWith('%PDF-'));
     assert.doesNotMatch(pdf, /\/Subtype \/Image|\/XObject|\/DCTDecode|\/FlateDecode/);
     assert.ok((pdf.match(/ 1 re\n/g) || []).length > 1000);
   });
 
-  test('22. PDF usa la MISMA geometría: tramos QR = SVG, escala 1:1 en mm', () => {
+  test('25. PDF muestra FRENTE (misma geometría QR) y REVERSO (mismos contornos) a escala 1:1', () => {
     const bloques = bloquesPdf(pdf);
-    assert.equal(bloques.length, 10);
-    bloques.forEach((bloque, i) => {
+    const frentes = bloques.filter((b) => b.runs.length > 0);
+    const reversos = bloques.filter((b) => b.runs.length === 0);
+    assert.equal(frentes.length, 10);
+    assert.equal(reversos.length, 10);
+    frentes.forEach((bloque, i) => {
       const item = preparado.items[i];
       assert.ok(Math.abs(bloque.escala - PT_POR_MM / item.arte.layout.unidadesPorMm) < 1e-5);
-      const esperados = item.arte.runs.map((r) => ({ x: r.x + item.arte.layout.qr.x, y: r.y + item.arte.layout.qr.y, w: r.w }));
-      assert.deepEqual(bloque.runs, esperados);
-      // Reconstrucción desde el PDF = matriz del SVG.
-      const bits = new Uint8Array(45 * 45);
-      for (const r of bloque.runs) for (let k = 0; k < r.w; k += 1) bits[(r.y - 9) * 45 + (r.x - 15 + k)] = 1;
-      assert.deepEqual(Array.from(bits), Array.from(matrixFromArteSvg(item.svg, 45)));
-      assert.ok(textosPdf(pdf).includes(item.codigoVisible));
+      const { x: qx, y: qy, lado } = item.arte.layout.qr;
+      assert.deepEqual(bloque.runs, item.arte.runs.map((r) => ({ x: r.x + qx, y: r.y + qy, w: r.w })));
+      const bits = new Uint8Array(lado * lado);
+      for (const r of bloque.runs) for (let k = 0; k < r.w; k += 1) bits[(r.y - qy) * lado + (r.x - qx + k)] = 1;
+      assert.deepEqual(Array.from(bits), Array.from(matrixFromArteSvg(item.svg, lado)));
     });
+    for (const b of reversos) assert.ok(Math.abs(b.escala - PT_POR_MM) < 1e-5);
+    const textos = textosPdf(pdf);
+    for (const item of preparado.items) assert.ok(textos.includes(`FRENTE \xb7 ${item.codigoVisible}`));
+    assert.ok(textos.includes('REVERSO (com\xfan)'));
+    assert.ok(textos.includes('60 \xd7 30.7 mm'));
   });
 
-  test('23. regla de control de 10 mm y nota "al 100 % — no ajustar a página"', () => {
+  test('regla de control de 10 mm y nota "al 100 % — no ajustar a página"', () => {
     const anchos = [...pdf.matchAll(/^[\d.]+ [\d.]+ ([\d.]+) [\d.]+ re$/gm)].map((m) => Number(m[1]));
     assert.ok(anchos.some((w) => Math.abs(w - 10 * PT_POR_MM) < 1e-4));
     const textos = textosPdf(pdf);
-    assert.ok(textos.includes('Imprimir / visualizar al 100 % \x97 no ajustar a p\xe1gina'));
+    assert.ok(textos.includes('Visualizar / imprimir al 100 % \x97 no ajustar a p\xe1gina'));
     assert.ok(textos.includes('10 mm'));
-    assert.ok(textos.includes('LQR-20261018-TEST'));
   });
 
-  test('18. ningún token en el PDF, el README, los SVG ni CHECKSUMS', () => {
+  test('ningún token en PDF, README, SVG ni CHECKSUMS', () => {
     for (const [path, buffer] of Object.entries(paquete.files)) {
       if (path === 'manifest.csv') continue;
       const texto = buffer.toString('latin1');
@@ -371,39 +421,41 @@ describe('FASE 15: manifest, PDF, checksums y ZIP (lote simulado de 10)', async 
     }
   });
 
-  test('24. CHECKSUMS.sha256 cubre todos los SVG, manifest, PDF y README y coincide', () => {
+  test('CHECKSUMS.sha256 cubre frentes, reverso, manifest, PDF y README y coincide', () => {
     const lineas = paquete.files['CHECKSUMS.sha256'].toString('utf8').trimEnd().split('\n');
-    const esperado = nombresPaquete(data.lote, preparado.items).filter((p) => p !== 'CHECKSUMS.sha256');
-    assert.deepEqual(lineas.map((l) => l.split('  ')[1]), esperado);
+    assert.deepEqual(lineas.map((l) => l.split('  ')[1]), nombresPaquete(data.lote, preparado.items).filter((p) => p !== 'CHECKSUMS.sha256'));
     for (const linea of lineas) {
       const [hash, path] = linea.split('  ');
       assert.equal(hash, sha256Hex(paquete.files[path]), path);
     }
+    assert.ok(lineas.includes(`${backSha}  back/agrogenomax-back.svg`));
   });
 
-  test('25-26. ZIP con exactamente los archivos esperados; SHA-256 del ZIP correcto', async () => {
+  test('24. ZIP: N frentes + 1 reverso + PDF + manifest + README + CHECKSUMS; SHA-256 del ZIP correcto', async () => {
     assert.equal(paquete.filename, 'LQR-20261018-TEST-fabricacion.zip');
     assert.equal(paquete.sha256, sha256Hex(paquete.buffer));
     const zip = await JSZip.loadAsync(paquete.buffer);
     const archivos = Object.values(zip.files).filter((f) => !f.dir).map((f) => f.name).sort();
     assert.deepEqual(archivos, nombresPaquete(data.lote, preparado.items).map((p) => `LQR-20261018-TEST/${p}`));
-    assert.equal(archivos.length, 14);
+    assert.equal(archivos.filter((n) => n.includes('/front/')).length, 10);
+    assert.deepEqual(archivos.filter((n) => n.includes('/back/')), ['LQR-20261018-TEST/back/agrogenomax-back.svg']);
+    assert.equal(archivos.length, 15);
     for (const nombre of archivos) {
       const contenido = await zip.file(nombre).async('nodebuffer');
       assert.ok(contenido.equals(paquete.files[nombre.replace('LQR-20261018-TEST/', '')]), nombre);
     }
   });
 
-  test('README del proveedor: reglas de fabricación explícitas', () => {
+  test('README del proveedor: frente/reverso y reglas de fabricación explícitas', () => {
     const readme = paquete.files['README_PROVEEDOR.txt'].toString('utf8');
-    for (const regla of ['al 100 %', 'NO redimensionar', 'NO invertir colores', 'NO suavizar', 'NO convertir el QR a contornos/strokes',
-      'NO regenerar el QR', 'NO modificar la URL ni añadir parámetros', 'formas rellenas', 'DEL MISMO ARCHIVO', 'Borrar el ZIP']) {
+    for (const regla of ['<codigo_visible>-front.svg', 'agrogenomax-back.svg', 'Respetar frente y reverso', 'al 100 %', 'NO redimensionar ni deformar',
+      'NO invertir colores', 'NO suavizar', 'NO convertir los módulos del QR en contornos/strokes', 'NO regenerar el QR',
+      'NO modificar la URL', 'DEL MISMO ARCHIVO', 'UNA SOLA muestra física', 'Borrar el ZIP', '60.0 x 30.7 mm']) {
       assert.ok(readme.includes(regla), regla);
     }
   });
 
-  test('PDF de referencia sin lote: misma salida de buildReferenciaPdf', async () => {
-    const otra = await buildReferenciaPdf(preparado);
-    assert.equal(bloquesPdf(otra.toString('latin1')).length, 10);
+  test('buildReferenciaPdf reutilizable con el mismo preparado', async () => {
+    assert.equal(bloquesPdf((await buildReferenciaPdf(preparado)).toString('latin1')).length, 20);
   });
 });
