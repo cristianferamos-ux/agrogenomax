@@ -46,11 +46,54 @@ const FORBIDDEN_SUBSTRINGS = [
   'secret',
   '192.168',
   'mozilla',
-  '4.6',
-  '-74.1',
+  // Coordenadas CENTINELA (no "4.6"/"-74.1"): un timestamp ISO tiene como
+  // máximo 3 decimales, así que "…54.604z" contenía "4.6" y el test fallaba
+  // de forma intermitente. Estos valores no pueden aparecer en un timestamp,
+  // por lo que el chequeo puede seguir recorriendo el evento COMPLETO.
+  '4.6123456789',
+  '-74.0987654321',
   'geometry',
   '<script>',
 ];
+
+// Sustrings prohibidos encontrados en el evento COMPLETO serializado.
+function findLeaks(event) {
+  const serialized = JSON.stringify(event).toLowerCase();
+  return FORBIDDEN_SUBSTRINGS.filter((forbidden) => serialized.includes(forbidden));
+}
+
+describe('detector de filtraciones (determinista)', () => {
+  const evento = {
+    timestamp: '2026-10-20t01:24:54.604z',
+    level: 'info',
+    event: 'request_completed',
+    correlationId: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
+    method: 'GET',
+    statusCode: 200,
+    durationMs: 4.612345,
+  };
+
+  test('detecta una coordenada sensible real presente en cualquier campo', () => {
+    assert.deepEqual(findLeaks({ ...evento, event: 'lat=4.6123456789' }), ['4.6123456789']);
+    assert.deepEqual(findLeaks({ ...evento, method: 'lon=-74.0987654321' }), ['-74.0987654321']);
+  });
+
+  test('NO marca timestamps con secuencias numéricas parecidas', () => {
+    for (const timestamp of ['2026-10-20T01:24:54.604Z', '2026-04-06T14:46:14.612Z', '2026-07-04T07:41:00.074Z']) {
+      assert.deepEqual(findLeaks({ ...evento, timestamp }), [], timestamp);
+    }
+  });
+
+  test('NO marca valores numéricos legítimos del log (status, duración con 6 decimales, request id)', () => {
+    for (const durationMs of [4.612345, 74.098765, 14.6, 0.000001, 1234.567891]) {
+      assert.deepEqual(findLeaks({ ...evento, durationMs }), [], String(durationMs));
+    }
+    for (const statusCode of [200, 404, 461, 500]) {
+      assert.deepEqual(findLeaks({ ...evento, statusCode }), [], String(statusCode));
+    }
+    assert.deepEqual(findLeaks({ ...evento, correlationId: '4612e456-7890-4abc-8def-740987654321' }), []);
+  });
+});
 
 describe('LOTE-010: server/observability/requestLogging.js', () => {
   test('genera un correlationId único por solicitud cuando no llega X-Request-ID', () => {
@@ -236,7 +279,7 @@ describe('LOTE-010: server/observability/requestLogging.js', () => {
       },
       method: 'GET',
     });
-    req.url = '/api/animales?token=abc&lat=4.6&lon=-74.1';
+    req.url = '/api/animales?token=abc&lat=4.6123456789&lon=-74.0987654321';
     req.ip = '192.168.1.10';
     const res = fakeRes();
 
@@ -248,10 +291,7 @@ describe('LOTE-010: server/observability/requestLogging.js', () => {
       for (const key of Object.keys(event)) {
         assert.equal(ALLOWED_FIELDS.has(key), true, `campo no permitido: ${key}`);
       }
-      const serialized = JSON.stringify(event).toLowerCase();
-      for (const forbidden of FORBIDDEN_SUBSTRINGS) {
-        assert.equal(serialized.includes(forbidden), false, `filtración de "${forbidden}" en ${serialized}`);
-      }
+      assert.deepEqual(findLeaks(event), [], `filtración en ${JSON.stringify(event)}`);
     }
   });
 
