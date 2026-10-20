@@ -10,12 +10,17 @@
 // servidor. /animales/local:<uuid> muestra un registro aún no sincronizado;
 // cuando el servidor confirma su animal_id redirige a /animales/<animal_id>.
 // Corregir, anular y gestionar la chapeta requieren conexión.
+//
+// FASE 1B: la ficha se organiza en pestañas "Resumen" (contenido previo) y
+// "Pesajes" (HatoPesajesPanel: historial, KPIs, gráfica y registro). La
+// pestaña Pesajes solo existe para animales ya confirmados por el servidor.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
 import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
 import HatoAnimalFields from './HatoAnimalFields.jsx';
 import HatoQrPanel from './HatoQrPanel.jsx';
+import HatoPesajesPanel from './HatoPesajesPanel.jsx';
 import { anularAnimal, corregirAnimal, getAnimal } from './hatoApi.js';
 import {
   GENERIC_ERROR_MESSAGE,
@@ -45,6 +50,49 @@ function Row({ label, children }) {
   );
 }
 
+const PESTANAS = Object.freeze([
+  { id: 'resumen', label: 'Resumen' },
+  { id: 'pesajes', label: 'Pesajes' },
+]);
+
+// Pestañas accesibles (patrón WAI-ARIA tabs): flechas izquierda/derecha,
+// Inicio/Fin; solo la pestaña activa es tabulable.
+function FichaTabs({ activa, onChange }) {
+  function onKeyDown(event) {
+    const indice = PESTANAS.findIndex((p) => p.id === activa);
+    const destino = {
+      ArrowRight: (indice + 1) % PESTANAS.length,
+      ArrowLeft: (indice - 1 + PESTANAS.length) % PESTANAS.length,
+      Home: 0,
+      End: PESTANAS.length - 1,
+    }[event.key];
+    if (destino === undefined) return;
+    event.preventDefault();
+    onChange(PESTANAS[destino].id);
+    document.getElementById(`ficha-tab-${PESTANAS[destino].id}`)?.focus();
+  }
+  return (
+    <div className="gan-hato-tabs" role="tablist" aria-label="Secciones del animal">
+      {PESTANAS.map((p) => (
+        <button
+          key={p.id}
+          type="button"
+          role="tab"
+          id={`ficha-tab-${p.id}`}
+          aria-selected={activa === p.id}
+          aria-controls={`ficha-panel-${p.id}`}
+          tabIndex={activa === p.id ? 0 : -1}
+          className={activa === p.id ? 'is-active' : undefined}
+          onClick={() => onChange(p.id)}
+          onKeyDown={onKeyDown}
+        >
+          {p.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function formatNacimiento(animal) {
   if (animal.nacimientoTipo === 'EXACTA') return `${animal.fechaNacimiento} (${formatEdad(animal)})`;
   return formatEdad(animal);
@@ -65,8 +113,11 @@ export default function HatoDetallePage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [aviso, setAviso] = useState('');
+  const [pestana, setPestana] = useState('resumen');
 
-  const load = useCallback(async () => {
+  // silencioso (FASE 1B): refresca la ficha sin pasar por "cargando" (tras
+  // registrar un pesaje, para no desmontar la pestaña ni su mensaje).
+  const load = useCallback(async ({ silencioso = false } = {}) => {
     if (!idValido) return;
     let localEncontrado = false;
     if (local) {
@@ -85,7 +136,7 @@ export default function HatoDetallePage() {
       if (!localEncontrado) setState({ status: 'not_found', animal: null });
       return;
     }
-    if (!localEncontrado) setState((current) => ({ ...current, status: 'loading' }));
+    if (!localEncontrado && !silencioso) setState((current) => ({ ...current, status: 'loading' }));
     try {
       const { ok, status, data } = await getAnimal(animalId);
       if (ok && data?.animal) setState({ status: 'ok', animal: data.animal, origen: 'servidor' });
@@ -224,8 +275,21 @@ export default function HatoDetallePage() {
             </StatusMessage>
           ) : null}
 
-          {modo === 'ver' ? (
-            <>
+          {modo === 'ver' && !esLocal ? <FichaTabs activa={pestana} onChange={setPestana} /> : null}
+
+          {modo === 'ver' && !esLocal && pestana === 'pesajes' ? (
+            <div role="tabpanel" id="ficha-panel-pesajes" aria-labelledby="ficha-tab-pesajes" tabIndex={0}>
+              <HatoPesajesPanel
+                animalId={animal.animalId}
+                animalActivo={animal.estado === 'ACTIVO'}
+                online={offline.online}
+                onPesajeRegistrado={() => load({ silencioso: true })}
+              />
+            </div>
+          ) : null}
+
+          {modo === 'ver' && (esLocal || pestana === 'resumen') ? (
+            <div {...(esLocal ? {} : { role: 'tabpanel', id: 'ficha-panel-resumen', 'aria-labelledby': 'ficha-tab-resumen' })}>
               <div className="gan-hato-ficha">
                 <Row label="Sexo">{formatSexo(animal.sexo)}</Row>
                 <Row label="Raza">{formatRaza(animal)}</Row>
@@ -275,7 +339,7 @@ export default function HatoDetallePage() {
                   </p>
                 </section>
               )}
-            </>
+            </div>
           ) : null}
 
           {modo === 'corregir' && form ? (

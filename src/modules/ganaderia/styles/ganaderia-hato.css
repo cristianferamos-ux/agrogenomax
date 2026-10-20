@@ -209,3 +209,264 @@
   margin: 0.5rem 0 0;
   padding-left: 1.1rem;
 }
+
+/* FASE 1B: pestañas de la ficha + pestaña Pesajes (KPIs, gráfica, formulario,
+   historial). Smartphone-first: KPIs en rejilla compacta, tabla convertida en
+   tarjetas bajo 640px, controles de al menos 44px y foco siempre visible. */
+
+.gan-hato-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin: 0.5rem 0 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.gan-hato-tabs [role='tab'] {
+  min-height: 44px;
+  padding: 0.55rem 1rem;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  color: #b6c0cc;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.gan-hato-tabs [role='tab'].is-active {
+  border-bottom-color: #9cff1a;
+  color: #e6edf3;
+}
+
+.gan-hato-tabs [role='tab']:focus-visible,
+.gan-pesajes button:focus-visible,
+.gan-pesajes input:focus-visible,
+.gan-pesajes select:focus-visible,
+.gan-pesajes textarea:focus-visible {
+  outline: 3px solid #9cff1a;
+  outline-offset: 2px;
+}
+
+.gan-pesajes {
+  display: grid;
+  gap: 1rem;
+  --gan-pesajes-linea: #9cff1a;
+  --gan-pesajes-gmd: #6ea8ff;
+}
+
+.gan-pesajes h3 {
+  margin: 0;
+}
+
+.gan-pesajes-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.gan-pesajes-kpi {
+  padding: 0.75rem 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.gan-pesajes-kpi dt {
+  color: #8b96a5;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.gan-pesajes-kpi dd {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0.3rem 0 0;
+}
+
+.gan-pesajes-kpi strong {
+  color: #e6edf3;
+  font-size: 1.15rem;
+}
+
+.gan-pesajes-kpi span {
+  color: #8b96a5;
+  font-size: 0.75rem;
+}
+
+/* Ítems de grid con min-width: 0 para que ResponsiveContainer pueda encoger. */
+.gan-pesajes > *,
+.gan-pesajes-graficas {
+  min-width: 0;
+}
+
+.gan-pesajes-graficas {
+  display: grid;
+  gap: 1rem;
+}
+
+.gan-pesajes-grafica {
+  margin: 0;
+  min-width: 0;
+}
+
+.gan-pesajes-grafica > [role="img"] {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.gan-pesajes-grafica figcaption {
+  margin-bottom: 0.35rem;
+  color: #b6c0cc;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.gan-pesajes-grafica .recharts-cartesian-axis-tick text {
+  fill: #a7b3c2;
+  font-size: 0.72rem;
+}
+
+.gan-pesajes-grafica .recharts-cartesian-grid line {
+  stroke: rgba(255, 255, 255, 0.08);
+}
+
+.gan-pesajes-tooltip {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 0.5rem;
+  background: #0f1720;
+  color: #e6edf3;
+  font-size: 0.8rem;
+}
+
+.gan-pesajes-vacio {
+  display: grid;
+  justify-items: start;
+  gap: 0.6rem;
+  padding: 1rem;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 0.6rem;
+}
+
+.gan-pesajes-vacio p {
+  margin: 0;
+  color: #b6c0cc;
+}
+
+.gan-pesaje-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.gan-pesaje-form input,
+.gan-pesaje-form select,
+.gan-pesaje-form textarea {
+  min-height: 44px;
+  font-size: 1rem; /* 16px: evita el zoom automático de iOS al enfocar */
+}
+
+.gan-field .gan-field-error,
+.gan-field-error {
+  color: #ff8a8a;
+  font-size: 0.82rem;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.gan-pesajes-historial {
+  overflow-x: auto;
+}
+
+.gan-pesajes-historial table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.gan-pesajes-historial caption {
+  margin-bottom: 0.4rem;
+  color: #b6c0cc;
+  font-weight: 600;
+  text-align: left;
+}
+
+.gan-pesajes-historial th,
+.gan-pesajes-historial td {
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  text-align: left;
+  vertical-align: top;
+}
+
+.gan-pesajes-historial th {
+  color: #8b96a5;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .gan-pesajes-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .gan-pesajes-kpi strong {
+    font-size: 1rem;
+  }
+
+  .gan-pesaje-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Tabla -> tarjetas: cada celda muestra su etiqueta (data-label). */
+  .gan-pesajes-historial thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+
+  .gan-pesajes-historial table,
+  .gan-pesajes-historial tbody,
+  .gan-pesajes-historial tr,
+  .gan-pesajes-historial td {
+    display: block;
+    width: 100%;
+  }
+
+  .gan-pesajes-historial tr {
+    margin-bottom: 0.6rem;
+    padding: 0.4rem 0.2rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.6rem;
+  }
+
+  .gan-pesajes-historial td {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    border-bottom: 0;
+    padding: 0.3rem 0.6rem;
+  }
+
+  .gan-pesajes-historial td::before {
+    content: attr(data-label);
+    color: #8b96a5;
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+}
+
+@media (max-width: 360px) {
+  .gan-pesajes-kpis {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
