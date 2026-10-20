@@ -15,6 +15,10 @@ import { enrichRows, getFechaNacimientoProductiva, isBirthWeightRow } from '../d
 const read = (rel) => fs.readFileSync(new URL(rel, import.meta.url), 'utf8');
 const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/.*$/gm, '$1');
 const BUSINESS = ['fechas', 'edad', 'pesajes', 'categoria', 'sanidad', 'produccionLeche', 'genetica', 'index'];
+// FASE 1A: fechas y pesajes viven en shared/ (compartidos con el backend);
+// src/.../engine/{fechas,pesajes}.js solo los reexportan.
+const CANONICO = { fechas: '../../../../../shared/ganaderia/engine/fechas.js', pesajes: '../../../../../shared/ganaderia/engine/pesajes.js' };
+const fuente = (nombre) => CANONICO[nombre] ?? `../${nombre}.js`;
 const DEMO = ['edadDemo', 'categoriaDemo', 'pesajesDemo'];
 
 describe('REGRESIÓN', () => {
@@ -83,8 +87,14 @@ describe('REGRESIÓN', () => {
 });
 
 describe('ARQUITECTURA del motor', () => {
+  test('src/engine/{fechas,pesajes}.js son solo reexportaciones de shared/', () => {
+    for (const nombre of ['fechas', 'pesajes']) {
+      assert.equal(stripComments(read(`../${nombre}.js`)).trim(), `export * from '../../../../shared/ganaderia/engine/${nombre}.js';`);
+    }
+  });
+
   for (const nombre of [...BUSINESS, ...DEMO]) {
-    const rel = DEMO.includes(nombre) ? `../demo/${nombre}.js` : `../${nombre}.js`;
+    const rel = DEMO.includes(nombre) ? `../demo/${nombre}.js` : fuente(nombre);
     test(`${rel}: puro (sin React, window, document, fetch, storage)`, () => {
       const src = stripComments(read(rel));
       assert.doesNotMatch(src, /\bwindow\b|\bdocument\b|\bfetch\(|localStorage|sessionStorage|from 'react'|import\.meta\.env|XMLHttpRequest/);
@@ -93,7 +103,7 @@ describe('ARQUITECTURA del motor', () => {
 
   test('el reloj solo se lee en fechas.fechaHoyLocal (inyectable)', () => {
     for (const nombre of BUSINESS) {
-      const src = stripComments(read(`../${nombre}.js`));
+      const src = stripComments(read(fuente(nombre)));
       if (nombre === 'fechas') {
         assert.equal((src.match(/new Date\(\)/g) || []).length, 1);
       } else {
@@ -103,7 +113,7 @@ describe('ARQUITECTURA del motor', () => {
   });
 
   test('el motor Business no importa la compatibilidad Demo/legacy', () => {
-    for (const nombre of BUSINESS) assert.doesNotMatch(read(`../${nombre}.js`), /from '\.\/demo\//, nombre);
+    for (const nombre of BUSINESS) assert.doesNotMatch(read(fuente(nombre)), /from '\.\/demo\//, nombre);
   });
 
   test('los módulos Demo están etiquetados DEMO / LEGACY', () => {

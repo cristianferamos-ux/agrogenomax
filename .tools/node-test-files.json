@@ -181,5 +181,9 @@
   "src/modules/ganaderia/utils/__tests__/dateFormat.test.js",
   "src/modules/ganaderia/engine/__tests__/engineCalculos.test.js",
   "src/modules/ganaderia/engine/__tests__/engineSanidadLeche.test.js",
-  "src/modules/ganaderia/engine/__tests__/engineRegresion.test.js"
+  "src/modules/ganaderia/engine/__tests__/engineRegresion.test.js",
+  "server/routes/__tests__/ganaderiaAnimalPesajesAuth.test.js",
+  "server/services/__tests__/pesajesService.test.js",
+  "server/services/__tests__/animalPesajesIntegration.test.js",
+  "server/services/__tests__/ganaderiaEngineParidad.test.js"
 ]
