@@ -30,6 +30,7 @@ import createGanaderiaCatalogoPasturasRouter from './routes/ganaderiaCatalogoPas
 import createGanaderiaCategoriasProductivasRouter from './routes/ganaderiaCategoriasProductivas.js';
 import createGanaderiaAnimalesRouter from './routes/ganaderiaAnimales.js';
 import { createGanaderiaAnimalQrRouter, createGanaderiaQrRouter } from './routes/ganaderiaAnimalQr.js';
+import createGanaderiaAnimalPesajesRouter from './routes/ganaderiaAnimalPesajes.js';
 import createGanaderiaAdminQrRouter from './routes/ganaderiaAdminQr.js';
 import createGanaderiaSyncRouter from './routes/ganaderiaSync.js';
 import createGanaderiaCatalogoRazasRouter from './routes/ganaderiaCatalogoRazas.js';
@@ -299,6 +300,17 @@ app.use(
 // (Postgres-AGX-Business, 0023). /animales/:id/qr montado ANTES del router
 // de animales para que no pase por él. Sesión con organización + CSRF.
 // Nunca /api/qr legacy.
+// FASE 1A: pesajes posteriores (agx.animal_pesajes, 0024) con el mismo
+// patrón: montado ANTES del router de animales; sesión con organización +
+// CSRF. Nunca /api/pesajes legacy.
+app.use(
+  '/api/ganaderia/animales/:animalId/pesajes',
+  createGanaderiaAnimalPesajesRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
 app.use(
   '/api/ganaderia/animales/:animalId/qr',
   createGanaderiaAnimalQrRouter({

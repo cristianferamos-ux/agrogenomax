@@ -144,3 +144,24 @@ El backend usa ese rol vía `AGX_BUSINESS_QR_ADMIN_DATABASE_URL` (distinta de
 Integración local (además de las dos URLs de siempre):
 `AGX_BUSINESS_QR_ADMIN_DATABASE_URL_TEST=postgres://agx_qr_admin:...@127.0.0.1:<puerto>/<base>_test`
 (`npm run test:ganaderia-animales-integration` la exige y valida el rol).
+
+## 0024 -- pesajes posteriores MANUAL (FASE 1A)
+
+Aditiva sobre `agx.animal_pesajes` (sigue siendo la única fuente de verdad
+del historial de peso; nada derivado se guarda en `agx.animales`):
+
+- `origen` admite `REGISTRO_INICIAL` (máximo uno por animal, NO es peso al
+  nacimiento) y `MANUAL` (N por animal, varios el mismo día). OFFLINE no es
+  un origen sino un transporte.
+- `client_operation_id uuid` (obligatorio para `MANUAL`, índice UNIQUE
+  parcial por organización) y `observaciones text` (≤ 500, nunca vacía).
+- Sin cambios de RLS/FORCE, políticas ni grants: `agx_app` sigue con
+  SELECT/INSERT (append-only).
+
+**Secuencia de despliegue:** aplicar `0024` en Postgres-AGX-Business
+**antes** del merge del código que registra pesajes MANUAL (Railway despliega
+`main` automáticamente); el código anterior funciona con la tabla ampliada.
+Rollback: `0024_animal_pesajes_manual_rollback.sql`, solo tras revertir el
+código y sin filas MANUAL (si existen, el rollback falla a propósito).
+Pruebas: `server/services/__tests__/animalPesajesIntegration.test.js`
+(incluida en `npm run test:ganaderia-animales-integration`).

@@ -10,11 +10,13 @@ try {
     'server/services/__tests__/animalesRepositoryIntegration.test.js',
     'server/services/__tests__/qrInventarioIntegration.test.js',
     'server/services/__tests__/syncPullIntegration.test.js',
+    'server/services/__tests__/animalPesajesIntegration.test.js',
   ], { requiredPasses: {
     'server/services/__tests__/animalesSchemaIntegration.test.js': 24,
     'server/services/__tests__/animalesRepositoryIntegration.test.js': 27,
     'server/services/__tests__/qrInventarioIntegration.test.js': 26,
     'server/services/__tests__/syncPullIntegration.test.js': 3,
+    'server/services/__tests__/animalPesajesIntegration.test.js': 14,
   } });
 } catch (error) {
   console.error(error.message);
