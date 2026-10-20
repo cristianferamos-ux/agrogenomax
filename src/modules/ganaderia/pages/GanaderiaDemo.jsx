@@ -20,8 +20,8 @@ import {
 } from 'lucide-react';
 import GanaderiaDemoNotice from '../components/GanaderiaDemoNotice.jsx';
 import { loadDemoData, resetDemoData } from '../data/ganaderiaDemoData.js';
-import { aplicaProduccionLeche, aplicaComercializacion } from '../engine/categoria.js';
-import { chartColorForState } from '../engine/pesajes.js';
+import { aplicaProduccionLeche, aplicaComercializacion } from '../engine/demo/categoriaDemo.js';
+import { chartColorForState } from '../engine/demo/pesajesDemo.js';
 import { buildDemoReportPdfBlob, downloadBlob } from '../utils/demoPdf.js';
 import '../styles/ganaderia-dashboard.css';
 import '../styles/ganaderia-demo.css';

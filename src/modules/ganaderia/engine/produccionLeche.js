@@ -1,107 +1,164 @@
-// Motor comun de produccion diaria de leche para Ganaderia Inteligente.
-// La cuenta real todavia no tiene tabla ni API para esto (modulo "Futuro" segun
-// el diseno de proposito productivo). La Cuenta Demo lo usa hoy con datos en
-// sessionStorage, con el mismo criterio que deberia usar la cuenta real cuando
-// el modulo exista — funciones puras, sin React, sin window/document, sin fetch.
+// FASE 0 -- producción de leche. La cuenta real todavía NO tiene tabla ni API
+// (módulo futuro); la Demo lo usa con datos de sesión. Funciones puras, sin
+// React/window/fetch, fechas calendario 'YYYY-MM-DD', litros sin redondear
+// (redondear solo al presentar).
+//
+// Reglas:
+//   * Varios registros/ordeños del mismo día se CONSOLIDAN por fecha (suma)
+//     antes de promediar. Un registro admite litros del día o litros AM + PM.
+//   * Los promedios usan DÍAS CALENDARIO (ventana [ref-(N-1), ref]), no "los
+//     últimos N registros" (BUG-04). Un día sin registro NO cuenta como 0:
+//     el promedio es sobre los días con registro dentro de la ventana.
+//   * fechaReferencia por defecto = último día con registro (función pura).
+//   * Días en leche = fechaObjetivo - fechaParto (null sin parto).
+//   * Umbrales de caída (15 % atención, 25 % crítico) y etapas de lactancia
+//     (<100 / 100-200 / >200 días) son HEURÍSTICOS hasta aprobación oficial.
+import { aFechaISO, diasEntre, sumarDias } from './fechas.js';
 
-import { valueOf, normalizeDateInput } from './edad.js';
-
-function round1(value) {
-  return Number.isFinite(value) ? Math.round(value * 10) / 10 : value;
+function numero(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
 }
 
-function promedio(values) {
-  if (!values.length) return null;
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
+function primerDefinido(registro, claves) {
+  for (const clave of claves) {
+    if (registro?.[clave] !== undefined && registro?.[clave] !== null && registro?.[clave] !== '') return registro[clave];
+  }
+  return null;
 }
 
-// 1. Normaliza registros con forma libre (alias de campos) a la forma canonica
-// { fecha, litros_dia, numero_ordenos, potrero_id, observaciones }, ordenados
-// por fecha ascendente (del mas antiguo al mas reciente).
+/** Litros de un registro: litros del día, o AM + PM si vienen separados. */
+export function litrosDeRegistro(registro) {
+  const dia = numero(primerDefinido(registro, ['litrosDia', 'litros_dia', 'litros', 'litros_día', 'totalLitros', 'total_liters']));
+  if (dia !== null) return dia;
+  const am = numero(primerDefinido(registro, ['litrosAm', 'litros_am', 'liters_am']));
+  const pm = numero(primerDefinido(registro, ['litrosPm', 'litros_pm', 'liters_pm']));
+  return am === null && pm === null ? null : (am ?? 0) + (pm ?? 0);
+}
+
+/**
+ * Forma canónica por REGISTRO (sin consolidar), ordenada por fecha:
+ * { fecha, litros_dia, numero_ordenos, potrero_id, observaciones }.
+ */
 export function normalizarRegistrosLeche(registros = []) {
   return registros
-    .map((registro) => {
-      const ordenosRaw = valueOf(registro, ['numero_ordenos', 'ordenos']);
-      return {
-        fecha: normalizeDateInput(valueOf(registro, ['fecha', 'fecha_registro'])),
-        litros_dia: Number(valueOf(registro, ['litros_dia', 'litros', 'litros_día'])),
-        numero_ordenos: ordenosRaw === '' ? null : Number(ordenosRaw),
-        potrero_id: valueOf(registro, ['potrero_id', 'potrero']) || null,
-        observaciones: valueOf(registro, ['observaciones', 'notes']) || '',
-      };
-    })
-    .filter((registro) => registro.fecha && Number.isFinite(registro.litros_dia))
-    .sort((a, b) => new Date(`${a.fecha}T00:00:00`).getTime() - new Date(`${b.fecha}T00:00:00`).getTime());
+    .map((registro) => ({
+      fecha: aFechaISO(primerDefinido(registro, ['fecha', 'fecha_registro', 'production_date'])),
+      litros_dia: litrosDeRegistro(registro),
+      numero_ordenos: numero(primerDefinido(registro, ['numero_ordenos', 'ordenos'])),
+      potrero_id: primerDefinido(registro, ['potrero_id', 'potrero']),
+      observaciones: primerDefinido(registro, ['observaciones', 'notes']) || '',
+    }))
+    .filter((registro) => registro.fecha && registro.litros_dia !== null && registro.litros_dia >= 0)
+    .sort((a, b) => diasEntre(b.fecha, a.fecha));
 }
 
-// 2. Promedio de litros/dia sobre una ventana de N dias mas recientes.
-// dias=undefined/null -> promedio sobre todos los registros disponibles.
-export function calcularPromedioLeche(registrosOrdenados, dias) {
-  const relevantes = Number.isFinite(dias) ? registrosOrdenados.slice(-dias) : registrosOrdenados;
-  return round1(promedio(relevantes.map((registro) => registro.litros_dia)));
+/** Un valor por día: { fecha, litros (suma del día), registros }. Orden ascendente. */
+export function consolidarLechePorDia(registros = []) {
+  const porDia = new Map();
+  for (const registro of normalizarRegistrosLeche(registros)) {
+    const dia = porDia.get(registro.fecha) ?? { fecha: registro.fecha, litros: 0, registros: 0 };
+    dia.litros += registro.litros_dia;
+    dia.registros += 1;
+    porDia.set(registro.fecha, dia);
+  }
+  return [...porDia.values()].sort((a, b) => diasEntre(b.fecha, a.fecha));
 }
 
-// 3. Suma de litros de los registros dados (no inventa un total de lactancia
-// que no este respaldado por registros reales).
-export function calcularProduccionAcumulada(registrosOrdenados) {
-  return round1(registrosOrdenados.reduce((sum, registro) => sum + registro.litros_dia, 0));
+function ultimaFecha(dias) {
+  return dias.length ? dias[dias.length - 1].fecha : null;
 }
 
-// 4. Compara el promedio de una ventana reciente contra el promedio de la
-// ventana base inmediatamente anterior (no superpuesta).
-export function calcularVariacionLeche(registrosOrdenados, ventanaReciente, ventanaBase) {
-  const total = registrosOrdenados.length;
-  if (total < ventanaReciente + 1 || ventanaReciente <= 0) return null;
+/** Días consolidados dentro de [ref-(ventanaDias-1), ref]. */
+export function diasEnVentana(diasConsolidados, ventanaDias, fechaReferencia = ultimaFecha(diasConsolidados)) {
+  const ref = aFechaISO(fechaReferencia);
+  if (!ref || !Number.isInteger(ventanaDias) || ventanaDias <= 0) return [];
+  const desde = sumarDias(ref, -(ventanaDias - 1));
+  return diasConsolidados.filter((d) => diasEntre(desde, d.fecha) >= 0 && diasEntre(d.fecha, ref) >= 0);
+}
 
-  const recientes = registrosOrdenados.slice(-ventanaReciente);
-  const disponiblesParaBase = registrosOrdenados.slice(0, total - ventanaReciente);
-  const base = disponiblesParaBase.slice(-ventanaBase);
-  if (!base.length) return null;
+function promedio(valores) {
+  return valores.length ? valores.reduce((s, v) => s + v, 0) / valores.length : null;
+}
 
-  const promedioReciente = promedio(recientes.map((registro) => registro.litros_dia));
-  const promedioBase = promedio(base.map((registro) => registro.litros_dia));
-  const variacionPorcentaje = Number.isFinite(promedioBase) && promedioBase > 0
-    ? round1(((promedioBase - promedioReciente) / promedioBase) * 100)
-    : null;
+/**
+ * Promedio de litros/día sobre los días con registro de una ventana de N días
+ * calendario. ventanaDias null/undefined -> todos los días con registro.
+ */
+export function calcularPromedioLeche(registros, ventanaDias, { fechaReferencia } = {}) {
+  const dias = consolidarLechePorDia(registros);
+  const relevantes = Number.isInteger(ventanaDias) ? diasEnVentana(dias, ventanaDias, fechaReferencia ?? ultimaFecha(dias)) : dias;
+  return promedio(relevantes.map((d) => d.litros));
+}
 
+/** Suma de litros de todos los registros (no inventa totales de lactancia). */
+export function calcularProduccionAcumulada(registros) {
+  return consolidarLechePorDia(registros).reduce((sum, d) => sum + d.litros, 0);
+}
+
+/**
+ * Compara el promedio de la ventana reciente [ref-(R-1), ref] con el de la
+ * ventana base de B días inmediatamente anterior (no superpuesta).
+ * variacionPorcentaje > 0 significa CAÍDA. null si no hay datos suficientes
+ * (menos de minDiasReciente / minDiasBase días con registro).
+ */
+export function calcularVariacionLeche(registros, {
+  fechaReferencia,
+  ventanaRecienteDias = 3,
+  ventanaBaseDias = 15,
+  minDiasReciente = 2,
+  minDiasBase = 3,
+} = {}) {
+  const dias = consolidarLechePorDia(registros);
+  const ref = aFechaISO(fechaReferencia) ?? ultimaFecha(dias);
+  if (!ref) return null;
+  const recientes = diasEnVentana(dias, ventanaRecienteDias, ref);
+  const base = diasEnVentana(dias, ventanaBaseDias, sumarDias(ref, -ventanaRecienteDias));
+  if (recientes.length < minDiasReciente || base.length < minDiasBase) return null;
+  const promedioReciente = promedio(recientes.map((d) => d.litros));
+  const promedioBase = promedio(base.map((d) => d.litros));
   return {
-    ventanaReciente,
-    ventanaBase: base.length,
-    promedioReciente: round1(promedioReciente),
-    promedioBase: round1(promedioBase),
-    variacionPorcentaje,
+    fechaReferencia: ref,
+    ventanaRecienteDias,
+    ventanaBaseDias,
+    diasConRegistroReciente: recientes.length,
+    diasConRegistroBase: base.length,
+    promedioReciente,
+    promedioBase,
+    variacionPorcentaje: promedioBase > 0 ? ((promedioBase - promedioReciente) / promedioBase) * 100 : null,
   };
 }
 
-// 5. Alerta de caida de produccion. Umbral: caida >= 15% en los ultimos 3 dias
-// vs. el promedio de los dias base disponibles inmediatamente anteriores.
-// No diagnostica enfermedad, no afirma una causa unica, no usa lenguaje
-// veterinario cerrado — solo describe el dato y sugiere revisar variables de manejo.
-export function detectarCaidaProduccion(registrosOrdenados) {
-  const total = registrosOrdenados.length;
-  const ventanaBaseDisponible = Math.max(0, total - 3);
-  const variacion = calcularVariacionLeche(registrosOrdenados, 3, ventanaBaseDisponible);
-
+/** HEURÍSTICO: caída >= umbralCaidaPct (15 %) de la ventana reciente frente a la base. */
+export function detectarCaidaProduccion(registros, { umbralCaidaPct = 15, ...ventanas } = {}) {
+  const variacion = calcularVariacionLeche(registros, ventanas);
   if (!variacion || !Number.isFinite(variacion.variacionPorcentaje)) {
-    return { hayCaida: false, variacionPorcentaje: null };
+    return { hayCaida: false, variacionPorcentaje: null, datosSuficientes: Boolean(variacion) };
   }
-
-  if (variacion.variacionPorcentaje >= 15) {
+  if (variacion.variacionPorcentaje >= umbralCaidaPct) {
     return {
       hayCaida: true,
+      datosSuficientes: true,
       variacionPorcentaje: variacion.variacionPorcentaje,
       promedioReciente: variacion.promedioReciente,
       promedioBase: variacion.promedioBase,
-      alerta: `Producción de leche cayó aproximadamente ${Math.round(variacion.variacionPorcentaje)}% en los últimos 3 días.`,
+      ventanaRecienteDias: variacion.ventanaRecienteDias,
+      alerta: `Producción de leche cayó aproximadamente ${Math.round(variacion.variacionPorcentaje)}% en los últimos ${variacion.ventanaRecienteDias} días.`,
       interpretacion: 'Puede estar asociada a alimentación, disponibilidad de agua, cambio de potrero o estrés calórico.',
       recomendacion: 'Revisar agua, dieta y confort térmico.',
     };
   }
-
-  return { hayCaida: false, variacionPorcentaje: variacion.variacionPorcentaje };
+  return { hayCaida: false, datosSuficientes: true, variacionPorcentaje: variacion.variacionPorcentaje };
 }
 
-// 6. Etapa de lactancia por dias en leche: Temprana <100, Media 100-200, Tardía >200.
+/** Días en leche = fechaObjetivo - fechaParto; null sin parto o si el objetivo es anterior. */
+export function calcularDiasEnLeche(fechaParto, fechaObjetivo) {
+  const dias = diasEntre(fechaParto, fechaObjetivo);
+  return dias === null || dias < 0 ? null : dias;
+}
+
+// HEURÍSTICO: Temprana <100, Media 100-200, Tardía >200 días en leche.
 export function calcularEtapaLactancia(diasEnLeche) {
   if (!Number.isFinite(diasEnLeche)) return 'Sin datos';
   if (diasEnLeche < 100) return 'Temprana';
@@ -109,45 +166,38 @@ export function calcularEtapaLactancia(diasEnLeche) {
   return 'Tardía';
 }
 
-// 7. Resumen lechero consolidado — la unica fuente de verdad que debe consumir
-// cualquier pantalla (demo hoy, cuenta real cuando el modulo exista).
-export function calcularResumenLechero({ animal, registrosLeche }) {
+/**
+ * Resumen lechero. Los días en leche salen de fechaParto (nunca de un campo
+ * fijo). fechaObjetivo por defecto = último día con registro.
+ */
+export function calcularResumenLechero({ registrosLeche = [], fechaParto = null, fechaObjetivo = null } = {}) {
   const registros = normalizarRegistrosLeche(registrosLeche);
-  const hoy = registros.at(-1) || null;
-  const diasEnLecheRaw = valueOf(animal, ['dias_en_leche', 'diasEnLeche']);
-  const diasEnLeche = diasEnLecheRaw === '' ? null : Number(diasEnLecheRaw);
-  const etapaLactancia = calcularEtapaLactancia(diasEnLeche);
-  const caida = detectarCaidaProduccion(registros);
-
-  const alertaPrincipal = caida.hayCaida ? caida.alerta : 'Sin alertas activas de producción.';
-  const interpretacion = caida.hayCaida
-    ? caida.interpretacion
-    : 'Producción dentro del comportamiento reciente esperado.';
-  const recomendacion = caida.hayCaida
-    ? caida.recomendacion
-    : 'Mantener el manejo actual y seguir registrando la producción diaria.';
+  const dias = consolidarLechePorDia(registrosLeche);
+  const referencia = aFechaISO(fechaObjetivo) ?? ultimaFecha(dias);
+  const hoy = dias.find((d) => d.fecha === referencia) ?? null;
+  const diasEnLeche = calcularDiasEnLeche(fechaParto, referencia);
+  const caida = detectarCaidaProduccion(registrosLeche, { fechaReferencia: referencia });
 
   return {
-    litros_hoy: hoy ? hoy.litros_dia : null,
-    promedio_semanal: calcularPromedioLeche(registros, 7),
-    promedio_historico: calcularPromedioLeche(registros),
-    produccion_acumulada: calcularProduccionAcumulada(registros),
-    dias_en_leche: Number.isFinite(diasEnLeche) ? diasEnLeche : null,
-    etapa_lactancia: etapaLactancia,
-    alerta_principal: alertaPrincipal,
-    interpretacion,
-    recomendacion,
+    fecha_referencia: referencia,
+    litros_hoy: hoy ? hoy.litros : null,
+    promedio_semanal: calcularPromedioLeche(registrosLeche, 7, { fechaReferencia: referencia }),
+    promedio_historico: calcularPromedioLeche(registrosLeche),
+    produccion_acumulada: calcularProduccionAcumulada(registrosLeche),
+    dias_en_leche: diasEnLeche,
+    etapa_lactancia: calcularEtapaLactancia(diasEnLeche),
+    alerta_principal: caida.hayCaida ? caida.alerta : 'Sin alertas activas de producción.',
+    interpretacion: caida.hayCaida ? caida.interpretacion : 'Producción dentro del comportamiento reciente esperado.',
+    recomendacion: caida.hayCaida ? caida.recomendacion : 'Mantener el manejo actual y seguir registrando la producción diaria.',
     caida,
     registros,
   };
 }
 
-// 8. Estado general de produccion segun la caida detectada en el resumen.
-export function obtenerEstadoProduccionLeche(resumen) {
+// HEURÍSTICO: Crítico si la caída es >= 25 %, Atención si hay caída, Estable si no.
+export function obtenerEstadoProduccionLeche(resumen, { umbralCriticoPct = 25 } = {}) {
   if (resumen?.caida?.hayCaida) {
-    if (resumen.caida.variacionPorcentaje >= 25) {
-      return { label: 'Crítico', className: 'estado-vencida' };
-    }
+    if (resumen.caida.variacionPorcentaje >= umbralCriticoPct) return { label: 'Crítico', className: 'estado-vencida' };
     return { label: 'Atención', className: 'estado-proxima' };
   }
   return { label: 'Estable', className: 'estado-vigente' };

@@ -21,8 +21,8 @@ import {
   getFechaNacimientoRealAnimal,
   getFechaNacimientoEstimadaPorEdad,
   formatAgeLabel as animalAgeLabel,
-} from '../engine/edad.js';
-import { normalizeSex, categoriaCebaPorSexo, clasificarCategoriaPorEdadSexo, clasificarCategoriaActual } from '../engine/categoria.js';
+} from '../engine/demo/edadDemo.js';
+import { normalizeSex, categoriaCebaPorSexo, clasificarCategoriaPorEdadSexo, clasificarCategoriaActual } from '../engine/demo/categoriaDemo.js';
 import {
   getFecha,
   getPeso,
@@ -39,7 +39,7 @@ import {
   chartColorForState,
   enrichRows,
   calcularTendenciaPesajes,
-} from '../engine/pesajes.js';
+} from '../engine/demo/pesajesDemo.js';
 
 function todayLocal() {
   const now = new Date();

@@ -178,5 +178,8 @@
   "src/modules/ganaderia/potreros/__tests__/potreroPlanPastoreoSmartArchitecture.test.js",
   "src/modules/ganaderia/potreros/__tests__/potreroDescansoReentradaArchitecture.test.js",
   "src/modules/ganaderia/potreros/__tests__/potreroCicloPastoreoArchitecture.test.js",
-  "src/modules/ganaderia/utils/__tests__/dateFormat.test.js"
+  "src/modules/ganaderia/utils/__tests__/dateFormat.test.js",
+  "src/modules/ganaderia/engine/__tests__/engineCalculos.test.js",
+  "src/modules/ganaderia/engine/__tests__/engineSanidadLeche.test.js",
+  "src/modules/ganaderia/engine/__tests__/engineRegresion.test.js"
 ]
