@@ -1,6 +1,8 @@
-// Barrel export del motor comun de Ganaderia Inteligente.
-// Cuenta real y Cuenta Demo importan de aqui las mismas funciones puras de calculo.
+// Barrel export del motor común (Business) de Ganadería Inteligente: funciones
+// puras, sin React/window/fetch/storage. La compatibilidad DEMO/LEGACY vive en
+// engine/demo/ y NO se exporta aquí a propósito.
 
+export * as fechas from './fechas.js';
 export * as edad from './edad.js';
 export * as categoria from './categoria.js';
 export * as pesajes from './pesajes.js';

@@ -4,8 +4,8 @@ import { Link, useParams } from 'react-router-dom';
 import { ganaderiaApi } from '../api/ganaderiaApi.js';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
 import { formatDateDisplay } from '../utils/dateFormat.js';
-import { obtenerEdadMeses } from '../engine/edad.js';
-import { categoriaBasePorEdadSexo, normalizeSex } from '../engine/categoria.js';
+import { obtenerEdadMeses } from '../engine/demo/edadDemo.js';
+import { categoriaBasePorEdadSexo, normalizeSex } from '../engine/demo/categoriaDemo.js';
 import { formatComposicionRacial } from '../engine/genetica.js';
 
 const fields = [

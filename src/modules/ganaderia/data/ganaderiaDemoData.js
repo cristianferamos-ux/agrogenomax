@@ -1,9 +1,15 @@
-// Datos demo de Coronado y Esperanza. A partir de esta fase, edad, categoria, GDP/umbrales
-// y estado sanitario se calculan con el mismo motor comun que usa la cuenta real
-// (src/modules/ganaderia/engine/), no con formulas propias de la demo.
-import { obtenerEdadMeses } from '../engine/edad.js';
-import { clasificarCategoriaPorEdadSexo } from '../engine/categoria.js';
-import { enrichRows, calcularGDP, calcularTendenciaPesajes, classifyProductivity, obtenerUmbralesGDP, thresholdText } from '../engine/pesajes.js';
+// Datos demo de Coronado y Esperanza. Edad, categoría, GDP/umbrales y estado
+// sanitario se calculan con el motor (src/modules/ganaderia/engine/); la
+// categoría por edad/propósito y los umbrales de GDP son la variante
+// DEMO/LEGACY aislada en engine/demo/ (no son regla Business).
+// FASE 0: los días en leche se calculan desde la fecha de parto (no un campo
+// fijo) y el redondeo de litros se hace AQUÍ, al presentar.
+// Los textos de reproducción (estado, próximo evento, edad al primer parto)
+// son NARRATIVA ESTÁTICA de la Demo: no existe todavía cálculo real de días
+// abiertos, intervalo entre partos ni servicios por concepción.
+import { obtenerEdadMeses } from '../engine/demo/edadDemo.js';
+import { clasificarCategoriaPorEdadSexo } from '../engine/demo/categoriaDemo.js';
+import { enrichRows, calcularGDP, calcularTendenciaPesajes, classifyProductivity, obtenerUmbralesGDP, thresholdText } from '../engine/demo/pesajesDemo.js';
 import { daysUntil, vaccinationStatus, sanitaryGeneralStatus } from '../engine/sanidad.js';
 import { formatComposicionRacial } from '../engine/genetica.js';
 import { calcularResumenLechero, obtenerEstadoProduccionLeche } from '../engine/produccionLeche.js';
@@ -193,10 +199,25 @@ function buildEsperanzaRegistrosLeche() {
   });
 }
 
+function round1(value) {
+  return Number.isFinite(value) ? Math.round(value * 10) / 10 : value;
+}
+
 function buildEsperanza() {
   const registrosLecheRaw = buildEsperanzaRegistrosLeche();
-  const resumenLechero = calcularResumenLechero({ animal: { dias_en_leche: 150 }, registrosLeche: registrosLecheRaw });
-  const estadoLeche = obtenerEstadoProduccionLeche(resumenLechero);
+  // Último parto de la narrativa Demo: hace 5 meses. Los días en leche salen
+  // de esta fecha (motor), ya no del valor fijo 150.
+  const fechaPartoDemo = monthsAgo(5);
+  const resumenCalculado = calcularResumenLechero({ registrosLeche: registrosLecheRaw, fechaParto: fechaPartoDemo });
+  // Presentación: litros con 1 decimal (el motor no redondea).
+  const resumenLechero = {
+    ...resumenCalculado,
+    litros_hoy: round1(resumenCalculado.litros_hoy),
+    promedio_semanal: round1(resumenCalculado.promedio_semanal),
+    promedio_historico: round1(resumenCalculado.promedio_historico),
+    produccion_acumulada: round1(resumenCalculado.produccion_acumulada),
+  };
+  const estadoLeche = obtenerEstadoProduccionLeche(resumenCalculado);
 
   const identidadBase = {
     nombre: 'Esperanza',
@@ -268,8 +289,8 @@ function buildEsperanza() {
     reproduccion: {
       tipo: 'ciclo propio',
       estadoActual: 'Vacía, aún no servida en este ciclo de lactancia.',
-      ultimoParto: monthsAgo(5),
-      diasEnLeche: 150,
+      ultimoParto: fechaPartoDemo,
+      diasEnLeche: resumenLechero.dias_en_leche,
       primerPartoEdadMeses: 27,
       proximoEvento: 'Programar servicio en los próximos 30–45 días para mantener un intervalo entre partos cercano a 13–14 meses.',
     },
