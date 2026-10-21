@@ -35,6 +35,17 @@ export function anularAnimal(animalId, motivo) {
   return postJsonWithCsrf(`${BASE}/animales/${encodeURIComponent(animalId)}/anular`, { motivo });
 }
 
+// FASE 1B: pesajes del animal (API Business de Fase 1A). GET devuelve el
+// historial ascendente con diferencia/días/GMD y el resumen; el POST es
+// idempotente por clientOperationId y nunca se reintenta automáticamente.
+export function listPesajes(animalId) {
+  return getJsonWithSession(`${BASE}/animales/${encodeURIComponent(animalId)}/pesajes`);
+}
+
+export function registrarPesaje(animalId, body) {
+  return postJsonWithCsrf(`${BASE}/animales/${encodeURIComponent(animalId)}/pesajes`, body);
+}
+
 // SPRINT-3D11.3 (R1): chapetas QR de la organización (asignadas por el
 // Super Admin). La organización nunca genera chapetas ni ve el stock central.
 export function resolveQrToken(token) {
