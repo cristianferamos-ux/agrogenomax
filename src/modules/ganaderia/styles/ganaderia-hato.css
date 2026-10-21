@@ -357,6 +357,81 @@
   color: #b6c0cc;
 }
 
+/* FASE 1C.1: alertas derivadas. La severidad va en texto; el color y el
+   borde solo la refuerzan. */
+.gan-pesajes-alertas {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.gan-pesajes-alertas h4 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.gan-pesajes-alertas ul {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gan-pesajes-alerta {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-left-width: 4px;
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.gan-pesajes-alerta p {
+  margin: 0;
+  color: #e6edf3;
+  overflow-wrap: anywhere;
+}
+
+.gan-pesajes-alerta .gan-pesajes-alerta-detalle {
+  color: #8b96a5;
+  font-size: 0.8rem;
+}
+
+.gan-pesajes-alerta-severidad {
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+}
+
+.gan-pesajes-alerta[data-severidad="URGENTE"] {
+  border-left-color: #ff6b6b;
+}
+
+.gan-pesajes-alerta[data-severidad="URGENTE"] .gan-pesajes-alerta-severidad {
+  color: #ff8a8a;
+}
+
+.gan-pesajes-alerta[data-severidad="ATENCION"] {
+  border-left-color: #ffc44d;
+}
+
+.gan-pesajes-alerta[data-severidad="ATENCION"] .gan-pesajes-alerta-severidad {
+  color: #ffd27a;
+}
+
+.gan-pesajes-alerta[data-severidad="INFO"] {
+  border-left-color: #6ea8ff;
+}
+
+.gan-pesajes-alerta[data-severidad="INFO"] .gan-pesajes-alerta-severidad {
+  color: #9cc3ff;
+}
+
+.gan-pesajes-alertas-vacio {
+  margin: 0;
+  color: #b6c0cc;
+}
+
 .gan-pesaje-form-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -426,6 +501,13 @@
   }
 
   /* Tabla -> tarjetas: cada celda muestra su etiqueta (data-label). */
+  /* FASE 1C.1: con la tabla en display:block el caption quedaba en una
+     columna estrecha; como bloque ocupa todo el ancho. */
+  .gan-pesajes-historial caption {
+    display: block;
+    width: 100%;
+  }
+
   .gan-pesajes-historial thead {
     position: absolute;
     width: 1px;
