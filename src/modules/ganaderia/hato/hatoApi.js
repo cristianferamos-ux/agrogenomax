@@ -3,7 +3,7 @@
 // autenticado compartido -- nunca con api/ganaderiaApi.js ni con las rutas
 // legacy /api/animales, /api/qr o /api/razas (desmontadas). Ninguna
 // función reintenta un POST automáticamente.
-import { getJsonWithSession, postJsonWithCsrf } from '../auth/ganaderiaAuthedRequest.js';
+import { getFileWithSession, getJsonWithSession, postJsonWithCsrf } from '../auth/ganaderiaAuthedRequest.js';
 
 const BASE = '/api/ganaderia';
 
@@ -90,4 +90,15 @@ export function listCategoriasProductivas() {
 
 export function listPrediosActivos() {
   return getJsonWithSession(`${BASE}/predios`);
+}
+
+// FASE 1C.2: reporte productivo individual. El PDF lo genera el SERVIDOR
+// (pdfkit); el navegador solo lo descarga. { ok, status, blob, filename } o
+// { ok:false, status, data } (data = JSON de error). Un error de red lanza.
+export async function descargarReporteProductivo(animalId) {
+  const result = await getFileWithSession(`${BASE}/animales/${encodeURIComponent(animalId)}/reporte-productivo.pdf`);
+  if (!result.ok) return result;
+  const disposition = result.headers?.get?.('Content-Disposition') ?? '';
+  const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? 'AgroGenomaX_Reporte_Productivo.pdf';
+  return { ...result, filename };
 }

@@ -24,3 +24,26 @@ export function resolveFechaHoyNegocio(now = new Date()) {
   const partes = Object.fromEntries(formatter.formatToParts(now).map((p) => [p.type, p.value]));
   return `${partes.year}-${partes.month}-${partes.day}`;
 }
+
+const formatterFechaHora = new Intl.DateTimeFormat('en-US', {
+  timeZone: BUSINESS_TIMEZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+
+/**
+ * FASE 1C.2: fecha calendario y hora 'HH:mm' del NEGOCIO para un instante
+ * (sello "generado el" de los reportes). Misma técnica formatToParts.
+ */
+export function resolveFechaHoraNegocio(now = new Date()) {
+  const partes = Object.fromEntries(formatterFechaHora.formatToParts(now).map((p) => [p.type, p.value]));
+  return {
+    fecha: `${partes.year}-${partes.month}-${partes.day}`,
+    hora: `${partes.hour}:${partes.minute}`,
+    zonaHoraria: BUSINESS_TIMEZONE,
+  };
+}

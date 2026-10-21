@@ -258,6 +258,37 @@
   margin: 0;
 }
 
+/* FASE 1C.2: cabecera de la pestaña con el botón del reporte productivo. */
+.gan-pesajes-cabecera {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.gan-pesajes-reporte {
+  display: grid;
+  justify-items: end;
+  gap: 0.35rem;
+  max-width: 100%;
+}
+
+.gan-pesajes-reporte button {
+  min-height: 44px;
+}
+
+.gan-pesajes-reporte .gan-hato-hint {
+  margin: 0;
+}
+
+@media (max-width: 480px) {
+  .gan-pesajes-reporte {
+    justify-items: stretch;
+    width: 100%;
+  }
+}
+
 .gan-pesajes-kpis {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

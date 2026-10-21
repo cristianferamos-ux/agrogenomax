@@ -26,7 +26,10 @@ function stripComments(source) {
 
 const src = (name) => stripComments(read(path.join(HATO_DIR, name)));
 const componente = src('HatoPesajesAlertas.jsx');
-const modelo = src('pesajesAlertas.js');
+// FASE 1C.2: la fuente canónica de las reglas pasó a shared/ (la comparte el
+// reporte PDF del backend); hato/pesajesAlertas.js solo la reexporta.
+const MODELO_CANONICO = path.join(REPO_ROOT, 'shared', 'ganaderia', 'engine', 'alertasPesajes.js');
+const modelo = stripComments(read(MODELO_CANONICO));
 const panel = src('HatoPesajesPanel.jsx');
 const css = read(path.join(GANADERIA_DIR, 'styles', 'ganaderia-hato.css'));
 const ARCHIVOS = ['HatoPesajesAlertas.jsx', 'pesajesAlertas.js'];
@@ -87,12 +90,13 @@ test('panel: alertas derivadas en render con fecha de negocio (America/Bogota); 
 
 test('umbrales centralizados en el modelo; nunca en componentes', () => {
   assert.match(modelo, /diasAtencion: 30,\n  diasUrgente: 60,/);
-  assert.match(read(path.join(HATO_DIR, 'pesajesAlertas.js')), /UMBRALES PROVISIONALES CONFIGURABLES/);
-  assert.match(read(path.join(HATO_DIR, 'pesajesAlertas.js')), /No son una recomendación veterinaria/);
+  assert.match(read(MODELO_CANONICO), /UMBRALES PROVISIONALES CONFIGURABLES/);
+  assert.match(read(MODELO_CANONICO), /No son una recomendación veterinaria/);
+  assert.match(src('pesajesAlertas.js'), /^\s*export \* from '\.\.\/engine\/alertasPesajes\.js';\s*$/, 'hato/ solo reexporta la fuente canónica');
   for (const name of ['HatoPesajesAlertas.jsx', 'HatoPesajesPanel.jsx']) {
     assert.doesNotMatch(src(name), /diasAtencion|diasUrgente|\b(30|60)\b/, `${name} no fija umbrales`);
   }
-  assert.match(modelo, /from '\.\.\/engine\/pesajes\.js'/, 'reutiliza clasificarAntiguedadPesaje del engine canónico');
+  assert.match(modelo, /from '\.\/pesajes\.js'/, 'reutiliza clasificarAntiguedadPesaje del engine canónico');
 });
 
 test('modelo puro: sin React, sin red, sin reloj', () => {
