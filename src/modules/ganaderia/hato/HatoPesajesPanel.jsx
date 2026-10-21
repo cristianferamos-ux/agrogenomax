@@ -9,19 +9,28 @@
 // CLIENT_OPERATION_ID_REUSED. Nunca se reintenta un POST automáticamente.
 // Tras guardar se refrescan historial y resumen (y la ficha vía
 // onPesajeRegistrado) sin recargar la página.
+//
+// FASE 1C.1: bloque "Alertas" DERIVADO (construirAlertasPesajes); no se
+// persiste. La fecha de referencia es la fecha calendario de NEGOCIO
+// (America/Bogota, fechaHoyNegocio), nunca la fecha local del navegador.
+// Solo para animales activos (un animal anulado no admite pesajes).
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { StatusMessage } from '../components/FormField.jsx';
 import HatoPesajeForm from './HatoPesajeForm.jsx';
+import HatoPesajesAlertas from './HatoPesajesAlertas.jsx';
 import HatoPesajesHistorial from './HatoPesajesHistorial.jsx';
 import HatoPesajesKpis from './HatoPesajesKpis.jsx';
 import { listPesajes, registrarPesaje } from './hatoApi.js';
 import { fechaHoyLocal, newClientOperationId } from './hatoFormModel.js';
 import { buildPesajeBody, initialPesajeForm, resultadoRegistro, validatePesajeForm } from './pesajesModel.js';
+import { construirAlertasPesajes } from './pesajesAlertas.js';
+import { fechaHoyNegocio } from '../engine/fechaNegocio.js';
 
 const HatoPesajesGrafica = lazy(() => import('./HatoPesajesGrafica.jsx'));
 
 export default function HatoPesajesPanel({ animalId, animalActivo, online = true, onPesajeRegistrado }) {
   const hoy = fechaHoyLocal();
+  const fechaNegocio = fechaHoyNegocio();
   const [state, setState] = useState({ status: 'loading', data: null });
   const [form, setForm] = useState(() => initialPesajeForm(hoy));
   const [errores, setErrores] = useState({});
@@ -124,6 +133,12 @@ export default function HatoPesajesPanel({ animalId, animalActivo, online = true
 
       {state.status === 'ok' ? (
         <>
+          {admitePesajes ? (
+            <HatoPesajesAlertas
+              alertas={construirAlertasPesajes({ pesajes, resumen: state.data.resumen, fechaReferencia: fechaNegocio })}
+            />
+          ) : null}
+
           <HatoPesajesKpis resumen={state.data.resumen} />
 
           {sinPesajes ? (
