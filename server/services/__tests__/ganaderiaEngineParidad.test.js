@@ -11,7 +11,7 @@ import fs from 'node:fs';
 
 const leer = (rel) => fs.readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 
-for (const archivo of ['fechas.js', 'pesajes.js']) {
+for (const archivo of ['fechas.js', 'pesajes.js', 'alertasPesajes.js']) {
   test(`server/services/ganaderia/engine/${archivo} es copia idéntica de shared/ganaderia/engine/${archivo}`, () => {
     assert.equal(
       leer(`../ganaderia/engine/${archivo}`),
@@ -22,7 +22,7 @@ for (const archivo of ['fechas.js', 'pesajes.js']) {
 }
 
 test('la copia del servidor no importa nada fuera de su carpeta', () => {
-  for (const archivo of ['fechas.js', 'pesajes.js']) {
+  for (const archivo of ['fechas.js', 'pesajes.js', 'alertasPesajes.js']) {
     const imports = [...leer(`../ganaderia/engine/${archivo}`).matchAll(/from '([^']+)'/g)].map((m) => m[1]);
     assert.ok(imports.every((spec) => spec.startsWith('./')), `${archivo}: ${imports.join(', ')}`);
   }

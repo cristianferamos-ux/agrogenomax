@@ -31,6 +31,7 @@ import createGanaderiaCategoriasProductivasRouter from './routes/ganaderiaCatego
 import createGanaderiaAnimalesRouter from './routes/ganaderiaAnimales.js';
 import { createGanaderiaAnimalQrRouter, createGanaderiaQrRouter } from './routes/ganaderiaAnimalQr.js';
 import createGanaderiaAnimalPesajesRouter from './routes/ganaderiaAnimalPesajes.js';
+import createGanaderiaAnimalReporteRouter from './routes/ganaderiaAnimalReporte.js';
 import createGanaderiaAdminQrRouter from './routes/ganaderiaAdminQr.js';
 import createGanaderiaSyncRouter from './routes/ganaderiaSync.js';
 import createGanaderiaCatalogoRazasRouter from './routes/ganaderiaCatalogoRazas.js';
@@ -306,6 +307,16 @@ app.use(
 app.use(
   '/api/ganaderia/animales/:animalId/pesajes',
   createGanaderiaAnimalPesajesRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
+// FASE 1C.2: reporte productivo individual en PDF (pdfkit, servidor). Solo
+// GET con sesión de organización; montado ANTES del router de animales.
+app.use(
+  '/api/ganaderia/animales/:animalId/reporte-productivo.pdf',
+  createGanaderiaAnimalReporteRouter({
     appEnv: appConfig.appEnv,
     csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
     allowedOrigins: appConfig.cors.allowedOrigins,

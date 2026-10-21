@@ -18,12 +18,16 @@
 // La MISMA fecha de negocio es la fecha por defecto del formulario, su `max`
 // y la cota "no futura" de la validación del cliente: coherente con el
 // backend (resolveFechaHoyNegocio), no con la zona horaria del dispositivo.
+//
+// FASE 1C.2: botón "Descargar reporte productivo" (PDF generado en el
+// servidor). Disponible también para animales anulados y sin pesajes.
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { StatusMessage } from '../components/FormField.jsx';
 import HatoPesajeForm from './HatoPesajeForm.jsx';
 import HatoPesajesAlertas from './HatoPesajesAlertas.jsx';
 import HatoPesajesHistorial from './HatoPesajesHistorial.jsx';
 import HatoPesajesKpis from './HatoPesajesKpis.jsx';
+import HatoReporteProductivoBoton from './HatoReporteProductivoBoton.jsx';
 import { listPesajes, registrarPesaje } from './hatoApi.js';
 import { newClientOperationId } from './hatoFormModel.js';
 import { buildPesajeBody, initialPesajeForm, resultadoRegistro, validatePesajeForm } from './pesajesModel.js';
@@ -119,7 +123,10 @@ export default function HatoPesajesPanel({ animalId, animalActivo, online = true
 
   return (
     <section className="gan-pesajes" aria-labelledby="pesajes-titulo">
-      <h3 id="pesajes-titulo">Pesajes</h3>
+      <div className="gan-pesajes-cabecera">
+        <h3 id="pesajes-titulo">Pesajes</h3>
+        <HatoReporteProductivoBoton animalId={animalId} online={online} />
+      </div>
 
       {state.status === 'loading' ? <StatusMessage>Cargando pesajes...</StatusMessage> : null}
       {state.status === 'not_found' ? <StatusMessage type="error">Este animal no está disponible.</StatusMessage> : null}
