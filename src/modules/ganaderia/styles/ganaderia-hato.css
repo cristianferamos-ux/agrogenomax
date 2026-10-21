@@ -233,6 +233,20 @@
   cursor: pointer;
 }
 
+/* Tres pestañas en 320px: se reparten el ancho sin desbordar la página. */
+@media (max-width: 479px) {
+  .gan-hato-tabs {
+    gap: 0;
+  }
+
+  .gan-hato-tabs [role='tab'] {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 0.55rem 0.4rem;
+    font-size: 0.9rem;
+  }
+}
+
 .gan-hato-tabs [role='tab'].is-active {
   border-bottom-color: #9cff1a;
   color: #e6edf3;
@@ -649,5 +663,129 @@
 @media (max-width: 360px) {
   .gan-pesajes-kpis {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* FASE 1D.2: pestaña Actividad -- línea de tiempo vertical (móvil y escritorio).
+   La categoría del evento va en TEXTO; la marca y el color solo refuerzan. */
+.gan-actividad {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.gan-actividad h3 {
+  margin: 0;
+}
+
+.gan-actividad-vacio {
+  margin: 0;
+  color: #b6c0cc;
+}
+
+.gan-actividad-lista {
+  position: relative;
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0 0 0 1.4rem;
+  list-style: none;
+}
+
+.gan-actividad-lista::before {
+  content: '';
+  position: absolute;
+  top: 0.35rem;
+  bottom: 0.35rem;
+  left: 0.45rem;
+  width: 2px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.gan-actividad-evento {
+  position: relative;
+  min-width: 0;
+}
+
+.gan-actividad-marca {
+  position: absolute;
+  top: 0.65rem;
+  left: -1.2rem;
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 2px solid #0b1118;
+  border-radius: 50%;
+  background: #8b96a5;
+}
+
+.gan-actividad-evento[data-tipo="PESAJE_REGISTRADO"] .gan-actividad-marca { background: #9cff1a; }
+.gan-actividad-evento[data-tipo="ANIMAL_REGISTRADO"] .gan-actividad-marca { background: #6ea8ff; }
+.gan-actividad-evento[data-tipo="ANIMAL_CORREGIDO"] .gan-actividad-marca { background: #ffc44d; }
+.gan-actividad-evento[data-tipo="ANIMAL_ANULADO"] .gan-actividad-marca { background: #ff6b6b; }
+.gan-actividad-evento[data-tipo^="QR_"] .gan-actividad-marca { background: #c792ea; }
+
+.gan-actividad-cuerpo {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.03);
+  overflow-wrap: anywhere;
+}
+
+.gan-actividad-cabecera {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.25rem 0.75rem;
+}
+
+.gan-actividad-tipo {
+  color: #8b96a5;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.gan-actividad-fecha {
+  color: #b6c0cc;
+  font-size: 0.8rem;
+}
+
+.gan-actividad-titulo {
+  color: #e6edf3;
+}
+
+.gan-actividad-descripcion {
+  margin: 0;
+  color: #c9d1d9;
+  font-size: 0.9rem;
+}
+
+.gan-actividad-detalles {
+  display: grid;
+  gap: 0.1rem;
+  margin: 0.2rem 0 0;
+  padding: 0;
+  list-style: none;
+  color: #8b96a5;
+  font-size: 0.82rem;
+}
+
+@media (min-width: 768px) {
+  .gan-actividad-lista {
+    gap: 1rem;
+    padding-left: 1.8rem;
+  }
+
+  .gan-actividad-marca {
+    left: -1.6rem;
+  }
+
+  .gan-actividad-cuerpo {
+    padding: 0.75rem 1rem;
   }
 }

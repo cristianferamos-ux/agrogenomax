@@ -102,3 +102,10 @@ export async function descargarReporteProductivo(animalId) {
   const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? 'AgroGenomaX_Reporte_Productivo.pdf';
   return { ...result, filename };
 }
+
+// FASE 1D.2: línea de tiempo DERIVADA del animal (solo lectura). La pide la
+// pestaña "Actividad" únicamente cuando se abre.
+export function getTimelineAnimal(animalId, { limit } = {}) {
+  const query = limit ? `?limit=${encodeURIComponent(limit)}` : '';
+  return getJsonWithSession(`${BASE}/animales/${encodeURIComponent(animalId)}/timeline${query}`);
+}

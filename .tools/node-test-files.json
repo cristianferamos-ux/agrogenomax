@@ -170,6 +170,7 @@
   "src/modules/ganaderia/hato/__tests__/reporteProductivoUi.test.js",
   "src/modules/ganaderia/hato/__tests__/pesajesOfflineUi.test.js",
   "src/modules/ganaderia/hato/__tests__/pesajeOfflineMensaje.test.js",
+  "src/modules/ganaderia/hato/__tests__/actividadUi.test.js",
   "src/modules/ganaderia/hato/__tests__/qrFlow.test.js",
   "src/modules/ganaderia/offline/__tests__/offlineSync.test.js",
   "src/modules/ganaderia/offline/__tests__/syncReconnect.test.js",
@@ -200,5 +201,9 @@
   "server/services/__tests__/reporteProductivoModelo.test.js",
   "server/services/__tests__/reporteProductivoPdf.test.js",
   "server/services/__tests__/reporteProductivoArchitecture.test.js",
-  "server/services/__tests__/reporteProductivoIntegration.test.js"
+  "server/services/__tests__/reporteProductivoIntegration.test.js",
+  "server/routes/__tests__/ganaderiaAnimalTimelineAuth.test.js",
+  "server/services/__tests__/timelineModelo.test.js",
+  "server/services/__tests__/timelineArchitecture.test.js",
+  "server/services/__tests__/timelineIntegration.test.js"
 ]

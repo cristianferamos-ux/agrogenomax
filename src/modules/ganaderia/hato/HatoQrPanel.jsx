@@ -21,7 +21,9 @@ function formatFecha(value) {
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-export default function HatoQrPanel({ animalId, animalActivo }) {
+// FASE 1D.2: `onCambio` (opcional) avisa a la ficha tras un cambio de chapeta
+// confirmado por el servidor (refresca la pestaña Actividad).
+export default function HatoQrPanel({ animalId, animalActivo, onCambio }) {
   const [state, setState] = useState({ status: 'loading', activa: null, historial: [] });
   const [modo, setModo] = useState('ver');
   const [codigo, setCodigo] = useState('');
@@ -65,6 +67,7 @@ export default function HatoQrPanel({ animalId, animalActivo }) {
         setModo('ver');
         setAviso(mensajeExito);
         await load();
+        onCambio?.();
       } else {
         setError(messageForError(data?.error));
       }

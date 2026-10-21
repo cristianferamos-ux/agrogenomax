@@ -52,6 +52,23 @@ async function fetchAnimalEstado(client, animalId, { forShare = false } = {}) {
 }
 
 /**
+ * Pesajes del animal (ASCENDENTE: fecha, pesaje_id) dentro de una
+ * transacción YA abierta con withOrganizacionTransaction (RLS activo).
+ * FASE 1D.2: la reutiliza la línea de tiempo para leer todo en una sola
+ * transacción.
+ */
+export async function listPesajesEnTx(client, animalId) {
+  const result = await client.query(
+    `select ${PESAJE_COLUMNS}
+       from agx.animal_pesajes
+      where animal_id = $1
+      order by fecha asc, pesaje_id asc`,
+    [animalId],
+  );
+  return result.rows.map(serializePesaje);
+}
+
+/**
  * Historial completo del animal en orden cronológico ASCENDENTE
  * (fecha, pesaje_id). null si el animal no existe o es de otra organización.
  */
@@ -59,14 +76,7 @@ export async function listPesajesDeAnimal(organizacionId, animalId) {
   return withOrganizacionTransaction(organizacionId, async (client) => {
     const animal = await fetchAnimalEstado(client, animalId);
     if (!animal) return null;
-    const result = await client.query(
-      `select ${PESAJE_COLUMNS}
-         from agx.animal_pesajes
-        where animal_id = $1
-        order by fecha asc, pesaje_id asc`,
-      [animalId],
-    );
-    return { animalId: animal.animal_id, estadoAnimal: animal.estado, pesajes: result.rows.map(serializePesaje) };
+    return { animalId: animal.animal_id, estadoAnimal: animal.estado, pesajes: await listPesajesEnTx(client, animalId) };
   });
 }
 
