@@ -14,6 +14,10 @@
 // persiste. La fecha de referencia es la fecha calendario de NEGOCIO
 // (America/Bogota, fechaHoyNegocio), nunca la fecha local del navegador.
 // Solo para animales activos (un animal anulado no admite pesajes).
+//
+// La MISMA fecha de negocio es la fecha por defecto del formulario, su `max`
+// y la cota "no futura" de la validación del cliente: coherente con el
+// backend (resolveFechaHoyNegocio), no con la zona horaria del dispositivo.
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { StatusMessage } from '../components/FormField.jsx';
 import HatoPesajeForm from './HatoPesajeForm.jsx';
@@ -21,7 +25,7 @@ import HatoPesajesAlertas from './HatoPesajesAlertas.jsx';
 import HatoPesajesHistorial from './HatoPesajesHistorial.jsx';
 import HatoPesajesKpis from './HatoPesajesKpis.jsx';
 import { listPesajes, registrarPesaje } from './hatoApi.js';
-import { fechaHoyLocal, newClientOperationId } from './hatoFormModel.js';
+import { newClientOperationId } from './hatoFormModel.js';
 import { buildPesajeBody, initialPesajeForm, resultadoRegistro, validatePesajeForm } from './pesajesModel.js';
 import { construirAlertasPesajes } from './pesajesAlertas.js';
 import { fechaHoyNegocio } from '../engine/fechaNegocio.js';
@@ -29,10 +33,9 @@ import { fechaHoyNegocio } from '../engine/fechaNegocio.js';
 const HatoPesajesGrafica = lazy(() => import('./HatoPesajesGrafica.jsx'));
 
 export default function HatoPesajesPanel({ animalId, animalActivo, online = true, onPesajeRegistrado }) {
-  const hoy = fechaHoyLocal();
   const fechaNegocio = fechaHoyNegocio();
   const [state, setState] = useState({ status: 'loading', data: null });
-  const [form, setForm] = useState(() => initialPesajeForm(hoy));
+  const [form, setForm] = useState(() => initialPesajeForm(fechaNegocio));
   const [errores, setErrores] = useState({});
   const [saving, setSaving] = useState(false);
   const [mensaje, setMensaje] = useState(null);
@@ -66,7 +69,7 @@ export default function HatoPesajesPanel({ animalId, animalActivo, online = true
     event.preventDefault();
     if (savingRef.current) return;
     setMensaje(null);
-    const { valido, errores: problemas } = validatePesajeForm(form, { hoy });
+    const { valido, errores: problemas } = validatePesajeForm(form, { hoy: fechaNegocio });
     if (!valido) {
       setErrores(problemas);
       return;
@@ -82,7 +85,7 @@ export default function HatoPesajesPanel({ animalId, animalActivo, online = true
       const resultado = resultadoRegistro(await registrarPesaje(animalId, buildPesajeBody(form, operationIdRef.current)));
       if (resultado.exito) {
         operationIdRef.current = newClientOperationId();
-        setForm(initialPesajeForm(hoy));
+        setForm(initialPesajeForm(fechaNegocio));
         setErrores({});
         setMensaje({ type: 'success', text: resultado.mensaje });
         await cargar();
@@ -169,7 +172,7 @@ export default function HatoPesajesPanel({ animalId, animalActivo, online = true
               onChange={update}
               onSubmit={guardar}
               saving={saving}
-              hoy={hoy}
+              hoy={fechaNegocio}
               primerPesaje={sinPesajes}
             />
           ) : null}

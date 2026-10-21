@@ -166,6 +166,7 @@
   "src/modules/ganaderia/hato/__tests__/pesajesAlertas.test.js",
   "src/modules/ganaderia/hato/__tests__/pesajesAlertasUiArchitecture.test.js",
   "src/modules/ganaderia/hato/__tests__/pesajesAlertasFechaNegocio.test.js",
+  "src/modules/ganaderia/hato/__tests__/pesajesFormFechaNegocio.test.js",
   "src/modules/ganaderia/hato/__tests__/qrFlow.test.js",
   "src/modules/ganaderia/offline/__tests__/offlineSync.test.js",
   "src/modules/ganaderia/offline/__tests__/syncReconnect.test.js",
