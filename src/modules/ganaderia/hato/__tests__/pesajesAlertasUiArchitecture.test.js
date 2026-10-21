@@ -74,11 +74,14 @@ test('cosmético: caption del historial como bloque en tarjetas móviles', () =>
   assert.match(movil, /\.gan-pesajes-historial caption \{\n    display: block;\n    width: 100%;\n  \}/);
 });
 
-test('panel: alertas derivadas en render con fecha de negocio `hoy`; solo animales activos', () => {
+test('panel: alertas derivadas en render con fecha de negocio (America/Bogota); solo animales activos', () => {
   assert.match(panel, /import HatoPesajesAlertas from '\.\/HatoPesajesAlertas\.jsx'/);
   assert.match(panel, /import \{ construirAlertasPesajes \} from '\.\/pesajesAlertas\.js'/);
-  assert.match(panel, /\{admitePesajes \? \(\s*<HatoPesajesAlertas\s*alertas=\{construirAlertasPesajes\(\{ pesajes, resumen: state\.data\.resumen, fechaReferencia: hoy \}\)\}/);
-  assert.match(panel, /const hoy = fechaHoyLocal\(\);/);
+  assert.match(panel, /\{admitePesajes \? \(\s*<HatoPesajesAlertas\s*alertas=\{construirAlertasPesajes\(\{ pesajes, resumen: state\.data\.resumen, fechaReferencia: fechaNegocio \}\)\}/);
+  // Fecha de NEGOCIO (America/Bogota), no la fecha local del navegador.
+  assert.match(panel, /import \{ fechaHoyNegocio \} from '\.\.\/engine\/fechaNegocio\.js'/);
+  assert.match(panel, /const fechaNegocio = fechaHoyNegocio\(\);/);
+  assert.doesNotMatch(panel, /fechaReferencia: hoy\b/);
   assert.doesNotMatch(panel, /useState\([^)]*alerta/i, 'las alertas no son estado: se derivan');
 });
 
