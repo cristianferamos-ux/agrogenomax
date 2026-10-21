@@ -104,9 +104,9 @@ test('panel: sin doble envío ni reintento automático del POST', () => {
 
 test('panel: refresca historial y KPIs tras guardar; valida antes de enviar', () => {
   assert.match(panel, /setMensaje\(\{ type: 'success', text: resultado\.mensaje \}\);\s*await cargar\(\);\s*onPesajeRegistrado\?\.\(\)/);
-  assert.match(panel, /validatePesajeForm\(form, \{ hoy \}\)/);
+  assert.match(panel, /validatePesajeForm\(form, \{ hoy: fechaNegocio \}\)/);
   assert.ok(panel.indexOf('validatePesajeForm(') < panel.indexOf('registrarPesaje('), 'validación antes del POST');
-  assert.match(panel, /setForm\(initialPesajeForm\(hoy\)\)/);
+  assert.match(panel, /setForm\(initialPesajeForm\(fechaNegocio\)\)/);
 });
 
 test('panel: estado vacío, anulado, sin conexión y error de carga', () => {
