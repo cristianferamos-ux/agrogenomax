@@ -86,7 +86,8 @@ test('panel: clientOperationId oculto, estable por intención, renovado solo tra
   assert.match(panel, /const operationIdRef = useRef\(newClientOperationId\(\)\)/);
   assert.match(panel, /buildPesajeBody\(form, operationIdRef\.current\)/);
   const renovaciones = panel.match(/operationIdRef\.current = newClientOperationId\(\)/g) ?? [];
-  assert.equal(renovaciones.length, 3, 'inicial-si-falta, tras éxito y tras CLIENT_OPERATION_ID_REUSED');
+  // FASE 1D.1: + tras quedar PERSISTIDO en el outbox sin conexión.
+  assert.equal(renovaciones.length, 4, 'inicial-si-falta, tras éxito online, tras persistir offline y tras CLIENT_OPERATION_ID_REUSED');
   assert.match(panel, /if \(resultado\.exito\) \{\s*operationIdRef\.current = newClientOperationId\(\)/);
   assert.match(panel, /resultado\.tipo === 'OPERACION_REUSADA'\) \{\s*operationIdRef\.current = newClientOperationId\(\)/);
   assert.doesNotMatch(formulario, /clientOperationId|operationId/, 'el formulario no muestra el id');
@@ -97,9 +98,15 @@ test('panel: sin doble envío ni reintento automático del POST', () => {
   assert.match(panel, /savingRef\.current = true;\s*setSaving\(true\)/);
   assert.match(panel, /finally \{\s*savingRef\.current = false;\s*setSaving\(false\)/);
   assert.equal((panel.match(/registrarPesaje\(/g) ?? []).length, 1, 'un único POST por envío');
-  assert.doesNotMatch(panel, /setTimeout|setInterval|retry/i);
+  // FASE 1D.1: el ÚNICO temporizador permitido relee el outbox LOCAL
+  // (leerPendientes); nunca reintenta el POST.
+  assert.equal((panel.match(/setTimeout\(|setInterval\(/g) ?? []).length, 1, 'un solo temporizador');
+  assert.match(panel, /setInterval\(\(\) => \{ leerPendientes\(\); \}, RELECTURA_PENDIENTES_MS\)/);
+  assert.doesNotMatch(panel, /retry/i);
   assert.match(formulario, /disabled=\{saving\}/);
-  assert.match(formulario, /'Guardando pesaje\.\.\.'/);
+  // FASE 1D.1: el texto del botón vive en el modelo (online / sin conexión).
+  assert.match(formulario, /\{textoBotonPesaje\(\{ online, saving, primerPesaje \}\)\}/);
+  assert.match(fs.readFileSync(path.join(HATO_DIR, 'pesajesOfflineModel.js'), 'utf8'), /'Guardando pesaje\.\.\.'/);
 });
 
 test('panel: refresca historial y KPIs tras guardar; valida antes de enviar', () => {
@@ -115,7 +122,10 @@ test('panel: estado vacío, anulado, sin conexión y error de carga', () => {
   assert.match(panel, /getElementById\('pesaje-peso'\)\?\.focus\(\)/);
   assert.match(panel, /Este animal está anulado y no admite nuevos pesajes\./);
   assert.match(panel, /const admitePesajes = animalActivo && !anuladoEnServidor/);
-  assert.match(panel, /\{admitePesajes && online \? \(\s*<HatoPesajeForm/);
+  // FASE 1D.1: con red, formulario cuando el historial confirmado cargó; sin
+  // red, cuando el dispositivo puede guardar en el outbox.
+  assert.match(panel, /const mostrarFormulario = admitePesajes && \(online \? state\.status === 'ok' : puedeGuardarOffline && state\.status !== 'not_found'\);/);
+  assert.match(panel, /const formulario = mostrarFormulario \? \(\s*<HatoPesajeForm/);
   assert.match(panel, /\{pesajes\.length \? <HatoPesajesHistorial/, 'historial visible también si está anulado');
   assert.match(panel, /Reintentar/);
   assert.match(panel, /aria-live="polite"/);

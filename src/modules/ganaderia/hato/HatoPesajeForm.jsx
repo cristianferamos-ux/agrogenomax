@@ -2,8 +2,11 @@
 // observaciones). El clientOperationId NO se muestra: lo gestiona el panel.
 // Labels reales, errores asociados a cada campo (aria-describedby +
 // aria-invalid) y botón con texto; mientras envía, todo queda deshabilitado.
+// FASE 1D.1: sin conexión el botón dice "Guardar para sincronizar" (el panel
+// guarda en el outbox; no hay POST).
 import { MAX_OBSERVACIONES_PESAJE, MAX_PESO_KG } from './pesajesModel.js';
 import { PESO_METODOS } from './hatoFormModel.js';
+import { textoBotonPesaje } from './pesajesOfflineModel.js';
 
 function campoError(id, mensaje) {
   return mensaje ? (
@@ -13,7 +16,7 @@ function campoError(id, mensaje) {
   ) : null;
 }
 
-export default function HatoPesajeForm({ form, errores = {}, onChange, onSubmit, saving = false, hoy, primerPesaje = false }) {
+export default function HatoPesajeForm({ form, errores = {}, onChange, onSubmit, saving = false, hoy, primerPesaje = false, online = true }) {
   const err = (campo) => errores[campo];
   const describedBy = (campo) => (err(campo) ? `pesaje-${campo}-error` : undefined);
   return (
@@ -91,7 +94,7 @@ export default function HatoPesajeForm({ form, errores = {}, onChange, onSubmit,
 
       <div className="gan-hato-actions">
         <button type="submit" className="gan-submit" disabled={saving} aria-busy={saving ? 'true' : undefined}>
-          {saving ? 'Guardando pesaje...' : primerPesaje ? 'Registrar primer pesaje' : 'Registrar pesaje'}
+          {textoBotonPesaje({ online, saving, primerPesaje })}
         </button>
       </div>
     </form>

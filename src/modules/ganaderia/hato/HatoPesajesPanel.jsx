@@ -21,22 +21,40 @@
 //
 // FASE 1C.2: botón "Descargar reporte productivo" (PDF generado en el
 // servidor). Disponible también para animales anulados y sin pesajes.
+//
+// FASE 1D.1: SIN conexión el pesaje se guarda en el outbox existente
+// (PESAJE_CREAR, repoOffline.registrarPesajeLocal) con el MISMO
+// clientOperationId; NO hay POST. El motor de sincronización (Web Locks,
+// reintentos, reconexión) lo envía después. Los pendientes se muestran
+// APARTE ("Pendiente"), nunca en KPIs, gráficas, alertas ni PDF. Cuando una
+// operación desaparece del outbox (confirmada) se recarga el historial del
+// servidor sin recargar la página.
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { StatusMessage } from '../components/FormField.jsx';
 import HatoPesajeForm from './HatoPesajeForm.jsx';
 import HatoPesajesAlertas from './HatoPesajesAlertas.jsx';
 import HatoPesajesHistorial from './HatoPesajesHistorial.jsx';
 import HatoPesajesKpis from './HatoPesajesKpis.jsx';
+import HatoPesajesPendientes from './HatoPesajesPendientes.jsx';
 import HatoReporteProductivoBoton from './HatoReporteProductivoBoton.jsx';
 import { listPesajes, registrarPesaje } from './hatoApi.js';
 import { newClientOperationId } from './hatoFormModel.js';
 import { buildPesajeBody, initialPesajeForm, resultadoRegistro, validatePesajeForm } from './pesajesModel.js';
+import {
+  MENSAJE_PESAJE_PENDIENTE,
+  MENSAJE_SIN_ALMACEN_LOCAL,
+  huboConfirmaciones,
+  idsPendientes,
+  mensajeErrorGuardadoLocal,
+} from './pesajesOfflineModel.js';
 import { construirAlertasPesajes } from './pesajesAlertas.js';
 import { fechaHoyNegocio } from '../engine/fechaNegocio.js';
 
 const HatoPesajesGrafica = lazy(() => import('./HatoPesajesGrafica.jsx'));
+/** Relectura del outbox local mientras haya pendientes (confirmaciones de otra pestaña / SW). */
+const RELECTURA_PENDIENTES_MS = 4_000;
 
-export default function HatoPesajesPanel({ animalId, animalActivo, online = true, onPesajeRegistrado }) {
+export default function HatoPesajesPanel({ animalId, animalActivo, online = true, repoOffline = null, onPesajeRegistrado }) {
   const fechaNegocio = fechaHoyNegocio();
   const [state, setState] = useState({ status: 'loading', data: null });
   const [form, setForm] = useState(() => initialPesajeForm(fechaNegocio));
@@ -44,8 +62,12 @@ export default function HatoPesajesPanel({ animalId, animalActivo, online = true
   const [saving, setSaving] = useState(false);
   const [mensaje, setMensaje] = useState(null);
   const [anuladoEnServidor, setAnuladoEnServidor] = useState(false);
+  const [pendientes, setPendientes] = useState([]);
   const operationIdRef = useRef(newClientOperationId());
   const savingRef = useRef(false);
+  const pendientesIdsRef = useRef(new Set());
+  const onRegistradoRef = useRef(onPesajeRegistrado);
+  onRegistradoRef.current = onPesajeRegistrado;
 
   const cargar = useCallback(async () => {
     try {
@@ -62,11 +84,80 @@ export default function HatoPesajesPanel({ animalId, animalActivo, online = true
     cargar();
   }, [cargar]);
 
+  // Pendientes del outbox de ESTE animal. Si alguno desaparece (el motor lo
+  // confirmó), el historial/KPIs/gráficas/alertas se vuelven a pedir al
+  // servidor y la ficha se refresca. Otra pestaña o el Service Worker no
+  // notifican a este repo: se relee al volver a la pestaña o a la red.
+  const leerPendientes = useCallback(async () => {
+    if (!repoOffline) return;
+    let lista;
+    try {
+      lista = await repoOffline.listPesajesPendientes(animalId);
+    } catch {
+      return;
+    }
+    const actuales = idsPendientes(lista);
+    const confirmadas = huboConfirmaciones(pendientesIdsRef.current, actuales);
+    pendientesIdsRef.current = actuales;
+    setPendientes(lista);
+    if (confirmadas) {
+      await cargar();
+      onRegistradoRef.current?.();
+    }
+  }, [repoOffline, animalId, cargar]);
+
+  useEffect(() => {
+    if (!repoOffline) {
+      pendientesIdsRef.current = new Set();
+      setPendientes([]);
+      return undefined;
+    }
+    leerPendientes();
+    const unsubscribe = repoOffline.subscribe(() => { leerPendientes(); });
+    const alVolver = () => {
+      if (document.visibilityState !== 'hidden') leerPendientes();
+    };
+    window.addEventListener('online', alVolver);
+    document.addEventListener('visibilitychange', alVolver);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('online', alVolver);
+      document.removeEventListener('visibilitychange', alVolver);
+    };
+  }, [repoOffline, leerPendientes]);
+
+  // Otra pestaña o el Service Worker pueden confirmar los pendientes sin
+  // avisar a este repo: mientras haya pendientes se relee el outbox LOCAL
+  // (IndexedDB, sin red) para refrescar en cuanto desaparezcan.
+  const hayPendientes = pendientes.length > 0;
+  useEffect(() => {
+    if (!repoOffline || !hayPendientes) return undefined;
+    const id = setInterval(() => { leerPendientes(); }, RELECTURA_PENDIENTES_MS);
+    return () => clearInterval(id);
+  }, [repoOffline, hayPendientes, leerPendientes]);
+
   const admitePesajes = animalActivo && !anuladoEnServidor;
+  const puedeGuardarOffline = !online && Boolean(repoOffline);
 
   function update(campo, valor) {
     setForm((current) => ({ ...current, [campo]: valor }));
     setErrores((current) => (current[campo] ? { ...current, [campo]: undefined } : current));
+  }
+
+  /** Sin conexión: se persiste en el outbox; NUNCA se hace POST aquí. */
+  async function guardarOffline(body) {
+    try {
+      await repoOffline.registrarPesajeLocal({ animalId, body });
+    } catch (error) {
+      setMensaje({ type: 'error', text: mensajeErrorGuardadoLocal(error) });
+      return;
+    }
+    // Solo tras quedar persistido: nueva intención y formulario limpio.
+    operationIdRef.current = newClientOperationId();
+    setForm(initialPesajeForm(fechaNegocio));
+    setErrores({});
+    setMensaje({ type: 'info', text: MENSAJE_PESAJE_PENDIENTE });
+    await leerPendientes();
   }
 
   async function guardar(event) {
@@ -83,9 +174,17 @@ export default function HatoPesajesPanel({ animalId, animalActivo, online = true
       setMensaje({ type: 'error', text: 'Este navegador no permite registrar el pesaje de forma segura. Actualízalo e inténtalo de nuevo.' });
       return;
     }
+    if (!online && !repoOffline) {
+      setMensaje({ type: 'error', text: MENSAJE_SIN_ALMACEN_LOCAL });
+      return;
+    }
     savingRef.current = true;
     setSaving(true);
     try {
+      if (!online) {
+        await guardarOffline(buildPesajeBody(form, operationIdRef.current));
+        return;
+      }
       const resultado = resultadoRegistro(await registrarPesaje(animalId, buildPesajeBody(form, operationIdRef.current)));
       if (resultado.exito) {
         operationIdRef.current = newClientOperationId();
@@ -120,6 +219,23 @@ export default function HatoPesajesPanel({ animalId, animalActivo, online = true
 
   const pesajes = state.data?.pesajes ?? [];
   const sinPesajes = state.status === 'ok' && pesajes.length === 0;
+  // El formulario: con red, cuando el historial confirmado cargó; sin red,
+  // siempre que el dispositivo pueda guardar en el outbox (aunque el
+  // historial del servidor no esté disponible).
+  const mostrarFormulario = admitePesajes && (online ? state.status === 'ok' : puedeGuardarOffline && state.status !== 'not_found');
+
+  const formulario = mostrarFormulario ? (
+    <HatoPesajeForm
+      form={form}
+      errores={errores}
+      onChange={update}
+      onSubmit={guardar}
+      saving={saving}
+      hoy={fechaNegocio}
+      primerPesaje={sinPesajes}
+      online={online}
+    />
+  ) : null;
 
   return (
     <section className="gan-pesajes" aria-labelledby="pesajes-titulo">
@@ -141,6 +257,8 @@ export default function HatoPesajesPanel({ animalId, animalActivo, online = true
 
       <div aria-live="polite">{mensaje ? <StatusMessage type={mensaje.type}>{mensaje.text}</StatusMessage> : null}</div>
 
+      <HatoPesajesPendientes pendientes={pendientes} />
+
       {state.status === 'ok' ? (
         <>
           {admitePesajes ? (
@@ -154,7 +272,7 @@ export default function HatoPesajesPanel({ animalId, animalActivo, online = true
           {sinPesajes ? (
             <div className="gan-pesajes-vacio">
               <p>No hay pesajes registrados.</p>
-              {admitePesajes && online ? (
+              {mostrarFormulario ? (
                 <button type="button" className="gan-secondary-button" onClick={() => document.getElementById('pesaje-peso')?.focus()}>
                   Registrar primer pesaje
                 </button>
@@ -169,24 +287,14 @@ export default function HatoPesajesPanel({ animalId, animalActivo, online = true
           {!admitePesajes ? (
             <StatusMessage type="info">Este animal está anulado y no admite nuevos pesajes.</StatusMessage>
           ) : null}
-          {admitePesajes && !online ? (
+          {admitePesajes && !online && !repoOffline ? (
             <p className="gan-hato-hint">Registrar un pesaje requiere conexión.</p>
           ) : null}
-          {admitePesajes && online ? (
-            <HatoPesajeForm
-              form={form}
-              errores={errores}
-              onChange={update}
-              onSubmit={guardar}
-              saving={saving}
-              hoy={fechaNegocio}
-              primerPesaje={sinPesajes}
-            />
-          ) : null}
+          {formulario}
 
           {pesajes.length ? <HatoPesajesHistorial pesajes={pesajes} /> : null}
         </>
-      ) : null}
+      ) : formulario}
     </section>
   );
 }
