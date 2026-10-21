@@ -57,6 +57,27 @@ export function mensajeErrorGuardadoLocal(error) {
   return 'No se pudo guardar el pesaje en este dispositivo. Intenta nuevamente.';
 }
 
+/** Estados en los que un pesaje sigue realmente "pendiente de sincronización". */
+export const ESTADOS_PESAJE_EN_CURSO = Object.freeze(['PENDIENTE', 'SINCRONIZANDO', 'ERROR_REINTENTABLE']);
+
+export function hayPesajesEnCurso(pendientes) {
+  return pendientes.some((p) => ESTADOS_PESAJE_EN_CURSO.includes(p.estado));
+}
+
+/**
+ * Mensaje tras releer el outbox: el informativo "Pesaje pendiente de
+ * sincronización." se retira cuando deja de ser cierto (ningún pesaje de
+ * este animal sigue en curso: confirmados, descartados o bloqueados). NO se
+ * sustituye por "sincronizado": una operación también desaparece al
+ * descartarla. Cualquier otro mensaje (error, validación, éxito online) se
+ * conserva. Un pesaje en CONFLICTO/RECHAZADO sigue visible en la sección de
+ * pendientes con su motivo.
+ */
+export function mensajeTrasLeerPendientes(mensaje, pendientes) {
+  const esAvisoPendiente = mensaje?.type === 'info' && mensaje.text === MENSAJE_PESAJE_PENDIENTE;
+  return esAvisoPendiente && !hayPesajesEnCurso(pendientes) ? null : mensaje;
+}
+
 /** Identificadores de operación (para detectar confirmaciones y refrescar). */
 export function idsPendientes(pendientes) {
   return new Set(pendientes.map((p) => p.localOperationId));
