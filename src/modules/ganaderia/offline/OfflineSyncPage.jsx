@@ -8,6 +8,8 @@ import { FormField, StatusMessage } from '../components/FormField.jsx';
 import { useGanaderiaOffline } from './GanaderiaOfflineProvider.jsx';
 import { formatUltimaSync } from './OfflineStatusBar.jsx';
 import { OUTBOX_ESTADOS } from './outbox.js';
+import { formatFecha, formatKg, formatMetodo } from '../hato/pesajesModel.js';
+import { mensajeBloqueoPesaje } from '../hato/pesajesOfflineModel.js';
 import '../styles/ganaderia-hato.css';
 import '../styles/ganaderia-offline.css';
 
@@ -20,6 +22,42 @@ const CONFLICTO_MENSAJES = Object.freeze({
   PREDIO_NOT_FOUND: 'El predio ya no está disponible.',
   PREDIO_ARCHIVADO: 'El predio fue archivado.',
 });
+
+// FASE 1D.1: un pesaje (PESAJE_CREAR) que el servidor no aceptó. No se
+// reintenta solo ni se le cambia el clientOperationId: el usuario lo revisa
+// en la ficha y, si corresponde, lo descarta (no afecta al servidor).
+function ConflictoPesajeItem({ op, animal, repo, onDone }) {
+  const [confirmar, setConfirmar] = useState(false);
+  const [error, setError] = useState('');
+  const p = op.payload ?? {};
+  async function descartar() {
+    setError('');
+    try {
+      await repo.descartarPesajePendiente(op.operationId);
+      onDone();
+    } catch (err) {
+      setError(err?.message ?? 'No fue posible descartar el pesaje.');
+    }
+  }
+  return (
+    <li className="gan-offline-conflicto">
+      <strong>Pesaje de {animal ? animal.numeroVisual || animal.nombre || 'animal sin identificar' : `animal ${p.animalId}`}</strong>
+      <span>{formatFecha(p.fecha)} · {formatKg(p.pesoKg)} · {formatMetodo(p.metodo)}</span>
+      <span>{mensajeBloqueoPesaje(op.ultimoError?.codigo)}</span>
+      <Link to={`/ganaderia/animales/${p.animalId}`}>Ver ficha del animal</Link>
+      <div className="gan-hato-actions">
+        <button type="button" className="gan-secondary-button" onClick={() => setConfirmar(true)}>Descartar pesaje pendiente</button>
+      </div>
+      {confirmar ? (
+        <div className="gan-hato-actions">
+          <StatusMessage type="info">El pesaje pendiente se eliminará de este dispositivo. No afecta al servidor.</StatusMessage>
+          <button type="button" className="gan-submit" onClick={descartar}>Confirmar descarte</button>
+        </div>
+      ) : null}
+      {error ? <StatusMessage type="error">{error}</StatusMessage> : null}
+    </li>
+  );
+}
 
 function ConflictoItem({ op, animal, repo, onDone }) {
   const [modo, setModo] = useState(null);
@@ -93,7 +131,12 @@ export default function OfflineSyncPage() {
   const cargar = useCallback(async () => {
     if (!offline.repo) return;
     const ops = (await offline.repo.listOutbox()).filter((op) => op.estado === OUTBOX_ESTADOS.CONFLICTO || op.estado === OUTBOX_ESTADOS.RECHAZADO);
-    const conAnimal = await Promise.all(ops.map(async (op) => ({ op, animal: await offline.repo.getAnimal(`local:${op.localUuid}`) })));
+    const conAnimal = await Promise.all(ops.map(async (op) => ({
+      op,
+      animal: op.tipoOperacion === 'PESAJE_CREAR'
+        ? await offline.repo.getAnimal(op.payload?.animalId)
+        : await offline.repo.getAnimal(`local:${op.localUuid}`),
+    })));
     setBloqueadas(conAnimal);
   }, [offline.repo]);
 
@@ -165,7 +208,9 @@ export default function OfflineSyncPage() {
           <p className="gan-hato-hint">Los registros se conservan en este dispositivo hasta que decidas qué hacer.</p>
           <ul>
             {bloqueadas.map(({ op, animal }) => (
-              <ConflictoItem key={op.operationId} op={op} animal={animal} repo={offline.repo} onDone={cargar} />
+              op.tipoOperacion === 'PESAJE_CREAR'
+                ? <ConflictoPesajeItem key={op.operationId} op={op} animal={animal} repo={offline.repo} onDone={cargar} />
+                : <ConflictoItem key={op.operationId} op={op} animal={animal} repo={offline.repo} onDone={cargar} />
             ))}
           </ul>
         </section>

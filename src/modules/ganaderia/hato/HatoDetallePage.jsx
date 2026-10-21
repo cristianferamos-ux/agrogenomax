@@ -14,6 +14,8 @@
 // FASE 1B: la ficha se organiza en pestañas "Resumen" (contenido previo) y
 // "Pesajes" (HatoPesajesPanel: historial, KPIs, gráfica y registro). La
 // pestaña Pesajes solo existe para animales ya confirmados por el servidor.
+// FASE 1D.1: el panel recibe el repositorio offline (outbox) para guardar
+// pesajes sin conexión; un animal local (sin animal_id) no tiene pestaña.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
 import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
@@ -283,6 +285,7 @@ export default function HatoDetallePage() {
                 animalId={animal.animalId}
                 animalActivo={animal.estado === 'ACTIVO'}
                 online={offline.online}
+                repoOffline={offline.repo}
                 onPesajeRegistrado={() => load({ silencioso: true })}
               />
             </div>

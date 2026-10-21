@@ -7,9 +7,10 @@
 // Operación:
 //   operationId         UUID local de la operación (clave del store)
 //   clientOperationId   UUID de idempotencia que viaja al servidor
-//   tipoOperacion       'ANIMAL_CREAR' | 'ANIMAL_CREAR_CON_CHAPETA' | ...
-//   entidad             'animal' | ...
-//   localUuid           entidad local afectada
+//   tipoOperacion       'ANIMAL_CREAR' | 'ANIMAL_CREAR_CON_CHAPETA' | 'PESAJE_CREAR' (FASE 1D.1) | ...
+//   entidad             'animal' | 'pesaje' | ...
+//   localUuid           entidad local afectada (un pesaje pendiente tiene el suyo propio:
+//                       un pesaje bloqueado nunca frena a los demás)
 //   payload             cuerpo de la escritura (sin secretos)
 //   createdAt, updatedAt  ISO
 //   estado              PENDIENTE | SINCRONIZANDO | SINCRONIZADO | ERROR_REINTENTABLE | CONFLICTO | RECHAZADO

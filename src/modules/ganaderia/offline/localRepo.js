@@ -3,7 +3,7 @@
 // ni DOM): lo usan las páginas, el motor de sincronización y el Service
 // Worker. Nunca fabrica un animal_id de PostgreSQL: un animal creado sin
 // red vive como 'loc:<localUuid>' hasta que el servidor confirma su id.
-import { OUTBOX_ESTADOS, newOperation } from './outbox.js';
+import { OUTBOX_ESTADOS, newOperation, ordenarOutbox } from './outbox.js';
 import { normalizeCodigoChapeta, isQrToken } from '../hato/qrToken.js';
 
 export const ESTADO_SYNC = Object.freeze({
@@ -22,6 +22,31 @@ export async function sha256Hex(text) {
 
 function localError(code, message) {
   return Object.assign(new Error(message), { code });
+}
+
+/** animal_id de PostgreSQL (nunca 'local:<uuid>' ni un id fabricado). */
+function esIdServidor(animalId) {
+  return /^[1-9]\d{0,17}$/.test(String(animalId ?? ''));
+}
+
+/**
+ * FASE 1D.1: vista de un pesaje pendiente (operación PESAJE_CREAR). Sin
+ * pesajeId: no existe en el servidor hasta que este lo confirma.
+ */
+export function pesajePendienteDe(op) {
+  return {
+    localOperationId: op.operationId,
+    localUuid: op.localUuid,
+    clientOperationId: op.clientOperationId,
+    animalId: op.payload.animalId,
+    fecha: op.payload.fecha,
+    pesoKg: op.payload.pesoKg,
+    metodo: op.payload.metodo,
+    observaciones: op.payload.observaciones ?? null,
+    estado: op.estado,
+    ultimoError: op.ultimoError ?? null,
+    createdAt: op.createdAt,
+  };
 }
 
 /**
@@ -251,6 +276,67 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
     },
 
     // -----------------------------------------------------------------
+    // FASE 1D.1 -- pesajes pendientes de sincronización (PESAJE_CREAR)
+    // -----------------------------------------------------------------
+
+    /**
+     * Encola un pesaje de un animal YA confirmado por el servidor. `body` es
+     * exactamente el cuerpo de POST /api/ganaderia/animales/:id/pesajes
+     * (buildPesajeBody: fecha, pesoKg, metodo, observaciones?,
+     * clientOperationId); NUNCA lleva organizacionId (el servidor la toma de
+     * la sesión). Idempotente: el mismo clientOperationId no crea una segunda
+     * operación (doble clic, reintento del usuario). No se fabrica pesajeId:
+     * el pesaje solo existe en el servidor cuando este lo confirma.
+     */
+    async registrarPesajeLocal({ animalId, body }) {
+      if (!esIdServidor(animalId)) {
+        throw localError('PESAJE_REQUIERE_ANIMAL_SINCRONIZADO', 'Este animal aún no está sincronizado: registra el pesaje cuando el servidor lo confirme.');
+      }
+      if (!body?.clientOperationId) throw localError('OPERACION_SIN_ID', 'Falta clientOperationId.');
+      if ('organizacionId' in body || 'organizacion_id' in body) throw localError('CAMPO_NO_PERMITIDO', 'La organización la resuelve el servidor.');
+      const previa = (await storage.getAll('outbox')).find((op) => op.tipoOperacion === 'PESAJE_CREAR' && op.clientOperationId === body.clientOperationId);
+      if (previa) return { localUuid: previa.localUuid, operationId: previa.operationId, pendiente: pesajePendienteDe(previa), yaEncolado: true };
+      const op = newOperation({
+        tipoOperacion: 'PESAJE_CREAR',
+        entidad: 'pesaje',
+        localUuid: uuid(),
+        clientOperationId: body.clientOperationId,
+        payload: {
+          animalId: String(animalId),
+          fecha: body.fecha,
+          pesoKg: body.pesoKg,
+          metodo: body.metodo,
+          observaciones: body.observaciones ?? null,
+          clientOperationId: body.clientOperationId,
+        },
+        deviceId,
+        now: now(),
+        uuid,
+      });
+      await storage.batch([{ op: 'put', store: 'outbox', value: op }]);
+      notify();
+      return { localUuid: op.localUuid, operationId: op.operationId, pendiente: pesajePendienteDe(op), yaEncolado: false };
+    },
+
+    /** Pesajes del outbox de un animal (orden de envío). Nunca entran en los datos confirmados. */
+    async listPesajesPendientes(animalId) {
+      const ops = (await storage.getAll('outbox'))
+        .filter((op) => op.tipoOperacion === 'PESAJE_CREAR' && op.payload?.animalId === String(animalId));
+      return ordenarOutbox(ops).map(pesajePendienteDe);
+    },
+
+    /** Descarta un pesaje que el servidor rechazó (decisión explícita del usuario). */
+    async descartarPesajePendiente(operationId) {
+      const op = await storage.get('outbox', operationId);
+      if (!op || op.tipoOperacion !== 'PESAJE_CREAR') throw localError('PESAJE_PENDIENTE_NO_ENCONTRADO', 'No hay un pesaje pendiente con ese identificador.');
+      if (![OUTBOX_ESTADOS.CONFLICTO, OUTBOX_ESTADOS.RECHAZADO].includes(op.estado)) {
+        throw localError('PESAJE_PENDIENTE_EN_CURSO', 'Solo se descartan pesajes que el servidor no aceptó.');
+      }
+      await storage.batch([{ op: 'delete', store: 'outbox', key: operationId }]);
+      notify();
+    },
+
+    // -----------------------------------------------------------------
     // Aplicación de resultados del servidor
     // -----------------------------------------------------------------
 
@@ -289,6 +375,16 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
         operaciones.push({ op: 'put', store: 'chapetas', value: merged });
       }
       await storage.batch(operaciones);
+      notify();
+    },
+
+    /**
+     * FASE 1D.1: el servidor confirmó el pesaje (201 creado o 200 yaExistia).
+     * Se elimina la operación; el historial, KPIs, gráficas, alertas y PDF se
+     * vuelven a pedir al servidor (fuente de verdad) vía notify().
+     */
+    async confirmarPesajeCreado(op) {
+      await storage.batch([{ op: 'delete', store: 'outbox', key: op.operationId }]);
       notify();
     },
 

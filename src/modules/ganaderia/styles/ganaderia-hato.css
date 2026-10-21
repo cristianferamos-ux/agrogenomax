@@ -463,6 +463,74 @@
   color: #b6c0cc;
 }
 
+/* FASE 1D.1: pesajes pendientes de sincronización (outbox), separados del
+   historial confirmado. Estado en texto ("Pendiente", "Sincronizando", "No
+   sincronizado"); el borde punteado lo refuerza. */
+.gan-pesajes-pendientes {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px dashed rgba(255, 196, 77, 0.55);
+  border-radius: 0.6rem;
+  background: rgba(255, 196, 77, 0.05);
+}
+
+.gan-pesajes-pendientes h4 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.gan-pesajes-pendientes-nota {
+  margin: 0;
+  color: #b6c0cc;
+  font-size: 0.8rem;
+}
+
+.gan-pesajes-pendientes ul {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gan-pesajes-pendiente {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 0.5rem;
+  overflow-wrap: anywhere;
+}
+
+.gan-pesajes-pendiente-badge {
+  justify-self: start;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid #ffc44d;
+  border-radius: 999px;
+  color: #ffd27a;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.gan-pesajes-pendiente[data-estado="CONFLICTO"] .gan-pesajes-pendiente-badge,
+.gan-pesajes-pendiente[data-estado="RECHAZADO"] .gan-pesajes-pendiente-badge {
+  border-color: #ff6b6b;
+  color: #ff8a8a;
+}
+
+.gan-pesajes-pendiente-datos {
+  color: #e6edf3;
+  font-weight: 600;
+}
+
+.gan-pesajes-pendiente-obs,
+.gan-pesajes-pendiente-detalle {
+  color: #8b96a5;
+  font-size: 0.8rem;
+}
+
 .gan-pesaje-form-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
