@@ -75,7 +75,8 @@ test('ficha: pestañas Resumen | Pesajes accesibles (tablist, aria-selected, ari
 });
 
 test('ficha: tras registrar un pesaje refresca la ficha en silencio (sin recargar la página)', () => {
-  assert.match(detalle, /onPesajeRegistrado=\{\(\) => load\(\{ silencioso: true \}\)\}/);
+  // FASE 1D.2: además marca la pestaña Actividad como desactualizada.
+  assert.match(detalle, /onPesajeRegistrado=\{\(\) => \{\s*load\(\{ silencioso: true \}\);\s*marcarActividad\(\);\s*\}\}/);
   assert.match(detalle, /animalActivo=\{[^}]*'ACTIVO'/);
   for (const name of [...PESAJES_FILES, 'HatoDetallePage.jsx']) {
     assert.doesNotMatch(src(name), /location\.reload|window\.location\s*=/, name);

@@ -16,6 +16,10 @@
 // pestaña Pesajes solo existe para animales ya confirmados por el servidor.
 // FASE 1D.1: el panel recibe el repositorio offline (outbox) para guardar
 // pesajes sin conexión; un animal local (sin animal_id) no tiene pestaña.
+// FASE 1D.2: pestaña "Actividad" (línea de tiempo derivada). Se monta al
+// abrirla por primera vez y queda montada (oculta) al cambiar de pestaña;
+// `actividadVersion` marca cambios (pesaje confirmado, corrección,
+// anulación, chapeta QR) para recargarla abierta o al volver a abrirla.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
 import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
@@ -23,6 +27,7 @@ import { FormField, StatusMessage } from '../components/FormField.jsx';
 import HatoAnimalFields from './HatoAnimalFields.jsx';
 import HatoQrPanel from './HatoQrPanel.jsx';
 import HatoPesajesPanel from './HatoPesajesPanel.jsx';
+import HatoActividadPanel from './HatoActividadPanel.jsx';
 import { anularAnimal, corregirAnimal, getAnimal } from './hatoApi.js';
 import {
   GENERIC_ERROR_MESSAGE,
@@ -55,6 +60,7 @@ function Row({ label, children }) {
 const PESTANAS = Object.freeze([
   { id: 'resumen', label: 'Resumen' },
   { id: 'pesajes', label: 'Pesajes' },
+  { id: 'actividad', label: 'Actividad' },
 ]);
 
 // Pestañas accesibles (patrón WAI-ARIA tabs): flechas izquierda/derecha,
@@ -116,6 +122,13 @@ export default function HatoDetallePage() {
   const [error, setError] = useState('');
   const [aviso, setAviso] = useState('');
   const [pestana, setPestana] = useState('resumen');
+  const [actividadAbierta, setActividadAbierta] = useState(false);
+  const [actividadVersion, setActividadVersion] = useState(0);
+  const marcarActividad = useCallback(() => setActividadVersion((v) => v + 1), []);
+  const cambiarPestana = useCallback((id) => {
+    setPestana(id);
+    if (id === 'actividad') setActividadAbierta(true);
+  }, []);
 
   // silencioso (FASE 1B): refresca la ficha sin pasar por "cargando" (tras
   // registrar un pesaje, para no desmontar la pestaña ni su mensaje).
@@ -203,6 +216,7 @@ export default function HatoDetallePage() {
         setState({ status: 'ok', animal: data.animal });
         setModo('ver');
         setAviso(data.sinCambios ? 'No había cambios para guardar.' : 'Datos corregidos.');
+        if (!data.sinCambios) marcarActividad();
         return;
       }
       if (data?.error === 'ANIMAL_MODIFICADO') {
@@ -234,6 +248,7 @@ export default function HatoDetallePage() {
         setState({ status: 'ok', animal: data.animal });
         setModo('ver');
         setAviso(data.yaAnulado ? 'Este registro ya estaba anulado.' : 'Registro anulado.');
+        if (!data.yaAnulado) marcarActividad();
         return;
       }
       setError(messageForError(data?.error));
@@ -277,7 +292,7 @@ export default function HatoDetallePage() {
             </StatusMessage>
           ) : null}
 
-          {modo === 'ver' && !esLocal ? <FichaTabs activa={pestana} onChange={setPestana} /> : null}
+          {modo === 'ver' && !esLocal ? <FichaTabs activa={pestana} onChange={cambiarPestana} /> : null}
 
           {modo === 'ver' && !esLocal && pestana === 'pesajes' ? (
             <div role="tabpanel" id="ficha-panel-pesajes" aria-labelledby="ficha-tab-pesajes" tabIndex={0}>
@@ -286,8 +301,17 @@ export default function HatoDetallePage() {
                 animalActivo={animal.estado === 'ACTIVO'}
                 online={offline.online}
                 repoOffline={offline.repo}
-                onPesajeRegistrado={() => load({ silencioso: true })}
+                onPesajeRegistrado={() => {
+                  load({ silencioso: true });
+                  marcarActividad();
+                }}
               />
+            </div>
+          ) : null}
+
+          {modo === 'ver' && !esLocal && actividadAbierta ? (
+            <div role="tabpanel" id="ficha-panel-actividad" aria-labelledby="ficha-tab-actividad" tabIndex={0} hidden={pestana !== 'actividad'}>
+              <HatoActividadPanel animalId={animal.animalId} visible={pestana === 'actividad'} version={actividadVersion} repoOffline={offline.repo} />
             </div>
           ) : null}
 
@@ -329,7 +353,7 @@ export default function HatoDetallePage() {
                 </div>
               ) : null}
               {accionesDisponibles ? (
-                <HatoQrPanel animalId={animal.animalId} animalActivo={animal.estado === 'ACTIVO'} />
+                <HatoQrPanel animalId={animal.animalId} animalActivo={animal.estado === 'ACTIVO'} onCambio={marcarActividad} />
               ) : (
                 <section className="gan-hato-qr">
                   <h3>Chapeta QR</h3>

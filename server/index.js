@@ -32,6 +32,7 @@ import createGanaderiaAnimalesRouter from './routes/ganaderiaAnimales.js';
 import { createGanaderiaAnimalQrRouter, createGanaderiaQrRouter } from './routes/ganaderiaAnimalQr.js';
 import createGanaderiaAnimalPesajesRouter from './routes/ganaderiaAnimalPesajes.js';
 import createGanaderiaAnimalReporteRouter from './routes/ganaderiaAnimalReporte.js';
+import createGanaderiaAnimalTimelineRouter from './routes/ganaderiaAnimalTimeline.js';
 import createGanaderiaAdminQrRouter from './routes/ganaderiaAdminQr.js';
 import createGanaderiaSyncRouter from './routes/ganaderiaSync.js';
 import createGanaderiaCatalogoRazasRouter from './routes/ganaderiaCatalogoRazas.js';
@@ -307,6 +308,16 @@ app.use(
 app.use(
   '/api/ganaderia/animales/:animalId/pesajes',
   createGanaderiaAnimalPesajesRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
+// FASE 1D.2: línea de tiempo DERIVADA del animal (solo lectura, sin tabla
+// propia). Sesión con organización; montada ANTES del router de animales.
+app.use(
+  '/api/ganaderia/animales/:animalId/timeline',
+  createGanaderiaAnimalTimelineRouter({
     appEnv: appConfig.appEnv,
     csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
     allowedOrigins: appConfig.cors.allowedOrigins,
