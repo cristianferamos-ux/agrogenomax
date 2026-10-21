@@ -4,6 +4,9 @@
 // registro atómico animal + chapeta, revocación, reemplazo, animal anulado,
 // colisiones, concurrencia, RLS por ROL (agx_app vs agx_qr_admin), trigger
 // de transiciones, grants y cifrado del token.
+// FASE 2A: regla permanente -- la chapeta es única, intransferible, no
+// reasignable y no reciclable, también tras la salida o muerte del animal
+// (requiere 0025; esa parte se auto-omite sin ella).
 //
 // Lee EXCLUSIVAMENTE AGX_BUSINESS_DATABASE_URL_TEST (agx_app),
 // AGX_BUSINESS_QR_ADMIN_DATABASE_URL_TEST (agx_qr_admin) y
@@ -19,6 +22,7 @@ import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import pg from 'pg';
 import { validateCreateAnimalBody } from '../ganaderia/animalValidation.js';
+import { validateCierreBody } from '../ganaderia/cierreValidation.js';
 import { resolveFechaHoyNegocio } from '../ganaderia/motorDescansoAuto/businessTimezone.js';
 
 let dbAvailable = false;
@@ -31,6 +35,8 @@ let codigos;
 let businessDb;
 let qrAdminDb;
 let qrAdminPool;
+let cierreRepo;
+let cierreDisponible = false;
 
 try {
   const testConnectionString = process.env.AGX_BUSINESS_DATABASE_URL_TEST;
@@ -61,6 +67,11 @@ if (dbAvailable) {
   codigos = await import('../ganaderia/qrCodigos.js');
   businessDb = await import('../../db/agxBusinessPool.js');
   qrAdminDb = await import('../../db/agxQrAdminPool.js');
+  cierreRepo = await import('../ganaderia/cierreRepository.js');
+  cierreDisponible = (await adminPool.query(
+    `select count(*)::int as n from information_schema.columns
+      where table_schema = 'agx' and table_name = 'animales' and column_name = 'estado_operativo'`,
+  )).rows[0].n === 1;
 }
 
 after(async () => {
@@ -762,5 +773,197 @@ describe('FASE 15: paquete de fabricación contra Postgres real (solo lectura)',
     const data = await inventario.exportLoteProveedor(lote.loteId);
     assert.equal(data.lote.tipo, 'QR_LEGACY');
     assert.equal(data.chapetas[0].token, null);
+  });
+});
+
+// ---------------------------------------------------------------------
+// FASE 2A: regla permanente. Una chapeta asignada a un animal queda ligada a
+// él para siempre: única, intransferible, no reasignable, no reciclable.
+// ---------------------------------------------------------------------
+describe('FASE 2A: regla QR permanente (salida, muerte, reemplazo, daño)', { skip: !dbAvailable || !cierreDisponible }, () => {
+  const cerrar = (org, animalId, tipo) => cierreRepo.registrarCierreIdempotente(org, animalId, validateCierreBody(
+    tipo,
+    tipo === 'SALIDA'
+      ? { fechaSalida: HOY, motivoSalida: 'VENTA', clientOperationId: crypto.randomUUID() }
+      : { fechaMuerte: HOY, causaMuerte: 'ENFERMEDAD', clientOperationId: crypto.randomUUID() },
+    { hoy: HOY },
+  ), { actorCuentaId: ACTOR });
+
+  async function fila(codigo) {
+    return (await adminPool.query(
+      `select qr_id::text as qr_id, estado, organizacion_id, animal_id::text as animal_id, codigo_visible, token_hash,
+              asignado_animal_at is not null as con_asignacion, revocado_at is not null as con_revocacion, motivo
+         from agx.qr_chapetas where codigo_visible = $1`,
+      [codigo],
+    )).rows[0];
+  }
+
+  /** Ningún camino de la organización ni del Super Admin vuelve a usar la chapeta terminal `c`. */
+  async function assertNoReutilizable(org, c, { otroAnimal, libre }) {
+    const qrId = (await fila(c.codigo)).qr_id;
+    for (const ref of [{ token: c.token }, { codigoVisible: c.codigo }]) {
+      const r = await chapetasRepo.resolverChapeta(org, ref);
+      assert.equal(r.resultado, 'NO_OPERATIVA', Object.keys(ref)[0]);
+      assert.equal(r.animalId, undefined, 'el escaneo nunca devuelve otro animal');
+    }
+    await expectSemantic(chapetasRepo.asociarChapetaAAnimal(org, otroAnimal, c.codigo, { actorCuentaId: ACTOR }), 'QR_NO_OPERATIVO', 410);
+    await expectSemantic(registrar(org, c.codigo, animalBody(await seedPredio(org))), 'QR_NO_OPERATIVO', 410);
+    // Como chapeta "nueva" de un reemplazo en otro animal.
+    await chapetasRepo.asociarChapetaAAnimal(org, otroAnimal, libre.codigo, { actorCuentaId: ACTOR });
+    await expectSemantic(
+      chapetasRepo.reemplazarChapetaDeAnimal(org, otroAnimal, { codigoNuevo: c.codigo, motivo: 'Prueba', actorCuentaId: ACTOR }),
+      'QR_NO_OPERATIVO',
+      410,
+    );
+    // Super Admin: ni baja, ni reemplazo, ni reasignación a otra organización.
+    const terminal = await fila(c.codigo);
+    const otraCausa = terminal.estado === 'DANADO' ? 'REVOCADO' : 'DANADO';
+    await expectSemantic(inventario.bajaChapetaAdmin(qrId, { causa: otraCausa, motivo: 'x' }, SUPERADMIN), 'QR_NO_OPERATIVO', 410);
+    if (terminal.estado !== 'REEMPLAZADO') {
+      // Repetir la MISMA baja es idempotente: sin cambios ni escritura.
+      const repetida = await inventario.bajaChapetaAdmin(qrId, { causa: terminal.estado, motivo: 'x' }, SUPERADMIN);
+      assert.equal(repetida.sinCambios, true);
+      assert.deepEqual(await fila(c.codigo), terminal);
+    }
+    await expectSemantic(inventario.reemplazarChapetaAdmin(qrId, { codigoNuevo: libre.codigo, motivo: 'x' }, SUPERADMIN), 'QR_NO_ACTIVO', 409);
+    const loteId = (await adminPool.query('select lote_id::text as lote_id from agx.qr_chapetas where qr_id = $1', [qrId])).rows[0].lote_id;
+    await expectSemantic(asignar(loteId, orgId(), { codigos: [c.codigo] }), 'QR_NO_DISPONIBLE', 409);
+  }
+
+  test('2A-1. asignada a un animal: no se asocia a otro animal ni la ve otra organización', async () => {
+    const org = orgId();
+    const [c] = await chapetasDe(org);
+    const a = await seedAnimal(org);
+    const b = await seedAnimal(org);
+    await chapetasRepo.asociarChapetaAAnimal(org, a, c.codigo, { actorCuentaId: ACTOR });
+    await expectSemantic(chapetasRepo.asociarChapetaAAnimal(org, b, c.codigo, { actorCuentaId: ACTOR }), 'QR_YA_ASOCIADO', 409);
+    await expectSemantic(registrar(org, c.codigo, animalBody(await seedPredio(org))), 'QR_YA_ASOCIADO', 409);
+    await expectSemantic(chapetasRepo.reemplazarChapetaDeAnimal(org, b, { codigoNuevo: c.codigo, motivo: 'x', actorCuentaId: ACTOR }), 'QR_YA_ASOCIADO', 409);
+    assert.equal(await chapetasRepo.resolverChapeta(orgId(), { token: c.token }), null, 'otra organización no la ve');
+    assert.equal((await fila(c.codigo)).animal_id, a);
+  });
+
+  for (const [tipo, causa, motivo] of [['SALIDA', 'ANIMAL_SALIDO', 'Animal salió del hato'], ['MUERTE', 'ANIMAL_MUERTO', 'Animal muerto']]) {
+    test(`2A-2/3. revocada por ${causa}: terminal, ligada al animal original, historial completo, nunca reutilizable`, async () => {
+      const org = orgId();
+      const [c, libre] = await chapetasDe(org, 2);
+      const animal = await seedAnimal(org);
+      await chapetasRepo.asociarChapetaAAnimal(org, animal, c.codigo, { actorCuentaId: ACTOR });
+      const antes = await fila(c.codigo);
+      await cerrar(org, animal, tipo);
+      const despues = await fila(c.codigo);
+      assert.deepEqual(
+        { estado: despues.estado, animal_id: despues.animal_id, organizacion_id: despues.organizacion_id, motivo: despues.motivo },
+        { estado: 'REVOCADO', animal_id: animal, organizacion_id: org, motivo },
+      );
+      assert.equal(despues.codigo_visible, antes.codigo_visible);
+      assert.equal(despues.token_hash, antes.token_hash, 'el token sigue ligado a la misma chapeta');
+      assert.ok(despues.con_asignacion && despues.con_revocacion, 'fechas de asignación y revocación conservadas');
+      const eventos = (await adminPool.query(
+        'select tipo_evento, metadata_json from agx.qr_chapeta_eventos where qr_id = $1 order by evento_id', [despues.qr_id],
+      )).rows;
+      assert.deepEqual(eventos.map((e) => e.tipo_evento), ['ASIGNADA_ORGANIZACION', 'ASOCIADA_ANIMAL', 'REVOCADA']);
+      assert.deepEqual(eventos[2].metadata_json, { causa, animalId: animal });
+      const animalEvento = (await adminPool.query(
+        "select metadata_json from agx.animal_eventos where animal_id = $1 and tipo_evento = 'QR_REVOCADO'", [animal],
+      )).rows;
+      assert.equal(animalEvento.length, 1);
+      assert.equal(animalEvento[0].metadata_json.causa, causa);
+      assert.equal(animalEvento[0].metadata_json.codigoVisible, c.codigo);
+      const tokens = (await adminPool.query('select count(*)::int as n from agx.qr_chapeta_tokens where qr_id = $1', [despues.qr_id])).rows[0].n;
+      assert.equal(tokens, 1, 'el cierre no borra el token');
+      await assertNoReutilizable(org, c, { otroAnimal: await seedAnimal(org), libre });
+    });
+  }
+
+  test('2A-4. REEMPLAZADA: terminal y ligada al mismo animal; la nueva también; nunca vuelve a asignarse', async () => {
+    const org = orgId();
+    const [vieja, nueva, libre] = await chapetasDe(org, 3);
+    const animal = await seedAnimal(org);
+    await chapetasRepo.asociarChapetaAAnimal(org, animal, vieja.codigo, { actorCuentaId: ACTOR });
+    await chapetasRepo.reemplazarChapetaDeAnimal(org, animal, { codigoNuevo: nueva.codigo, motivo: 'Ilegible', actorCuentaId: ACTOR });
+    const v = await fila(vieja.codigo);
+    assert.equal(v.estado, 'REEMPLAZADO');
+    assert.equal(v.animal_id, animal);
+    assert.equal((await fila(nueva.codigo)).animal_id, animal, 'el reemplazo no es una transferencia entre animales');
+    await assertNoReutilizable(org, vieja, { otroAnimal: await seedAnimal(org), libre });
+  });
+
+  test('2A-5. DANADA: terminal y nunca vuelve a asignarse', async () => {
+    const org = orgId();
+    const [c, libre] = await chapetasDe(org, 2);
+    const animal = await seedAnimal(org);
+    await chapetasRepo.asociarChapetaAAnimal(org, animal, c.codigo, { actorCuentaId: ACTOR });
+    await chapetasRepo.bajaChapetaDeAnimal(org, animal, { causa: 'DANADO', motivo: 'Rota', actorCuentaId: ACTOR });
+    assert.equal((await fila(c.codigo)).animal_id, animal);
+    await assertNoReutilizable(org, c, { otroAnimal: await seedAnimal(org), libre });
+  });
+
+  test('2A-6/7. código visible y token reservados para siempre; token inmutable y único por chapeta', async () => {
+    const org = orgId();
+    const [c] = await chapetasDe(org);
+    const animal = await seedAnimal(org);
+    await chapetasRepo.asociarChapetaAAnimal(org, animal, c.codigo, { actorCuentaId: ACTOR });
+    await cerrar(org, animal, 'MUERTE');
+    const original = await fila(c.codigo);
+    assert.equal(codigos.hashQrToken(c.token), original.token_hash);
+    const lote = await loteEnStock(1);
+    await asQrAdmin((client) => expectPgError(
+      client.query("insert into agx.qr_chapetas (lote_id, tipo, codigo_visible, token_hash) values ($1, 'QR_AGX', $2, $3)",
+        [lote.loteId, c.codigo, 'b'.repeat(64)]),
+      '23505', 'qr_chapetas_codigo_visible_key',
+    ));
+    await asQrAdmin((client) => expectPgError(
+      client.query("insert into agx.qr_chapetas (lote_id, tipo, codigo_visible, token_hash) values ($1, 'QR_AGX', $2, $3)",
+        [lote.loteId, codigos.generateCodigoVisible(), original.token_hash]),
+      '23505', 'qr_chapetas_token_hash_key',
+    ));
+    await asQrAdmin((client) => expectPgError(
+      client.query('update agx.qr_chapeta_tokens set token_cifrado = token_cifrado where qr_id = $1', [original.qr_id]),
+      '42501',
+    ));
+    await asQrAdmin((client) => expectPgError(
+      client.query("insert into agx.qr_chapeta_tokens (qr_id, token_cifrado) values ($1, decode(repeat('00', 60), 'hex'))", [original.qr_id]),
+      '23505',
+    ));
+  });
+
+  test('2A-9/10. ninguna transición terminal -> asignable: ni agx_app, ni agx_qr_admin, ni superusuario', async () => {
+    const org = orgId();
+    const [rev, dan, ree, nueva] = await chapetasDe(org, 4);
+    const a1 = await seedAnimal(org);
+    const a2 = await seedAnimal(org);
+    const a3 = await seedAnimal(org);
+    await chapetasRepo.asociarChapetaAAnimal(org, a1, rev.codigo, { actorCuentaId: ACTOR });
+    await cerrar(org, a1, 'SALIDA');
+    await chapetasRepo.asociarChapetaAAnimal(org, a2, dan.codigo, { actorCuentaId: ACTOR });
+    await chapetasRepo.bajaChapetaDeAnimal(org, a2, { causa: 'DANADO', motivo: 'Rota', actorCuentaId: ACTOR });
+    await chapetasRepo.asociarChapetaAAnimal(org, a3, ree.codigo, { actorCuentaId: ACTOR });
+    await chapetasRepo.reemplazarChapetaDeAnimal(org, a3, { codigoNuevo: nueva.codigo, motivo: 'x', actorCuentaId: ACTOR });
+    const otro = await seedAnimal(org);
+    const intentos = [
+      "update agx.qr_chapetas set estado = 'ASIGNADO_ANIMAL', revocado_at = null, revocado_por = null, motivo = null, reemplazado_por = null where codigo_visible = $1",
+      "update agx.qr_chapetas set estado = 'ASIGNADO_ANIMAL', animal_id = $2, revocado_at = null, revocado_por = null, motivo = null, reemplazado_por = null where codigo_visible = $1",
+      "update agx.qr_chapetas set estado = 'ASIGNADO_ORGANIZACION', animal_id = null, asignado_animal_at = null, revocado_at = null, revocado_por = null, motivo = null, reemplazado_por = null where codigo_visible = $1",
+      "update agx.qr_chapetas set estado = 'EN_INVENTARIO', organizacion_id = null, asignacion_id = null, animal_id = null, asignado_organizacion_at = null, asignado_animal_at = null, revocado_at = null, revocado_por = null, motivo = null, reemplazado_por = null where codigo_visible = $1",
+    ];
+    for (const c of [rev, dan, ree]) {
+      for (const sql of intentos) {
+        const params = sql.includes('$2') ? [c.codigo, otro] : [c.codigo];
+        // agx_app no tiene UPDATE sobre organizacion_id/asignacion_id (42501); el resto lo frena el trigger (23514).
+        const codigoApp = sql.includes('organizacion_id = null') ? '42501' : '23514';
+        await asApp(org, (client) => expectPgError(client.query(sql, params), codigoApp));
+        await asQrAdmin((client) => expectPgError(client.query(sql, params), '23514'), org);
+        const su = await adminPool.connect();
+        try {
+          await su.query('begin');
+          await expectPgError(su.query(sql, params), '23514');
+        } finally {
+          await su.query('rollback').catch(() => {});
+          su.release();
+        }
+      }
+    }
+    for (const [c, animal] of [[rev, a1], [dan, a2], [ree, a3]]) assert.equal((await fila(c.codigo)).animal_id, animal);
   });
 });

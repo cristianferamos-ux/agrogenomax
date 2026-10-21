@@ -169,3 +169,62 @@ test('contrato normalizado: solo { id, tipo, fechaHora, fecha, hora, titulo, des
     assert.ok(Object.values(TIPOS_TIMELINE).includes(e.tipo));
   }
 });
+
+// FASE 2A: salida y muerte (agx.animal_eventos SALIDO / MUERTO).
+test('2A. salida: fecha EFECTIVA calendario, motivo en texto y observaciones seguras', () => {
+  const salida = ev(10, 'SALIDO', '2026-10-21T15:00:00.000000Z', { fecha: '2026-10-19', motivo: 'VENTA', observaciones: 'Lote   3' });
+  const r = tl({ eventosAnimal: [REGISTRO, salida] });
+  const e = r.eventos.find((x) => x.tipo === 'ANIMAL_SALIDO');
+  assert.deepEqual(e, {
+    id: 'animal_evento:10', tipo: 'ANIMAL_SALIDO', titulo: 'Animal salió del hato',
+    descripcion: 'Motivo: Venta. Observaciones: Lote 3',
+    datos: { motivo: 'VENTA', observaciones: 'Lote 3', registradoEn: '2026-10-21T15:00:00.000000Z' },
+    origen: 'animal_eventos', fechaHora: null, fecha: '2026-10-19', hora: null,
+  });
+  assert.equal(r.eventos[0].id, 'animal_evento:10');
+});
+
+test('2A. muerte: causa en texto, sin "nacido"; catálogo desconocido no se expone crudo', () => {
+  const r = tl({ eventosAnimal: [REGISTRO, ev(11, 'MUERTO', '2026-10-21T15:00:00Z', { fecha: '2026-10-20', causa: 'SACRIFICIO' })] });
+  const e = r.eventos.find((x) => x.tipo === 'ANIMAL_MUERTO');
+  assert.equal(e.titulo, 'Animal muerto');
+  assert.equal(e.descripcion, 'Causa: Sacrificio.');
+  assert.deepEqual(e.datos, { causa: 'SACRIFICIO', observaciones: null, registradoEn: '2026-10-21T15:00:00Z' });
+  const raro = tl({ eventosAnimal: [ev(12, 'MUERTO', '2026-10-21T15:00:00Z', { fecha: '2026-10-20', causa: '<script>' })] });
+  const x = raro.eventos.find((y) => y.tipo === 'ANIMAL_MUERTO');
+  assert.equal(x.descripcion, 'Sin detalle registrado.');
+  assert.equal(x.datos.causa, null);
+  assert.doesNotMatch(JSON.stringify(raro), /script/);
+});
+
+test('2A. el cierre precede a la revocación de chapeta que provoca (mismo instante y día)', () => {
+  const instante = '2026-10-20T15:00:00.000000Z';
+  const r = tl({
+    eventosAnimal: [
+      REGISTRO,
+      ev(20, 'MUERTO', instante, { fecha: '2026-10-20', causa: 'ENFERMEDAD' }),
+      ev(21, 'QR_REVOCADO', instante, { qrId: '5', codigoVisible: 'AGX-7KM4-P2XZ-R', causa: 'ANIMAL_MUERTO' }),
+    ],
+    pesajes: derivar([ps(1, '2026-10-20', 300, '2026-10-20T13:00:00Z')]),
+  });
+  assert.deepEqual(r.eventos.slice(0, 3).map((e) => e.tipo), ['ANIMAL_MUERTO', 'QR_DESASIGNADO', 'PESAJE_REGISTRADO']);
+  const qr = r.eventos.find((e) => e.tipo === 'QR_DESASIGNADO');
+  assert.equal(qr.descripcion, 'Chapeta AGX-7KM4-P2XZ-R revocada por muerte del animal.');
+  assert.equal(qr.datos.causa, 'ANIMAL_MUERTO');
+  assert.doesNotMatch(JSON.stringify(r), /"qrId"|"5"/);
+});
+
+test('2A. salida con fecha efectiva anterior: se ordena por su fecha, la revocación por la de registro', () => {
+  const r = tl({
+    eventosAnimal: [
+      REGISTRO,
+      ev(30, 'SALIDO', '2026-10-21T15:00:00Z', { fecha: '2026-10-19', motivo: 'TRASLADO' }),
+      ev(31, 'QR_REVOCADO', '2026-10-21T15:00:00Z', { codigoVisible: 'AGX-7KM4-P2XZ-R', causa: 'ANIMAL_SALIDO' }),
+    ],
+  });
+  assert.deepEqual(r.eventos.map((e) => [e.tipo, e.fecha]), [
+    ['QR_DESASIGNADO', '2026-10-21'], ['ANIMAL_SALIDO', '2026-10-19'], ['ANIMAL_REGISTRADO', '2026-10-18'],
+  ]);
+  assert.match(r.eventos[0].descripcion, /revocada por salida del animal\.$/);
+  assert.equal(new Set(ids(r)).size, r.eventos.length, 'sin duplicados');
+});

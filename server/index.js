@@ -33,6 +33,7 @@ import { createGanaderiaAnimalQrRouter, createGanaderiaQrRouter } from './routes
 import createGanaderiaAnimalPesajesRouter from './routes/ganaderiaAnimalPesajes.js';
 import createGanaderiaAnimalReporteRouter from './routes/ganaderiaAnimalReporte.js';
 import createGanaderiaAnimalTimelineRouter from './routes/ganaderiaAnimalTimeline.js';
+import createGanaderiaAnimalCierreRouter from './routes/ganaderiaAnimalCierre.js';
 import createGanaderiaAdminQrRouter from './routes/ganaderiaAdminQr.js';
 import createGanaderiaSyncRouter from './routes/ganaderiaSync.js';
 import createGanaderiaCatalogoRazasRouter from './routes/ganaderiaCatalogoRazas.js';
@@ -323,6 +324,20 @@ app.use(
     allowedOrigins: appConfig.cors.allowedOrigins,
   }),
 );
+// FASE 2A: cierre operativo (salida / muerte) en Postgres-AGX-Business
+// (0025). Endpoints explícitos, sesión con organización + CSRF; montados
+// ANTES del router de animales.
+for (const [ruta, tipo] of [['salida', 'SALIDA'], ['muerte', 'MUERTE']]) {
+  app.use(
+    `/api/ganaderia/animales/:animalId/${ruta}`,
+    createGanaderiaAnimalCierreRouter({
+      tipo,
+      appEnv: appConfig.appEnv,
+      csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+      allowedOrigins: appConfig.cors.allowedOrigins,
+    }),
+  );
+}
 // FASE 1C.2: reporte productivo individual en PDF (pdfkit, servidor). Solo
 // GET con sesión de organización; montado ANTES del router de animales.
 app.use(

@@ -165,3 +165,29 @@ Rollback: `0024_animal_pesajes_manual_rollback.sql`, solo tras revertir el
 código y sin filas MANUAL (si existen, el rollback falla a propósito).
 Pruebas: `server/services/__tests__/animalPesajesIntegration.test.js`
 (incluida en `npm run test:ganaderia-animales-integration`).
+
+## 0025 -- cierre operativo: salida y muerte (FASE 2A)
+
+Aditiva sobre `agx.animales` y `agx.animal_eventos`:
+
+- `estado_operativo` (`EN_HATO` | `SALIDO` | `MUERTO`, por defecto
+  `EN_HATO`) es un eje **independiente** de `estado` (`ACTIVO` | `ANULADO`):
+  anular corrige un registro erróneo; salir o morir es un hecho real.
+- `cierre_fecha` (fecha efectiva de negocio), `cierre_causa` (catálogo según
+  el estado), `cierre_observaciones` (≤ 500), `cierre_at`, `cierre_por` y
+  `cierre_client_operation_id` (UNIQUE parcial por organización:
+  idempotencia). CHECKs de consistencia estado/columnas y de orden de fechas
+  (no antes del nacimiento ni del ingreso).
+- Trigger `animales_cierre_guard`: solo `EN_HATO -> SALIDO|MUERTO`; el
+  cierre es terminal e inmutable (sin reapertura en esta fase).
+- Eventos `SALIDO` / `MUERTO` en `agx.animal_eventos` (como mucho uno de los
+  dos por animal, índice único parcial). `agx_app` recibe UPDATE solo sobre
+  las columnas nuevas; RLS/FORCE y políticas sin cambios.
+
+**Secuencia de despliegue:** aplicar `0025` en Postgres-AGX-Business
+**antes** del merge del código de FASE 2A; el código anterior funciona con
+las columnas nuevas (no las lee ni las escribe). Rollback:
+`0025_animal_cierre_operativo_rollback.sql`, solo tras revertir el código y
+sin eventos `SALIDO`/`MUERTO` (si existen, el rollback falla a propósito).
+Pruebas: `server/services/__tests__/animalCierreIntegration.test.js`
+(incluida en `npm run test:ganaderia-animales-integration`).
