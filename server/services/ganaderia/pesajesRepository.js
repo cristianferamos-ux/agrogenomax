@@ -10,6 +10,7 @@
 // tiempo futura se agregará desde las tablas especializadas).
 // Nunca toca el Postgres legacy (server/db.js).
 import { withOrganizacionTransaction } from '../../db/agxBusinessPool.js';
+import { errorAnimalCerrado } from './cierreValidation.js';
 
 const CLIENT_OPERATION_UNIQUE_CONSTRAINT = 'animal_pesajes_org_client_operation_key';
 
@@ -45,7 +46,8 @@ async function fetchAnimalEstado(client, animalId, { forShare = false } = {}) {
   // FOR SHARE: una anulación concurrente del animal espera al COMMIT del
   // pesaje (y viceversa), sin bloquear otros pesajes del mismo animal.
   const result = await client.query(
-    `select animal_id::text as animal_id, estado from agx.animales where animal_id = $1${forShare ? ' for share' : ''}`,
+    `select animal_id::text as animal_id, estado, estado_operativo
+       from agx.animales where animal_id = $1${forShare ? ' for share' : ''}`,
     [animalId],
   );
   return result.rows[0] ?? null;
@@ -130,6 +132,9 @@ export async function registrarPesajeIdempotente(organizacionId, animalId, value
     if (animal.estado !== 'ACTIVO') {
       throw semanticError('ANIMAL_ANULADO', 409, 'El animal está anulado: no admite nuevos pesajes.');
     }
+    // FASE 2A: un animal salido o muerto conserva su historial, sin pesajes nuevos.
+    const cerrado = errorAnimalCerrado(animal.estado_operativo, 'no admite nuevos pesajes');
+    if (cerrado) throw cerrado;
 
     try {
       const inserted = await client.query(

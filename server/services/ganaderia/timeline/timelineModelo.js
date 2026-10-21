@@ -11,8 +11,12 @@
 //   PESAJE_REGISTRADO   agx.animal_pesajes + derivaciones del motor canónico
 //                       (construirHistorialPesajes). Nunca se copia a eventos.
 //   QR_ASIGNADO         agx.animal_eventos QR_ASOCIADO.
-//   QR_DESASIGNADO      agx.animal_eventos QR_REVOCADO (revocada/dañada/anulación).
+//   QR_DESASIGNADO      agx.animal_eventos QR_REVOCADO (revocada/dañada/
+//                       anulación/salida/muerte).
 //   QR_REEMPLAZADO      agx.animal_eventos QR_REEMPLAZADO.
+//   ANIMAL_SALIDO       agx.animal_eventos SALIDO (FASE 2A; metadata.fecha =
+//   ANIMAL_MUERTO       fecha efectiva, motivo/causa). animales.cierre_* es el
+//                       MISMO hecho: no se usa.
 //   agx.qr_chapeta_eventos registra los MISMOS hechos QR desde la chapeta
 //   (ASOCIADA_ANIMAL, REVOCADA, ...) y ASIGNADA_ORGANIZACION no es un hecho
 //   del animal: se EXCLUYE por diseño (deduplicación).
@@ -21,8 +25,8 @@
 // JSON crudo de metadata.
 //
 // Orden (DESCENDENTE, determinístico):
-//   1. fecha efectiva (pesaje: su fecha calendario; resto: fecha de negocio
-//      America/Bogota del instante) DESC;
+//   1. fecha efectiva (pesaje y salida/muerte: su fecha calendario; resto:
+//      fecha de negocio America/Bogota del instante) DESC;
 //   2. instante técnico (ocurrido_en / created_at del pesaje) DESC;
 //   3. prioridad de tipo (registro al final de su día; anulación primero);
 //   4. id numérico de la fuente DESC.
@@ -39,17 +43,48 @@ export const TIPOS_TIMELINE = Object.freeze({
   QR_ASIGNADO: 'QR_ASIGNADO',
   QR_DESASIGNADO: 'QR_DESASIGNADO',
   QR_REEMPLAZADO: 'QR_REEMPLAZADO',
+  ANIMAL_SALIDO: 'ANIMAL_SALIDO',
+  ANIMAL_MUERTO: 'ANIMAL_MUERTO',
 });
 
-// Menor = aparece antes (más reciente) ante empate de fecha e instante.
+// Menor = aparece antes (más reciente) ante empate de fecha e instante. El
+// cierre (salida/muerte) precede a la revocación de chapeta que provoca.
 const PRIORIDAD = Object.freeze({
   ANIMAL_ANULADO: 0,
-  QR_DESASIGNADO: 1,
-  QR_REEMPLAZADO: 2,
-  QR_ASIGNADO: 3,
-  ANIMAL_CORREGIDO: 4,
-  PESAJE_REGISTRADO: 5,
-  ANIMAL_REGISTRADO: 6,
+  ANIMAL_MUERTO: 1,
+  ANIMAL_SALIDO: 1,
+  QR_DESASIGNADO: 2,
+  QR_REEMPLAZADO: 3,
+  QR_ASIGNADO: 4,
+  ANIMAL_CORREGIDO: 5,
+  PESAJE_REGISTRADO: 6,
+  ANIMAL_REGISTRADO: 7,
+});
+
+// FASE 2A: catálogos de cierre (cierreValidation.js) -> texto.
+const MOTIVOS_SALIDA = Object.freeze({
+  VENTA: 'Venta',
+  TRASLADO: 'Traslado',
+  DONACION: 'Donación',
+  INTERCAMBIO: 'Intercambio',
+  DEVOLUCION: 'Devolución',
+  OTRA: 'Otra',
+});
+const CAUSAS_MUERTE = Object.freeze({
+  MUERTE_NATURAL: 'Muerte natural',
+  ENFERMEDAD: 'Enfermedad',
+  ACCIDENTE: 'Accidente',
+  SACRIFICIO: 'Sacrificio',
+  DEPREDACION: 'Depredación',
+  DESCONOCIDA: 'Desconocida',
+  OTRA: 'Otra',
+});
+const CAUSAS_REVOCACION_QR = Object.freeze({
+  ANIMAL_ANULADO: 'revocada por anulación del animal',
+  ANIMAL_SALIDO: 'revocada por salida del animal',
+  ANIMAL_MUERTO: 'revocada por muerte del animal',
+  DANADO: 'marcada como dañada',
+  REVOCADO: 'revocada',
 });
 
 const METODOS = Object.freeze({ BASCULA: 'Pesado en báscula', ESTIMADO: 'Estimado' });
@@ -148,9 +183,9 @@ function eventoAnimal(row) {
     }
     case 'QR_REVOCADO': {
       const codigo = codigoSeguro(meta.codigoVisible);
-      const causa = meta.causa === 'ANIMAL_ANULADO' ? 'ANIMAL_ANULADO' : meta.causa === 'DANADO' ? 'DANADO' : 'REVOCADO';
-      const accion = { ANIMAL_ANULADO: 'revocada por anulación del animal', DANADO: 'marcada como dañada', REVOCADO: 'revocada' }[causa];
-      const motivo = causa === 'ANIMAL_ANULADO' ? null : textoSeguro(meta.motivo);
+      const causa = Object.hasOwn(CAUSAS_REVOCACION_QR, meta.causa) ? meta.causa : 'REVOCADO';
+      const accion = CAUSAS_REVOCACION_QR[causa];
+      const motivo = causa.startsWith('ANIMAL_') ? null : textoSeguro(meta.motivo);
       return conFecha({
         ...base,
         tipo: TIPOS_TIMELINE.QR_DESASIGNADO,
@@ -170,6 +205,24 @@ function eventoAnimal(row) {
         descripcion: `${anterior && nueva ? `${anterior} → ${nueva}.` : 'Se reemplazó la chapeta QR.'}${motivo ? ` Motivo: ${motivo}` : ''}`,
         datos: { codigoVisible: nueva, anteriorCodigoVisible: anterior, motivo },
       }, row.ocurridoEn);
+    }
+    case 'SALIDO':
+    case 'MUERTO': {
+      const salida = row.tipoEvento === 'SALIDO';
+      const codigo = salida ? meta.motivo : meta.causa;
+      const etiqueta = (salida ? MOTIVOS_SALIDA : CAUSAS_MUERTE)[codigo] ?? null;
+      const observaciones = textoSeguro(meta.observaciones, 500);
+      const fecha = typeof meta.fecha === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(meta.fecha) ? meta.fecha : null;
+      const evento = {
+        ...base,
+        tipo: salida ? TIPOS_TIMELINE.ANIMAL_SALIDO : TIPOS_TIMELINE.ANIMAL_MUERTO,
+        titulo: salida ? 'Animal salió del hato' : 'Animal muerto',
+        descripcion: `${etiqueta ? `${salida ? 'Motivo' : 'Causa'}: ${etiqueta}.` : 'Sin detalle registrado.'}${observaciones ? ` Observaciones: ${observaciones}` : ''}`,
+        datos: { [salida ? 'motivo' : 'causa']: etiqueta ? codigo : null, observaciones, registradoEn: row.ocurridoEn ?? null },
+      };
+      // Fecha EFECTIVA del cierre (calendario), como los pesajes: nunca un
+      // instante UTC ficticio. Sin fecha válida se usa el registro técnico.
+      return fecha ? { ...evento, fechaHora: null, fecha, hora: null } : conFecha(evento, row.ocurridoEn);
     }
     default:
       return null; // tipo desconocido: nunca se inventa ni se expone crudo

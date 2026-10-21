@@ -11,6 +11,7 @@
 import { withOrganizacionTransaction } from '../../db/agxBusinessPool.js';
 import { createAnimalInTransaction, fetchAnimal } from './animalesRepository.js';
 import { hashQrToken, isCodigoVisible, isQrToken } from './qrCodigos.js';
+import { errorAnimalCerrado } from './cierreValidation.js';
 
 export const ESTADOS_NO_OPERATIVOS = Object.freeze(['REVOCADO', 'DANADO', 'REEMPLAZADO']);
 
@@ -85,12 +86,15 @@ async function insertAnimalEvento(client, { organizacionId, animalId, tipoEvento
 
 async function lockAnimalActivo(client, animalId) {
   const result = await client.query(
-    'select a.animal_id::text as animal_id, a.estado from agx.animales a where a.animal_id = $1 for update',
+    'select a.animal_id::text as animal_id, a.estado, a.estado_operativo from agx.animales a where a.animal_id = $1 for update',
     [animalId],
   );
   const animal = result.rows[0];
   if (!animal) throw semanticError('ANIMAL_NOT_FOUND', 404, 'Animal no encontrado.');
   if (animal.estado !== 'ACTIVO') throw semanticError('ANIMAL_ANULADO', 409, 'El animal está anulado.');
+  // FASE 2A: sin chapetas nuevas ni reemplazos para un animal salido o muerto.
+  const cerrado = errorAnimalCerrado(animal.estado_operativo, 'no admite cambios de chapeta QR');
+  if (cerrado) throw cerrado;
   return animal;
 }
 
@@ -248,7 +252,8 @@ export async function resolverChapeta(organizacionId, { token, codigoVisible }) 
     if (row.estado === 'ASIGNADO_ANIMAL') {
       const animal = await fetchAnimal(client, row.animal_id);
       // Defensivo: anularAnimal revoca la chapeta en la misma transacción.
-      if (animal?.estado === 'ACTIVO') return { resultado: 'ANIMAL', animalId: animal.animalId, chapeta };
+      // FASE 2A: el cierre (salida/muerte) también revoca la chapeta.
+      if (animal?.estado === 'ACTIVO' && animal.estadoOperativo === 'EN_HATO') return { resultado: 'ANIMAL', animalId: animal.animalId, chapeta };
     }
     return { resultado: 'NO_OPERATIVA', chapeta };
   });

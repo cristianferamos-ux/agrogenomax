@@ -205,5 +205,8 @@
   "server/routes/__tests__/ganaderiaAnimalTimelineAuth.test.js",
   "server/services/__tests__/timelineModelo.test.js",
   "server/services/__tests__/timelineArchitecture.test.js",
-  "server/services/__tests__/timelineIntegration.test.js"
+  "server/services/__tests__/timelineIntegration.test.js",
+  "server/routes/__tests__/ganaderiaAnimalCierreAuth.test.js",
+  "server/services/__tests__/cierreArchitecture.test.js",
+  "server/services/__tests__/animalCierreIntegration.test.js"
 ]
