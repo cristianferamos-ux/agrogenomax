@@ -169,6 +169,7 @@
   "src/modules/ganaderia/hato/__tests__/pesajesFormFechaNegocio.test.js",
   "src/modules/ganaderia/hato/__tests__/reporteProductivoUi.test.js",
   "src/modules/ganaderia/hato/__tests__/pesajesOfflineUi.test.js",
+  "src/modules/ganaderia/hato/__tests__/pesajeOfflineMensaje.test.js",
   "src/modules/ganaderia/hato/__tests__/qrFlow.test.js",
   "src/modules/ganaderia/offline/__tests__/offlineSync.test.js",
   "src/modules/ganaderia/offline/__tests__/syncReconnect.test.js",

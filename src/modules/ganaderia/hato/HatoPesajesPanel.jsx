@@ -46,6 +46,7 @@ import {
   huboConfirmaciones,
   idsPendientes,
   mensajeErrorGuardadoLocal,
+  mensajeTrasLeerPendientes,
 } from './pesajesOfflineModel.js';
 import { construirAlertasPesajes } from './pesajesAlertas.js';
 import { fechaHoyNegocio } from '../engine/fechaNegocio.js';
@@ -100,6 +101,9 @@ export default function HatoPesajesPanel({ animalId, animalActivo, online = true
     const confirmadas = huboConfirmaciones(pendientesIdsRef.current, actuales);
     pendientesIdsRef.current = actuales;
     setPendientes(lista);
+    // El aviso "pendiente" se retira cuando deja de ser cierto (nunca se
+    // convierte en "sincronizado"); otros mensajes se conservan.
+    setMensaje((actual) => mensajeTrasLeerPendientes(actual, lista));
     if (confirmadas) {
       await cargar();
       onRegistradoRef.current?.();
