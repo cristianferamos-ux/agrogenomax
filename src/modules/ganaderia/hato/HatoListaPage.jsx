@@ -11,7 +11,12 @@
 // (Activos por defecto, Anulados, Todos -> estado). La copia local aplica
 // los mismos filtros (sin estadoOperativo en caché = EN_HATO). Con red se
 // muestran los contadores de GET /animales/resumen (una sola consulta).
-import { useCallback, useEffect, useState } from 'react';
+//
+// Respuestas fuera de orden: cada carga toma un número de consulta
+// (consultaRef). Solo la respuesta de la consulta VIGENTE se aplica; una
+// respuesta tardía de filtros anteriores (o un "Ver más" de una lista ya
+// reemplazada) se descarta y nunca pisa el filtro actual.
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
 import { StatusMessage } from '../components/FormField.jsx';
@@ -48,6 +53,7 @@ export default function HatoListaPage() {
   const [busqueda, setBusqueda] = useState('');
   const [state, setState] = useState({ status: 'loading', animales: [], total: 0 });
   const [loadingMore, setLoadingMore] = useState(false);
+  const consultaRef = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -84,39 +90,49 @@ export default function HatoListaPage() {
   }, [offline.online]);
 
   const load = useCallback(async () => {
+    const consulta = ++consultaRef.current;
+    const vigente = () => consulta === consultaRef.current;
     if (local) {
       try {
         const animales = await local.listAnimales(filtros);
-        setState({ status: 'ok', animales, total: animales.length, origen: 'local' });
+        if (vigente()) setState({ status: 'ok', animales, total: animales.length, origen: 'local' });
       } catch {
-        setState({ status: 'error', animales: [], total: 0 });
+        if (vigente()) setState({ status: 'error', animales: [], total: 0 });
       }
       return;
     }
     setState((current) => ({ ...current, status: 'loading' }));
     try {
       const { ok, data } = await listAnimales({ ...filtros, limit: PAGE_SIZE, offset: 0 });
+      if (!vigente()) return;
       if (!ok || !Array.isArray(data?.animales)) {
         setState({ status: 'error', animales: [], total: 0 });
         return;
       }
       setState({ status: 'ok', animales: data.animales, total: data.total ?? data.animales.length });
     } catch {
-      setState({ status: 'error', animales: [], total: 0 });
+      if (vigente()) setState({ status: 'error', animales: [], total: 0 });
     }
   }, [filtros, local]);
 
   useEffect(() => {
     load();
     // Copia local: se refresca sola cuando la sincronización la actualiza.
-    return local ? local.subscribe(load) : undefined;
+    const unsubscribe = local ? local.subscribe(load) : null;
+    return () => {
+      // Al cambiar filtros o desmontar, toda respuesta en vuelo queda obsoleta.
+      consultaRef.current += 1;
+      unsubscribe?.();
+    };
   }, [load, local]);
 
   async function cargarMas() {
     if (loadingMore) return;
+    const consulta = consultaRef.current;
     setLoadingMore(true);
     try {
       const { ok, data } = await listAnimales({ ...filtros, limit: PAGE_SIZE, offset: state.animales.length });
+      if (consulta !== consultaRef.current) return;
       if (ok && Array.isArray(data?.animales)) {
         setState((current) => ({ ...current, animales: [...current.animales, ...data.animales], total: data.total }));
       }
