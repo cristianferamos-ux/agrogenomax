@@ -377,3 +377,17 @@ test('responsive: diálogo con ancho fluido, formularios verticales y botones fu
   assert.match(css, /@media \(max-width: 640px\) \{[\s\S]*?\.gan-cierre-dialog-acciones > \* \{[\s\S]*?width: 100%;/);
   assert.match(css, /\.gan-hato-resumen \{[\s\S]*?grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/);
 });
+
+test('listado: respuestas fuera de orden se descartan (solo aplica la consulta vigente)', () => {
+  assert.match(lista, /const consultaRef = useRef\(0\);/);
+  assert.match(lista, /const consulta = \+\+consultaRef\.current;\s*const vigente = \(\) => consulta === consultaRef\.current;/);
+  // Servidor: nada se aplica tras el await sin comprobar vigencia.
+  assert.match(lista, /await listAnimales\(\{ \.\.\.filtros, limit: PAGE_SIZE, offset: 0 \}\);\s*if \(!vigente\(\)\) return;/);
+  assert.match(lista, /if \(vigente\(\)\) setState\(\{ status: 'ok', animales, total: animales\.length, origen: 'local' \}\);/);
+  assert.match(lista, /catch \{\s*if \(vigente\(\)\) setState\(\{ status: 'error'/);
+  // Cambio de filtros / desmontaje invalida lo que esté en vuelo.
+  assert.match(lista, /return \(\) => \{\s*consultaRef\.current \+= 1;\s*unsubscribe\?\.\(\);\s*\};/);
+  // "Ver más" de una lista ya reemplazada no se mezcla con la actual.
+  assert.match(lista, /const consulta = consultaRef\.current;\s*setLoadingMore\(true\);/);
+  assert.match(lista, /offset: state\.animales\.length \}\);\s*if \(consulta !== consultaRef\.current\) return;/);
+});
