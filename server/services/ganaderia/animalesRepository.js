@@ -49,6 +49,11 @@ export const ANIMAL_SELECT = `
          a.estado,
          a.estado_motivo,
          a.estado_at,
+         a.estado_operativo,
+         to_char(a.cierre_fecha, 'YYYY-MM-DD') as cierre_fecha,
+         a.cierre_causa,
+         a.cierre_observaciones,
+         a.cierre_at,
          a.created_at,
          to_char(a.updated_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as updated_at_iso,
          lp.peso_kg as ultimo_peso_kg,
@@ -66,8 +71,23 @@ export const ANIMAL_SELECT = `
        limit 1
     ) lp on true`;
 
-// API: nunca expone organizacion_id, client_operation_id ni
-// creation_intent_hash.
+// FASE 2A: estado_operativo -> tipo de cierre expuesto.
+const CIERRE_TIPOS = Object.freeze({ SALIDO: 'SALIDA', MUERTO: 'MUERTE' });
+
+function serializeCierre(row) {
+  const tipo = CIERRE_TIPOS[row.estado_operativo];
+  if (!tipo) return null;
+  return {
+    tipo,
+    fecha: row.cierre_fecha,
+    causa: row.cierre_causa,
+    observaciones: row.cierre_observaciones,
+    registradoEn: row.cierre_at,
+  };
+}
+
+// API: nunca expone organizacion_id, client_operation_id,
+// creation_intent_hash ni cierre_client_operation_id.
 export function serializeAnimal(row) {
   return {
     animalId: row.animal_id,
@@ -98,6 +118,8 @@ export function serializeAnimal(row) {
     estado: row.estado,
     estadoMotivo: row.estado_motivo,
     estadoAt: row.estado_at,
+    estadoOperativo: row.estado_operativo,
+    cierre: serializeCierre(row),
     fechaCreacion: row.created_at,
     fechaActualizacion: row.updated_at_iso,
   };
@@ -332,6 +354,7 @@ const CORRECTABLE_COLUMNS = Object.freeze({
 async function lockAnimalForUpdate(client, animalId, fechaActualizacionEsperada = null) {
   const result = await client.query(
     `select a.animal_id::text as animal_id, a.estado,
+            to_char(a.cierre_fecha, 'YYYY-MM-DD') as cierre_fecha,
             a.numero_visual, a.nombre, a.sexo,
             a.nacimiento_tipo, to_char(a.fecha_nacimiento, 'YYYY-MM-DD') as fecha_nacimiento,
             a.edad_aproximada_meses, to_char(a.edad_referencia_fecha, 'YYYY-MM-DD') as edad_referencia_fecha,
@@ -389,6 +412,20 @@ export async function corregirAnimal(
     }
 
     validateAnimalConsistency(merged);
+    // FASE 2A: corregir datos declarados de un animal cerrado (salido o
+    // muerto) sigue siendo válido -- es su registro histórico --, pero nunca
+    // deja nacimiento/ingreso después de la fecha efectiva del cierre.
+    if (row.cierre_fecha) {
+      for (const [campo, valor] of [['fechaNacimiento', merged.fechaNacimiento], ['fechaIngreso', merged.fechaIngreso]]) {
+        if (valor && valor > row.cierre_fecha) {
+          throw semanticError(
+            'INVALID_FECHA',
+            400,
+            `${campo} no puede ser posterior a la fecha de salida o muerte del animal (${row.cierre_fecha}).`,
+          );
+        }
+      }
+    }
 
     const changedKeys = Object.keys(CORRECTABLE_COLUMNS).filter((key) => (actual[key] ?? null) !== (merged[key] ?? null));
     if (changedKeys.length === 0) {
@@ -460,27 +497,41 @@ export async function anularAnimal(organizacionId, animalId, { motivo, actorCuen
     // SPRINT-3D11.3 (R1): la chapeta QR de un animal anulado deja de ser un
     // identificador operativo -- pasa a REVOCADO en la misma transacción
     // (historial conservado; el código no se reutiliza).
-    const chapeta = await client.query(
-      `update agx.qr_chapetas
-          set estado = 'REVOCADO', revocado_at = now(), revocado_por = $2,
-              motivo = 'Animal anulado', updated_at = now()
-        where animal_id = $1 and estado = 'ASIGNADO_ANIMAL'
-        returning qr_id::text as qr_id, codigo_visible`,
-      [animalId, actorCuentaId],
-    );
-    for (const row of chapeta.rows) {
-      await client.query(
-        `insert into agx.qr_chapeta_eventos (qr_id, organizacion_id, tipo_evento, metadata_json, actor_cuenta_id)
-         values ($1, $2, 'REVOCADA', $3::jsonb, $4)`,
-        [row.qr_id, organizacionId, JSON.stringify({ causa: 'ANIMAL_ANULADO', animalId: String(animalId) }), actorCuentaId],
-      );
-      await client.query(
-        `insert into agx.animal_eventos (organizacion_id, animal_id, tipo_evento, metadata_json, actor_cuenta_id)
-         values ($1, $2, 'QR_REVOCADO', $3::jsonb, $4)`,
-        [organizacionId, animalId, JSON.stringify({ qrId: row.qr_id, codigoVisible: row.codigo_visible, causa: 'ANIMAL_ANULADO' }), actorCuentaId],
-      );
-    }
+    await revocarChapetaActivaEnTx(client, {
+      organizacionId, animalId, actorCuentaId, causa: 'ANIMAL_ANULADO', motivo: 'Animal anulado',
+    });
 
     return { animal: await fetchAnimal(client, animalId), yaAnulado: false };
   });
+}
+
+/**
+ * Revoca (REVOCADO, terminal) la chapeta ASIGNADO_ANIMAL del animal dentro de
+ * una transacción YA abierta, con eventos de chapeta y de animal; historial
+ * conservado y el código nunca se reutiliza. La usan la anulación
+ * (ANIMAL_ANULADO) y el cierre operativo de FASE 2A (ANIMAL_SALIDO /
+ * ANIMAL_MUERTO). Devuelve los códigos visibles revocados.
+ */
+export async function revocarChapetaActivaEnTx(client, { organizacionId, animalId, actorCuentaId, causa, motivo }) {
+  const chapeta = await client.query(
+    `update agx.qr_chapetas
+        set estado = 'REVOCADO', revocado_at = now(), revocado_por = $2,
+            motivo = $3, updated_at = now()
+      where animal_id = $1 and estado = 'ASIGNADO_ANIMAL'
+      returning qr_id::text as qr_id, codigo_visible`,
+    [animalId, actorCuentaId, motivo],
+  );
+  for (const row of chapeta.rows) {
+    await client.query(
+      `insert into agx.qr_chapeta_eventos (qr_id, organizacion_id, tipo_evento, metadata_json, actor_cuenta_id)
+       values ($1, $2, 'REVOCADA', $3::jsonb, $4)`,
+      [row.qr_id, organizacionId, JSON.stringify({ causa, animalId: String(animalId) }), actorCuentaId],
+    );
+    await client.query(
+      `insert into agx.animal_eventos (organizacion_id, animal_id, tipo_evento, metadata_json, actor_cuenta_id)
+       values ($1, $2, 'QR_REVOCADO', $3::jsonb, $4)`,
+      [organizacionId, animalId, JSON.stringify({ qrId: row.qr_id, codigoVisible: row.codigo_visible, causa }), actorCuentaId],
+    );
+  }
+  return chapeta.rows.map((row) => row.codigo_visible);
 }
