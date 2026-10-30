@@ -29,6 +29,12 @@
 // APARTE ("Pendiente"), nunca en KPIs, gráficas, alertas ni PDF. Cuando una
 // operación desaparece del outbox (confirmada) se recarga el historial del
 // servidor sin recargar la página.
+//
+// FASE 2B: animal SALIDO/MUERTO (estadoOperativo) -> historial, gráfica y
+// KPIs visibles; SIN formulario (ni online ni offline) y SIN alertas de
+// atraso ("Sin alertas: el animal ya no está en el hato."). Un 409
+// ANIMAL_YA_SALIDO/MUERTO al guardar (cierre hecho en otro dispositivo)
+// produce el mismo estado y refresca la ficha.
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { StatusMessage } from '../components/FormField.jsx';
 import HatoPesajeForm from './HatoPesajeForm.jsx';
@@ -50,12 +56,13 @@ import {
 } from './pesajesOfflineModel.js';
 import { construirAlertasPesajes } from './pesajesAlertas.js';
 import { fechaHoyNegocio } from '../engine/fechaNegocio.js';
+import { TEXTO_SIN_ALERTAS_CERRADO, mensajePesajesCerrado } from './cierreModel.js';
 
 const HatoPesajesGrafica = lazy(() => import('./HatoPesajesGrafica.jsx'));
 /** Relectura del outbox local mientras haya pendientes (confirmaciones de otra pestaña / SW). */
 const RELECTURA_PENDIENTES_MS = 4_000;
 
-export default function HatoPesajesPanel({ animalId, animalActivo, online = true, repoOffline = null, onPesajeRegistrado }) {
+export default function HatoPesajesPanel({ animalId, animalActivo, estadoOperativo = 'EN_HATO', online = true, repoOffline = null, onPesajeRegistrado }) {
   const fechaNegocio = fechaHoyNegocio();
   const [state, setState] = useState({ status: 'loading', data: null });
   const [form, setForm] = useState(() => initialPesajeForm(fechaNegocio));
@@ -63,6 +70,7 @@ export default function HatoPesajesPanel({ animalId, animalActivo, online = true
   const [saving, setSaving] = useState(false);
   const [mensaje, setMensaje] = useState(null);
   const [anuladoEnServidor, setAnuladoEnServidor] = useState(false);
+  const [cerradoEnServidor, setCerradoEnServidor] = useState(null);
   const [pendientes, setPendientes] = useState([]);
   const operationIdRef = useRef(newClientOperationId());
   const savingRef = useRef(false);
@@ -140,7 +148,10 @@ export default function HatoPesajesPanel({ animalId, animalActivo, online = true
     return () => clearInterval(id);
   }, [repoOffline, hayPendientes, leerPendientes]);
 
-  const admitePesajes = animalActivo && !anuladoEnServidor;
+  // Situación efectiva: la de la ficha o la que reveló un 409 del servidor.
+  const situacion = cerradoEnServidor ?? (estadoOperativo === 'SALIDO' || estadoOperativo === 'MUERTO' ? estadoOperativo : 'EN_HATO');
+  const cerrado = situacion !== 'EN_HATO';
+  const admitePesajes = animalActivo && !anuladoEnServidor && !cerrado;
   const puedeGuardarOffline = !online && Boolean(repoOffline);
 
   function update(campo, valor) {
@@ -208,6 +219,11 @@ export default function HatoPesajesPanel({ animalId, animalActivo, online = true
         await cargar();
         onPesajeRegistrado?.();
       }
+      if (resultado.tipo === 'CERRADO') {
+        setCerradoEnServidor(resultado.estadoOperativo);
+        await cargar();
+        onPesajeRegistrado?.();
+      }
       if (resultado.tipo === 'OPERACION_REUSADA') {
         operationIdRef.current = newClientOperationId();
         await cargar();
@@ -270,6 +286,12 @@ export default function HatoPesajesPanel({ animalId, animalActivo, online = true
               alertas={construirAlertasPesajes({ pesajes, resumen: state.data.resumen, fechaReferencia: fechaNegocio })}
             />
           ) : null}
+          {cerrado ? (
+            <section className="gan-pesajes-alertas" aria-labelledby="pesajes-alertas-titulo">
+              <h4 id="pesajes-alertas-titulo">Alertas</h4>
+              <p className="gan-pesajes-alertas-vacio">{TEXTO_SIN_ALERTAS_CERRADO}</p>
+            </section>
+          ) : null}
 
           <HatoPesajesKpis resumen={state.data.resumen} />
 
@@ -288,7 +310,10 @@ export default function HatoPesajesPanel({ animalId, animalActivo, online = true
             </Suspense>
           )}
 
-          {!admitePesajes ? (
+          {cerrado ? (
+            <StatusMessage type="info">{mensajePesajesCerrado(situacion)}</StatusMessage>
+          ) : null}
+          {!admitePesajes && !cerrado ? (
             <StatusMessage type="info">Este animal está anulado y no admite nuevos pesajes.</StatusMessage>
           ) : null}
           {admitePesajes && !online && !repoOffline ? (

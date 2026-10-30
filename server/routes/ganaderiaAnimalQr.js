@@ -70,7 +70,11 @@ function withAnimalId(fn) {
  *   null          -> 404 QR_NOT_FOUND
  *   DISPONIBLE    -> 200 { resultado: 'DISPONIBLE', chapeta }   (abrir registro)
  *   ANIMAL        -> 200 { resultado: 'ANIMAL', animalId, chapeta } (abrir ficha)
- *   NO_OPERATIVA  -> 410 QR_NO_OPERATIVO { estado }             (estado controlado)
+ *   NO_OPERATIVA  -> 410 QR_NO_OPERATIVO { estado, animalId? }  (estado controlado)
+ * FASE 2B: animalId (vínculo histórico, para "Ver ficha del animal") solo
+ * llega si el resolver lo dio, es decir, bajo la organización de la sesión.
+ * Este router exige sesión: el acceso público (/qr/:codigo) nunca lo
+ * consulta y otra organización recibe 404 QR_NOT_FOUND idéntico.
  */
 export function sendResolution(res, resolved) {
   if (!resolved) {
@@ -78,7 +82,9 @@ export function sendResolution(res, resolved) {
     return;
   }
   if (resolved.resultado === 'NO_OPERATIVA') {
-    res.status(410).json({ error: 'QR_NO_OPERATIVO', estado: resolved.chapeta.estado });
+    const body = { error: 'QR_NO_OPERATIVO', estado: resolved.chapeta.estado };
+    if (typeof resolved.animalId === 'string') body.animalId = resolved.animalId;
+    res.status(410).json(body);
     return;
   }
   res.json({ ok: true, ...resolved });

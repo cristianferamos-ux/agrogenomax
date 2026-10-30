@@ -6,6 +6,12 @@
 import { OUTBOX_ESTADOS, newOperation, ordenarOutbox } from './outbox.js';
 import { normalizeCodigoChapeta, isQrToken } from '../hato/qrToken.js';
 
+// FASE 2B: situación del animal (EN_HATO | SALIDO | MUERTO). Una copia local
+// anterior a 0025 no trae el campo: se trata como EN_HATO (fallback).
+export function situacionLocal(animal) {
+  return ['EN_HATO', 'SALIDO', 'MUERTO'].includes(animal?.estadoOperativo) ? animal.estadoOperativo : 'EN_HATO';
+}
+
 export const ESTADO_SYNC = Object.freeze({
   SINCRONIZADO: 'SINCRONIZADO',
   PENDIENTE: 'PENDIENTE',
@@ -93,10 +99,12 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
     // Lecturas (rutas offline del piloto)
     // -----------------------------------------------------------------
 
-    async listAnimales({ estado = 'ACTIVO', q = '', predioId = '' } = {}) {
+    /** Mismos filtros que GET /animales: estado ACTIVO y situación EN_HATO por defecto; 'TODOS' no filtra. */
+    async listAnimales({ estado = 'ACTIVO', estadoOperativo = 'EN_HATO', q = '', predioId = '' } = {}) {
       const term = q.trim().toLowerCase();
       return (await storage.getAll('animales'))
-        .filter((animal) => (estado ? animal.estado === estado : true))
+        .filter((animal) => (estado && estado !== 'TODOS' ? animal.estado === estado : true))
+        .filter((animal) => (estadoOperativo && estadoOperativo !== 'TODOS' ? situacionLocal(animal) === estadoOperativo : true))
         .filter((animal) => (predioId ? animal.predioId === predioId : true))
         .filter((animal) => !term
           || String(animal.numeroVisual ?? '').toLowerCase().startsWith(term)
@@ -161,11 +169,15 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
       if (chapeta.estado === 'ASIGNADO_ORGANIZACION') {
         return { resultado: 'DISPONIBLE', chapeta, to: `/ganaderia/animales/nuevo?chapeta=${encodeURIComponent(chapeta.codigoVisible)}` };
       }
+      const animal = chapeta.animalId ? await storage.get('animales', `srv:${chapeta.animalId}`) : null;
       if (chapeta.estado === 'ASIGNADO_ANIMAL' && chapeta.animalId) {
-        const animal = await storage.get('animales', `srv:${chapeta.animalId}`);
-        if (!animal || animal.estado === 'ACTIVO') return { resultado: 'ANIMAL', chapeta, to: `/ganaderia/animales/${chapeta.animalId}` };
+        if (!animal || (animal.estado === 'ACTIVO' && situacionLocal(animal) === 'EN_HATO')) {
+          return { resultado: 'ANIMAL', chapeta, to: `/ganaderia/animales/${chapeta.animalId}` };
+        }
       }
-      return { resultado: 'NO_OPERATIVA', chapeta, estado: chapeta.estado };
+      // FASE 2B: vínculo histórico solo si el animal está en la copia local
+      // (misma organización del dispositivo preparado).
+      return { resultado: 'NO_OPERATIVA', chapeta, estado: chapeta.estado, animalId: animal ? chapeta.animalId : null };
     },
 
     async contar() {

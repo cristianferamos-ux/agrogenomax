@@ -249,13 +249,17 @@ export async function resolverChapeta(organizacionId, { token, codigoVisible }) 
     if (!row) return null;
     const chapeta = serializeChapeta(row);
     if (row.estado === 'ASIGNADO_ORGANIZACION') return { resultado: 'DISPONIBLE', chapeta };
+    const animal = row.animal_id ? await fetchAnimal(client, row.animal_id) : null;
     if (row.estado === 'ASIGNADO_ANIMAL') {
-      const animal = await fetchAnimal(client, row.animal_id);
       // Defensivo: anularAnimal revoca la chapeta en la misma transacción.
       // FASE 2A: el cierre (salida/muerte) también revoca la chapeta.
       if (animal?.estado === 'ACTIVO' && animal.estadoOperativo === 'EN_HATO') return { resultado: 'ANIMAL', animalId: animal.animalId, chapeta };
     }
-    return { resultado: 'NO_OPERATIVA', chapeta };
+    // FASE 2B: la chapeta fuera de uso conserva su vínculo HISTÓRICO con el
+    // animal. Solo se expone animalId si el animal es visible bajo RLS de la
+    // organización de la sesión (misma organización): para otra organización
+    // la chapeta ya es invisible (null -> 404) y nunca hay pista alguna.
+    return animal ? { resultado: 'NO_OPERATIVA', animalId: animal.animalId, chapeta } : { resultado: 'NO_OPERATIVA', chapeta };
   });
 }
 

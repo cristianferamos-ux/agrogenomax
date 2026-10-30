@@ -9,12 +9,16 @@
 // del historial se reemplaza al navegar (el token no queda en el historial).
 // SPRINT-3D11.3 (R1): con el dispositivo preparado resuelve primero contra
 // la copia local (sin red): token por SHA-256, código por su valor.
+// FASE 2B: chapeta fuera de uso con vínculo histórico (animalId SOLO de la
+// misma organización: respuesta del servidor bajo la sesión o copia local
+// del dispositivo) -> "Ver ficha del animal". Sin animalId no hay pista.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
 import { StatusMessage } from '../components/FormField.jsx';
 import { resolveQrCodigo, resolveQrToken } from './hatoApi.js';
 import { ESTADO_CHAPETA_LABELS, parseQrContent, qrResolutionOutcome } from './qrToken.js';
 import { useGanaderiaOffline } from '../offline/GanaderiaOfflineProvider.jsx';
+import { MENSAJE_QR_HISTORICA } from './cierreModel.js';
 import '../styles/ganaderia-hato.css';
 
 export default function HatoQrResolverPage() {
@@ -42,7 +46,11 @@ export default function HatoQrResolverPage() {
           return;
         }
         if (localResult.resultado === 'NO_OPERATIVA') {
-          setOutcome({ status: 'no_operativa', estado: ESTADO_CHAPETA_LABELS[localResult.estado] ?? 'Fuera de uso' });
+          setOutcome({
+            status: 'no_operativa',
+            estado: ESTADO_CHAPETA_LABELS[localResult.estado] ?? 'Fuera de uso',
+            animalId: /^[1-9]\d{0,17}$/.test(String(localResult.animalId ?? '')) ? String(localResult.animalId) : null,
+          });
           return;
         }
       } catch {
@@ -79,10 +87,18 @@ export default function HatoQrResolverPage() {
           Esta chapeta no pertenece a tu cuenta o el código no es válido. Revisa el código impreso.
         </StatusMessage>
       ) : null}
-      {outcome.status === 'no_operativa' ? (
+      {outcome.status === 'no_operativa' && !outcome.animalId ? (
         <StatusMessage type="error">
           Esta chapeta está fuera de uso ({outcome.estado}). Usa otra chapeta disponible.
         </StatusMessage>
+      ) : null}
+      {outcome.status === 'no_operativa' && outcome.animalId ? (
+        <div className="gan-hato-actions">
+          <StatusMessage type="info">
+            Esta chapeta está fuera de uso ({outcome.estado}). {MENSAJE_QR_HISTORICA}
+          </StatusMessage>
+          <Link className="gan-submit" to={`/ganaderia/animales/${outcome.animalId}`}>Ver ficha del animal</Link>
+        </div>
       ) : null}
       {outcome.status === 'desconocida_offline' ? (
         <StatusMessage type="info">Código no disponible en este dispositivo. Conéctese para verificarlo.</StatusMessage>

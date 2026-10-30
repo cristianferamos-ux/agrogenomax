@@ -210,6 +210,8 @@ test('2A. el cierre precede a la revocación de chapeta que provoca (mismo insta
   assert.deepEqual(r.eventos.slice(0, 3).map((e) => e.tipo), ['ANIMAL_MUERTO', 'QR_DESASIGNADO', 'PESAJE_REGISTRADO']);
   const qr = r.eventos.find((e) => e.tipo === 'QR_DESASIGNADO');
   assert.equal(qr.descripcion, 'Chapeta AGX-7KM4-P2XZ-R revocada por muerte del animal.');
+  assert.equal(qr.titulo, 'Chapeta QR dada de baja por muerte del animal', 'FASE 2B: hecho separado con título propio');
+  assert.equal(r.eventos[0].titulo, 'Animal muerto');
   assert.equal(qr.datos.causa, 'ANIMAL_MUERTO');
   assert.doesNotMatch(JSON.stringify(r), /"qrId"|"5"/);
 });
@@ -225,6 +227,8 @@ test('2A. salida con fecha efectiva anterior: se ordena por su fecha, la revocac
   assert.deepEqual(r.eventos.map((e) => [e.tipo, e.fecha]), [
     ['QR_DESASIGNADO', '2026-10-21'], ['ANIMAL_SALIDO', '2026-10-19'], ['ANIMAL_REGISTRADO', '2026-10-18'],
   ]);
+  assert.equal(r.eventos[0].titulo, 'Chapeta QR dada de baja por salida del animal');
+  assert.equal(r.eventos[1].titulo, 'Animal salió del hato');
   assert.match(r.eventos[0].descripcion, /revocada por salida del animal\.$/);
   assert.equal(new Set(ids(r)).size, r.eventos.length, 'sin duplicados');
 });

@@ -20,6 +20,12 @@
 // abrirla por primera vez y queda montada (oculta) al cambiar de pestaña;
 // `actividadVersion` marca cambios (pesaje confirmado, corrección,
 // anulación, chapeta QR) para recargarla abierta o al volver a abrirla.
+//
+// FASE 2B: dos ejes SEPARADOS -- "Estado del registro" (ACTIVO/ANULADO) y
+// "Situación del animal" (EN_HATO/SALIDO/MUERTO; fallback EN_HATO). El
+// bloque Situación del Resumen muestra el cierre (fecha, motivo/causa,
+// observaciones) aunque el registro quede ANULADO. Registrar salida/muerte
+// (HatoCierreAnimal) solo para ACTIVO + EN_HATO + rol owner|admin y con red.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
 import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
@@ -28,6 +34,9 @@ import HatoAnimalFields from './HatoAnimalFields.jsx';
 import HatoQrPanel from './HatoQrPanel.jsx';
 import HatoPesajesPanel from './HatoPesajesPanel.jsx';
 import HatoActividadPanel from './HatoActividadPanel.jsx';
+import HatoCierreAnimal from './HatoCierreAnimal.jsx';
+import { ETIQUETAS_ESTADO_REGISTRO, ETIQUETAS_SITUACION, bloqueSituacion, situacionDe } from './cierreModel.js';
+import { useGanaderiaAuthOptional } from '../auth/GanaderiaAuthContext.jsx';
 import { anularAnimal, corregirAnimal, getAnimal } from './hatoApi.js';
 import {
   GENERIC_ERROR_MESSAGE,
@@ -101,6 +110,21 @@ function FichaTabs({ activa, onChange }) {
   );
 }
 
+function SituacionAnimal({ animal }) {
+  const bloque = bloqueSituacion(animal);
+  return (
+    <section className={`gan-situacion gan-situacion-${bloque.situacion.toLowerCase()}`} aria-labelledby="situacion-titulo">
+      <h3 id="situacion-titulo">Situación</h3>
+      <p className="gan-situacion-estado"><strong>{bloque.titulo}</strong></p>
+      {bloque.filas.length ? (
+        <div className="gan-hato-ficha">
+          {bloque.filas.map(([label, valor]) => <Row key={label} label={label}>{valor}</Row>)}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function formatNacimiento(animal) {
   if (animal.nacimientoTipo === 'EXACTA') return `${animal.fechaNacimiento} (${formatEdad(animal)})`;
   return formatEdad(animal);
@@ -111,8 +135,13 @@ export default function HatoDetallePage() {
   const idValido = /^(?:[1-9]\d{0,17}|local:[0-9a-f-]{36})$/i.test(String(animalId));
   const esLocal = String(animalId).startsWith('local:');
   const offline = useGanaderiaOffline();
+  const auth = useGanaderiaAuthOptional();
+  // Rol de la organización activa (resuelto por el servidor en /session):
+  // solo decide qué se MUESTRA; el servidor vuelve a exigirlo (RBAC).
+  const rol = auth?.organizacionActiva?.rol ?? null;
   const local = offline.preparado && offline.repo ? offline.repo : null;
   const [chapetaLocal, setChapetaLocal] = useState(null);
+  const [tieneQrActiva, setTieneQrActiva] = useState(false);
   const catalogos = useHatoCatalogos({ conPredios: false });
   const [state, setState] = useState({ status: 'loading', animal: null });
   const [modo, setModo] = useState('ver');
@@ -177,6 +206,8 @@ export default function HatoDetallePage() {
   const accionesDisponibles = !esLocal && offline.online;
 
   const { animal } = state;
+  const situacion = animal ? situacionDe(animal) : 'EN_HATO';
+  const enHato = situacion === 'EN_HATO';
 
   function abrirCorreccion() {
     setForm(formFromAnimal(animal));
@@ -278,6 +309,10 @@ export default function HatoDetallePage() {
             <span className="gan-eyebrow">Animal</span>
             <h2>{formatIdentidad(animal)}</h2>
           </div>
+          <div className="gan-hato-ejes">
+            <span className="gan-hato-badge">Registro: {ETIQUETAS_ESTADO_REGISTRO[animal.estado] ?? animal.estado}</span>
+            <span className={`gan-hato-badge gan-hato-badge-situacion-${situacion.toLowerCase()}`}>Situación: {ETIQUETAS_SITUACION[situacion]}</span>
+          </div>
           {animal.estado === 'ANULADO' ? (
             <StatusMessage type="error">Registro anulado. Motivo: {animal.estadoMotivo}</StatusMessage>
           ) : null}
@@ -299,6 +334,7 @@ export default function HatoDetallePage() {
               <HatoPesajesPanel
                 animalId={animal.animalId}
                 animalActivo={animal.estado === 'ACTIVO'}
+                estadoOperativo={situacion}
                 online={offline.online}
                 repoOffline={offline.repo}
                 onPesajeRegistrado={() => {
@@ -318,6 +354,8 @@ export default function HatoDetallePage() {
           {modo === 'ver' && (esLocal || pestana === 'resumen') ? (
             <div {...(esLocal ? {} : { role: 'tabpanel', id: 'ficha-panel-resumen', 'aria-labelledby': 'ficha-tab-resumen' })}>
               <div className="gan-hato-ficha">
+                <Row label="Estado del registro">{ETIQUETAS_ESTADO_REGISTRO[animal.estado] ?? animal.estado}</Row>
+                <Row label="Situación del animal">{ETIQUETAS_SITUACION[situacion]}</Row>
                 <Row label="Sexo">{formatSexo(animal.sexo)}</Row>
                 <Row label="Raza">{formatRaza(animal)}</Row>
                 <Row label="Categoría">{animal.categoriaProductivaNombre ?? 'Sin categoría'}</Row>
@@ -329,6 +367,22 @@ export default function HatoDetallePage() {
                 {animal.fechaIngreso ? <Row label="Fecha de ingreso">{animal.fechaIngreso}</Row> : null}
                 {animal.observaciones ? <Row label="Observaciones">{animal.observaciones}</Row> : null}
               </div>
+              <SituacionAnimal animal={animal} />
+              {!esLocal ? (
+                <HatoCierreAnimal
+                  animal={animal}
+                  rol={rol}
+                  online={offline.online}
+                  esLocal={esLocal}
+                  tieneQrActiva={tieneQrActiva}
+                  onCerrado={(mensaje) => {
+                    setAviso(mensaje);
+                    load({ silencioso: true });
+                    marcarActividad();
+                  }}
+                  onRecargar={() => load({ silencioso: true })}
+                />
+              ) : null}
               {error ? <StatusMessage type="error">{error}</StatusMessage> : null}
               {animal.estado === 'ACTIVO' && !accionesDisponibles && !esLocal ? (
                 <p className="gan-hato-hint">Corregir, anular o cambiar la chapeta requiere conexión.</p>
@@ -353,7 +407,13 @@ export default function HatoDetallePage() {
                 </div>
               ) : null}
               {accionesDisponibles ? (
-                <HatoQrPanel animalId={animal.animalId} animalActivo={animal.estado === 'ACTIVO'} onCambio={marcarActividad} />
+                <HatoQrPanel
+                  animalId={animal.animalId}
+                  animalActivo={animal.estado === 'ACTIVO' && enHato}
+                  estadoOperativo={situacion}
+                  onCambio={marcarActividad}
+                  onActiva={setTieneQrActiva}
+                />
               ) : (
                 <section className="gan-hato-qr">
                   <h3>Chapeta QR</h3>

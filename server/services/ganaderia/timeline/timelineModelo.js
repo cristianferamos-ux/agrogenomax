@@ -87,6 +87,13 @@ const CAUSAS_REVOCACION_QR = Object.freeze({
   REVOCADO: 'revocada',
 });
 
+// FASE 2B: la baja de la chapeta por cierre del animal es un hecho APARTE
+// del cierre (su propio evento) y lo dice en el título.
+const TITULOS_REVOCACION_QR = Object.freeze({
+  ANIMAL_SALIDO: 'Chapeta QR dada de baja por salida del animal',
+  ANIMAL_MUERTO: 'Chapeta QR dada de baja por muerte del animal',
+});
+
 const METODOS = Object.freeze({ BASCULA: 'Pesado en báscula', ESTIMADO: 'Estimado' });
 
 // Columnas corregibles (animalesRepository.CORRECTABLE_COLUMNS) -> etiqueta.
@@ -189,7 +196,7 @@ function eventoAnimal(row) {
       return conFecha({
         ...base,
         tipo: TIPOS_TIMELINE.QR_DESASIGNADO,
-        titulo: 'Chapeta QR dada de baja',
+        titulo: TITULOS_REVOCACION_QR[causa] ?? 'Chapeta QR dada de baja',
         descripcion: `${codigo ? `Chapeta ${codigo}` : 'La chapeta'} ${accion}.${motivo ? ` Motivo: ${motivo}` : ''}`,
         datos: { codigoVisible: codigo, causa, motivo },
       }, row.ocurridoEn);

@@ -99,7 +99,7 @@ test('refresco/stale sin polling: pesaje confirmado, corrección, anulación, ch
   assert.match(detalle, /load\(\{ silencioso: true \}\);\s*marcarActividad\(\);/);
   assert.match(detalle, /if \(!data\.sinCambios\) marcarActividad\(\);/);
   assert.match(detalle, /if \(!data\.yaAnulado\) marcarActividad\(\);/);
-  assert.match(detalle, /<HatoQrPanel [^>]*onCambio=\{marcarActividad\} \/>/);
+  assert.match(detalle, /<HatoQrPanel\s[^>]*onCambio=\{marcarActividad\}[^>]*\/>/);
   assert.match(qr, /await load\(\);\s*onCambio\?\.\(\);/);
   assert.match(panel, /repoOffline\.subscribe\(\(\) => \{ revisar\(\); \}\)/);
   assert.match(panel, /if \(huboConfirmaciones\(pendientesRef\.current, actuales\)\) setConfirmacionesLocales/);

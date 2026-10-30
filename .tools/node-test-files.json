@@ -208,5 +208,8 @@
   "server/services/__tests__/timelineIntegration.test.js",
   "server/routes/__tests__/ganaderiaAnimalCierreAuth.test.js",
   "server/services/__tests__/cierreArchitecture.test.js",
-  "server/services/__tests__/animalCierreIntegration.test.js"
+  "server/services/__tests__/animalCierreIntegration.test.js",
+  "server/routes/__tests__/ganaderiaAnimalesSituacion.test.js",
+  "server/routes/__tests__/ganaderiaQrNoOperativo.test.js",
+  "src/modules/ganaderia/hato/__tests__/cierreUi.test.js"
 ]

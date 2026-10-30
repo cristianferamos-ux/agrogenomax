@@ -65,7 +65,7 @@ function startApp({ inyectar = true } = {}) {
   });
 }
 
-function wireFakeSession(organizacionId) {
+function wireFakeSession(organizacionId, rol = 'owner') {
   const rawToken = crypto.randomBytes(32).toString('base64url');
   const tokenHash = hashSessionSecret(rawToken);
   const pool = getAgxAuthPool({ AGX_AUTH_DATABASE_URL: FAKE_AUTH_CONNECTION_STRING });
@@ -74,15 +74,15 @@ function wireFakeSession(organizacionId) {
       return { rows: [{ sesion_id: 's', cuenta_id: 'cuenta-1', organizacion_id: organizacionId, fecha_expiracion: new Date(Date.now() + 60_000).toISOString(), fecha_revocacion: null, cuenta_estado: 'activa', email: 't@example.com', nombre: 'T' }] };
     }
     if (text.includes('fn_resolver_autorizacion_sesion') && params[0] === tokenHash) {
-      return { rows: [{ sesion_id: 's', cuenta_id: 'cuenta-1', organizacion_id: organizacionId, rol: 'propietario' }] };
+      return { rows: [{ sesion_id: 's', cuenta_id: 'cuenta-1', organizacion_id: organizacionId, rol }] };
     }
     return { rows: [] };
   };
   return rawToken;
 }
 
-async function post(path, body, { org = ORG_A, csrf = 'valid', method = 'POST', headers: extra = {}, inyectar } = {}) {
-  const rawToken = org ? wireFakeSession(org) : null;
+async function post(path, body, { org = ORG_A, rol = 'owner', csrf = 'valid', method = 'POST', headers: extra = {}, inyectar } = {}) {
+  const rawToken = org ? wireFakeSession(org, rol) : null;
   const ctx = await startApp({ inyectar });
   try {
     const headers = { 'Content-Type': 'application/json', Origin: ALLOWED_ORIGIN, ...extra };
@@ -191,5 +191,45 @@ describe('FASE 2A: delegación al repositorio', () => {
     const r = await post('/animales/7/salida', SALIDA);
     assert.equal(r.status, 500);
     assert.doesNotMatch(r.text, /agx\.|constraint|select|stack|at /i);
+  });
+});
+
+describe('FASE 2B: RBAC de cierres (owner/admin)', () => {
+  test('operador y lector -> 403 ROLE_FORBIDDEN en salida y muerte, sin tocar el repositorio', async () => {
+    for (const rol of ['operador', 'lector']) {
+      const salida = await post('/animales/7/salida', SALIDA, { rol });
+      const muerte = await post('/animales/7/muerte', MUERTE, { rol });
+      assert.equal(salida.status, 403, rol);
+      assert.deepEqual(salida.json, { error: 'ROLE_FORBIDDEN' });
+      assert.equal(muerte.status, 403, rol);
+      assert.deepEqual(muerte.json, { error: 'ROLE_FORBIDDEN' });
+    }
+    assert.equal(llamadas.length, 0);
+  });
+
+  test('owner y admin -> pasan (201) y delegan al repositorio', async () => {
+    for (const rol of ['owner', 'admin']) {
+      assert.equal((await post('/animales/7/salida', SALIDA, { rol })).status, 201, rol);
+      assert.equal((await post('/animales/7/muerte', MUERTE, { rol })).status, 201, rol);
+    }
+    assert.equal(llamadas.length, 4);
+  });
+
+  test('rol desconocido (p. ej. "propietario") o ausente -> 403; sin sesión sigue siendo 401', async () => {
+    for (const rol of ['propietario', 'super_admin', null]) {
+      assert.equal((await post('/animales/7/salida', SALIDA, { rol })).json?.error, 'ROLE_FORBIDDEN', String(rol));
+    }
+    assert.equal((await post('/animales/7/salida', SALIDA, { org: null, rol: 'lector' })).status, 401);
+    assert.equal(llamadas.length, 0);
+  });
+
+  test('el rol se exige DESPUÉS de la sesión (orden de middlewares en el router)', async () => {
+    const fs = await import('node:fs');
+    const src = fs.readFileSync(new URL('../ganaderiaAnimalCierre.js', import.meta.url), 'utf8');
+    const sesion = src.indexOf('router.use(createRequireGanaderiaSession');
+    const rol = src.indexOf('router.use(createRequireGanaderiaRole(...ROLES_CIERRE))');
+    const post = src.indexOf("router.post('/'");
+    assert.ok(sesion > 0 && rol > sesion && post > rol);
+    assert.match(src, /ROLES_CIERRE = Object\.freeze\(\['owner', 'admin'\]\)/);
   });
 });

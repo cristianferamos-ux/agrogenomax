@@ -159,11 +159,21 @@ test('anular: motivo normalizado y obligatorio', () => {
   assert.equal(codeOf(() => validateAnularAnimalBody({ motivo: 'x', extra: 1 })), 'FORBIDDEN_FIELDS');
 });
 
-test('listado: defaults (ACTIVO, 50, 0) y límites', () => {
-  assert.deepEqual(validateListAnimalesQuery({}), { predioId: null, estado: 'ACTIVO', sexo: null, q: null, limit: 50, offset: 0 });
+test('listado: defaults (ACTIVO, EN_HATO, 50, 0) y límites', () => {
+  assert.deepEqual(validateListAnimalesQuery({}), { predioId: null, estado: 'ACTIVO', estadoOperativo: 'EN_HATO', sexo: null, q: null, limit: 50, offset: 0 });
   assert.equal(validateListAnimalesQuery({ estado: 'TODOS', limit: '200', q: '  lo ' }).q, 'lo');
   assert.equal(codeOf(() => validateListAnimalesQuery({ limit: '201' })), 'INVALID_QUERY');
   assert.equal(codeOf(() => validateListAnimalesQuery({ q: ['a', 'b'] })), 'INVALID_QUERY');
+});
+
+test('FASE 2B listado: estadoOperativo EN_HATO|SALIDO|MUERTO|TODOS; inválido -> INVALID_QUERY', () => {
+  for (const valor of ['EN_HATO', 'SALIDO', 'MUERTO', 'TODOS']) {
+    assert.equal(validateListAnimalesQuery({ estadoOperativo: valor }).estadoOperativo, valor);
+  }
+  assert.equal(validateListAnimalesQuery({ estadoOperativo: '' }).estadoOperativo, 'EN_HATO');
+  for (const valor of ['ACTIVO', 'salido', 'VENDIDO']) {
+    assert.equal(codeOf(() => validateListAnimalesQuery({ estadoOperativo: valor })), 'INVALID_QUERY', valor);
+  }
 });
 
 test('categoría-sexo: hembras/machos según código; ternero_emposte ambos; código desconocido no asignable', () => {

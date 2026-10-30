@@ -102,7 +102,7 @@ test('inexistente / de otra organización / stock central (404) -> un único est
 test('revocada / dañada / reemplazada (410) -> estado controlado con su estado', () => {
   assert.deepEqual(
     qrResolutionOutcome({ ok: false, status: 410, data: { error: 'QR_NO_OPERATIVO', estado: 'REEMPLAZADO' } }),
-    { status: 'no_operativa', estado: 'Reemplazada' },
+    { status: 'no_operativa', estado: 'Reemplazada', animalId: null },
   );
 });
 

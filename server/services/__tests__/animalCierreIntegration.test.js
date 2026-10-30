@@ -477,4 +477,67 @@ describe('FASE 2A: efectos sobre otras funciones', { skip: !dbAvailable }, () =>
     const t = await timeline.obtenerTimelineAnimal(org, animalId, { limit: 50 });
     assert.ok(!t.eventos.some((e) => ['ANIMAL_SALIDO', 'ANIMAL_MUERTO'].includes(e.tipo)));
   });
+
+  // FASE 2B -----------------------------------------------------------------
+  test('17. FASE 2B listado por situación (default EN_HATO, SALIDO, MUERTO, TODOS) y resumen en una consulta, bajo RLS', async () => {
+    const org = crypto.randomUUID();
+    const otra = crypto.randomUUID();
+    const enHato = await seedAnimal(org);
+    const salido = await seedAnimal(org);
+    const muerto = await seedAnimal(org);
+    const anuladoSalido = await seedAnimal(org);
+    const anuladoMuerto = await seedAnimal(org);
+    await seedAnimal(otra);
+    await cerrar(org, salido, salida());
+    await cerrar(org, muerto, muerte());
+    await cerrar(org, anuladoSalido, salida());
+    await cerrar(org, anuladoMuerto, muerte());
+    await animalesRepo.anularAnimal(org, anuladoSalido, { motivo: 'Duplicado', actorCuentaId: ACTOR });
+    await animalesRepo.anularAnimal(org, anuladoMuerto, { motivo: 'Duplicado', actorCuentaId: ACTOR });
+
+    const listar = async (estadoOperativo, estado = 'ACTIVO') => (await animalesRepo.listAnimales(org, {
+      predioId: null, estado, estadoOperativo, sexo: null, q: null, limit: 50, offset: 0,
+    })).animales.map((a) => a.animalId).sort();
+    assert.deepEqual(await listar(undefined), [enHato], 'default EN_HATO');
+    assert.deepEqual(await listar('EN_HATO'), [enHato]);
+    assert.deepEqual(await listar('SALIDO'), [salido]);
+    assert.deepEqual(await listar('MUERTO'), [muerto]);
+    assert.deepEqual(await listar('TODOS'), [enHato, salido, muerto].sort());
+    assert.deepEqual(await listar('SALIDO', 'ANULADO'), [anuladoSalido], 'el cierre se conserva aunque el registro quede ANULADO');
+    assert.deepEqual(await listar('MUERTO', 'ANULADO'), [anuladoMuerto], 'ejes independientes también para MUERTO');
+    assert.deepEqual(await listar('SALIDO', 'TODOS'), [salido, anuladoSalido].sort());
+    assert.deepEqual(await listar('MUERTO', 'TODOS'), [muerto, anuladoMuerto].sort());
+    assert.deepEqual(await listar('TODOS', 'TODOS'), [enHato, salido, muerto, anuladoSalido, anuladoMuerto].sort(), 'nunca filas de otra organización');
+
+    // Históricos acumulados: ACTIVO+EN_HATO, ACTIVO+SALIDO, ACTIVO+MUERTO,
+    // ANULADO+SALIDO, ANULADO+MUERTO -> hatoActual 1, salidos 2, muertos 2.
+    // Anular el registro después del cierre NO borra el hecho histórico.
+    assert.deepEqual(await animalesRepo.resumenAnimales(org), { hatoActual: 1, salidos: 2, muertos: 2 });
+    assert.deepEqual(await animalesRepo.resumenAnimales(otra), { hatoActual: 1, salidos: 0, muertos: 0 });
+    assert.deepEqual(await animalesRepo.resumenAnimales(crypto.randomUUID()), { hatoActual: 0, salidos: 0, muertos: 0 });
+  });
+
+  test('18. FASE 2B QR_NO_OPERATIVO: animalId solo para la MISMA organización; otra organización -> null (sin pista)', async () => {
+    const org = crypto.randomUUID();
+    const otra = crypto.randomUUID();
+    const animalId = await seedAnimal(org);
+    const [codigo] = await chapetaDe(org);
+    await chapetasRepo.asociarChapetaAAnimal(org, animalId, codigo, { actorCuentaId: ACTOR });
+    await cerrar(org, animalId, muerte());
+
+    const propia = await chapetasRepo.resolverChapeta(org, { codigoVisible: codigo });
+    assert.equal(propia.resultado, 'NO_OPERATIVA');
+    assert.equal(propia.animalId, animalId);
+    assert.equal(propia.chapeta.estado, 'REVOCADO');
+
+    assert.equal(await chapetasRepo.resolverChapeta(otra, { codigoVisible: codigo }), null);
+    const { sendResolution } = await import('../../routes/ganaderiaAnimalQr.js');
+    const respuesta = (resolved) => {
+      const out = {};
+      sendResolution({ status(s) { out.status = s; return this; }, json(b) { out.body = b; } }, resolved);
+      return out;
+    };
+    assert.deepEqual(respuesta(propia), { status: 410, body: { error: 'QR_NO_OPERATIVO', estado: 'REVOCADO', animalId } });
+    assert.deepEqual(respuesta(null), { status: 404, body: { error: 'QR_NOT_FOUND' } });
+  });
 });

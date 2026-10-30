@@ -97,6 +97,10 @@ export function resultadoRegistro(result) {
   if (code === 'CSRF_UNAVAILABLE') {
     return { tipo: 'NO_ENVIADO', mensaje: 'No pudimos enviar el pesaje. Revisa tu conexión e inténtalo de nuevo.' };
   }
+  // FASE 2B: 403 ROLE_FORBIDDEN es falta de permisos, nunca sesión expirada.
+  if (code === 'ROLE_FORBIDDEN' || result?.failure === 'ROLE_FORBIDDEN') {
+    return { tipo: 'PERMISOS', mensaje: 'No tienes permisos para realizar esta acción.' };
+  }
   if (result?.status === 401 || result?.status === 403 || code === 'SESSION_EXPIRED') {
     return { tipo: 'SESION', mensaje: 'Tu sesión expiró o no es válida. Vuelve a iniciar sesión para registrar pesajes.' };
   }
@@ -106,6 +110,13 @@ export function resultadoRegistro(result) {
   }
   if (code === 'ANIMAL_ANULADO') {
     return { tipo: 'ANULADO', mensaje: 'Este animal está anulado y no admite nuevos pesajes.' };
+  }
+  // FASE 2B: el animal salió del hato o murió (otro dispositivo / pestaña).
+  if (code === 'ANIMAL_YA_SALIDO') {
+    return { tipo: 'CERRADO', estadoOperativo: 'SALIDO', mensaje: 'Este animal salió del hato y no admite nuevos pesajes.' };
+  }
+  if (code === 'ANIMAL_YA_MUERTO') {
+    return { tipo: 'CERRADO', estadoOperativo: 'MUERTO', mensaje: 'Este animal está registrado como muerto y no admite nuevos pesajes.' };
   }
   if (code === 'CLIENT_OPERATION_ID_REUSED') {
     return {

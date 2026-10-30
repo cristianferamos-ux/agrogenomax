@@ -24,6 +24,7 @@ import {
   createAnimalIdempotente,
   getAnimal,
   listAnimales,
+  resumenAnimales,
 } from '../services/ganaderia/animalesRepository.js';
 
 function sendSemanticError(res, error) {
@@ -40,7 +41,15 @@ export function buildCreateAnimalResponse({ animal, yaExistia }) {
   return { status: yaExistia ? 200 : 201, body: { ok: true, yaExistia, animal } };
 }
 
-export default function createGanaderiaAnimalesRouter({ appEnv, csrfServerSecret, allowedOrigins } = {}) {
+// FASE 2B: `listar` y `resumir` son inyectables solo para las pruebas HTTP
+// (por defecto, el repositorio real bajo RLS).
+export default function createGanaderiaAnimalesRouter({
+  appEnv,
+  csrfServerSecret,
+  allowedOrigins,
+  listar = listAnimales,
+  resumir = resumenAnimales,
+} = {}) {
   const router = Router();
 
   router.use(createRequireGanaderiaSession({ appEnv }));
@@ -51,10 +60,28 @@ export default function createGanaderiaAnimalesRouter({ appEnv, csrfServerSecret
     try {
       const filtros = validateListAnimalesQuery(req.query);
       const { organizacionId } = req.ganaderiaAuth;
-      const { animales, total } = await listAnimales(organizacionId, filtros);
+      const { animales, total } = await listar(organizacionId, filtros);
       res.json({ animales, total, limit: filtros.limit, offset: filtros.offset });
     } catch (error) {
       if (sendSemanticError(res, error)) return;
+      next(error);
+    }
+  });
+
+  // FASE 2B: contadores del hato (una sola consulta agregada). Montado ANTES
+  // de /:animalId. Sin parámetros: cualquier query (p. ej. organizacionId)
+  // es INVALID_QUERY.
+  router.get('/resumen', async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      if (Object.keys(req.query || {}).length > 0) {
+        res.status(400).json({ error: 'INVALID_QUERY' });
+        return;
+      }
+      const { organizacionId } = req.ganaderiaAuth;
+      const resumen = await resumir(organizacionId);
+      res.json({ ok: true, resumen });
+    } catch (error) {
       next(error);
     }
   });

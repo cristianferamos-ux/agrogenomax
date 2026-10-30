@@ -398,11 +398,12 @@ export async function getChapetaAdmin(qrId) {
       // Lectura del animal bajo la organización dueña de la chapeta.
       await client.query("select set_config('app.current_org_id', $1, true)", [row.organizacion_id]);
       const animalResult = await client.query(
-        `select animal_id::text as animal_id, numero_visual, nombre, estado from agx.animales where animal_id = $1`,
+        `select animal_id::text as animal_id, numero_visual, nombre, estado, estado_operativo from agx.animales where animal_id = $1`,
         [row.animal_id],
       );
       const a = animalResult.rows[0];
-      if (a) animal = { animalId: a.animal_id, numeroVisual: a.numero_visual, nombre: a.nombre, estado: a.estado };
+      // FASE 2B: solo lectura -- situación del animal (EN_HATO/SALIDO/MUERTO).
+      if (a) animal = { animalId: a.animal_id, numeroVisual: a.numero_visual, nombre: a.nombre, estado: a.estado, estadoOperativo: a.estado_operativo };
     }
     const eventos = await client.query(
       `select tipo_evento, metadata_json, actor_cuenta_id, organizacion_id, ocurrido_en

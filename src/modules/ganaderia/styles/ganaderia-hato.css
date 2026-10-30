@@ -789,3 +789,184 @@
     padding: 0.75rem 1rem;
   }
 }
+
+/* FASE 2B: filtros Situación / Estado del registro, contadores, ejes de la
+   ficha, bloque Situación y cierre (salida/muerte) con alertdialog.
+   Sin scroll horizontal en 320/375/768/1280; en móvil formularios verticales
+   y botones a todo el ancho. */
+.gan-hato-toolbar {
+  grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr)) auto;
+}
+
+.gan-hato-filtro {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.gan-hato-filtro span {
+  color: #a7b3c2;
+  font-size: 0.78rem;
+}
+
+.gan-hato-resumen {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin: 0 0 1rem;
+}
+
+.gan-hato-resumen div {
+  min-width: 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.gan-hato-resumen dt {
+  color: #a7b3c2;
+  font-size: 0.8rem;
+}
+
+.gan-hato-resumen dd {
+  margin: 0.15rem 0 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.gan-hato-ejes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  margin: 0.25rem 0 0.75rem;
+}
+
+.gan-hato-ejes .gan-hato-badge {
+  color: #c9d4e0;
+}
+
+.gan-hato-badge-situacion-salido,
+.gan-hato-ejes .gan-hato-badge-situacion-salido {
+  color: #ffd27a;
+}
+
+.gan-hato-badge-situacion-muerto,
+.gan-hato-ejes .gan-hato-badge-situacion-muerto {
+  color: #ffb4a8;
+}
+
+.gan-situacion,
+.gan-cierre {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 1.25rem;
+}
+
+.gan-situacion h3,
+.gan-cierre-titulo {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.gan-situacion-estado {
+  margin: 0;
+}
+
+.gan-cierre-form,
+.gan-cierre-revision {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 36rem;
+}
+
+.gan-cierre-form h4,
+.gan-cierre-revision h4 {
+  margin: 0;
+}
+
+.gan-cierre-form textarea,
+.gan-cierre-form select,
+.gan-cierre-form input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.gan-cierre-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(3, 8, 14, 0.72);
+}
+
+.gan-cierre-dialog {
+  width: 100%;
+  max-width: 32rem;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 1.25rem;
+  border: 1px solid rgba(255, 180, 168, 0.4);
+  border-radius: 0.75rem;
+  background: #0d1620;
+  color: #e6edf3;
+}
+
+.gan-cierre-dialog h3 {
+  margin: 0 0 0.5rem;
+}
+
+.gan-cierre-dialog p {
+  margin: 0 0 1rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.gan-hato-qr-historica {
+  display: grid;
+  gap: 0.25rem;
+}
+
+@media (max-width: 960px) {
+  .gan-hato-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .gan-hato-toolbar input[type='search'] {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 640px) {
+  .gan-hato-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .gan-hato-resumen {
+    gap: 0.4rem;
+  }
+
+  .gan-hato-resumen div {
+    padding: 0.5rem;
+  }
+
+  .gan-cierre-form,
+  .gan-cierre-revision {
+    max-width: none;
+  }
+
+  .gan-cierre-dialog-acciones {
+    flex-direction: column-reverse;
+  }
+
+  .gan-cierre-botones > *,
+  .gan-cierre-acciones > *,
+  .gan-cierre-dialog-acciones > * {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+}

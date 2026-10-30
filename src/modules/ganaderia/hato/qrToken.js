@@ -109,6 +109,8 @@ export const ESTADO_CHAPETA_LABELS = Object.freeze({
  *   200 DISPONIBLE -> registro de animal con esa chapeta
  *   404            -> un único estado controlado (inexistente / otra organización)
  *   410            -> chapeta fuera de uso (revocada / dañada / reemplazada)
+ * FASE 2B: el 410 puede traer animalId (vínculo histórico) SOLO si el
+ * servidor lo resolvió bajo la organización de la sesión -> "Ver ficha".
  */
 export function qrResolutionOutcome({ ok, status, data } = {}) {
   if (ok && data?.resultado === 'ANIMAL' && typeof data.animalId === 'string' && /^[1-9]\d{0,17}$/.test(data.animalId)) {
@@ -119,6 +121,9 @@ export function qrResolutionOutcome({ ok, status, data } = {}) {
     return { status: 'found', to: `/ganaderia/animales/nuevo?chapeta=${encodeURIComponent(codigo)}` };
   }
   if (status === 404) return { status: 'not_found' };
-  if (status === 410) return { status: 'no_operativa', estado: ESTADO_CHAPETA_LABELS[data?.estado] ?? 'Fuera de uso' };
+  if (status === 410) {
+    const animalId = typeof data?.animalId === 'string' && /^[1-9]\d{0,17}$/.test(data.animalId) ? data.animalId : null;
+    return { status: 'no_operativa', estado: ESTADO_CHAPETA_LABELS[data?.estado] ?? 'Fuera de uso', animalId };
+  }
   return { status: 'error' };
 }

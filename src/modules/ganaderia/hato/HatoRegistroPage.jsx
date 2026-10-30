@@ -132,7 +132,7 @@ export default function HatoRegistroPage() {
             return;
           }
           const numero = String(body.numeroVisual ?? '').trim().toLowerCase();
-          if (numero && (await local.listAnimales({ estado: 'ACTIVO' })).some((a) => String(a.numeroVisual ?? '').trim().toLowerCase() === numero)) {
+          if (numero && (await local.listAnimales({ estado: 'ACTIVO', estadoOperativo: 'TODOS' })).some((a) => String(a.numeroVisual ?? '').trim().toLowerCase() === numero)) {
             setFieldError(messageForError('ANIMAL_NUMERO_VISUAL_DUPLICADO'));
             return;
           }

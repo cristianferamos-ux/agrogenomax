@@ -14,6 +14,18 @@ export const ASIGNACION_LABELS = Object.freeze({
   TOTAL: 'Asignado',
 });
 
+// FASE 2B: situación del animal asociado (solo lectura en el Super Admin).
+// Sin dato (respuesta anterior a 0025) se presenta como "En hato".
+export const ESTADO_OPERATIVO_ANIMAL_LABELS = Object.freeze({
+  EN_HATO: 'En hato',
+  SALIDO: 'Salido',
+  MUERTO: 'Muerto',
+});
+
+export function etiquetaEstadoOperativoAnimal(estadoOperativo) {
+  return ESTADO_OPERATIVO_ANIMAL_LABELS[estadoOperativo] ?? ESTADO_OPERATIVO_ANIMAL_LABELS.EN_HATO;
+}
+
 export const ESTADO_CHAPETA_ADMIN_LABELS = Object.freeze({
   EN_INVENTARIO: 'En inventario',
   ASIGNADO_ORGANIZACION: 'Asignada a organización',
