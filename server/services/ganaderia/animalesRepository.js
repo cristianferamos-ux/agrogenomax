@@ -182,13 +182,14 @@ export async function listAnimales(organizacionId, { predioId, estado, estadoOpe
  * FASE 2B: GET /api/ganaderia/animales/resumen -- contadores en UNA sola
  * consulta agregada (bajo RLS de la organización), nunca tres listados.
  *   hatoActual = registro ACTIVO y situación EN_HATO
- *   salidos / muertos = históricos (registros ACTIVO; un registro ANULADO es
- *   un error de captura y no cuenta como salida ni muerte real).
+ *   salidos / muertos = histórico ACUMULADO por situación, SIN filtrar el
+ *   estado del registro: los ejes son independientes y anular después un
+ *   registro (ANULADO + SALIDO/MUERTO) no borra el hecho histórico del cierre.
  */
 export const RESUMEN_ANIMALES_SQL = `
   select count(*) filter (where a.estado = 'ACTIVO' and a.estado_operativo = 'EN_HATO')::int as hato_actual,
-         count(*) filter (where a.estado = 'ACTIVO' and a.estado_operativo = 'SALIDO')::int as salidos,
-         count(*) filter (where a.estado = 'ACTIVO' and a.estado_operativo = 'MUERTO')::int as muertos
+         count(*) filter (where a.estado_operativo = 'SALIDO')::int as salidos,
+         count(*) filter (where a.estado_operativo = 'MUERTO')::int as muertos
     from agx.animales a`;
 
 export async function resumenAnimales(organizacionId) {

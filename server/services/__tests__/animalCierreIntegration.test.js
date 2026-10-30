@@ -486,11 +486,14 @@ describe('FASE 2A: efectos sobre otras funciones', { skip: !dbAvailable }, () =>
     const salido = await seedAnimal(org);
     const muerto = await seedAnimal(org);
     const anuladoSalido = await seedAnimal(org);
+    const anuladoMuerto = await seedAnimal(org);
     await seedAnimal(otra);
     await cerrar(org, salido, salida());
     await cerrar(org, muerto, muerte());
     await cerrar(org, anuladoSalido, salida());
+    await cerrar(org, anuladoMuerto, muerte());
     await animalesRepo.anularAnimal(org, anuladoSalido, { motivo: 'Duplicado', actorCuentaId: ACTOR });
+    await animalesRepo.anularAnimal(org, anuladoMuerto, { motivo: 'Duplicado', actorCuentaId: ACTOR });
 
     const listar = async (estadoOperativo, estado = 'ACTIVO') => (await animalesRepo.listAnimales(org, {
       predioId: null, estado, estadoOperativo, sexo: null, q: null, limit: 50, offset: 0,
@@ -501,9 +504,15 @@ describe('FASE 2A: efectos sobre otras funciones', { skip: !dbAvailable }, () =>
     assert.deepEqual(await listar('MUERTO'), [muerto]);
     assert.deepEqual(await listar('TODOS'), [enHato, salido, muerto].sort());
     assert.deepEqual(await listar('SALIDO', 'ANULADO'), [anuladoSalido], 'el cierre se conserva aunque el registro quede ANULADO');
-    assert.deepEqual(await listar('TODOS', 'TODOS'), [enHato, salido, muerto, anuladoSalido].sort(), 'nunca filas de otra organización');
+    assert.deepEqual(await listar('MUERTO', 'ANULADO'), [anuladoMuerto], 'ejes independientes también para MUERTO');
+    assert.deepEqual(await listar('SALIDO', 'TODOS'), [salido, anuladoSalido].sort());
+    assert.deepEqual(await listar('MUERTO', 'TODOS'), [muerto, anuladoMuerto].sort());
+    assert.deepEqual(await listar('TODOS', 'TODOS'), [enHato, salido, muerto, anuladoSalido, anuladoMuerto].sort(), 'nunca filas de otra organización');
 
-    assert.deepEqual(await animalesRepo.resumenAnimales(org), { hatoActual: 1, salidos: 1, muertos: 1 });
+    // Históricos acumulados: ACTIVO+EN_HATO, ACTIVO+SALIDO, ACTIVO+MUERTO,
+    // ANULADO+SALIDO, ANULADO+MUERTO -> hatoActual 1, salidos 2, muertos 2.
+    // Anular el registro después del cierre NO borra el hecho histórico.
+    assert.deepEqual(await animalesRepo.resumenAnimales(org), { hatoActual: 1, salidos: 2, muertos: 2 });
     assert.deepEqual(await animalesRepo.resumenAnimales(otra), { hatoActual: 1, salidos: 0, muertos: 0 });
     assert.deepEqual(await animalesRepo.resumenAnimales(crypto.randomUUID()), { hatoActual: 0, salidos: 0, muertos: 0 });
   });

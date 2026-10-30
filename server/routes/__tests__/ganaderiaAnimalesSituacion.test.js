@@ -100,10 +100,13 @@ describe('FASE 2B: listado por situación (estadoOperativo)', () => {
     assert.deepEqual(llamadas.listar.map((l) => l.filtros.estadoOperativo), ['SALIDO', 'MUERTO', 'TODOS', 'EN_HATO', 'EN_HATO']);
   });
 
-  test('ejes independientes: estado=ANULADO&estadoOperativo=SALIDO', async () => {
+  test('ejes independientes: estado=ANULADO con SALIDO y con MUERTO', async () => {
     await get('/animales?estado=ANULADO&estadoOperativo=SALIDO');
+    await get('/animales?estado=ANULADO&estadoOperativo=MUERTO');
     assert.equal(llamadas.listar[0].filtros.estado, 'ANULADO');
     assert.equal(llamadas.listar[0].filtros.estadoOperativo, 'SALIDO');
+    assert.equal(llamadas.listar[1].filtros.estado, 'ANULADO');
+    assert.equal(llamadas.listar[1].filtros.estadoOperativo, 'MUERTO');
   });
 
   test('valor inválido -> 400 INVALID_QUERY sin consultar', async () => {
@@ -139,8 +142,10 @@ describe('FASE 2B: GET /animales/resumen', () => {
   test('UNA sola consulta agregada (count filter), sin listados', () => {
     assert.equal((RESUMEN_ANIMALES_SQL.match(/\bselect\b/gi) ?? []).length, 1);
     assert.match(RESUMEN_ANIMALES_SQL, /estado = 'ACTIVO' and a\.estado_operativo = 'EN_HATO'\)::int as hato_actual/);
-    assert.match(RESUMEN_ANIMALES_SQL, /estado_operativo = 'SALIDO'\)::int as salidos/);
-    assert.match(RESUMEN_ANIMALES_SQL, /estado_operativo = 'MUERTO'\)::int as muertos/);
+    // Históricos acumulados: SIN filtrar el estado del registro (ANULADO + SALIDO/MUERTO cuenta).
+    assert.match(RESUMEN_ANIMALES_SQL, /filter \(where a\.estado_operativo = 'SALIDO'\)::int as salidos/);
+    assert.match(RESUMEN_ANIMALES_SQL, /filter \(where a\.estado_operativo = 'MUERTO'\)::int as muertos/);
+    assert.equal((RESUMEN_ANIMALES_SQL.match(/a\.estado = 'ACTIVO'/g) ?? []).length, 1, 'solo hatoActual filtra ACTIVO');
     assert.doesNotMatch(RESUMEN_ANIMALES_SQL, /limit|offset|organizacion_id/i);
   });
 });
