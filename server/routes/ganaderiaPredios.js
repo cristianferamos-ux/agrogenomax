@@ -18,6 +18,7 @@ import {
   createRequireGanaderiaSession,
   createRequireGanaderiaCsrf,
 } from '../security/ganaderiaSession.js';
+import { createRequireAdministracion } from '../security/ganaderiaPermisos.js';
 import { prediosSearchLimiter } from '../middleware/rateLimit.js';
 import {
   lookupPredioPorCoordenadas,
@@ -370,6 +371,8 @@ export default function createGanaderiaPrediosRouter({ appEnv, csrfServerSecret,
   // pasan libres dentro de createRequireGanaderiaCsrf).
   router.use(requireSession);
   router.use(requireCsrf);
+  // FASE 3A: RBAC por acción (ver server/security/ganaderiaPermisos.js).
+  const requireAdministracion = createRequireAdministracion();
 
   // §3: GET /api/ganaderia/predios
   router.get('/', async (req, res, next) => {
@@ -408,7 +411,7 @@ export default function createGanaderiaPrediosRouter({ appEnv, csrfServerSecret,
   });
 
   // §6: POST /api/ganaderia/predios/buscar-por-coordenadas
-  router.post('/buscar-por-coordenadas', prediosSearchLimiter, async (req, res, next) => {
+  router.post('/buscar-por-coordenadas', requireAdministracion, prediosSearchLimiter, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const { lat, lng } = validateCoordinatesBody(req.body);
@@ -442,7 +445,7 @@ export default function createGanaderiaPrediosRouter({ appEnv, csrfServerSecret,
   });
 
   // §7: POST /api/ganaderia/predios/buscar-por-codigo
-  router.post('/buscar-por-codigo', prediosSearchLimiter, async (req, res, next) => {
+  router.post('/buscar-por-codigo', requireAdministracion, prediosSearchLimiter, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const result = await lookupPredioPorCodigo(req.body?.codigo);
@@ -472,7 +475,7 @@ export default function createGanaderiaPrediosRouter({ appEnv, csrfServerSecret,
   });
 
   // §12/§16: POST /api/ganaderia/predios -- crear predio (automático o manual)
-  router.post('/', async (req, res, next) => {
+  router.post('/', requireAdministracion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const mode = req.body?.mode;
@@ -562,7 +565,7 @@ export default function createGanaderiaPrediosRouter({ appEnv, csrfServerSecret,
   // SPRINT-3D9.2: archivar/restaurar -- reemplaza el hard DELETE
   // (revocado en 0010) por un estado reversible. "Eliminar predio" en la
   // UI internamente llama a este endpoint.
-  router.post('/:predioId/archivar', async (req, res, next) => {
+  router.post('/:predioId/archivar', requireAdministracion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       if (!/^\d+$/.test(String(req.params.predioId))) {
@@ -580,7 +583,7 @@ export default function createGanaderiaPrediosRouter({ appEnv, csrfServerSecret,
     }
   });
 
-  router.post('/:predioId/restaurar', async (req, res, next) => {
+  router.post('/:predioId/restaurar', requireAdministracion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       if (!/^\d+$/.test(String(req.params.predioId))) {

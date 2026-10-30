@@ -24,10 +24,13 @@ import {
   previewDescansoReentrada,
   createDescansoReentrada,
 } from './ganaderiaDescansoReentradaApi.js';
+import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
+import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
 
 const GENERIC_ERROR = 'No fue posible completar la operación en este momento. Intenta nuevamente.';
 
 const DESCANSO_ERROR_MESSAGES = {
+  ROLE_FORBIDDEN: MENSAJE_ROLE_FORBIDDEN, // FASE 3A
   NO_GRAZING_RECOMMENDATION: 'Primero guarda una recomendación de pastoreo para este potrero.',
   NO_PASTURE_PROFILE: 'Esta pastura todavía no tiene un perfil de descanso con evidencia técnica suficiente. Preferimos no recomendar automáticamente antes que inventar un descanso genérico.',
   REST_UNAVAILABLE: 'No fue posible completar el cálculo de descanso con los datos disponibles.',
@@ -318,6 +321,8 @@ function PlanPastoreoReport({ payload }) {
 }
 
 export default function PotreroDescansoReentradaPanel({ predioId, potreroId, refreshKey }) {
+  // FASE 3A: calcular (preview) es lectura; guardar la estimación = operación.
+  const permisos = useGanaderiaPermisos();
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
@@ -553,9 +558,11 @@ export default function PotreroDescansoReentradaPanel({ predioId, potreroId, ref
           <PlanPastoreoReport payload={preview} />
           <StatusMessage type="error">{saveError}</StatusMessage>
           <div className="gan-potrero-actions">
-            <button type="button" className="gan-submit" onClick={handleGuardar} disabled={saving}>
-              {saving ? 'Guardando...' : 'Guardar esta estimación'}
-            </button>
+            {permisos.planificarPastoreo ? (
+              <button type="button" className="gan-submit" onClick={handleGuardar} disabled={saving}>
+                {saving ? 'Guardando...' : 'Guardar esta estimación'}
+              </button>
+            ) : null}
             <button type="button" className="gan-back-inline" onClick={handleCancelar} disabled={saving}>
               Cancelar
             </button>

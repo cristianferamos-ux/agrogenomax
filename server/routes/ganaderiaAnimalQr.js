@@ -13,6 +13,7 @@ import {
   createRequireGanaderiaSession,
   createRequireGanaderiaCsrf,
 } from '../security/ganaderiaSession.js';
+import { createRequireAdministracion, createRequireOperacion } from '../security/ganaderiaPermisos.js';
 import { resolveFechaHoyNegocio } from '../services/ganaderia/motorDescansoAuto/businessTimezone.js';
 import { isValidPositiveId, validateCreateAnimalBody } from '../services/ganaderia/animalValidation.js';
 import { isQrToken, normalizeCodigoVisible } from '../services/ganaderia/qrCodigos.js';
@@ -95,6 +96,9 @@ export function createGanaderiaQrRouter({ appEnv, csrfServerSecret, allowedOrigi
 
   router.use(createRequireGanaderiaSession({ appEnv }));
   router.use(createRequireGanaderiaCsrf({ csrfServerSecret, allowedOrigins }));
+  // FASE 3A: RBAC por acción (ver server/security/ganaderiaPermisos.js).
+  // El inventario de la organización (GET) es de lectura para todos los roles.
+  const requireOperacion = createRequireOperacion();
 
   router.get('/token/:token', handler(async (req, res) => {
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -121,7 +125,7 @@ export function createGanaderiaQrRouter({ appEnv, csrfServerSecret, allowedOrigi
     res.json({ ok: true, ...result, limit: filtros.limit, offset: filtros.offset });
   }));
 
-  router.post('/chapetas/:codigo/registrar-animal', handler(async (req, res) => {
+  router.post('/chapetas/:codigo/registrar-animal', requireOperacion, handler(async (req, res) => {
     const codigoVisible = requireCodigoVisible(req.params.codigo);
     const value = validateCreateAnimalBody(req.body, { hoy: resolveFechaHoyNegocio() });
     const { organizacionId, cuentaId } = req.ganaderiaAuth;
@@ -139,6 +143,9 @@ export function createGanaderiaAnimalQrRouter({ appEnv, csrfServerSecret, allowe
 
   router.use(createRequireGanaderiaSession({ appEnv }));
   router.use(createRequireGanaderiaCsrf({ csrfServerSecret, allowedOrigins }));
+  // FASE 3A: RBAC por acción (ver server/security/ganaderiaPermisos.js).
+  const requireAdministracion = createRequireAdministracion();
+  const requireOperacion = createRequireOperacion();
 
   router.get('/', withAnimalId(async (req, res) => {
     const result = await getChapetasDeAnimal(req.ganaderiaAuth.organizacionId, req.params.animalId);
@@ -149,14 +156,14 @@ export function createGanaderiaAnimalQrRouter({ appEnv, csrfServerSecret, allowe
     res.json({ ok: true, ...result });
   }));
 
-  router.post('/asociar', withAnimalId(async (req, res) => {
+  router.post('/asociar', requireOperacion, withAnimalId(async (req, res) => {
     const { codigoVisible } = validateAsociarBody(req.body);
     const { organizacionId, cuentaId } = req.ganaderiaAuth;
     const result = await asociarChapetaAAnimal(organizacionId, req.params.animalId, codigoVisible, { actorCuentaId: cuentaId });
     res.status(result.yaExistia ? 200 : 201).json({ ok: true, ...result });
   }));
 
-  router.post('/reemplazar', withAnimalId(async (req, res) => {
+  router.post('/reemplazar', requireAdministracion, withAnimalId(async (req, res) => {
     const { codigoNuevo, motivo } = validateReemplazarBody(req.body);
     const { organizacionId, cuentaId } = req.ganaderiaAuth;
     const result = await reemplazarChapetaDeAnimal(organizacionId, req.params.animalId, {
@@ -167,7 +174,7 @@ export function createGanaderiaAnimalQrRouter({ appEnv, csrfServerSecret, allowe
     res.status(result.yaExistia ? 200 : 201).json({ ok: true, ...result });
   }));
 
-  router.post('/baja', withAnimalId(async (req, res) => {
+  router.post('/baja', requireAdministracion, withAnimalId(async (req, res) => {
     const { causa, motivo } = validateBajaOrganizacionBody(req.body);
     const { organizacionId, cuentaId } = req.ganaderiaAuth;
     const result = await bajaChapetaDeAnimal(organizacionId, req.params.animalId, { causa, motivo, actorCuentaId: cuentaId });

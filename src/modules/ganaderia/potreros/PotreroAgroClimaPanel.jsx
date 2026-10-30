@@ -10,6 +10,8 @@ import { useEffect, useState } from 'react';
 import { StatusMessage } from '../components/FormField.jsx';
 import { formatDateDisplay } from '../utils/dateFormat.js';
 import { getContextoAgroclimatico, refreshContextoAgroclimatico } from './ganaderiaAgroClimaApi.js';
+import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
+import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
 
 const GENERIC_ERROR = 'No fue posible completar la operación en este momento. Intenta nuevamente.';
 
@@ -89,6 +91,8 @@ export default function PotreroAgroClimaPanel({ predioId, potreroId }) {
   const [loadError, setLoadError] = useState('');
   const [actual, setActual] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  // FASE 3A: refrescar (persiste snapshot) = operación (owner/admin/operador).
+  const permisos = useGanaderiaPermisos();
   const [refreshError, setRefreshError] = useState('');
   const [lastStatus, setLastStatus] = useState(null);
 
@@ -129,7 +133,7 @@ export default function PotreroAgroClimaPanel({ predioId, potreroId }) {
     const { ok, data } = await refreshContextoAgroclimatico(predioId, potreroId);
     setRefreshing(false);
     if (!ok) {
-      setRefreshError(GENERIC_ERROR);
+      setRefreshError(data?.error === 'ROLE_FORBIDDEN' ? MENSAJE_ROLE_FORBIDDEN : GENERIC_ERROR);
       return;
     }
     setLastStatus(data?.status ?? null);
@@ -159,11 +163,13 @@ export default function PotreroAgroClimaPanel({ predioId, potreroId }) {
       {lastStatus && STATUS_MESSAGES[lastStatus] ? <StatusMessage type="warning">{STATUS_MESSAGES[lastStatus]}</StatusMessage> : null}
       <StatusMessage type="error">{refreshError}</StatusMessage>
 
-      <div className="gan-potrero-actions">
-        <button type="button" className="gan-secondary-button" onClick={handleRefresh} disabled={refreshing}>
-          {refreshing ? 'Actualizando...' : 'Actualizar contexto'}
-        </button>
-      </div>
+      {permisos.planificarPastoreo ? (
+        <div className="gan-potrero-actions">
+          <button type="button" className="gan-secondary-button" onClick={handleRefresh} disabled={refreshing}>
+            {refreshing ? 'Actualizando...' : 'Actualizar contexto'}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

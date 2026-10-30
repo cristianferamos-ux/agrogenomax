@@ -18,6 +18,7 @@ import { asociarQr, bajaQr, getAnimalQr, reemplazarQr } from './hatoApi.js';
 import { messageForError } from './hatoFormModel.js';
 import { ESTADO_CHAPETA_LABELS, normalizeCodigoChapeta } from './qrToken.js';
 import { MENSAJE_QR_HISTORICA, chapetaHistoricaDeCierre } from './cierreModel.js';
+import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
 
 const CODIGO_INVALIDO = 'Revisa el código de la chapeta (forma AGX-7KM4-P2XZ-R).';
 const MOTIVO_REQUERIDO = 'Escribe el motivo (máximo 500 caracteres).';
@@ -32,6 +33,8 @@ function formatFecha(value) {
 // confirmado por el servidor (refresca la pestaña Actividad).
 export default function HatoQrPanel({ animalId, animalActivo, estadoOperativo = 'EN_HATO', onCambio, onActiva }) {
   const cerrado = estadoOperativo === 'SALIDO' || estadoOperativo === 'MUERTO';
+  // FASE 3A: asociar = operación (incluye operador); reemplazar/baja = owner/admin.
+  const permisos = useGanaderiaPermisos();
   const [state, setState] = useState({ status: 'loading', activa: null, historial: [] });
   const [modo, setModo] = useState('ver');
   const [codigo, setCodigo] = useState('');
@@ -181,14 +184,14 @@ export default function HatoQrPanel({ animalId, animalActivo, estadoOperativo = 
             <p className="gan-hato-hint">Este animal no tiene una chapeta QR asociada.</p>
           )}
           {error ? <StatusMessage type="error">{error}</StatusMessage> : null}
-          {animalActivo && !cerrado ? (
+          {animalActivo && !cerrado && (activa ? permisos.reemplazarQr || permisos.darBajaQr : permisos.asociarQr) ? (
             <div className="gan-hato-actions">
               {!activa ? (
                 <button type="button" className="gan-submit" onClick={() => abrir('asociar')}>Asociar chapeta</button>
               ) : (
                 <>
-                  <button type="button" className="gan-secondary-button" onClick={() => abrir('reemplazar')}>Reemplazar chapeta</button>
-                  <button type="button" className="gan-secondary-button" onClick={() => abrir('baja')}>Reportar pérdida o daño</button>
+                  {permisos.reemplazarQr ? <button type="button" className="gan-secondary-button" onClick={() => abrir('reemplazar')}>Reemplazar chapeta</button> : null}
+                  {permisos.darBajaQr ? <button type="button" className="gan-secondary-button" onClick={() => abrir('baja')}>Reportar pérdida o daño</button> : null}
                 </>
               )}
             </div>

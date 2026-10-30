@@ -14,6 +14,7 @@ import {
   createRequireGanaderiaSession,
   createRequireGanaderiaCsrf,
 } from '../security/ganaderiaSession.js';
+import { createRequireAdministracion, createRequireOperacion } from '../security/ganaderiaPermisos.js';
 import {
   iniciarCicloPastoreo,
   finalizarCicloPastoreo,
@@ -305,6 +306,9 @@ export default function createGanaderiaPotreroCicloPastoreoRouter({ appEnv, csrf
 
   router.use(requireSession);
   router.use(requireCsrf);
+  // FASE 3A: RBAC por acción (ver server/security/ganaderiaPermisos.js).
+  const requireAdministracion = createRequireAdministracion();
+  const requireOperacion = createRequireOperacion();
 
   // GET .../ciclos-pastoreo/actual -- ciclo EN_CURSO, o { actual: null }.
   // Estrictamente read-only -- nunca dispara Iniciar/Finalizar.
@@ -367,7 +371,7 @@ export default function createGanaderiaPotreroCicloPastoreoRouter({ appEnv, csrf
   // POST .../ciclos-pastoreo/iniciar -- crea el ciclo (EN_CURSO) + evento
   // PASTOREO_INICIADO. Doble clic/requests concurrentes -> 409
   // CICLO_ALREADY_IN_PROGRESS (garantía DB, índice único parcial).
-  router.post('/iniciar', async (req, res, next) => {
+  router.post('/iniciar', requireOperacion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const { predioId, potreroId } = req.params;
@@ -394,7 +398,7 @@ export default function createGanaderiaPotreroCicloPastoreoRouter({ appEnv, csrf
   // reintenta el descanso si quedó PENDIENTE/ERROR_TECNICO. Siempre 200
   // si el ciclo existe y no está CANCELADO -- un descanso pendiente NUNCA
   // es un error HTTP (el hecho real ya es un éxito irrevocable).
-  router.post('/:cicloId/finalizar', async (req, res, next) => {
+  router.post('/:cicloId/finalizar', requireOperacion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const { predioId, potreroId, cicloId } = req.params;
@@ -418,7 +422,7 @@ export default function createGanaderiaPotreroCicloPastoreoRouter({ appEnv, csrf
   // -- el productor declara los días de descanso cuando la pastura no
   // tiene perfil técnico (ASSESSMENT_PENDING / NO_PASTURE_PROFILE). 201 al
   // crear; 200 en un reintento idéntico; 409 si ya hay descanso o no aplica.
-  router.post('/:cicloId/descanso-declarado', async (req, res, next) => {
+  router.post('/:cicloId/descanso-declarado', requireOperacion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const { predioId, potreroId, cicloId } = req.params;
@@ -441,7 +445,7 @@ export default function createGanaderiaPotreroCicloPastoreoRouter({ appEnv, csrf
 
   // POST .../ciclos-pastoreo/:cicloId/cancelar -- solo EN_CURSO ->
   // CANCELADO. Motivo obligatorio. Nunca DELETE.
-  router.post('/:cicloId/cancelar', async (req, res, next) => {
+  router.post('/:cicloId/cancelar', requireAdministracion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const { predioId, potreroId, cicloId } = req.params;
@@ -466,7 +470,7 @@ export default function createGanaderiaPotreroCicloPastoreoRouter({ appEnv, csrf
   // histórico (FINALIZADO/CANCELADO) que nunca debió contar. Nunca sobre
   // EN_CURSO (usar Cancelar). Invalida atómicamente el descanso vigente
   // derivado, si existía.
-  router.post('/:cicloId/anular', async (req, res, next) => {
+  router.post('/:cicloId/anular', requireAdministracion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const { predioId, potreroId, cicloId } = req.params;
@@ -492,7 +496,7 @@ export default function createGanaderiaPotreroCicloPastoreoRouter({ appEnv, csrf
   // A'/B' (ver potreroCicloPastoreoRepository.js) -- si se corrige una
   // fecha, invalida atómicamente el descanso vigente y reintenta
   // generar la siguiente versión (best-effort).
-  router.post('/:cicloId/corregir', async (req, res, next) => {
+  router.post('/:cicloId/corregir', requireAdministracion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const { predioId, potreroId, cicloId } = req.params;
@@ -517,7 +521,7 @@ export default function createGanaderiaPotreroCicloPastoreoRouter({ appEnv, csrf
   // sistema NUNCA decide APTO/NO_APTO, solo registra el juicio humano
   // respaldado por un aforo nuevo. Solo aplica con estado operativo
   // EVALUACION_REINGRESO.
-  router.post('/evaluar-reingreso', async (req, res, next) => {
+  router.post('/evaluar-reingreso', requireOperacion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const { predioId, potreroId } = req.params;
@@ -562,7 +566,7 @@ export default function createGanaderiaPotreroCicloPastoreoRouter({ appEnv, csrf
   // captura el hecho físico de campo. SIEMPRE persiste aunque falte
   // evidencia científica (clima caído, descanso REAL pendiente) -- nunca
   // rechaza por eso, solo por invalidez temporal del hecho mismo.
-  router.post('/:cicloId/residual-real', async (req, res, next) => {
+  router.post('/:cicloId/residual-real', requireOperacion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const { predioId, potreroId, cicloId } = req.params;
@@ -606,7 +610,7 @@ export default function createGanaderiaPotreroCicloPastoreoRouter({ appEnv, csrf
   // SPRINT-3D9.4 -- POST .../ciclos-pastoreo/:cicloId/residual-real/actualizar-comparativo
   // -- completa progresivamente %MS/estimado contra el estado vigente
   // actual. Nueva versión append-only, nunca UPDATE.
-  router.post('/:cicloId/residual-real/actualizar-comparativo', async (req, res, next) => {
+  router.post('/:cicloId/residual-real/actualizar-comparativo', requireOperacion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const { predioId, potreroId, cicloId } = req.params;
@@ -629,7 +633,7 @@ export default function createGanaderiaPotreroCicloPastoreoRouter({ appEnv, csrf
   // -- corrige el hecho físico (numeroMuestras/aforoPromedioGM2/
   // medicionRealAt/observacion) de un residual mal digitado. Nueva
   // versión completa, nunca UPDATE.
-  router.post('/:cicloId/residual-real/corregir', async (req, res, next) => {
+  router.post('/:cicloId/residual-real/corregir', requireAdministracion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const { predioId, potreroId, cicloId } = req.params;
@@ -652,7 +656,7 @@ export default function createGanaderiaPotreroCicloPastoreoRouter({ appEnv, csrf
   // SPRINT-3D9.4 -- POST .../ciclos-pastoreo/:cicloId/residual-real/aplicar-a-descanso
   // -- exige comparativoEstado COMPLETO. Sin fetch climático, sin NRC, sin
   // recompute del estimado -- contexto congelado del descanso origen.
-  router.post('/:cicloId/residual-real/aplicar-a-descanso', async (req, res, next) => {
+  router.post('/:cicloId/residual-real/aplicar-a-descanso', requireOperacion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const { predioId, potreroId, cicloId } = req.params;
@@ -675,7 +679,7 @@ export default function createGanaderiaPotreroCicloPastoreoRouter({ appEnv, csrf
   // -- invalidación explícita con motivo obligatorio. Si sustentaba un
   // descanso MEDIDO vigente, lo invalida en la misma transacción --
   // nunca revierte automáticamente a ESTIMADO.
-  router.post('/:cicloId/residual-real/anular', async (req, res, next) => {
+  router.post('/:cicloId/residual-real/anular', requireAdministracion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const { predioId, potreroId, cicloId } = req.params;

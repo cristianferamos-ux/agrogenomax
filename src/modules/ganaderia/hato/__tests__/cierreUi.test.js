@@ -88,7 +88,8 @@ test('botones offline: visibles pero deshabilitados con el copy exacto', () => {
 });
 
 test('la ficha toma el rol de la organización activa (sesión) y nunca muestra cierres para registros locales', () => {
-  assert.match(detalle, /auth\?\.organizacionActiva\?\.rol/);
+  // FASE 3A: rol vía useGanaderiaPermisos (organizacionActiva.rol de la sesión).
+  assert.match(detalle, /const permisos = useGanaderiaPermisos\(\);\s*const rol = permisos\.rol;/);
   assert.match(detalle, /<HatoCierreAnimal[\s\S]*?rol=\{rol\}[\s\S]*?online=\{offline\.online\}/);
   assert.match(detalle, /\{!esLocal \? \(\s*<HatoCierreAnimal/);
 });
@@ -298,7 +299,7 @@ test('pesajes cerrados: mensajes exactos, sin alertas de atraso, sin formulario'
   assert.equal(mensajePesajesCerrado('EN_HATO'), null);
   assert.equal(TEXTO_SIN_ALERTAS_CERRADO, 'Sin alertas: el animal ya no está en el hato.');
   assert.match(pesajesPanel, /const admitePesajes = animalActivo && !anuladoEnServidor && !cerrado;/);
-  assert.match(pesajesPanel, /const mostrarFormulario = admitePesajes &&/);
+  assert.match(pesajesPanel, /const mostrarFormulario = permisos.registrarPesaje && admitePesajes &&/);
   assert.match(pesajesPanel, /\{admitePesajes \? \(\s*<HatoPesajesAlertas/);
   assert.match(pesajesPanel, /\{cerrado \? \([\s\S]*?TEXTO_SIN_ALERTAS_CERRADO/);
   assert.match(pesajesPanel, /<HatoPesajesKpis resumen=\{state\.data\.resumen\} \/>/, 'KPIs siguen visibles');
@@ -341,7 +342,7 @@ test('QR de animal cerrado: histórica "No operativa", mensaje exacto y sin asoc
   assert.equal(chapetaHistoricaDeCierre([], 'MUERTO'), null);
   assert.match(qrPanel, /<strong>No operativa<\/strong>/);
   assert.match(qrPanel, /Causa de baja/);
-  assert.match(qrPanel, /\{animalActivo && !cerrado \? \(/);
+  assert.match(qrPanel, /\{animalActivo && !cerrado && \(/);
   assert.match(detalle, /animalActivo=\{animal\.estado === 'ACTIVO' && enHato\}/);
 });
 

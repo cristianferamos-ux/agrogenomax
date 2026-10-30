@@ -97,9 +97,10 @@ test('página: sin red no ofrece escrituras ni mapa satelital; usa la copia loca
   assert.match(PAGE, /const sinConexion = !offline\.online;/);
   assert.match(PAGE, /local: localRepo,\s*online: !sinConexion,/);
   assert.match(PAGE, /\{predio\.tieneGeometria && sinConexion \? \(\s*<div className="gan-predio-map-empty">Mapa disponible con conexión\.<\/div>/);
-  assert.match(PAGE, /\{!sinConexion \? \(\s*<button type="button" className="gan-secondary-button" onClick=\{toggleRegistrar\}/);
-  assert.match(PAGE, /\{sinConexion \? null : !archivado \? \(/);
+  // FASE 3A: las escrituras exigen además la capacidad del rol.
+  assert.match(PAGE, /\{!sinConexion && permisos\.editarPotrero \? \(\s*<button type="button" className="gan-secondary-button" onClick=\{toggleRegistrar\}/);
+  assert.match(PAGE, /\{sinConexion \|\| !permisos\.editarPredio \? null : !archivado \? \(/);
   assert.match(PAGE, /\{activePanel === 'ver' && sinConexion \? <PotrerosLocales localRepo=\{localRepo\} predioId=\{predio\.predioId\} \/> : null\}/);
-  assert.match(PAGE, /\{activePanel === 'registrar' && !sinConexion \? \(/);
+  assert.match(PAGE, /\{activePanel === 'registrar' && !sinConexion && permisos\.editarPotrero \? \(/);
   assert.match(PAGE, /La búsqueda en CatastroX y el registro de predios necesitan Internet\./);
 });

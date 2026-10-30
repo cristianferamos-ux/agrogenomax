@@ -25,6 +25,8 @@ import PotreroRegistrationPanel from '../potreros/PotreroRegistrationPanel.jsx';
 import PotrerosByPredioPanel from '../potreros/PotrerosByPredioPanel.jsx';
 import { useGanaderiaOffline } from '../offline/GanaderiaOfflineProvider.jsx';
 import { cargarPrediosLocalFirst } from './prediosLocalFirst.js';
+import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
+import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
 import '../../catastrox/styles/catastrox.css';
 
 // SPRINT-3D11.3 (R1) offline-first: con el dispositivo preparado la lista y
@@ -77,6 +79,8 @@ const SAVE_ERROR_MESSAGES = {
   CANDIDATE_IN_USE: 'Esta búsqueda ya se está procesando. Espera un momento.',
   CANDIDATE_NOT_FOUND: 'La búsqueda no es válida. Vuelve a intentarlo.',
   DUPLICATE_CODIGO_PREDIAL: 'Este predio ya está registrado en tu cuenta.',
+  // FASE 3A: 403 por rol (nunca "sesión expirada").
+  ROLE_FORBIDDEN: MENSAJE_ROLE_FORBIDDEN,
 };
 
 const INITIAL_MANUAL_FORM = {
@@ -162,6 +166,8 @@ export default function PrediosPage() {
   // ver predios ARCHIVADO; la vista normal (false) siempre queda activa.
   const [mostrarArchivadosPredios, setMostrarArchivadosPredios] = useState(false);
   const offline = useGanaderiaOffline();
+  // FASE 3A: crear/archivar/restaurar predios = owner/admin; el resto consulta.
+  const permisos = useGanaderiaPermisos();
   const localRepo = offline.preparado && offline.repo ? offline.repo : null;
   const sinConexion = !offline.online;
 
@@ -500,7 +506,7 @@ export default function PrediosPage() {
         />
       </div>
 
-      {sinConexion ? (
+      {!permisos.editarPredio ? null : sinConexion ? (
         <div className="gan-panel">
           <div className="gan-section-heading">
             <span className="gan-eyebrow">Registrar nuevo predio</span>
@@ -663,6 +669,7 @@ function PredioCard({ predio, onArchivoChanged, sinConexion = false, localRepo =
   // null | 'registrar' | 'ver' -- expansión inline dentro de la MISMA
   // tarjeta, nunca una lista plana que mezcle potreros de otros predios.
   const [activePanel, setActivePanel] = useState(null);
+  const permisos = useGanaderiaPermisos();
 
   // SPRINT-3D9.2: archivar/restaurar -- reemplaza el hard DELETE (nunca
   // existió un botón "Eliminar definitivamente" para un predio). "Eliminar
@@ -686,7 +693,7 @@ function PredioCard({ predio, onArchivoChanged, sinConexion = false, localRepo =
     if (!ok) {
       setArchivoError(data?.error === 'PREDIO_CON_CICLO_EN_CURSO'
         ? 'No se puede archivar: al menos un potrero de este predio tiene un pastoreo en curso.'
-        : 'No fue posible completar la operación en este momento. Intenta nuevamente.');
+        : data?.error === 'ROLE_FORBIDDEN' ? MENSAJE_ROLE_FORBIDDEN : 'No fue posible completar la operación en este momento. Intenta nuevamente.');
       return;
     }
     setMostrarArchivar(false);
@@ -697,10 +704,10 @@ function PredioCard({ predio, onArchivoChanged, sinConexion = false, localRepo =
     if (archivoEnCurso) return;
     setArchivoEnCurso(true);
     setArchivoError('');
-    const { ok } = await postGanaderiaPredios(`/api/ganaderia/predios/${predio.predioId}/restaurar`, {});
+    const { ok, data } = await postGanaderiaPredios(`/api/ganaderia/predios/${predio.predioId}/restaurar`, {});
     setArchivoEnCurso(false);
     if (!ok) {
-      setArchivoError('No fue posible completar la operación en este momento. Intenta nuevamente.');
+      setArchivoError(data?.error === 'ROLE_FORBIDDEN' ? MENSAJE_ROLE_FORBIDDEN : 'No fue posible completar la operación en este momento. Intenta nuevamente.');
       return;
     }
     onArchivoChanged?.();
@@ -773,7 +780,7 @@ function PredioCard({ predio, onArchivoChanged, sinConexion = false, localRepo =
       </div>
 
       <div className="gan-predio-card-actions">
-        {!sinConexion ? (
+        {!sinConexion && permisos.editarPotrero ? (
           <button type="button" className="gan-secondary-button" onClick={toggleRegistrar} disabled={archivado}>
             Registrar potrero
           </button>
@@ -781,7 +788,7 @@ function PredioCard({ predio, onArchivoChanged, sinConexion = false, localRepo =
         <button type="button" className="gan-secondary-button" onClick={toggleVer}>
           Ver potreros
         </button>
-        {sinConexion ? null : !archivado ? (
+        {sinConexion || !permisos.editarPredio ? null : !archivado ? (
           <button type="button" className="gan-back-inline" onClick={() => { setMostrarArchivar(true); setMotivoArchivar(''); setArchivoError(''); }}>
             Eliminar predio
           </button>
@@ -811,7 +818,7 @@ function PredioCard({ predio, onArchivoChanged, sinConexion = false, localRepo =
       ) : null}
       <StatusMessage type="error">{!mostrarArchivar ? archivoError : ''}</StatusMessage>
 
-      {activePanel === 'registrar' && !sinConexion ? (
+      {activePanel === 'registrar' && !sinConexion && permisos.editarPotrero ? (
         <PotreroRegistrationPanel
           predioId={predio.predioId}
           predioNombre={predio.nombrePredio}

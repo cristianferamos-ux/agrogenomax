@@ -24,6 +24,7 @@ import { getResumenAnimales, listAnimales, listPrediosActivos } from './hatoApi.
 import { ETIQUETAS_SITUACION, FILTROS_ESTADO_REGISTRO, FILTROS_LISTADO_DEFAULT, FILTROS_SITUACION, situacionDe } from './cierreModel.js';
 import { formatEdad, formatIdentidad, formatPeso, formatRaza, formatSexo } from './hatoFormModel.js';
 import { useGanaderiaOffline } from '../offline/GanaderiaOfflineProvider.jsx';
+import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
 import '../styles/ganaderia-offline.css';
 import '../styles/ganaderia-hato.css';
 
@@ -46,6 +47,7 @@ function SyncBadge({ animal }) {
 
 export default function HatoListaPage() {
   const offline = useGanaderiaOffline();
+  const permisos = useGanaderiaPermisos();
   const local = offline.preparado && offline.repo ? offline.repo : null;
   const [predios, setPredios] = useState([]);
   const [filtros, setFiltros] = useState({ predioId: '', q: '', ...FILTROS_LISTADO_DEFAULT });
@@ -157,7 +159,7 @@ export default function HatoListaPage() {
       <div className="gan-section-heading">
         <span className="gan-eyebrow">Animales</span>
         <h2>Mis animales</h2>
-        <Link className="gan-submit gan-hato-cta" to="/ganaderia/animales/nuevo">Registrar animal</Link>
+        {permisos.crearAnimal ? <Link className="gan-submit gan-hato-cta" to="/ganaderia/animales/nuevo">Registrar animal</Link> : null}
         <Link className="gan-secondary-button gan-hato-cta" to="/ganaderia/escanear-qr">Escanear QR</Link>
       </div>
 

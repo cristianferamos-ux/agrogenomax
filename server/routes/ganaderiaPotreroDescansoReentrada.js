@@ -31,6 +31,7 @@ import {
   createRequireGanaderiaSession,
   createRequireGanaderiaCsrf,
 } from '../security/ganaderiaSession.js';
+import { createRequireOperacion } from '../security/ganaderiaPermisos.js';
 import {
   getDescansoReentradaByPotrero,
   previewDescansoReentrada,
@@ -129,6 +130,8 @@ export default function createGanaderiaPotreroDescansoReentradaRouter({ appEnv, 
 
   router.use(requireSession);
   router.use(requireCsrf);
+  // FASE 3A: RBAC por acción (ver server/security/ganaderiaPermisos.js).
+  const requireOperacion = createRequireOperacion();
 
   // GET .../descanso-reentrada -- recomendación de descanso más reciente +
   // historial resumido. Sin recomendaciones todavía -> 200 con
@@ -178,7 +181,7 @@ export default function createGanaderiaPotreroDescansoReentradaRouter({ appEnv, 
 
   // POST .../descanso-reentrada -- recalcula server-side y persiste una
   // recomendación de descanso NUEVA (append, nunca sobrescribe una anterior).
-  router.post('/', async (req, res, next) => {
+  router.post('/', requireOperacion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const { predioId, potreroId } = req.params;

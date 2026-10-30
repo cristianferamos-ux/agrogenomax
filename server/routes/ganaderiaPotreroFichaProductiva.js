@@ -15,6 +15,7 @@ import {
   createRequireGanaderiaSession,
   createRequireGanaderiaCsrf,
 } from '../security/ganaderiaSession.js';
+import { createRequireAdministracion } from '../security/ganaderiaPermisos.js';
 import {
   getFichaProductivaByPotrero,
   createFichaProductiva,
@@ -203,6 +204,8 @@ export default function createGanaderiaPotreroFichaProductivaRouter({ appEnv, cs
 
   router.use(requireSession);
   router.use(requireCsrf);
+  // FASE 3A: RBAC por acción (ver server/security/ganaderiaPermisos.js).
+  const requireAdministracion = createRequireAdministracion();
 
   // GET .../ficha-productiva -- ficha actual + historial resumido (§17/§23).
   // Potrero sin ficha -> 200 con { actual: null, historial: [] } (§24),
@@ -226,7 +229,7 @@ export default function createGanaderiaPotreroFichaProductivaRouter({ appEnv, cs
   });
 
   // POST .../ficha-productiva -- registra una ficha NUEVA (append, §4).
-  router.post('/', async (req, res, next) => {
+  router.post('/', requireAdministracion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const { predioId, potreroId } = req.params;

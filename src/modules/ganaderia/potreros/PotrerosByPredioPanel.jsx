@@ -9,6 +9,8 @@ import { formatDateDisplay } from '../utils/dateFormat.js';
 import GanaderiaPotreroCardMap from './GanaderiaPotreroCardMap.jsx';
 import PotreroFichaProductivaPanel from './PotreroFichaProductivaPanel.jsx';
 import PotreroAgroClimaPanel from './PotreroAgroClimaPanel.jsx';
+import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
+import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
 
 const LIST_ERROR_MESSAGE = 'No fue posible cargar los potreros de este predio. Intenta nuevamente.';
 const LIST_EMPTY_MESSAGE = 'Aún no tienes potreros registrados en este predio.';
@@ -204,6 +206,8 @@ function PotreroCard({
   const [archivoEnCurso, setArchivoEnCurso] = useState(false);
   const [archivoError, setArchivoError] = useState('');
   const archivado = potrero.estado === 'ARCHIVADO';
+  // FASE 3A: archivar/restaurar potrero = owner/admin.
+  const permisos = useGanaderiaPermisos();
 
   async function handleConfirmarArchivar() {
     if (archivoEnCurso) return;
@@ -218,7 +222,7 @@ function PotreroCard({
     if (!ok) {
       setArchivoError(data?.error === 'POTRERO_CON_CICLO_EN_CURSO'
         ? 'No se puede archivar: este potrero tiene un pastoreo en curso.'
-        : 'No fue posible completar la operación en este momento. Intenta nuevamente.');
+        : data?.error === 'ROLE_FORBIDDEN' ? MENSAJE_ROLE_FORBIDDEN : 'No fue posible completar la operación en este momento. Intenta nuevamente.');
       return;
     }
     setMostrarArchivar(false);
@@ -234,7 +238,7 @@ function PotreroCard({
     if (!ok) {
       setArchivoError(data?.error === 'PREDIO_ARCHIVADO'
         ? 'No se puede restaurar: el predio de este potrero sigue archivado. Restaura primero el predio.'
-        : 'No fue posible completar la operación en este momento. Intenta nuevamente.');
+        : data?.error === 'ROLE_FORBIDDEN' ? MENSAJE_ROLE_FORBIDDEN : 'No fue posible completar la operación en este momento. Intenta nuevamente.');
       return;
     }
     onArchivoChanged?.();
@@ -294,7 +298,7 @@ function PotreroCard({
         >
           Contexto agroclimático
         </button>
-        {!archivado ? (
+        {!permisos.editarPotrero ? null : !archivado ? (
           <button
             type="button"
             className="gan-back-inline"

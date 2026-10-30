@@ -34,10 +34,13 @@ import {
 } from './ganaderiaCicloPastoreoApi.js';
 import { getFichaProductiva } from './ganaderiaFichaProductivaApi.js';
 import PotreroResidualRealPanel from './PotreroResidualRealPanel.jsx';
+import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
+import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
 
 const GENERIC_ERROR = 'No fue posible completar la operación en este momento. Intenta nuevamente.';
 
 const CICLO_ERROR_MESSAGES = {
+  ROLE_FORBIDDEN: MENSAJE_ROLE_FORBIDDEN, // FASE 3A
   NO_GRAZING_RECOMMENDATION: 'Primero guarda una recomendación de pastoreo para este potrero.',
   CICLO_ALREADY_IN_PROGRESS: 'Ya existe un pastoreo en curso en este potrero.',
   CICLO_NOT_FOUND: 'Este ciclo de pastoreo ya no está disponible.',
@@ -144,6 +147,9 @@ const HISTORIAL_ESTADO_LABELS = {
 const CORREGIBLE_FIELDS_INICIALES = { fechaIngresoReal: '', fechaSalidaReal: '', categoriaCodigo: '', numeroAnimales: '', pesoPromedioKg: '' };
 
 export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLote, categorias, onDescansoChange }) {
+  // FASE 3A: iniciar/finalizar/descanso declarado/reingreso = operación
+  // (incluye operador); cancelar/anular/corregir = owner/admin.
+  const permisos = useGanaderiaPermisos();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [actual, setActual] = useState(null);
@@ -592,21 +598,25 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
                 />
               </FormField>
               <StatusMessage type="error">{descansoDeclaradoError}</StatusMessage>
-              <div className="gan-potrero-actions">
-                <button type="button" className="gan-submit" onClick={handleGuardarDescansoDeclarado} disabled={guardandoDescansoDeclarado}>
-                  {guardandoDescansoDeclarado ? 'Guardando...' : 'Guardar descanso'}
-                </button>
-              </div>
+              {permisos.operarCiclo && (
+                <div className="gan-potrero-actions">
+                  <button type="button" className="gan-submit" onClick={handleGuardarDescansoDeclarado} disabled={guardandoDescansoDeclarado}>
+                    {guardandoDescansoDeclarado ? 'Guardando...' : 'Guardar descanso'}
+                  </button>
+                </div>
+              )}
             </>
           ) : (
             <>
               <p className="gan-potrero-points-hint">El pastoreo quedó registrado, pero todavía no se pudo calcular el descanso.</p>
               <StatusMessage type="error">{reintentarDescansoError}</StatusMessage>
-              <div className="gan-potrero-actions">
-                <button type="button" className="gan-secondary-button" onClick={handleReintentarDescanso} disabled={reintentandoDescanso}>
-                  {reintentandoDescanso ? 'Reintentando...' : 'Reintentar cálculo de descanso'}
-                </button>
-              </div>
+              {permisos.operarCiclo && (
+                <div className="gan-potrero-actions">
+                  <button type="button" className="gan-secondary-button" onClick={handleReintentarDescanso} disabled={reintentandoDescanso}>
+                    {reintentandoDescanso ? 'Reintentando...' : 'Reintentar cálculo de descanso'}
+                  </button>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -650,7 +660,7 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
             <>
               <p className="gan-potrero-points-hint">Aforo más reciente: {formatDateDisplay(fichaEvaluacion.fechaAforo)}.</p>
               <StatusMessage type="error">{evaluarError}</StatusMessage>
-              {!mostrarObservacionNoApto ? (
+              {!permisos.operarCiclo ? null : !mostrarObservacionNoApto ? (
                 <div className="gan-potrero-actions">
                   <button type="button" className="gan-submit" onClick={() => handleEvaluar('APTO')} disabled={evaluando}>
                     {evaluando ? 'Guardando...' : 'Apto -- reingresar'}
@@ -701,7 +711,7 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
             )
           ) : null}
 
-          {!ajustando ? (
+          {!permisos.operarCiclo ? null : !ajustando ? (
             <>
               <button type="button" className="gan-secondary-button" onClick={handleIniciar} disabled={iniciando}>
                 {iniciando ? 'Iniciando...' : 'Iniciar pastoreo'}
@@ -816,12 +826,16 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
 
           {!mostrarCancelar ? (
             <div className="gan-potrero-actions">
-              <button type="button" className="gan-submit" onClick={handleFinalizar} disabled={finalizando || cancelando}>
-                {finalizando ? 'Finalizando...' : 'Finalizar pastoreo'}
-              </button>
-              <button type="button" className="gan-back-inline" onClick={handleAbrirCancelar} disabled={finalizando || cancelando}>
-                Cancelar registro
-              </button>
+              {permisos.operarCiclo ? (
+                <button type="button" className="gan-submit" onClick={handleFinalizar} disabled={finalizando || cancelando}>
+                  {finalizando ? 'Finalizando...' : 'Finalizar pastoreo'}
+                </button>
+              ) : null}
+              {permisos.administrarCiclo ? (
+                <button type="button" className="gan-back-inline" onClick={handleAbrirCancelar} disabled={finalizando || cancelando}>
+                  Cancelar registro
+                </button>
+              ) : null}
             </div>
           ) : (
             <div className="gan-stack">
@@ -863,7 +877,7 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
               <span>Ingreso: {formatDateDisplay(ciclo.fechaIngresoReal)}</span>
               {ciclo.fechaSalidaReal ? <span>Salida: {formatDateDisplay(ciclo.fechaSalidaReal)}</span> : null}
 
-              {ciclo.estado !== 'ANULADO' && accionCicloId !== ciclo.cicloId ? (
+              {permisos.administrarCiclo && ciclo.estado !== 'ANULADO' && accionCicloId !== ciclo.cicloId ? (
                 <div className="gan-potrero-actions">
                   <button type="button" className="gan-back-inline" onClick={() => handleAbrirAnular(ciclo.cicloId)}>
                     Anular registro

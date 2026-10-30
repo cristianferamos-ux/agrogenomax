@@ -3,6 +3,7 @@
 // presentan SEPARADOS del historial confirmado: nunca entran en KPIs, GMD,
 // ganancia acumulada, gráficas, alertas ni PDF hasta que el servidor los
 // confirma (los datos Business confirmados son la fuente de verdad).
+import { MENSAJE_OFFLINE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
 
 export const MENSAJE_PESAJE_PENDIENTE = 'Pesaje pendiente de sincronización.';
 export const MENSAJE_SIN_ALMACEN_LOCAL = 'Sin conexión, y este dispositivo no puede guardar pesajes para sincronizar. Regístralo cuando vuelva la conexión.';
@@ -28,6 +29,8 @@ const BLOQUEOS = Object.freeze({
   ANIMAL_YA_SALIDO: 'Este pesaje no se sincronizó porque el animal salió del hato.',
   ANIMAL_YA_MUERTO: 'Este pesaje no se sincronizó porque el animal está registrado como muerto.',
   CLIENT_OPERATION_ID_REUSED: 'Este registro ya existe en el servidor con otros datos.',
+  // FASE 3A: 403 por rol -> RECHAZADO terminal (syncEngine), sin reintentos.
+  ROLE_FORBIDDEN: MENSAJE_OFFLINE_ROLE_FORBIDDEN,
 });
 
 /** Motivo de un pesaje que el servidor no aceptó (sin detalles internos). */

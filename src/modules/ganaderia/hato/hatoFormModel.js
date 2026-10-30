@@ -3,6 +3,7 @@
 // textos para el productor y ciclo de vida del clientOperationId. Los
 // enums técnicos (EXACTA, PURA, BASCULA...) nunca se muestran tal cual.
 import { CATEGORIA_SEXOS } from './categoriaSexo.js';
+import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaAuthedRequest.js';
 
 export const NACIMIENTO_MODOS = Object.freeze([
   { value: 'EXACTA', label: 'Sé la fecha de nacimiento' },
@@ -297,6 +298,8 @@ const ERROR_MESSAGES = Object.freeze({
   INVALID_CODIGO: 'Revisa el código de la chapeta (forma AGX-7KM4-P2XZ-R).',
   INVALID_CODIGO_NUEVO: 'Revisa el código de la chapeta nueva (forma AGX-7KM4-P2XZ-R).',
   INVALID_MOTIVO: 'Escribe el motivo (máximo 500 caracteres).',
+  // FASE 3A: 403 por rol (nunca "sesión expirada").
+  ROLE_FORBIDDEN: MENSAJE_ROLE_FORBIDDEN,
 });
 
 export const GENERIC_ERROR_MESSAGE = 'No fue posible completar la acción en este momento. Intenta nuevamente.';

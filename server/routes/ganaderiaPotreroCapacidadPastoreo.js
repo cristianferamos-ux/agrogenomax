@@ -14,6 +14,7 @@ import {
   createRequireGanaderiaSession,
   createRequireGanaderiaCsrf,
 } from '../security/ganaderiaSession.js';
+import { createRequireOperacion } from '../security/ganaderiaPermisos.js';
 import {
   getCapacidadPastoreoByPotrero,
   previewCapacidadPastoreo,
@@ -184,6 +185,8 @@ export default function createGanaderiaPotreroCapacidadPastoreoRouter({ appEnv, 
 
   router.use(requireSession);
   router.use(requireCsrf);
+  // FASE 3A: RBAC por acción (ver server/security/ganaderiaPermisos.js).
+  const requireOperacion = createRequireOperacion();
 
   // GET .../capacidad-pastoreo -- cálculo más reciente + historial
   // resumido (§21/§27). Sin cálculos todavía -> 200 con
@@ -230,7 +233,7 @@ export default function createGanaderiaPotreroCapacidadPastoreoRouter({ appEnv, 
 
   // POST .../capacidad-pastoreo -- recalcula server-side y persiste un
   // cálculo NUEVO (append, §3/§5).
-  router.post('/', async (req, res, next) => {
+  router.post('/', requireOperacion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const { predioId, potreroId } = req.params;

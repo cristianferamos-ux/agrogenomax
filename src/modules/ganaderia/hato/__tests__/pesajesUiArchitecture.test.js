@@ -125,7 +125,8 @@ test('panel: estado vacío, anulado, sin conexión y error de carga', () => {
   assert.match(panel, /const admitePesajes = animalActivo && !anuladoEnServidor/);
   // FASE 1D.1: con red, formulario cuando el historial confirmado cargó; sin
   // red, cuando el dispositivo puede guardar en el outbox.
-  assert.match(panel, /const mostrarFormulario = admitePesajes && \(online \? state\.status === 'ok' : puedeGuardarOffline && state\.status !== 'not_found'\);/);
+  // FASE 3A: el formulario exige además la capacidad registrarPesaje.
+  assert.match(panel, /const mostrarFormulario = permisos\.registrarPesaje && admitePesajes && \(online \? state\.status === 'ok' : puedeGuardarOffline && state\.status !== 'not_found'\);/);
   assert.match(panel, /const formulario = mostrarFormulario \? \(\s*<HatoPesajeForm/);
   assert.match(panel, /\{pesajes\.length \? <HatoPesajesHistorial/, 'historial visible también si está anulado');
   assert.match(panel, /Reintentar/);

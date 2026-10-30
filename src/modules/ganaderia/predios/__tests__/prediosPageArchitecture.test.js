@@ -411,7 +411,8 @@ test('PredioCard: "Eliminar predio" solo se muestra cuando el predio NO está ar
   const fn = extractPredioCardFn();
   assert.match(fn, /const archivado = predio\.estado === 'ARCHIVADO';/);
   // SPRINT-3D11.3 (R1): sin conexión no se ofrece ninguno de los dos.
-  assert.match(fn, /\{sinConexion \? null : !archivado \? \(/);
+  // FASE 3A: tampoco sin la capacidad editarPredio (owner/admin).
+  assert.match(fn, /\{sinConexion \|\| !permisos\.editarPredio \? null : !archivado \? \(/);
   assert.match(fn, /Eliminar predio/);
   assert.match(fn, /\) : \(/);
   assert.match(fn, /Restaurar/);

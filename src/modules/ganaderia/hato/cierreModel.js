@@ -16,6 +16,7 @@
 // Deuda documentada: el PDF del reporte productivo (servidor) todavía no
 // incorpora la situación del animal ni el cierre.
 import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaAuthedRequest.js';
+import { CAPACIDADES, canCerrarAnimal } from '../auth/ganaderiaPermisos.js';
 import { formatFecha } from './pesajesModel.js';
 
 export const SITUACIONES = Object.freeze({ EN_HATO: 'EN_HATO', SALIDO: 'SALIDO', MUERTO: 'MUERTO' });
@@ -112,7 +113,8 @@ export function etiquetaCausaCierre(tipo, codigo) {
 // Visibilidad de acciones
 // ---------------------------------------------------------------------------
 
-export const ROLES_CIERRE = Object.freeze(['owner', 'admin']);
+// FASE 3A: misma fuente que la matriz central de capacidades.
+export const ROLES_CIERRE = CAPACIDADES.cerrarAnimal;
 export const MENSAJE_CIERRE_OFFLINE = 'Registrar salida o muerte requiere conexión.';
 
 /**
@@ -123,7 +125,7 @@ export const MENSAJE_CIERRE_OFFLINE = 'Registrar salida o muerte requiere conexi
  */
 export function accionesCierre({ animal, rol, online, esLocal = false }) {
   const visible = Boolean(animal) && !esLocal && animal.estado === 'ACTIVO'
-    && situacionDe(animal) === SITUACIONES.EN_HATO && ROLES_CIERRE.includes(rol);
+    && situacionDe(animal) === SITUACIONES.EN_HATO && canCerrarAnimal(rol);
   if (!visible) return { visible: false, habilitado: false, aviso: null };
   return online ? { visible: true, habilitado: true, aviso: null } : { visible: true, habilitado: false, aviso: MENSAJE_CIERRE_OFFLINE };
 }

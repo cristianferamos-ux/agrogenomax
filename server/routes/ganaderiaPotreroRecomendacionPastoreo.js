@@ -17,6 +17,7 @@ import {
   createRequireGanaderiaSession,
   createRequireGanaderiaCsrf,
 } from '../security/ganaderiaSession.js';
+import { createRequireOperacion } from '../security/ganaderiaPermisos.js';
 import {
   getRecomendacionPastoreoByPotrero,
   previewRecomendacionPastoreo,
@@ -234,6 +235,8 @@ export default function createGanaderiaPotreroRecomendacionPastoreoRouter({ appE
 
   router.use(requireSession);
   router.use(requireCsrf);
+  // FASE 3A: RBAC por acción (ver server/security/ganaderiaPermisos.js).
+  const requireOperacion = createRequireOperacion();
 
   // GET .../recomendacion-pastoreo -- recomendación más reciente +
   // historial resumido. Sin recomendaciones todavía -> 200 con
@@ -280,7 +283,7 @@ export default function createGanaderiaPotreroRecomendacionPastoreoRouter({ appE
 
   // POST .../recomendacion-pastoreo -- recalcula server-side y persiste una
   // recomendación NUEVA (append, nunca sobrescribe una anterior).
-  router.post('/', async (req, res, next) => {
+  router.post('/', requireOperacion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const { predioId, potreroId } = req.params;
@@ -354,7 +357,7 @@ export default function createGanaderiaPotreroRecomendacionPastoreoRouter({ appE
   // POST .../auto -- RECALCULA DESDE CERO (nunca confía en un preview
   // previo) y persiste SOLO si estado=OK (modo_calculo='AUTOMATICO',
   // append-only, igual que el endpoint manual).
-  router.post('/auto', async (req, res, next) => {
+  router.post('/auto', requireOperacion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const { predioId, potreroId } = req.params;

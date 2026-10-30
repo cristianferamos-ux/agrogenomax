@@ -177,7 +177,8 @@ test('"Ajustar lote" es una acción secundaria (gan-back-inline), nunca el botó
 });
 
 test('los controles de ajuste (categoría/número/peso) solo se renderizan dentro del bloque `ajustando`, nunca visibles junto al botón simple', () => {
-  const idxAjustando = panelSource.indexOf('{!ajustando ? (');
+  // FASE 3A: el bloque va precedido del guard de rol (`!permisos.operarCiclo ? null :`).
+  const idxAjustando = panelSource.indexOf('!ajustando ? (');
   const idxCategoria = panelSource.indexOf('label="Categoría"');
   const idxIniciarSimple = panelSource.indexOf("onClick={handleIniciar}");
   assert.ok(idxAjustando >= 0 && idxCategoria >= 0 && idxIniciarSimple >= 0);

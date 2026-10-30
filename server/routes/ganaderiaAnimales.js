@@ -10,6 +10,7 @@ import {
   createRequireGanaderiaSession,
   createRequireGanaderiaCsrf,
 } from '../security/ganaderiaSession.js';
+import { createRequireAdministracion, createRequireOperacion } from '../security/ganaderiaPermisos.js';
 import { resolveFechaHoyNegocio } from '../services/ganaderia/motorDescansoAuto/businessTimezone.js';
 import {
   isValidPositiveId,
@@ -54,6 +55,9 @@ export default function createGanaderiaAnimalesRouter({
 
   router.use(createRequireGanaderiaSession({ appEnv }));
   router.use(createRequireGanaderiaCsrf({ csrfServerSecret, allowedOrigins }));
+  // FASE 3A: RBAC por acción (ver server/security/ganaderiaPermisos.js).
+  const requireAdministracion = createRequireAdministracion();
+  const requireOperacion = createRequireOperacion();
 
   router.get('/', async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -105,7 +109,7 @@ export default function createGanaderiaAnimalesRouter({
     }
   });
 
-  router.post('/', async (req, res, next) => {
+  router.post('/', requireOperacion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const value = validateCreateAnimalBody(req.body, { hoy: resolveFechaHoyNegocio() });
@@ -119,7 +123,7 @@ export default function createGanaderiaAnimalesRouter({
     }
   });
 
-  router.post('/:animalId/corregir', async (req, res, next) => {
+  router.post('/:animalId/corregir', requireAdministracion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       if (!isValidPositiveId(req.params.animalId)) {
@@ -138,7 +142,7 @@ export default function createGanaderiaAnimalesRouter({
     }
   });
 
-  router.post('/:animalId/anular', async (req, res, next) => {
+  router.post('/:animalId/anular', requireAdministracion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       if (!isValidPositiveId(req.params.animalId)) {
