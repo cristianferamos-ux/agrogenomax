@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { construirHistorialPesajes } from '../ganaderia/pesajesService.js';
-import { ALERTAS_ANULADO, NOTA_UMBRALES, construirReporteProductivo } from '../ganaderia/reporteProductivo/reporteProductivoModelo.js';
+import { ALERTAS_ANULADO, ALERTAS_FUERA_DEL_HATO, NOTA_CHAPETA_HISTORICA, NOTA_UMBRALES, construirReporteProductivo } from '../ganaderia/reporteProductivo/reporteProductivoModelo.js';
 import { LOGO_PATH, escalaTemporal, generarPdfReporteProductivo } from '../ganaderia/reporteProductivo/reporteProductivoPdf.js';
 
 const AHORA = new Date('2026-10-21T02:00:00Z');
@@ -14,7 +14,7 @@ const p = (fecha, pesoKg, extra = {}) => ({ pesajeId: String(++seq), fecha, peso
 const animal = (extra = {}) => ({
   animalId: '7', predioNombre: 'Finca QA', numeroVisual: 'AGX-000007', nombre: 'Lucero', sexo: 'HEMBRA',
   razaTipo: 'PURA', razaPrincipalNombre: 'Brahman', categoriaProductivaNombre: 'Novilla de levante',
-  estado: 'ACTIVO', estadoMotivo: null, fechaCreacion: new Date('2026-01-10T15:00:00Z'), ...extra,
+  estado: 'ACTIVO', estadoMotivo: null, estadoOperativo: 'EN_HATO', cierre: null, fechaCreacion: new Date('2026-01-10T15:00:00Z'), ...extra,
 });
 const modelo = (filas, a = animal()) => construirReporteProductivo({ animal: a, historial: construirHistorialPesajes({ animalId: a.animalId, pesajes: filas }), ahora: AHORA });
 const pdf = (m, opciones = {}) => generarPdfReporteProductivo(m, { ahora: AHORA, compress: false, ...opciones });
@@ -160,4 +160,54 @@ test('eje X temporal proporcional a los días reales', () => {
 test('compresión activada por defecto (producción)', async () => {
   const b = await generarPdfReporteProductivo(modelo([p('2026-10-19', 350)]), { ahora: AHORA });
   assert.match(b.toString('latin1'), /\/Filter \/FlateDecode/);
+});
+
+// FASE 2C: dos ejes, bloque de cierre, alertas y chapeta en el PDF dibujado.
+const PESAJES_QA = () => [p('2026-07-01', 350), p('2026-07-20', 355), p('2026-08-06', 360)];
+const conChapeta = (a, chapetas) => construirReporteProductivo({
+  animal: a, historial: construirHistorialPesajes({ animalId: a.animalId, pesajes: PESAJES_QA() }), chapetas, ahora: AHORA,
+});
+const textoDe = async (m) => textoPorPagina(await pdf(m)).join('\n');
+const CHAPETA = { codigoVisible: 'AGX-000001', estado: 'ASIGNADO_ANIMAL' };
+const REVOCADA = { codigoVisible: 'AGX-000001', estado: 'REVOCADO' };
+
+test('2C. EN_HATO: "Estado del registro" y "Situación del animal" separados; sin bloque de cierre; chapeta operativa', async () => {
+  const t = await textoDe(conChapeta(animal(), { activa: CHAPETA, historial: [CHAPETA] }));
+  assert.ok(t.includes('ESTADO DEL REGISTRO') && t.includes('Activo'));
+  assert.ok(t.includes('SITUACIÓN DEL ANIMAL') && t.includes('En hato'));
+  assert.ok(t.includes('AGX-000001') && t.includes('Operativa'));
+  assert.ok(!t.includes('No operativa'));
+  assert.ok(!t.includes('SALIDA DEL HATO') && !t.includes('MUERTE'));
+  assert.ok(t.includes('PESAJE') || t.includes('pesaje'), 'alertas evaluadas');
+  assert.ok(!t.includes(ALERTAS_FUERA_DEL_HATO));
+});
+
+test('2C. SALIDO: bloque "Salida del hato" con fecha/motivo; sin alertas; histórico completo; chapeta no operativa', async () => {
+  const a = animal({ estadoOperativo: 'SALIDO', cierre: { tipo: 'SALIDA', fecha: '2026-10-30', causa: 'VENTA', observaciones: null } });
+  const t = await textoDe(conChapeta(a, { activa: null, historial: [REVOCADA] }));
+  assert.ok(t.includes('SALIDA DEL HATO'));
+  assert.ok(t.includes('30/10/2026') && t.includes('Venta'));
+  assert.ok(!t.includes('VENTA'), 'sin enum técnico');
+  assert.ok(!t.includes('OBSERVACIONES\n'), 'sin fila de observaciones vacía en el cierre');
+  assert.ok(t.includes('Salido') && t.includes('Activo'));
+  assert.ok(t.includes(ALERTAS_FUERA_DEL_HATO));
+  assert.ok(!/Han pasado \d+ días/.test(t), 'sin alerta de pesaje atrasado');
+  for (const f of ['01/07/2026', '20/07/2026', '06/08/2026', '+10 kg en 36 días', 'GMD POR PERÍODO', 'EVOLUCIÓN DE PESO']) assert.ok(t.includes(f), f);
+  assert.ok(t.includes('No operativa') && t.includes('AGX-000001'));
+  assert.ok(t.includes(NOTA_CHAPETA_HISTORICA));
+  assert.doesNotMatch(t, /token|hash|qrId|intent/i);
+});
+
+test('2C. MUERTO y ANULADO + MUERTO: bloque "Muerte" con causa y observaciones; situación histórica', async () => {
+  const cierre = { tipo: 'MUERTE', fecha: '2026-10-30', causa: 'ENFERMEDAD', observaciones: 'Necropsia pendiente' };
+  const t = await textoDe(conChapeta(animal({ estadoOperativo: 'MUERTO', cierre }), null));
+  assert.ok(t.includes('MUERTE') && t.includes('Enfermedad') && t.includes('Necropsia pendiente'));
+  assert.ok(t.includes('Muerto') && t.includes(ALERTAS_FUERA_DEL_HATO));
+  assert.ok(!t.includes('CHAPETA QR'), 'sin chapeta: no se afirma QR');
+
+  const anulado = await textoDe(conChapeta(animal({ estado: 'ANULADO', estadoMotivo: 'Registro duplicado', estadoOperativo: 'MUERTO', cierre }), { activa: null, historial: [REVOCADA] }));
+  assert.ok(anulado.includes('Anulado') && anulado.includes('SITUACIÓN HISTÓRICA') && anulado.includes('Muerto'));
+  assert.ok(anulado.includes('30/10/2026') && anulado.includes('Enfermedad') && anulado.includes('Necropsia pendiente'));
+  assert.ok(anulado.includes('No operativa') && anulado.includes(ALERTAS_ANULADO));
+  assert.ok(anulado.includes('06/08/2026'), 'pesajes conservados');
 });

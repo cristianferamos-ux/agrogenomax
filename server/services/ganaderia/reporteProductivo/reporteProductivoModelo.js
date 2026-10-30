@@ -17,6 +17,13 @@
 //     byte a byte de shared/). Sin umbrales productivos de GMD.
 //   * Texto apto para las fuentes estándar del PDF (WinAnsi): el signo menos
 //     es "-" y cualquier carácter fuera de WinAnsi se sustituye.
+//   * FASE 2C: dos ejes independientes, nunca equivalentes: "Estado del
+//     registro" (estado: ACTIVO/ANULADO) y "Situación del animal"
+//     (estadoOperativo: EN_HATO/SALIDO/MUERTO; "Situación histórica" si el
+//     registro está anulado). El cierre (salida/muerte) se conserva siempre,
+//     también en ANULADO. Alertas solo con ACTIVO + EN_HATO. El histórico de
+//     pesajes/GMD no cambia por el cierre. La chapeta QR solo expone código
+//     visible y si es operativa (nunca token, hash, qrId ni metadata).
 import { construirAlertasPesajes } from '../engine/alertasPesajes.js';
 import { numeroDeDia } from '../engine/fechas.js';
 import { resolveFechaHoraNegocio, resolveFechaHoyNegocio } from '../motorDescansoAuto/businessTimezone.js';
@@ -28,9 +35,24 @@ export const NOTA_UMBRALES = 'Los umbrales de antigüedad del pesaje son paráme
 export const SIN_ALERTAS = 'No hay alertas de pesaje activas.';
 export const ALERTAS_ANULADO = 'El animal está anulado: no se evalúan alertas de pesaje.';
 export const SIN_PESAJES = 'No hay pesajes registrados.';
+export const ALERTAS_FUERA_DEL_HATO = 'Sin alertas operativas: el animal ya no está en el hato.';
+export const NOTA_CHAPETA_HISTORICA = 'Chapeta vinculada históricamente al animal; no puede reasignarse.';
 
 const SEXOS = Object.freeze({ HEMBRA: 'Hembra', MACHO: 'Macho' });
 const ESTADOS = Object.freeze({ ACTIVO: 'Activo', ANULADO: 'Anulado' });
+const SITUACIONES = Object.freeze({ EN_HATO: 'En hato', SALIDO: 'Salido', MUERTO: 'Muerto' });
+// Catálogos = cierreValidation.js (CHECK de 0025), con etiquetas de negocio.
+const MOTIVOS_SALIDA = Object.freeze({
+  VENTA: 'Venta', TRASLADO: 'Traslado', DONACION: 'Donación', INTERCAMBIO: 'Intercambio', DEVOLUCION: 'Devolución', OTRA: 'Otra',
+});
+const CAUSAS_MUERTE = Object.freeze({
+  MUERTE_NATURAL: 'Muerte natural', ENFERMEDAD: 'Enfermedad', ACCIDENTE: 'Accidente', SACRIFICIO: 'Sacrificio',
+  DEPREDACION: 'Depredación', DESCONOCIDA: 'Desconocida', OTRA: 'Otra',
+});
+const CIERRES = Object.freeze({
+  SALIDO: Object.freeze({ titulo: 'Salida del hato', etiquetaCausa: 'Motivo', causas: MOTIVOS_SALIDA }),
+  MUERTO: Object.freeze({ titulo: 'Muerte', etiquetaCausa: 'Causa', causas: CAUSAS_MUERTE }),
+});
 const METODOS = Object.freeze({ BASCULA: 'Báscula', ESTIMADO: 'Estimado' });
 const SEVERIDADES = Object.freeze({ URGENTE: 'URGENTE', ATENCION: 'ATENCIÓN', INFO: 'INFO' });
 
@@ -111,7 +133,57 @@ export function identificacionAnimal(animal) {
   return animal.numeroVisual || animal.nombre || `Animal ${animal.animalId}`;
 }
 
-function construirIdentificacion(animal) {
+/** Etiqueta de negocio de un enum; un valor fuera de catálogo no se inventa. */
+function etiquetaCatalogo(catalogo, valor) {
+  if (valor === null || valor === undefined || valor === '') return SIN_DATO;
+  return catalogo[valor] ?? textoPdf(valor);
+}
+
+/** Estado operativo validado: el reporte nunca supone "En hato" por omisión. */
+function situacionDe(animal) {
+  if (!Object.hasOwn(SITUACIONES, animal.estadoOperativo ?? '')) {
+    throw new TypeError('construirReporteProductivo requiere estadoOperativo EN_HATO, SALIDO o MUERTO.');
+  }
+  return animal.estadoOperativo;
+}
+
+/**
+ * Bloque de salida/muerte. null si el animal está EN_HATO. Se conserva con el
+ * registro ANULADO (el hecho histórico no se pierde). Observaciones solo si
+ * existen.
+ */
+function construirCierre(animal) {
+  const config = CIERRES[animal.estadoOperativo];
+  if (!config) return null;
+  const cierre = animal.cierre ?? {};
+  const filas = [
+    { etiqueta: 'Fecha', valor: formatFecha(cierre.fecha) },
+    { etiqueta: config.etiquetaCausa, valor: etiquetaCatalogo(config.causas, cierre.causa) },
+  ];
+  const observaciones = textoPdf(cierre.observaciones);
+  if (observaciones) filas.push({ etiqueta: 'Observaciones', valor: observaciones });
+  return { titulo: config.titulo, filas };
+}
+
+/**
+ * Chapeta QR a mostrar: la activa o, si no hay, la más reciente del historial
+ * del animal (vínculo histórico). Solo se proyectan código visible y estado:
+ * ningún token, hash, qrId ni metadata llega al modelo. null si el animal
+ * nunca tuvo chapeta (no se afirma un QR inexistente).
+ */
+function construirChapeta(animal, chapetas) {
+  const fuente = chapetas?.activa ?? chapetas?.historial?.[0] ?? null;
+  const codigo = textoPdf(fuente?.codigoVisible);
+  if (!codigo) return null;
+  const operativa = fuente.estado === 'ASIGNADO_ANIMAL' && animal.estado === 'ACTIVO' && animal.estadoOperativo === 'EN_HATO';
+  return {
+    codigoVisible: codigo,
+    estado: operativa ? 'Operativa' : 'No operativa',
+    nota: operativa ? null : NOTA_CHAPETA_HISTORICA,
+  };
+}
+
+function construirIdentificacion(animal, chapeta) {
   const filas = [];
   const agregar = (etiqueta, valor) => {
     if (valor !== null && valor !== undefined && String(valor).trim() !== '') filas.push({ etiqueta, valor: textoPdf(valor) });
@@ -119,8 +191,13 @@ function construirIdentificacion(animal) {
   agregar('Número de identificación', animal.numeroVisual);
   agregar('Nombre', animal.nombre);
   agregar('Sexo', SEXOS[animal.sexo] ?? animal.sexo);
-  agregar('Estado', ESTADOS[animal.estado] ?? animal.estado);
+  agregar('Estado del registro', ESTADOS[animal.estado] ?? animal.estado);
+  agregar(animal.estado === 'ANULADO' ? 'Situación histórica' : 'Situación del animal', SITUACIONES[animal.estadoOperativo]);
   if (animal.estado === 'ANULADO') agregar('Motivo de anulación', animal.estadoMotivo);
+  if (chapeta) {
+    agregar('Chapeta QR', chapeta.codigoVisible);
+    agregar('Estado de chapeta', chapeta.estado);
+  }
   agregar('Categoría productiva', animal.categoriaProductivaNombre);
   agregar('Raza', formatRaza(animal));
   agregar('Predio', animal.predioNombre);
@@ -223,6 +300,8 @@ function detalleAlerta(alerta) {
 
 function construirAlertas(animal, historial, fechaReferencia) {
   if (animal.estado !== 'ACTIVO') return { lista: [], vacio: ALERTAS_ANULADO };
+  // Fuera del hato (SALIDO/MUERTO) no hay manejo futuro que alertar.
+  if (animal.estadoOperativo !== 'EN_HATO') return { lista: [], vacio: ALERTAS_FUERA_DEL_HATO };
   const lista = construirAlertasPesajes({ pesajes: historial.pesajes, resumen: historial.resumen, fechaReferencia })
     .map((a) => ({
       codigo: a.codigo,
@@ -253,10 +332,12 @@ export function nombreArchivoReporte(animal, fecha) {
 
 /**
  * Contenido completo del reporte.
- * @param {{ animal: object, historial: { resumen, pesajes }, ahora?: Date }} p
+ * @param {{ animal: object, historial: { resumen, pesajes }, chapetas?: { activa, historial }|null, ahora?: Date }} p
  */
-export function construirReporteProductivo({ animal, historial, ahora = new Date() }) {
+export function construirReporteProductivo({ animal, historial, chapetas = null, ahora = new Date() }) {
   if (!animal || !historial) throw new TypeError('construirReporteProductivo requiere animal e historial.');
+  const situacion = situacionDe(animal);
+  const chapeta = construirChapeta(animal, chapetas);
   const generado = resolveFechaHoraNegocio(ahora);
   const pesajes = Array.isArray(historial.pesajes) ? historial.pesajes : [];
   const alertas = construirAlertas(animal, { ...historial, pesajes }, generado.fecha);
@@ -271,8 +352,12 @@ export function construirReporteProductivo({ animal, historial, ahora = new Date
       animalId: String(animal.animalId),
       identificacion: textoPdf(identificacionAnimal(animal)),
       anulado: animal.estado === 'ANULADO',
+      estado: animal.estado,
+      estadoOperativo: situacion,
     },
-    identificacion: construirIdentificacion(animal),
+    identificacion: construirIdentificacion(animal, chapeta),
+    notaChapeta: chapeta?.nota ?? null,
+    cierre: construirCierre(animal),
     resumen: construirResumen(historial.resumen, pesajes),
     historial: { orden: 'ASCENDENTE', columnas: [...COLUMNAS_HISTORIAL], filas: construirHistorial(pesajes), vacio: SIN_PESAJES },
     graficaPeso: construirGraficaPeso(pesajes),

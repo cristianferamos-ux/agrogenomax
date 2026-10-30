@@ -6,6 +6,8 @@ import assert from 'node:assert/strict';
 import { construirHistorialPesajes } from '../ganaderia/pesajesService.js';
 import {
   ALERTAS_ANULADO,
+  ALERTAS_FUERA_DEL_HATO,
+  NOTA_CHAPETA_HISTORICA,
   NOTA_UMBRALES,
   SIN_ALERTAS,
   SIN_DATO,
@@ -24,7 +26,7 @@ const p = (fecha, pesoKg, extra = {}) => ({ pesajeId: String(++seq), fecha, peso
 const animal = (extra = {}) => ({
   animalId: '7', predioNombre: 'Finca QA', numeroVisual: 'AGX-000007', nombre: 'Lucero', sexo: 'HEMBRA',
   razaTipo: 'PURA', razaPrincipalNombre: 'Brahman', razaOtroNombre: null, cruceDescripcion: null,
-  categoriaProductivaNombre: 'Novilla de levante', estado: 'ACTIVO', estadoMotivo: null,
+  categoriaProductivaNombre: 'Novilla de levante', estado: 'ACTIVO', estadoMotivo: null, estadoOperativo: 'EN_HATO', cierre: null,
   fechaCreacion: new Date('2026-01-11T03:00:00Z'), // 10/01/2026 22:00 en Bogotá
   ...extra,
 });
@@ -44,12 +46,12 @@ test('encabezado: título, subtítulo y fecha/hora de generación en America/Bog
 test('identificación: solo campos existentes; fecha de registro en fecha de negocio', () => {
   const completa = reporte([]).identificacion.map((x) => `${x.etiqueta}=${x.valor}`);
   assert.deepEqual(completa, [
-    'Número de identificación=AGX-000007', 'Nombre=Lucero', 'Sexo=Hembra', 'Estado=Activo',
+    'Número de identificación=AGX-000007', 'Nombre=Lucero', 'Sexo=Hembra', 'Estado del registro=Activo', 'Situación del animal=En hato',
     'Categoría productiva=Novilla de levante', 'Raza=Brahman', 'Predio=Finca QA', 'Fecha de registro=10/01/2026',
   ]);
   const minima = reporte([], animal({ nombre: null, categoriaProductivaNombre: null, predioNombre: null, razaTipo: 'DESCONOCIDA', razaPrincipalNombre: null }));
   const etiquetas = minima.identificacion.map((x) => x.etiqueta);
-  assert.deepEqual(etiquetas, ['Número de identificación', 'Sexo', 'Estado', 'Raza', 'Fecha de registro']);
+  assert.deepEqual(etiquetas, ['Número de identificación', 'Sexo', 'Estado del registro', 'Situación del animal', 'Raza', 'Fecha de registro']);
   assert.equal(valor(minima.identificacion, 'Raza'), 'No conocida');
   assert.ok(!minima.identificacion.some((x) => x.valor === SIN_DATO), 'no se rellena con "Sin dato" en masa');
   assert.equal(valor(reporte([], animal({ razaTipo: 'CRUCE', cruceDescripcion: 'Brahman x Holstein' })).identificacion, 'Raza'), 'Cruce: Brahman x Holstein');
@@ -57,7 +59,7 @@ test('identificación: solo campos existentes; fecha de registro en fecha de neg
 
 test('animal anulado: estado y motivo; alertas no evaluadas', () => {
   const r = reporte([p('2026-03-01', 290)], animal({ estado: 'ANULADO', estadoMotivo: 'Registro duplicado' }));
-  assert.equal(valor(r.identificacion, 'Estado'), 'Anulado');
+  assert.equal(valor(r.identificacion, 'Estado del registro'), 'Anulado');
   assert.equal(valor(r.identificacion, 'Motivo de anulación'), 'Registro duplicado');
   assert.equal(r.animal.anulado, true);
   assert.deepEqual(r.alertas.lista, []);
@@ -184,4 +186,128 @@ test('modelo puro: requiere animal e historial; sin estado del reloj si se inyec
   const a = reporte([p('2026-10-19', 350)]);
   const b = reporte([p('2026-10-19', 350)]);
   assert.deepEqual({ ...a, historial: null }, { ...b, historial: null });
+});
+
+// ---------------------------------------------------------------------
+// FASE 2C: estado del registro vs. situación del animal, cierre, alertas y
+// chapeta QR. El cierre nunca altera el histórico productivo.
+// ---------------------------------------------------------------------
+const SALIDA = { tipo: 'SALIDA', fecha: '2026-10-30', causa: 'VENTA', observaciones: 'Venta a feria local', registradoEn: new Date('2026-10-30T15:00:00Z') };
+const MUERTE = { tipo: 'MUERTE', fecha: '2026-10-30', causa: 'ENFERMEDAD', observaciones: null, registradoEn: new Date('2026-10-30T15:00:00Z') };
+const salido = (extra = {}) => animal({ estadoOperativo: 'SALIDO', cierre: SALIDA, ...extra });
+const muerto = (extra = {}) => animal({ estadoOperativo: 'MUERTO', cierre: MUERTE, ...extra });
+const PESAJES_QA = () => [p('2026-07-01', 350), p('2026-07-20', 355), p('2026-08-06', 340)];
+const CHAPETA = { codigoVisible: 'AGX-000001', estado: 'ASIGNADO_ANIMAL' };
+const REVOCADA = { codigoVisible: 'AGX-000001', estado: 'REVOCADO' };
+const conChapeta = (filas, a, chapetas) => construirReporteProductivo({
+  animal: a, historial: construirHistorialPesajes({ animalId: a.animalId, pesajes: filas }), chapetas, ahora: AHORA,
+});
+
+test('2C-1. ACTIVO + EN_HATO: situación "En hato", sin bloque de cierre, alertas evaluadas', () => {
+  const r = reporte(PESAJES_QA());
+  assert.equal(valor(r.identificacion, 'Estado del registro'), 'Activo');
+  assert.equal(valor(r.identificacion, 'Situación del animal'), 'En hato');
+  assert.equal(r.cierre, null, '6. EN_HATO sin cierre: no hay bloque');
+  assert.deepEqual(r.alertas.lista.map((a) => a.codigo).sort(), ['PERDIDA_DE_PESO', 'PESAJE_ATRASADO'], 'alertas evaluadas normalmente');
+  assert.deepEqual({ estado: r.animal.estado, estadoOperativo: r.animal.estadoOperativo }, { estado: 'ACTIVO', estadoOperativo: 'EN_HATO' });
+});
+
+test('2C-2. ACTIVO + SALIDO: dos ejes, fecha/motivo con etiqueta, sin alertas, histórico intacto', () => {
+  const enHato = reporte(PESAJES_QA());
+  const r = reporte(PESAJES_QA(), salido());
+  assert.equal(valor(r.identificacion, 'Estado del registro'), 'Activo');
+  assert.equal(valor(r.identificacion, 'Situación del animal'), 'Salido');
+  assert.ok(!r.identificacion.some((x) => x.etiqueta === 'Situación histórica'));
+  assert.deepEqual(r.cierre, {
+    titulo: 'Salida del hato',
+    filas: [
+      { etiqueta: 'Fecha', valor: '30/10/2026' },
+      { etiqueta: 'Motivo', valor: 'Venta' },
+      { etiqueta: 'Observaciones', valor: 'Venta a feria local' },
+    ],
+  });
+  assert.deepEqual(r.alertas.lista, [], 'ni pesaje atrasado ni pérdida de peso');
+  assert.equal(r.alertas.vacio, 'Sin alertas operativas: el animal ya no está en el hato.');
+  assert.equal(r.alertas.vacio, ALERTAS_FUERA_DEL_HATO);
+  // El cierre NO cambia el histórico productivo.
+  for (const k of ['resumen', 'historial', 'graficaPeso', 'gmd']) assert.deepEqual(r[k], enHato[k], k);
+  assert.equal(valor(r.resumen, 'Diferencia'), '-15 kg');
+  assert.equal(r.historial.filas.length, 3);
+});
+
+test('2C-3. ACTIVO + MUERTO: causa con etiqueta, sin observaciones vacías, sin alertas', () => {
+  const r = reporte(PESAJES_QA(), muerto());
+  assert.equal(valor(r.identificacion, 'Estado del registro'), 'Activo');
+  assert.equal(valor(r.identificacion, 'Situación del animal'), 'Muerto');
+  assert.deepEqual(r.cierre, {
+    titulo: 'Muerte',
+    filas: [{ etiqueta: 'Fecha', valor: '30/10/2026' }, { etiqueta: 'Causa', valor: 'Enfermedad' }],
+  }, '7. sin observaciones: no hay fila vacía');
+  assert.deepEqual(r.alertas.lista, []);
+  assert.equal(r.alertas.vacio, ALERTAS_FUERA_DEL_HATO);
+  assert.equal(r.historial.filas.length, 3);
+  assert.ok(r.gmd);
+});
+
+test('2C-4/5. ANULADO + SALIDO/MUERTO: situación histórica y cierre preservados', () => {
+  const s = reporte(PESAJES_QA(), salido({ estado: 'ANULADO', estadoMotivo: 'Registro duplicado' }));
+  assert.equal(valor(s.identificacion, 'Estado del registro'), 'Anulado');
+  assert.equal(valor(s.identificacion, 'Situación histórica'), 'Salido');
+  assert.ok(!s.identificacion.some((x) => x.etiqueta === 'Situación del animal'));
+  assert.equal(valor(s.identificacion, 'Motivo de anulación'), 'Registro duplicado');
+  assert.equal(s.cierre.titulo, 'Salida del hato');
+  assert.deepEqual(s.cierre.filas.map((f) => f.valor), ['30/10/2026', 'Venta', 'Venta a feria local']);
+  assert.equal(s.alertas.vacio, ALERTAS_ANULADO, 'política de anulado sin cambios');
+  assert.equal(s.historial.filas.length, 3);
+
+  const m = reporte(PESAJES_QA(), muerto({ estado: 'ANULADO', estadoMotivo: 'Error de carga', cierre: { ...MUERTE, observaciones: 'Necropsia pendiente' } }));
+  assert.equal(valor(m.identificacion, 'Situación histórica'), 'Muerto');
+  assert.deepEqual(m.cierre.filas.map((f) => `${f.etiqueta}=${f.valor}`), ['Fecha=30/10/2026', 'Causa=Enfermedad', 'Observaciones=Necropsia pendiente']);
+  assert.equal(m.alertas.vacio, ALERTAS_ANULADO);
+});
+
+test('2C. catálogos de motivo/causa con etiquetas de negocio (sin enums técnicos)', () => {
+  const motivos = { VENTA: 'Venta', TRASLADO: 'Traslado', DONACION: 'Donación', INTERCAMBIO: 'Intercambio', DEVOLUCION: 'Devolución', OTRA: 'Otra' };
+  for (const [causa, etiqueta] of Object.entries(motivos)) {
+    assert.equal(valor(reporte([], salido({ cierre: { ...SALIDA, causa } })).cierre.filas, 'Motivo'), etiqueta);
+  }
+  const causas = { MUERTE_NATURAL: 'Muerte natural', ENFERMEDAD: 'Enfermedad', ACCIDENTE: 'Accidente', SACRIFICIO: 'Sacrificio', DEPREDACION: 'Depredación', DESCONOCIDA: 'Desconocida', OTRA: 'Otra' };
+  for (const [causa, etiqueta] of Object.entries(causas)) {
+    assert.equal(valor(reporte([], muerto({ cierre: { ...MUERTE, causa } })).cierre.filas, 'Causa'), etiqueta);
+  }
+  assert.equal(valor(reporte([], salido({ cierre: { ...SALIDA, observaciones: '   ' } })).cierre.filas, 'Observaciones'), undefined);
+});
+
+test('2C. estadoOperativo obligatorio: nunca se supone "En hato"', () => {
+  for (const estadoOperativo of [undefined, null, '', 'ACTIVO', 'TODOS']) {
+    assert.throws(() => reporte([], animal({ estadoOperativo })), TypeError, String(estadoOperativo));
+  }
+});
+
+test('2C-8. chapeta QR: EN_HATO operativa; cerrado/anulado "No operativa"; sin secretos', () => {
+  const enHato = conChapeta(PESAJES_QA(), animal(), { activa: CHAPETA, historial: [CHAPETA] });
+  assert.equal(valor(enHato.identificacion, 'Chapeta QR'), 'AGX-000001');
+  assert.equal(valor(enHato.identificacion, 'Estado de chapeta'), 'Operativa');
+  assert.equal(enHato.notaChapeta, null);
+
+  for (const a of [salido(), muerto(), salido({ estado: 'ANULADO' }), animal({ estado: 'ANULADO' })]) {
+    const r = conChapeta(PESAJES_QA(), a, { activa: null, historial: [REVOCADA] });
+    assert.equal(valor(r.identificacion, 'Chapeta QR'), 'AGX-000001', 'código visible conservado');
+    assert.equal(valor(r.identificacion, 'Estado de chapeta'), 'No operativa');
+    assert.equal(r.notaChapeta, NOTA_CHAPETA_HISTORICA);
+  }
+  // Aunque llegara una chapeta ASIGNADO_ANIMAL, un animal cerrado no la muestra operativa.
+  assert.equal(valor(conChapeta([], muerto(), { activa: CHAPETA, historial: [CHAPETA] }).identificacion, 'Estado de chapeta'), 'No operativa');
+
+  // Sin chapeta: no se afirma un QR inexistente.
+  for (const chapetas of [null, { activa: null, historial: [] }]) {
+    const r = conChapeta([], salido(), chapetas);
+    assert.ok(!r.identificacion.some((x) => /chapeta/i.test(x.etiqueta)));
+    assert.equal(r.notaChapeta, null);
+  }
+
+  // Aunque la fuente trajera campos técnicos, el modelo solo proyecta código y estado.
+  const sucia = { ...REVOCADA, qrId: '991', token: 'tok-secreto', tokenHash: 'abc-hash', tokenCifrado: 'zzz-cifrado', intentHash: 'ih-x', metadata: { x: 1 } };
+  const json = JSON.stringify(conChapeta(PESAJES_QA(), salido(), { activa: null, historial: [sucia] }));
+  assert.doesNotMatch(json, /tok-secreto|"991"|abc-hash|zzz-cifrado|ih-x|tokenHash|intentHash|qrId|metadata/);
 });

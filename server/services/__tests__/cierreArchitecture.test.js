@@ -79,12 +79,15 @@ test('migración: RLS intacto, grants por columna, trigger de cierre terminal, r
   assert.ok(fs.existsSync(path.join(MIGRATIONS, '0025_animal_cierre_operativo_rollback.sql')));
 });
 
-test('sin legacy, Demo ni PDF; el reporte PDF no cambia en 2A', () => {
+test('sin legacy, Demo ni PDF; el reporte PDF solo LEE el cierre (FASE 2C)', () => {
   for (const rel of ARCHIVOS) {
     assert.doesNotMatch(strip(read(rel)), /from ['"][^'"]*\/db\.js['"]|DATABASE_URL|supabase|demo|pdfkit|reporteProductivo/i, rel);
   }
+  // 2A dejó el PDF intacto; 2C lo actualiza solo como LECTOR del animal
+  // serializado (estadoOperativo + cierre): nunca registra cierres ni SQL propio.
   for (const rel of ['services/ganaderia/reporteProductivo/reporteProductivoService.js', 'services/ganaderia/reporteProductivo/reporteProductivoModelo.js']) {
-    assert.doesNotMatch(read(rel), /estado_?operativo|cierre/i, rel);
+    const code = strip(read(rel));
+    assert.doesNotMatch(code, /cierreRepository|registrarCierre|estado_operativo|\b(update|insert)\b\s/i, rel);
   }
 });
 
