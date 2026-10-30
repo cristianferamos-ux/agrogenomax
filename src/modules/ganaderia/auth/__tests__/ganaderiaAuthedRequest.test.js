@@ -158,10 +158,10 @@ for (const code of ['CSRF_REQUIRED', 'CSRF_INVALID', 'ORIGIN_INVALID']) {
 }
 
 // 8
-test('POST 403 ROLE_FORBIDDEN: se conserva tal cual, sin aviso', async () => {
+test('POST 403 ROLE_FORBIDDEN: se conserva el cuerpo, sin aviso (FASE 2B: failure ROLE_FORBIDDEN)', async () => {
   installFetch(csrfOk(), json(403, { error: 'ROLE_FORBIDDEN' }));
   const result = await postJsonWithCsrf(TARGET, {});
-  assert.deepEqual(result, { ok: false, status: 403, data: { error: 'ROLE_FORBIDDEN' } });
+  assert.deepEqual(result, { ok: false, status: 403, data: { error: 'ROLE_FORBIDDEN' }, failure: 'ROLE_FORBIDDEN' });
   assert.deepEqual(notices, []);
 });
 
@@ -403,3 +403,22 @@ for (const [label, queue] of [
     assert.ok(calls.length <= 2);
   });
 }
+
+// FASE 2B: 403 ROLE_FORBIDDEN (RBAC) es distinto de 401 sesión y 403 CSRF.
+test('POST 403 ROLE_FORBIDDEN: failure ROLE_FORBIDDEN, sin aviso global, nunca SESSION_EXPIRED ni CSRF', async () => {
+  installFetch(csrfOk(), json(403, { error: 'ROLE_FORBIDDEN' }));
+  const result = await postJsonWithCsrf('/api/ganaderia/animales/7/salida', {});
+  assert.deepEqual(result, { ok: false, status: 403, data: { error: 'ROLE_FORBIDDEN' }, failure: 'ROLE_FORBIDDEN' });
+  assert.deepEqual(notices, []);
+  assert.equal(postCalls().length, 1, 'sin reintento');
+});
+
+test('clasificadores 401/403: sesión, CSRF y rol son disjuntos; mensaje de permisos exacto', async () => {
+  const mod = await import('../ganaderiaAuthedRequest.js');
+  assert.equal(mod.MENSAJE_ROLE_FORBIDDEN, 'No tienes permisos para realizar esta acción.');
+  assert.equal(mod.isRoleForbiddenResponse(403, { error: 'ROLE_FORBIDDEN' }), true);
+  assert.equal(mod.isRoleForbiddenResponse(401, { error: 'ROLE_FORBIDDEN' }), false);
+  assert.equal(mod.isRoleForbiddenResponse(403, { error: 'CSRF_INVALID' }), false);
+  assert.equal(mod.isSessionExpiredResponse(403, { error: 'ROLE_FORBIDDEN' }), false);
+  assert.equal(mod.isCsrfRejectedResponse(403, { error: 'ROLE_FORBIDDEN' }), false);
+});

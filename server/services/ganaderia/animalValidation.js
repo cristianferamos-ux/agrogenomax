@@ -17,6 +17,9 @@ export const RAZA_TIPOS = Object.freeze(['PURA', 'CRUCE', 'DESCONOCIDA']);
 export const ORIGEN_TIPOS = Object.freeze(['NACIDO_EN_PREDIO', 'COMPRADO', 'RECIBIDO', 'OTRO']);
 export const PESO_METODOS = Object.freeze(['BASCULA', 'ESTIMADO']);
 export const ESTADO_FILTROS = Object.freeze(['ACTIVO', 'ANULADO', 'TODOS']);
+// FASE 2B: situación del animal (agx.animales.estado_operativo, 0025). Eje
+// independiente del estado del registro: ACTIVO nunca implica EN_HATO.
+export const ESTADO_OPERATIVO_FILTROS = Object.freeze(['EN_HATO', 'SALIDO', 'MUERTO', 'TODOS']);
 
 export const MAX_NUMERO_VISUAL = 40;
 export const MAX_NOMBRE = 120;
@@ -376,7 +379,7 @@ export function validateAnularAnimalBody(body) {
 // GET /api/ganaderia/animales
 // ---------------------------------------------------------------------
 
-const LIST_ALLOWED_KEYS = new Set(['predioId', 'estado', 'sexo', 'q', 'limit', 'offset']);
+const LIST_ALLOWED_KEYS = new Set(['predioId', 'estado', 'estadoOperativo', 'sexo', 'q', 'limit', 'offset']);
 
 function parseNonNegativeIntParam(rawValue, { min, max, fallback }) {
   if (rawValue === undefined) return fallback;
@@ -398,6 +401,10 @@ export function validateListAnimalesQuery(query) {
     : normalizeId(query.predioId, { code: 'INVALID_QUERY', field: 'predioId' });
   const estado = query.estado === undefined || query.estado === '' ? 'ACTIVO' : query.estado;
   if (!ESTADO_FILTROS.includes(estado)) throw badRequest('INVALID_QUERY', 'estado debe ser ACTIVO, ANULADO o TODOS.');
+  const estadoOperativo = query.estadoOperativo === undefined || query.estadoOperativo === '' ? 'EN_HATO' : query.estadoOperativo;
+  if (!ESTADO_OPERATIVO_FILTROS.includes(estadoOperativo)) {
+    throw badRequest('INVALID_QUERY', 'estadoOperativo debe ser EN_HATO, SALIDO, MUERTO o TODOS.');
+  }
   const sexo = query.sexo === undefined || query.sexo === '' ? null : query.sexo;
   if (sexo !== null && !SEXOS.includes(sexo)) throw badRequest('INVALID_QUERY', 'sexo debe ser MACHO o HEMBRA.');
   const q = query.q === undefined ? null : query.q.replace(/\s+/g, ' ').trim() || null;
@@ -406,6 +413,7 @@ export function validateListAnimalesQuery(query) {
   return {
     predioId,
     estado,
+    estadoOperativo,
     sexo,
     q,
     limit: parseNonNegativeIntParam(query.limit, { min: 1, max: LIST_MAX_LIMIT, fallback: LIST_DEFAULT_LIMIT }),

@@ -23,6 +23,10 @@ export function resumenPendientes(cantidad) {
 const BLOQUEOS = Object.freeze({
   ANIMAL_ANULADO: 'El animal fue anulado: el servidor no aceptó este pesaje.',
   ANIMAL_NOT_FOUND: 'El animal ya no está disponible.',
+  // FASE 2B: 409 del servidor -> CONFLICTO (syncEngine.classifyResult): se
+  // conserva en el dispositivo y NO se reintenta en bucle.
+  ANIMAL_YA_SALIDO: 'Este pesaje no se sincronizó porque el animal salió del hato.',
+  ANIMAL_YA_MUERTO: 'Este pesaje no se sincronizó porque el animal está registrado como muerto.',
   CLIENT_OPERATION_ID_REUSED: 'Este registro ya existe en el servidor con otros datos.',
 });
 

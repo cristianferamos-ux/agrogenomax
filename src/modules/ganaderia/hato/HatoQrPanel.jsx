@@ -6,11 +6,18 @@
 //   * historial de chapetas del animal.
 // Solo POST con CSRF vía hatoApi.js; nunca reintenta automáticamente. Las
 // tres acciones son idempotentes en el servidor por estado.
+//
+// FASE 2B: animal SALIDO/MUERTO -> la chapeta queda como vínculo HISTÓRICO
+// "No operativa" (código, asignación, fecha y causa de baja) con
+// MENSAJE_QR_HISTORICA; sin asociar, reemplazar ni dar de baja (la ficha
+// pasa animalActivo=false). `onActiva` informa si hay chapeta activa (el
+// texto de confirmación de la salida depende de ello).
 import { useCallback, useEffect, useState } from 'react';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
 import { asociarQr, bajaQr, getAnimalQr, reemplazarQr } from './hatoApi.js';
 import { messageForError } from './hatoFormModel.js';
 import { ESTADO_CHAPETA_LABELS, normalizeCodigoChapeta } from './qrToken.js';
+import { MENSAJE_QR_HISTORICA, chapetaHistoricaDeCierre } from './cierreModel.js';
 
 const CODIGO_INVALIDO = 'Revisa el código de la chapeta (forma AGX-7KM4-P2XZ-R).';
 const MOTIVO_REQUERIDO = 'Escribe el motivo (máximo 500 caracteres).';
@@ -23,7 +30,8 @@ function formatFecha(value) {
 
 // FASE 1D.2: `onCambio` (opcional) avisa a la ficha tras un cambio de chapeta
 // confirmado por el servidor (refresca la pestaña Actividad).
-export default function HatoQrPanel({ animalId, animalActivo, onCambio }) {
+export default function HatoQrPanel({ animalId, animalActivo, estadoOperativo = 'EN_HATO', onCambio, onActiva }) {
+  const cerrado = estadoOperativo === 'SALIDO' || estadoOperativo === 'MUERTO';
   const [state, setState] = useState({ status: 'loading', activa: null, historial: [] });
   const [modo, setModo] = useState('ver');
   const [codigo, setCodigo] = useState('');
@@ -47,6 +55,10 @@ export default function HatoQrPanel({ animalId, animalActivo, onCambio }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (state.status === 'ok') onActiva?.(Boolean(state.activa));
+  }, [state.status, state.activa, onActiva]);
 
   function abrir(nuevoModo) {
     setCodigo('');
@@ -109,7 +121,8 @@ export default function HatoQrPanel({ animalId, animalActivo, onCambio }) {
   }
 
   const { activa, historial } = state;
-  const anteriores = historial.filter((item) => item.estado !== 'ASIGNADO_ANIMAL');
+  const historica = cerrado && !activa ? chapetaHistoricaDeCierre(historial, estadoOperativo) : null;
+  const anteriores = historial.filter((item) => item.estado !== 'ASIGNADO_ANIMAL' && item.qrId !== historica?.qrId);
 
   return (
     <section className="gan-hato-qr" aria-labelledby="gan-hato-qr-title">
@@ -125,7 +138,35 @@ export default function HatoQrPanel({ animalId, animalActivo, onCambio }) {
 
       {state.status === 'ok' && modo === 'ver' ? (
         <>
-          {activa ? (
+          {historica ? (
+            <div className="gan-hato-qr-historica">
+              <div className="gan-hato-ficha">
+                <div className="gan-ficha-row">
+                  <span>Código</span>
+                  <strong className="gan-hato-qr-codigo">{historica.codigoVisible}</strong>
+                </div>
+                <div className="gan-ficha-row">
+                  <span>Estado</span>
+                  <strong>No operativa</strong>
+                </div>
+                <div className="gan-ficha-row">
+                  <span>Asociada</span>
+                  <strong>{formatFecha(historica.asignadoAnimalAt)}</strong>
+                </div>
+                <div className="gan-ficha-row">
+                  <span>Dada de baja</span>
+                  <strong>{formatFecha(historica.revocadoAt)}</strong>
+                </div>
+                {historica.motivo ? (
+                  <div className="gan-ficha-row">
+                    <span>Causa de baja</span>
+                    <strong>{historica.motivo}</strong>
+                  </div>
+                ) : null}
+              </div>
+              <p className="gan-hato-hint">{MENSAJE_QR_HISTORICA}</p>
+            </div>
+          ) : activa ? (
             <div className="gan-hato-ficha">
               <div className="gan-ficha-row">
                 <span>Código</span>
@@ -140,7 +181,7 @@ export default function HatoQrPanel({ animalId, animalActivo, onCambio }) {
             <p className="gan-hato-hint">Este animal no tiene una chapeta QR asociada.</p>
           )}
           {error ? <StatusMessage type="error">{error}</StatusMessage> : null}
-          {animalActivo ? (
+          {animalActivo && !cerrado ? (
             <div className="gan-hato-actions">
               {!activa ? (
                 <button type="button" className="gan-submit" onClick={() => abrir('asociar')}>Asociar chapeta</button>

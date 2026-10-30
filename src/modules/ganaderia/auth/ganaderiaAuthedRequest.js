@@ -6,6 +6,7 @@
 //   GET /auth/csrf        401 SESSION_REQUIRED | 401 SESSION_INVALID | 200 { csrfToken }
 //   requireSession        401 SESSION_REQUIRED | 401 SESSION_INVALID | 409 ORGANIZATION_REQUIRED
 //   requireCsrf           401 SESSION_REQUIRED | 403 ORIGIN_INVALID | 403 CSRF_REQUIRED | 403 CSRF_INVALID
+//   requireRole (FASE 2B) 403 ROLE_FORBIDDEN (sesión válida, rol sin permiso)
 //
 // postWithCsrf/postJsonWithCsrf NUNCA lanzan por HTTP ni por red: siempre
 // devuelven { ok, status, data } (+ `failure` solo en fallos de sesión,
@@ -19,10 +20,13 @@ const CSRF_URL = '/api/ganaderia/auth/csrf';
 
 export const SESSION_EXPIRED_CODES = Object.freeze(['SESSION_REQUIRED', 'SESSION_INVALID']);
 export const CSRF_REJECTED_CODES = Object.freeze(['CSRF_REQUIRED', 'CSRF_INVALID', 'ORIGIN_INVALID']);
+export const ROLE_FORBIDDEN_CODE = 'ROLE_FORBIDDEN';
+export const MENSAJE_ROLE_FORBIDDEN = 'No tienes permisos para realizar esta acción.';
 
 export const REQUEST_FAILURES = Object.freeze({
   SESSION_EXPIRED: 'SESSION_EXPIRED',
   CSRF_REJECTED: 'CSRF_REJECTED',
+  ROLE_FORBIDDEN: 'ROLE_FORBIDDEN',
   NETWORK_ERROR: 'NETWORK_ERROR',
   REQUEST_NOT_SENT: 'REQUEST_NOT_SENT',
 });
@@ -47,6 +51,13 @@ export function isSessionExpiredResponse(status, data) {
 // Un 403 de CSRF/origen NUNCA se trata como sesión expirada ni logout.
 export function isCsrfRejectedResponse(status, data) {
   return status === 403 && CSRF_REJECTED_CODES.includes(errorCodeOf(data));
+}
+
+// FASE 2B: 403 de RBAC -- la sesión SIGUE siendo válida. Nunca se trata
+// como sesión expirada ni como CSRF, y no emite avisos globales: cada
+// pantalla muestra MENSAJE_ROLE_FORBIDDEN.
+export function isRoleForbiddenResponse(status, data) {
+  return status === 403 && errorCodeOf(data) === ROLE_FORBIDDEN_CODE;
 }
 
 function csrfFetchError(status, code) {
@@ -142,6 +153,9 @@ export async function postWithCsrf(path, { body, headers } = {}) {
   if (isCsrfRejectedResponse(response.status, data)) {
     emitAuthNotice(AUTH_NOTICE_KINDS.CSRF_REJECTED);
     return { ...result, failure: REQUEST_FAILURES.CSRF_REJECTED };
+  }
+  if (isRoleForbiddenResponse(response.status, data)) {
+    return { ...result, failure: REQUEST_FAILURES.ROLE_FORBIDDEN };
   }
   return result;
 }

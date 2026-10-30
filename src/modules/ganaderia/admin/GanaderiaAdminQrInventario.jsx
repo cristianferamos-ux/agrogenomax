@@ -33,6 +33,7 @@ import {
   ESTADO_LOTE_LABELS,
   adminQrErrorMessage,
   codigosLegacyConsecutivos,
+  etiquetaEstadoOperativoAnimal,
   newOperationId,
   parseCodigosTexto,
   siguienteEstadoLote,
@@ -438,6 +439,7 @@ function ChapetaDetalle({ qrId, nombreOrg, onChanged }) {
           <dt>Animal</dt>
           <dd>{animal ? `${animal.numeroVisual ?? ''} ${animal.nombre ?? ''} (#${animal.animalId}${animal.estado === 'ANULADO' ? ', anulado' : ''})` : '—'}</dd>
         </div>
+        {animal ? <div><dt>Situación del animal</dt><dd>{etiquetaEstadoOperativoAnimal(animal.estadoOperativo)}</dd></div> : null}
         {chapeta.motivo ? <div><dt>Motivo</dt><dd>{chapeta.motivo}</dd></div> : null}
       </dl>
       <Msg type="success">{aviso}</Msg>

@@ -22,7 +22,7 @@ try {
     'server/services/__tests__/animalPesajesIntegration.test.js': 14,
     'server/services/__tests__/reporteProductivoIntegration.test.js': 5,
     'server/services/__tests__/timelineIntegration.test.js': 7,
-    'server/services/__tests__/animalCierreIntegration.test.js': 16,
+    'server/services/__tests__/animalCierreIntegration.test.js': 18,
   } });
 } catch (error) {
   console.error(error.message);

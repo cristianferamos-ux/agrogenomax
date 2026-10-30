@@ -17,6 +17,9 @@ const ETIQUETAS = Object.freeze({
   QR_ASIGNADO: 'Chapeta QR',
   QR_DESASIGNADO: 'Chapeta QR',
   QR_REEMPLAZADO: 'Chapeta QR',
+  // FASE 2B: el cierre del animal tiene etiqueta propia (nunca "Actividad").
+  ANIMAL_SALIDO: 'Salida',
+  ANIMAL_MUERTO: 'Muerte',
 });
 
 export function etiquetaTipoEvento(tipo) {

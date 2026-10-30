@@ -527,6 +527,7 @@ describe('SPRINT-3D11.3: inventario QR contra Postgres real', { skip: !dbAvailab
     const detalle = await inventario.getChapetaAdmin(qrId);
     assert.equal(detalle.chapeta.organizacionId, org);
     assert.equal(detalle.animal.animalId, animal.animalId);
+    assert.equal(detalle.animal.estadoOperativo, 'EN_HATO', 'FASE 2B: situación del animal visible en el Super Admin');
     assert.deepEqual(detalle.historial.map((h) => h.tipoEvento), ['ASIGNADA_ORGANIZACION', 'ASOCIADA_ANIMAL']);
     const reemplazo = await inventario.reemplazarChapetaAdmin(qrId, { codigoNuevo: c2.codigo, motivo: 'Soporte' }, SUPERADMIN);
     assert.equal(reemplazo.chapeta.animalId, animal.animalId);
@@ -800,11 +801,14 @@ describe('FASE 2A: regla QR permanente (salida, muerte, reemplazo, daño)', { sk
 
   /** Ningún camino de la organización ni del Super Admin vuelve a usar la chapeta terminal `c`. */
   async function assertNoReutilizable(org, c, { otroAnimal, libre }) {
-    const qrId = (await fila(c.codigo)).qr_id;
+    const { qr_id: qrId, animal_id: animalOriginal } = await fila(c.codigo);
     for (const ref of [{ token: c.token }, { codigoVisible: c.codigo }]) {
       const r = await chapetasRepo.resolverChapeta(org, ref);
       assert.equal(r.resultado, 'NO_OPERATIVA', Object.keys(ref)[0]);
-      assert.equal(r.animalId, undefined, 'el escaneo nunca devuelve otro animal');
+      // FASE 2B: la misma organización recibe el vínculo HISTÓRICO (el animal
+      // original, para "Ver ficha"); el escaneo nunca devuelve otro animal.
+      assert.equal(r.animalId, animalOriginal, 'solo el animal original (vínculo histórico)');
+      assert.notEqual(r.animalId, otroAnimal, 'el escaneo nunca devuelve otro animal');
     }
     await expectSemantic(chapetasRepo.asociarChapetaAAnimal(org, otroAnimal, c.codigo, { actorCuentaId: ACTOR }), 'QR_NO_OPERATIVO', 410);
     await expectSemantic(registrar(org, c.codigo, animalBody(await seedPredio(org))), 'QR_NO_OPERATIVO', 410);

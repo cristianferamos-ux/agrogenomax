@@ -134,14 +134,22 @@ function escapeLikePrefix(value) {
   return value.replace(/[\\%_]/g, (match) => `\\${match}`);
 }
 
-/** GET /api/ganaderia/animales -- más recientes primero, offset/limit. */
-export async function listAnimales(organizacionId, { predioId, estado, sexo, q, limit, offset }) {
+/**
+ * GET /api/ganaderia/animales -- más recientes primero, offset/limit.
+ * FASE 2B: `estadoOperativo` (EN_HATO por defecto | SALIDO | MUERTO | TODOS)
+ * es un eje independiente de `estado` (registro ACTIVO/ANULADO).
+ */
+export async function listAnimales(organizacionId, { predioId, estado, estadoOperativo = 'EN_HATO', sexo, q, limit, offset }) {
   return withOrganizacionTransaction(organizacionId, async (client) => {
     const conditions = [];
     const params = [];
     if (estado !== 'TODOS') {
       params.push(estado);
       conditions.push(`a.estado = $${params.length}`);
+    }
+    if (estadoOperativo !== 'TODOS') {
+      params.push(estadoOperativo);
+      conditions.push(`a.estado_operativo = $${params.length}`);
     }
     if (predioId) {
       params.push(predioId);
@@ -167,6 +175,27 @@ export async function listAnimales(organizacionId, { predioId, estado, sexo, q, 
       [...params, limit, offset],
     );
     return { animales: rowsResult.rows.map(serializeAnimal), total: totalResult.rows[0].total };
+  });
+}
+
+/**
+ * FASE 2B: GET /api/ganaderia/animales/resumen -- contadores en UNA sola
+ * consulta agregada (bajo RLS de la organización), nunca tres listados.
+ *   hatoActual = registro ACTIVO y situación EN_HATO
+ *   salidos / muertos = históricos (registros ACTIVO; un registro ANULADO es
+ *   un error de captura y no cuenta como salida ni muerte real).
+ */
+export const RESUMEN_ANIMALES_SQL = `
+  select count(*) filter (where a.estado = 'ACTIVO' and a.estado_operativo = 'EN_HATO')::int as hato_actual,
+         count(*) filter (where a.estado = 'ACTIVO' and a.estado_operativo = 'SALIDO')::int as salidos,
+         count(*) filter (where a.estado = 'ACTIVO' and a.estado_operativo = 'MUERTO')::int as muertos
+    from agx.animales a`;
+
+export async function resumenAnimales(organizacionId) {
+  return withOrganizacionTransaction(organizacionId, async (client) => {
+    const { rows } = await client.query(RESUMEN_ANIMALES_SQL);
+    const row = rows[0] ?? {};
+    return { hatoActual: row.hato_actual ?? 0, salidos: row.salidos ?? 0, muertos: row.muertos ?? 0 };
   });
 }
 

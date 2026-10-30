@@ -7,16 +7,34 @@ import { getFileWithSession, getJsonWithSession, postJsonWithCsrf } from '../aut
 
 const BASE = '/api/ganaderia';
 
-export function listAnimales({ predioId, estado, sexo, q, limit, offset } = {}) {
+// FASE 2B: estadoOperativo (EN_HATO por defecto en el servidor | SALIDO |
+// MUERTO | TODOS) es independiente de estado (ACTIVO | ANULADO | TODOS).
+export function listAnimales({ predioId, estado, estadoOperativo, sexo, q, limit, offset } = {}) {
   const params = new URLSearchParams();
   if (predioId) params.set('predioId', predioId);
   if (estado) params.set('estado', estado);
+  if (estadoOperativo) params.set('estadoOperativo', estadoOperativo);
   if (sexo) params.set('sexo', sexo);
   if (q) params.set('q', q);
   if (limit) params.set('limit', String(limit));
   if (offset) params.set('offset', String(offset));
   const query = params.toString();
   return getJsonWithSession(`${BASE}/animales${query ? `?${query}` : ''}`);
+}
+
+// FASE 2B: { resumen: { hatoActual, salidos, muertos } } (una consulta agregada).
+export function getResumenAnimales() {
+  return getJsonWithSession(`${BASE}/animales/resumen`);
+}
+
+// FASE 2B: cierre operativo (owner/admin; 403 ROLE_FORBIDDEN para el resto).
+// Idempotente por clientOperationId; nunca se reintenta automáticamente.
+export function registrarSalida(animalId, body) {
+  return postJsonWithCsrf(`${BASE}/animales/${encodeURIComponent(animalId)}/salida`, body);
+}
+
+export function registrarMuerte(animalId, body) {
+  return postJsonWithCsrf(`${BASE}/animales/${encodeURIComponent(animalId)}/muerte`, body);
 }
 
 export function getAnimal(animalId) {

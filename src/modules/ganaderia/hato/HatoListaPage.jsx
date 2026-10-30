@@ -5,11 +5,18 @@
 // SPRINT-3D11.3 (R1): local-first -- con el dispositivo preparado la lista
 // sale de la copia local (abre sin red, al instante) e incluye los animales
 // registrados sin señal con su estado de sincronización.
+//
+// FASE 2B: dos filtros independientes -- Situación (En hato por defecto,
+// Salidos, Muertos, Todos -> estadoOperativo) y Estado del registro
+// (Activos por defecto, Anulados, Todos -> estado). La copia local aplica
+// los mismos filtros (sin estadoOperativo en caché = EN_HATO). Con red se
+// muestran los contadores de GET /animales/resumen (una sola consulta).
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
 import { StatusMessage } from '../components/FormField.jsx';
-import { listAnimales, listPrediosActivos } from './hatoApi.js';
+import { getResumenAnimales, listAnimales, listPrediosActivos } from './hatoApi.js';
+import { ETIQUETAS_SITUACION, FILTROS_ESTADO_REGISTRO, FILTROS_LISTADO_DEFAULT, FILTROS_SITUACION, situacionDe } from './cierreModel.js';
 import { formatEdad, formatIdentidad, formatPeso, formatRaza, formatSexo } from './hatoFormModel.js';
 import { useGanaderiaOffline } from '../offline/GanaderiaOfflineProvider.jsx';
 import '../styles/ganaderia-offline.css';
@@ -36,7 +43,8 @@ export default function HatoListaPage() {
   const offline = useGanaderiaOffline();
   const local = offline.preparado && offline.repo ? offline.repo : null;
   const [predios, setPredios] = useState([]);
-  const [filtros, setFiltros] = useState({ predioId: '', q: '', estado: 'ACTIVO' });
+  const [filtros, setFiltros] = useState({ predioId: '', q: '', ...FILTROS_LISTADO_DEFAULT });
+  const [resumen, setResumen] = useState(null);
   const [busqueda, setBusqueda] = useState('');
   const [state, setState] = useState({ status: 'loading', animales: [], total: 0 });
   const [loadingMore, setLoadingMore] = useState(false);
@@ -55,6 +63,25 @@ export default function HatoListaPage() {
       active = false;
     };
   }, [local]);
+
+  // Contadores del hato: solo del servidor (no se derivan de la página cargada).
+  useEffect(() => {
+    let active = true;
+    if (!offline.online) {
+      setResumen(null);
+      return undefined;
+    }
+    getResumenAnimales()
+      .then(({ ok, data }) => {
+        if (active) setResumen(ok && data?.resumen ? data.resumen : null);
+      })
+      .catch(() => {
+        if (active) setResumen(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [offline.online]);
 
   const load = useCallback(async () => {
     if (local) {
@@ -106,6 +133,7 @@ export default function HatoListaPage() {
   }
 
   const hayFiltros = Boolean(filtros.q || filtros.predioId);
+  const filtrosPorDefecto = filtros.estado === FILTROS_LISTADO_DEFAULT.estado && filtros.estadoOperativo === FILTROS_LISTADO_DEFAULT.estadoOperativo;
 
   return (
     <div className="gan-panel gan-hato">
@@ -136,15 +164,36 @@ export default function HatoListaPage() {
             <option key={predio.predioId} value={predio.predioId}>{predio.nombrePredio}</option>
           ))}
         </select>
+        <label className="gan-hato-filtro" htmlFor="filtro-situacion">
+          <span>Situación</span>
+          <select
+            id="filtro-situacion"
+            value={filtros.estadoOperativo}
+            onChange={(event) => setFiltros((current) => ({ ...current, estadoOperativo: event.target.value }))}
+          >
+            {FILTROS_SITUACION.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+          </select>
+        </label>
+        <label className="gan-hato-filtro" htmlFor="filtro-estado-registro">
+          <span>Estado del registro</span>
+          <select
+            id="filtro-estado-registro"
+            value={filtros.estado}
+            onChange={(event) => setFiltros((current) => ({ ...current, estado: event.target.value }))}
+          >
+            {FILTROS_ESTADO_REGISTRO.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+          </select>
+        </label>
         <button type="submit" className="gan-secondary-button">Buscar</button>
-        <button
-          type="button"
-          className="gan-back-inline"
-          onClick={() => setFiltros((current) => ({ ...current, estado: current.estado === 'ACTIVO' ? 'ANULADO' : 'ACTIVO' }))}
-        >
-          {filtros.estado === 'ACTIVO' ? 'Ver anulados' : 'Ver activos'}
-        </button>
       </form>
+
+      {resumen ? (
+        <dl className="gan-hato-resumen" aria-label="Resumen del hato">
+          <div><dt>En hato</dt><dd>{resumen.hatoActual}</dd></div>
+          <div><dt>Salidos</dt><dd>{resumen.salidos}</dd></div>
+          <div><dt>Muertos</dt><dd>{resumen.muertos}</dd></div>
+        </dl>
+      ) : null}
 
       {state.status === 'loading' ? <StatusMessage>Cargando animales...</StatusMessage> : null}
       {state.status === 'error' ? (
@@ -157,9 +206,9 @@ export default function HatoListaPage() {
         <StatusMessage type="info">
           {hayFiltros
             ? 'Ningún animal coincide con la búsqueda.'
-            : filtros.estado === 'ANULADO'
-              ? 'No hay registros anulados.'
-              : 'Aún no tienes animales registrados.'}
+            : !filtrosPorDefecto
+              ? 'No hay animales con estos filtros.'
+              : 'Aún no tienes animales en el hato.'}
         </StatusMessage>
       ) : null}
 
@@ -181,6 +230,9 @@ export default function HatoListaPage() {
                     <span>{formatPeso(animal.ultimoPeso)}</span>
                     <span>{animal.predioNombre}</span>
                     {animal.estado === 'ANULADO' ? <span className="gan-hato-badge">Anulado</span> : null}
+                    {situacionDe(animal) !== 'EN_HATO' ? (
+                      <span className={`gan-hato-badge gan-hato-badge-situacion-${situacionDe(animal).toLowerCase()}`}>{ETIQUETAS_SITUACION[situacionDe(animal)]}</span>
+                    ) : null}
                     <SyncBadge animal={animal} />
                   </div>
                 </Link>
