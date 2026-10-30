@@ -35,6 +35,15 @@ test('solo fuentes Business: sin legacy, vistas, Demo ni Supabase', () => {
   assert.match(service, /from '\.\.\/pesajesService\.js'/);
 });
 
+test('FASE 2C: chapeta solo vía repositorio Business y proyectada; el modelo nunca lee secretos QR', () => {
+  const service = strip(read(ARCHIVOS[2]));
+  assert.match(service, /from '\.\.\/qrChapetasRepository\.js'/);
+  assert.match(service, /codigoVisible: c\.codigoVisible, estado: c\.estado/);
+  for (const rel of [ARCHIVOS[0], ARCHIVOS[1]]) {
+    assert.doesNotMatch(strip(read(rel)), /\.(token\w*|qrId|intentHash|metadata\w*)\b/i, `${rel}: sin campos técnicos QR`);
+  }
+});
+
 test('organización solo desde la sesión; nunca de query/body/headers', () => {
   const ruta = strip(read(ARCHIVOS[3]));
   assert.match(ruta, /router\.use\(createRequireGanaderiaSession\(\{ appEnv \}\)\)/);

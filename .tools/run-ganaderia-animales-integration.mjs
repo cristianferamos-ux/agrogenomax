@@ -20,7 +20,7 @@ try {
     'server/services/__tests__/qrInventarioIntegration.test.js': 33,
     'server/services/__tests__/syncPullIntegration.test.js': 3,
     'server/services/__tests__/animalPesajesIntegration.test.js': 14,
-    'server/services/__tests__/reporteProductivoIntegration.test.js': 5,
+    'server/services/__tests__/reporteProductivoIntegration.test.js': 7,
     'server/services/__tests__/timelineIntegration.test.js': 7,
     'server/services/__tests__/animalCierreIntegration.test.js': 18,
   } });

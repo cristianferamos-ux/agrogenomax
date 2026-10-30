@@ -29,7 +29,7 @@ let seq = 0;
 const p = (fecha, pesoKg) => ({ pesajeId: String(++seq), fecha, pesoKg, metodo: 'BASCULA', origen: 'MANUAL', observaciones: null, createdAt: `${fecha}T12:00:00Z` });
 const animal = (animalId, extra = {}) => ({
   animalId, predioNombre: 'Finca A', numeroVisual: `AGX-${animalId}`, nombre: null, sexo: 'MACHO', razaTipo: 'DESCONOCIDA',
-  categoriaProductivaNombre: null, estado: 'ACTIVO', estadoMotivo: null, fechaCreacion: new Date('2026-01-10T15:00:00Z'), ...extra,
+  categoriaProductivaNombre: null, estado: 'ACTIVO', estadoMotivo: null, estadoOperativo: 'EN_HATO', cierre: null, fechaCreacion: new Date('2026-01-10T15:00:00Z'), ...extra,
 });
 
 // "Base" de la organización A (la B solo tiene su propio animal 900).
@@ -41,9 +41,18 @@ const DATOS = {
     4: { animal: animal('4'), pesajes: Array.from({ length: 40 }, (_, i) => p(new Date(Date.UTC(2025, 0, 1 + i * 9)).toISOString().slice(0, 10), 200 + i * 3)) },
     5: { animal: animal('5'), pesajes: [p('2026-06-01', 320), p('2026-07-01', 330), p('2026-08-06', 300)] },
     6: { animal: animal('6', { estado: 'ANULADO', estadoMotivo: 'Registro duplicado' }), pesajes: [p('2026-03-01', 290)] },
+    // FASE 2C: cerrados (QA producción #2 y #3) y anulado con cierre.
+    7: {
+      animal: animal('7', { estadoOperativo: 'SALIDO', cierre: { tipo: 'SALIDA', fecha: '2026-10-30', causa: 'VENTA', observaciones: null } }),
+      pesajes: [p('2026-10-19', 350), p('2026-10-20', 355)],
+      chapetas: { activa: null, historial: [{ codigoVisible: 'AGX-000002', estado: 'REVOCADO' }] },
+    },
+    8: { animal: animal('8', { estadoOperativo: 'MUERTO', cierre: { tipo: 'MUERTE', fecha: '2026-10-30', causa: 'ENFERMEDAD', observaciones: null } }), pesajes: [p('2026-10-19', 350)] },
+    10: { animal: animal('10', { estado: 'ANULADO', estadoMotivo: 'Duplicado', estadoOperativo: 'SALIDO', cierre: { tipo: 'SALIDA', fecha: '2026-10-30', causa: 'TRASLADO', observaciones: 'x' } }), pesajes: [] },
   },
   [ORG_B]: {
     900: { animal: animal('900', { numeroVisual: 'SECRETO-B', predioNombre: 'Finca B confidencial' }), pesajes: [p('2026-10-01', 500)] },
+    901: { animal: animal('901', { numeroVisual: 'SECRETO-B2', estadoOperativo: 'MUERTO', cierre: { tipo: 'MUERTE', fecha: '2026-10-30', causa: 'ACCIDENTE', observaciones: null } }), pesajes: [] },
   },
 };
 
@@ -52,7 +61,7 @@ async function cargarDatosFalso(organizacionId, animalId) {
   llamadas.push({ organizacionId, animalId });
   const fila = DATOS[organizacionId]?.[animalId];
   if (!fila) return null;
-  return { animal: fila.animal, historial: construirHistorialPesajes({ animalId, pesajes: fila.pesajes }) };
+  return { animal: fila.animal, historial: construirHistorialPesajes({ animalId, pesajes: fila.pesajes }), chapetas: fila.chapetas ?? null };
 }
 
 before(() => {
@@ -212,5 +221,29 @@ describe('FASE 1C.2: reporte productivo -- respuesta PDF', () => {
     assert.equal(r.status, 500);
     assert.doesNotMatch(r.body.toString('utf8'), /relation|animal_pesajes|\.js:|stack/i);
     assert.notEqual(r.headers.get('content-type'), 'application/pdf');
+  });
+});
+
+describe('FASE 2C: reporte productivo -- animales fuera del hato', () => {
+  test('SALIDO, MUERTO y ANULADO + SALIDO -> 200 PDF válido con las mismas cabeceras seguras', async () => {
+    for (const id of [7, 8, 10]) {
+      const r = await get(URL_REPORTE(id));
+      assert.equal(r.status, 200, `animal ${id}`);
+      assert.equal(r.headers.get('content-type'), 'application/pdf');
+      assert.equal(r.headers.get('content-disposition'), `attachment; filename="AgroGenomaX_Reporte_Productivo_AGX-${id}_2026-10-20.pdf"`);
+      assert.equal(r.headers.get('cache-control'), 'no-store');
+      assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
+      assert.equal(Number(r.headers.get('content-length')), r.body.length);
+      assert.equal(r.body.subarray(0, 5).toString('latin1'), '%PDF-');
+    }
+  });
+
+  test('animal cerrado de OTRA organización -> 404 idéntico al inexistente', async () => {
+    const ajeno = await get(URL_REPORTE(901));
+    const inexistente = await get(URL_REPORTE(999999));
+    assert.equal(ajeno.status, 404);
+    assert.deepEqual(ajeno.json, inexistente.json);
+    assert.doesNotMatch(ajeno.body.toString('latin1'), /SECRETO-B2/);
+    assert.equal((await get(URL_REPORTE(901), { org: ORG_B })).status, 200);
   });
 });

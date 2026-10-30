@@ -314,6 +314,15 @@ export function generarPdfReporteProductivo(modelo, { ahora = new Date(), compre
       // 1. Identificación
       tituloSeccion(doc, cursor, 'Identificación');
       rejilla(doc, cursor, modelo.identificacion, { columnas: 3 });
+      if (modelo.notaChapeta) parrafo(doc, cursor, modelo.notaChapeta, { size: 7.5, color: C.soft, despues: 6 });
+
+      // 1b. Cierre operativo (salida/muerte), solo si existe
+      if (modelo.cierre) {
+        tituloSeccion(doc, cursor, modelo.cierre.titulo);
+        // Fecha + motivo/causa; observaciones (hasta 500) a todo el ancho.
+        rejilla(doc, cursor, modelo.cierre.filas.slice(0, 2), { columnas: 2 });
+        if (modelo.cierre.filas.length > 2) rejilla(doc, cursor, modelo.cierre.filas.slice(2), { columnas: 1 });
+      }
 
       // 2. Resumen productivo
       tituloSeccion(doc, cursor, 'Resumen productivo');
