@@ -5,11 +5,22 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useGanaderiaAuth } from './GanaderiaAuthContext.jsx';
 import OrganizacionRequerida from './OrganizacionRequerida.jsx';
 import { loginReturnState } from './loginReturnPath.js';
+import { QR_RESOLVER_LIMPIO, tokenEnRutaPrivada } from '../hato/qrToken.js';
+import { guardarTokenPendiente } from '../hato/qrPendiente.js';
 import '../styles/ganaderia-login.css';
 
 export default function RequireGanaderiaAuth({ children }) {
   const { status, rolInterno } = useGanaderiaAuth();
   const location = useLocation();
+
+  // FASE 3B: una URL antigua /ganaderia/qr/<token> sale de la barra ANTES de
+  // cualquier otra rama (incluido el login, que la guardaría en state): el
+  // token pasa a memoria y se continúa en la URL limpia /ganaderia/qr.
+  const tokenEnRuta = tokenEnRutaPrivada(location.pathname);
+  if (tokenEnRuta) {
+    guardarTokenPendiente(tokenEnRuta);
+    return <Navigate to={QR_RESOLVER_LIMPIO} replace />;
+  }
 
   // Orden de las ramas: loading primero -- ninguna rama posterior puede
   // ejecutarse antes de que esta retorne, así que el contenido privado

@@ -66,8 +66,11 @@ export function registrarPesaje(animalId, body) {
 
 // SPRINT-3D11.3 (R1): chapetas QR de la organización (asignadas por el
 // Super Admin). La organización nunca genera chapetas ni ve el stock central.
-export function resolveQrToken(token) {
-  return getJsonWithSession(`${BASE}/qr/token/${encodeURIComponent(token)}`);
+// FASE 3B: el token NUNCA va en la URL. Con token en memoria (escáner) va en
+// el body; sin él, el servidor usa la cookie HttpOnly que fijó la Pages
+// Function al abrir la chapeta impresa. POST con CSRF, sin reintentos.
+export function resolveQrPendiente(token) {
+  return postJsonWithCsrf(`${BASE}/qr/resolver`, token ? { token } : {});
 }
 
 export function resolveQrCodigo(codigo) {

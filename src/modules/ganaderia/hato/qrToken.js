@@ -90,9 +90,30 @@ export function parseQrContent(rawValue) {
   return (match && classify(match[1])) || { kind: 'invalid' };
 }
 
-/** Ruta privada del resolver para un token o un código canónico. */
+// FASE 3B: URL limpia del resolver. Un token NUNCA va en la ruta (se
+// resuelve desde memoria -- qrPendiente.js -- o desde la cookie HttpOnly
+// de la Pages Function); un código visible no es secreto y sí va.
+export const QR_RESOLVER_LIMPIO = '/ganaderia/qr';
+const RUTA_PRIVADA_CON_TOKEN = /^\/ganaderia\/qr\/([A-Za-z0-9_-]{32})\/?$/;
+
+/** Ruta privada del resolver: URL limpia para un token, /ganaderia/qr/<código> para un código. */
 export function qrResolverPath(parsed) {
-  return `/ganaderia/qr/${parsed.kind === 'token' ? parsed.token : parsed.codigo}`;
+  return parsed.kind === 'token' ? QR_RESOLVER_LIMPIO : `/ganaderia/qr/${parsed.codigo}`;
+}
+
+/** /ganaderia/qr/<token> (URL antigua) -> token, para sacarlo de la URL antes de cualquier otra cosa. */
+export function tokenEnRutaPrivada(pathname) {
+  const match = typeof pathname === 'string' ? pathname.match(RUTA_PRIVADA_CON_TOKEN) : null;
+  return match ? match[1] : null;
+}
+
+const CORRELATION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** FASE 3B: 5xx con correlationId del servidor -> código de seguimiento corto (8 hex), o null. */
+export function codigoSeguimiento({ status, data } = {}) {
+  if (typeof status !== 'number' || status < 500) return null;
+  const id = data?.correlationId;
+  return typeof id === 'string' && CORRELATION_ID_PATTERN.test(id) ? id.slice(0, 8).toLowerCase() : null;
 }
 
 export const ESTADO_CHAPETA_LABELS = Object.freeze({
@@ -113,6 +134,9 @@ export const ESTADO_CHAPETA_LABELS = Object.freeze({
  * servidor lo resolvió bajo la organización de la sesión -> "Ver ficha".
  */
 export function qrResolutionOutcome({ ok, status, data } = {}) {
+  // FASE 3B: POST /resolver sin token en memoria ni cookie (recarga, cookie
+  // vencida o ya consumida) -> pedir escanear de nuevo. No revela nada.
+  if (status === 404 && data?.error === 'QR_PENDIENTE_AUSENTE') return { status: 'sin_pendiente' };
   if (ok && data?.resultado === 'ANIMAL' && typeof data.animalId === 'string' && /^[1-9]\d{0,17}$/.test(data.animalId)) {
     return { status: 'found', to: `/ganaderia/animales/${data.animalId}` };
   }
@@ -125,5 +149,6 @@ export function qrResolutionOutcome({ ok, status, data } = {}) {
     const animalId = typeof data?.animalId === 'string' && /^[1-9]\d{0,17}$/.test(data.animalId) ? data.animalId : null;
     return { status: 'no_operativa', estado: ESTADO_CHAPETA_LABELS[data?.estado] ?? 'Fuera de uso', animalId };
   }
-  return { status: 'error' };
+  const seguimiento = codigoSeguimiento({ status, data });
+  return seguimiento ? { status: 'error', seguimiento } : { status: 'error' };
 }

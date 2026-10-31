@@ -12,7 +12,11 @@ import {
   parseQrContent,
   qrResolutionOutcome,
   qrResolverPath,
+  QR_RESOLVER_LIMPIO,
+  tokenEnRutaPrivada,
+  codigoSeguimiento,
 } from '../qrToken.js';
+import { descartarTokenPendiente, guardarTokenPendiente, leerTokenPendiente, rutaResolverQr, QR_PENDIENTE_TTL_MS } from '../qrPendiente.js';
 import { loginReturnState, safeLoginReturnPath } from '../../auth/loginReturnPath.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -72,9 +76,50 @@ test('contenido ajeno -> invalid (sin navegar a la URL leída)', () => {
   }
 });
 
-test('escaneo y digitación llevan al MISMO resolver privado', () => {
-  assert.equal(qrResolverPath({ kind: 'token', token: TOKEN }), `/ganaderia/qr/${TOKEN}`);
+test('escaneo y digitación llevan al MISMO resolver privado; FASE 3B: el token nunca va en la ruta', () => {
+  assert.equal(QR_RESOLVER_LIMPIO, '/ganaderia/qr');
+  assert.equal(qrResolverPath({ kind: 'token', token: TOKEN }), '/ganaderia/qr');
   assert.equal(qrResolverPath({ kind: 'codigo', codigo: CODIGO }), `/ganaderia/qr/${CODIGO}`);
+  descartarTokenPendiente();
+  assert.equal(rutaResolverQr({ kind: 'token', token: TOKEN }), '/ganaderia/qr');
+  assert.equal(leerTokenPendiente(), TOKEN, 'el token queda solo en memoria');
+  descartarTokenPendiente();
+  assert.equal(rutaResolverQr({ kind: 'codigo', codigo: CODIGO }), `/ganaderia/qr/${CODIGO}`);
+  assert.equal(leerTokenPendiente(), null, 'un código no deja token pendiente');
+});
+
+test('FASE 3B: token pendiente en memoria -- formato válido, caduca y se descarta', () => {
+  descartarTokenPendiente();
+  guardarTokenPendiente('corto');
+  assert.equal(leerTokenPendiente(), null);
+  guardarTokenPendiente(TOKEN, 1000);
+  assert.equal(leerTokenPendiente(1000 + QR_PENDIENTE_TTL_MS - 1), TOKEN);
+  assert.equal(leerTokenPendiente(1000 + QR_PENDIENTE_TTL_MS), null, 'caducado');
+  assert.equal(leerTokenPendiente(1000), null, 'caducado se borra');
+  guardarTokenPendiente(TOKEN);
+  descartarTokenPendiente();
+  assert.equal(leerTokenPendiente(), null);
+  const store = code('qrPendiente.js');
+  assert.doesNotMatch(store, /localStorage|sessionStorage|indexedDB|document\.cookie|history\.|location/);
+});
+
+test('FASE 3B: /ganaderia/qr/<token> (URL antigua) se detecta para sacarlo de la barra', () => {
+  assert.equal(tokenEnRutaPrivada(`/ganaderia/qr/${TOKEN}`), TOKEN);
+  assert.equal(tokenEnRutaPrivada(`/ganaderia/qr/${TOKEN}/`), TOKEN);
+  for (const p of ['/ganaderia/qr', `/ganaderia/qr/${CODIGO}`, `/qr/${TOKEN}`, `/ganaderia/qr/${TOKEN}/x`, undefined]) {
+    assert.equal(tokenEnRutaPrivada(p), null, String(p));
+  }
+});
+
+test('FASE 3B: 5xx con correlationId -> código de seguimiento corto; 4xx o sin id -> nada', () => {
+  const id = '4612e456-7890-4abc-8def-740987654321';
+  assert.equal(codigoSeguimiento({ status: 500, data: { correlationId: id } }), '4612e456');
+  assert.equal(codigoSeguimiento({ status: 503, data: { correlationId: id } }), '4612e456');
+  assert.equal(codigoSeguimiento({ status: 404, data: { correlationId: id } }), null);
+  assert.equal(codigoSeguimiento({ status: 500, data: { correlationId: '<script>' } }), null);
+  assert.equal(codigoSeguimiento({ status: 500, data: null }), null);
+  assert.deepEqual(qrResolutionOutcome({ ok: false, status: 500, data: { error: 'x', correlationId: id } }), { status: 'error', seguimiento: '4612e456' });
+  assert.deepEqual(qrResolutionOutcome({ ok: false, status: 404, data: { error: 'QR_PENDIENTE_AUSENTE' } }), { status: 'sin_pendiente' });
 });
 
 // ---------------------------------------------------------------------
@@ -123,17 +168,20 @@ test('respuestas inesperadas -> error, nunca navegación', () => {
 // ---------------------------------------------------------------------
 
 test('destino post-login: solo resolver QR (token o código) y escáner; nada de URLs absolutas', () => {
-  for (const ok of [`/ganaderia/qr/${TOKEN}`, `/ganaderia/qr/${CODIGO}`, '/ganaderia/qr/AGX-000003', '/ganaderia/escanear-qr']) {
+  for (const ok of ['/ganaderia/qr', `/ganaderia/qr/${CODIGO}`, '/ganaderia/qr/AGX-000003', '/ganaderia/escanear-qr']) {
     assert.equal(safeLoginReturnPath(ok), ok);
   }
   for (const value of [
     undefined, null, 42, '', '/ganaderia/dashboard', '/ganaderia/animales/1', `//evil.example/ganaderia/qr/${TOKEN}`,
     `https://evil.example/ganaderia/qr/${TOKEN}`, `/ganaderia/qr/${TOKEN}/x`, '/ganaderia/qr/corto', `/ganaderia/qr/${CODIGO}?x=1`,
     '/ganaderia/admin/qr',
+    // FASE 3B: un token nunca es destino post-login (no debe quedar en location.state).
+    `/ganaderia/qr/${TOKEN}`,
   ]) {
     assert.equal(safeLoginReturnPath(value), null, String(value));
   }
-  assert.deepEqual(loginReturnState(`/ganaderia/qr/${TOKEN}`), { from: `/ganaderia/qr/${TOKEN}` });
+  assert.deepEqual(loginReturnState('/ganaderia/qr'), { from: '/ganaderia/qr' });
+  assert.equal(loginReturnState(`/ganaderia/qr/${TOKEN}`), undefined);
   assert.equal(loginReturnState('/ganaderia/predios'), undefined);
 });
 
@@ -142,6 +190,11 @@ test('sin sesión: el guard envía a /ganaderia/login antes de renderizar el res
   assert.match(guard, /if \(status === 'anonymous'\) \{\s*return <Navigate to="\/ganaderia\/login" replace state=\{loginReturnState\(location\.pathname\)\} \/>;/);
   const app = stripComments(read(path.join(GANADERIA_DIR, 'GanaderiaApp.jsx')));
   assert.match(app, /<Route path="qr\/:valor" element=\{<HatoQrResolverPage \/>\} \/>/);
+  assert.match(app, /<Route path="qr" element=\{<HatoQrResolverPage \/>\} \/>/);
+  // FASE 3B: el token sale de la URL ANTES de la rama de login (no llega a location.state).
+  const iToken = guard.indexOf('tokenEnRutaPrivada(location.pathname)');
+  assert.ok(iToken > 0 && iToken < guard.indexOf("status === 'loading'") && iToken < guard.indexOf("status === 'anonymous'"));
+  assert.match(guard, /guardarTokenPendiente\(tokenEnRuta\);\s*return <Navigate to=\{QR_RESOLVER_LIMPIO\} replace \/>;/);
 });
 
 // ---------------------------------------------------------------------
@@ -150,9 +203,13 @@ test('sin sesión: el guard envía a /ganaderia/login antes de renderizar el res
 
 test('resolver: valida el formato antes de llamar a la API, usa token o código y reemplaza el historial', () => {
   const resolver = code('HatoQrResolverPage.jsx');
-  assert.match(resolver, /const parsed = parseQrContent\(valor\);/);
+  assert.match(resolver, /const parsed = pendiente \? null : parseQrContent\(valor\);/);
   assert.match(resolver, /if \(!valido\) return;/);
-  assert.match(resolver, /kind === 'token' \? await resolveQrToken\(clave\) : await resolveQrCodigo\(clave\)/);
+  // FASE 3B: código por GET (no es secreto); token (memoria) o cookie por POST, nunca en la URL.
+  assert.match(resolver, /kind === 'codigo' \? resolveQrCodigo\(clave\) : resolveQrPendiente\(clave\)/);
+  assert.doesNotMatch(resolver, /resolveQrToken|localStorage|sessionStorage/);
+  assert.match(resolver, /if \(tokenEnUrl\) return <Navigate to=\{rutaResolverQr\(parsed\)\} replace \/>;/);
+  assert.match(resolver, /Código de seguimiento/);
   assert.match(resolver, /if \(outcome\.status === 'found'\) return <Navigate to=\{outcome\.to\} replace \/>;/);
 });
 
@@ -168,7 +225,7 @@ test('escáner móvil: html5-qrcode sin normalizador legacy ni MAYÚSCULAS; entr
   assert.match(page, />Buscar</);
   assert.match(page, /onDecoded=\{\(text\) => handleContent\(text, INVALID_SCAN_MESSAGE\)\}/);
   assert.match(page, /handleContent\(codigo, INVALID_CODE_MESSAGE\)/);
-  assert.match(page, /navigate\(qrResolverPath\(parsed\)\)/);
+  assert.match(page, /navigate\(rutaResolverQr\(parsed\)\)/);
   for (const forbidden of [/hatoApi/, /\/api\//, /fetch\(/, /from '\.\.\/qr\//]) {
     assert.doesNotMatch(page, forbidden);
   }
@@ -191,7 +248,8 @@ test('ficha: la organización asocia, reemplaza o da de baja chapetas existentes
 
 test('hatoApi: chapetas solo bajo /api/ganaderia/qr y /animales/:id/qr; nunca /api/qr legacy ni admin', () => {
   const api = code('hatoApi.js');
-  for (const fragment of ['/qr/token/', '/qr/codigo/', '/qr/chapetas', '/registrar-animal', '/qr/asociar', '/qr/reemplazar', '/qr/baja']) {
+  assert.ok(!api.includes('/qr/token/'), 'FASE 3B: el SPA ya no pone el token en la URL');
+  for (const fragment of ['/qr/resolver', '/qr/codigo/', '/qr/chapetas', '/registrar-animal', '/qr/asociar', '/qr/reemplazar', '/qr/baja']) {
     assert.ok(api.includes(fragment), fragment);
   }
   assert.doesNotMatch(api, /'\/api\/qr|`\/api\/qr|\/admin\//);
