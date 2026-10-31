@@ -133,13 +133,15 @@ test('mutaciones usan CSRF vía el cliente autenticado compartido, GET no', () =
 test('PotreroFichaProductivaPanel.jsx monta PotreroMotorPastoreoPanel siempre que no se esté registrando un aforo, con tieneFicha={Boolean(actual)}', () => {
   assert.match(fichaPanelSource, /import PotreroMotorPastoreoPanel from '\.\/PotreroMotorPastoreoPanel\.jsx';/);
   assert.match(fichaPanelSource, /tieneFicha=\{Boolean\(actual\)\}/);
-  assert.match(fichaPanelSource, /onCrearFicha=\{openForm\}/);
+  // FASE 3A: crear ficha (estructura del potrero) solo con editarPotrero.
+  assert.match(fichaPanelSource, /onCrearFicha=\{permisos\.editarPotrero \? openForm : undefined\}/);
 
   // Debe estar fuera de la rama "actual" (para renderizar también cuando
   // no hay ficha) y fuera de la rama "showForm" (oculto mientras se
   // registra un aforo nuevo).
   const componentIndex = fichaPanelSource.indexOf('<PotreroMotorPastoreoPanel');
-  const formBranchStart = fichaPanelSource.indexOf('{showForm ? (');
+  // FASE 3A: la rama del formulario exige además editarPotrero.
+  const formBranchStart = fichaPanelSource.indexOf('{showForm && permisos.editarPotrero ? (');
   assert.ok(componentIndex > 0 && formBranchStart > componentIndex, 'debe montarse antes del formulario de nueva ficha, nunca dentro de él');
 });
 

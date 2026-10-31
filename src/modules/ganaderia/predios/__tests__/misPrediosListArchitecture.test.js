@@ -140,7 +140,8 @@ test('PrediosPage.jsx: el panel "Registrar nuevo predio" se renderiza incondicio
   // se muestra "Requiere conexión"); nunca el estado de la lista.
   const registerPanel = source.match(/\) : \(\s*<div className="gan-panel">\s*<div className="gan-section-heading">\s*<span className="gan-eyebrow">Registrar nuevo predio<\/span>[\s\S]*?<\/div>\s*\)\}\s*<\/div>\s*\);/)?.[0] ?? '';
   assert.ok(registerPanel, 'debe existir el panel de registro');
-  assert.match(source, /\{sinConexion \? \(\s*<div className="gan-panel">[\s\S]{0,200}Requiere conexión/);
+  // FASE 3A: además, solo con la capacidad editarPredio (owner/admin).
+  assert.match(source, /\{!permisos\.editarPredio \? null : sinConexion \? \(\s*<div className="gan-panel">[\s\S]{0,200}Requiere conexión/);
   assert.doesNotMatch(registerPanel.slice(0, 50), /prediosListError/);
   // El bloque que envuelve el heading no depende de {!prediosListError && ...}
   assert.doesNotMatch(source, /\{!prediosListError[\s\S]{0,80}Registrar nuevo predio/);

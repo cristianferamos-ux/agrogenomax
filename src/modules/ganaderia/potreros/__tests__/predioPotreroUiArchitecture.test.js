@@ -532,7 +532,8 @@ test('PotreroCard: "Eliminar potrero" solo se muestra cuando el potrero NO está
   const fn = extractPotreroCardFn();
   assert.notEqual(fn, '');
   assert.match(fn, /const archivado = potrero\.estado === 'ARCHIVADO';/);
-  assert.match(fn, /\{!archivado \? \(/);
+  // FASE 3A: solo con la capacidad editarPotrero (owner/admin).
+  assert.match(fn, /\{!permisos\.editarPotrero \? null : !archivado \? \(/);
   assert.match(fn, /Eliminar potrero/);
   assert.match(fn, /\) : \(/);
   assert.match(fn, /Restaurar potrero/);

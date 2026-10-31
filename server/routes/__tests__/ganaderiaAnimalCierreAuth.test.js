@@ -230,6 +230,9 @@ describe('FASE 2B: RBAC de cierres (owner/admin)', () => {
     const rol = src.indexOf('router.use(createRequireGanaderiaRole(...ROLES_CIERRE))');
     const post = src.indexOf("router.post('/'");
     assert.ok(sesion > 0 && rol > sesion && post > rol);
-    assert.match(src, /ROLES_CIERRE = Object\.freeze\(\['owner', 'admin'\]\)/);
+    // FASE 3A: ROLES_CIERRE sale de la matriz central (owner/admin).
+    assert.match(src, /ROLES_CIERRE = ROLES_ADMINISTRACION;/);
+    const { ROLES_CIERRE } = await import('../ganaderiaAnimalCierre.js');
+    assert.deepEqual([...ROLES_CIERRE], ['owner', 'admin']);
   });
 });

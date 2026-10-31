@@ -17,6 +17,7 @@ import {
   previewPotreroGps,
 } from './ganaderiaPotrerosApi.js';
 import GanaderiaPotreroPreviewMap from './GanaderiaPotreroPreviewMap.jsx';
+import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
 
 const GENERIC_PREVIEW_ERROR = 'No fue posible generar la vista previa en este momento. Intenta nuevamente.';
 const GENERIC_CREATE_ERROR = 'No fue posible registrar el potrero en este momento. Intenta nuevamente.';
@@ -29,6 +30,7 @@ const MIN_POINTS = 3;
 // copy deja de sugerir que CUALQUIER diferencia es un error, ya que una
 // diferencia pequeña se acepta como TOLERANCE_OK sin llegar a este código.
 const PREVIEW_ERROR_MESSAGES = {
+  ROLE_FORBIDDEN: MENSAJE_ROLE_FORBIDDEN, // FASE 3A
   POTRERO_OUTSIDE_PREDIO:
     'Una parte importante del potrero se encuentra fuera del límite registrado del predio. Revisa la delimitación antes de continuar.',
   INVALID_POTRERO_GEOMETRY: 'Los puntos ingresados no forman un polígono válido.',
@@ -56,6 +58,7 @@ const GPS_MAX_ACCURACY_M = 100;
 // frontend nunca decide si un archivo es válido, solo traduce el código
 // real devuelto por preview-file (potreroKmlImport.js) a copy amigable.
 const FILE_ERROR_MESSAGES = {
+  ROLE_FORBIDDEN: MENSAJE_ROLE_FORBIDDEN, // FASE 3A
   UNSUPPORTED_FILE_TYPE: 'Solo se aceptan archivos .kml o .kmz.',
   FILE_TOO_LARGE: 'El archivo es demasiado grande.',
   INVALID_KML: 'El archivo KML no es válido.',
@@ -120,6 +123,7 @@ const METODO_DELIMITACION_LABELS = {
 
 // §21: errores de candidate en la creación definitiva.
 const CREATE_ERROR_MESSAGES = {
+  ROLE_FORBIDDEN: MENSAJE_ROLE_FORBIDDEN, // FASE 3A
   CANDIDATE_EXPIRED: 'La vista previa expiró. Genera una nueva.',
   CANDIDATE_ALREADY_USED: 'Esta vista previa ya fue utilizada. Genera una nueva.',
   CANDIDATE_IN_USE: 'Esta vista previa ya se está procesando. Espera un momento.',

@@ -23,11 +23,14 @@ import {
   createPasturaPersonalizada,
 } from './ganaderiaFichaProductivaApi.js';
 import PotreroMotorPastoreoPanel from './PotreroMotorPastoreoPanel.jsx';
+import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
+import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
 
 const GENERIC_ERROR = 'No fue posible completar la operación en este momento. Intenta nuevamente.';
 const MAX_AFORO_G_M2 = 10000;
 
 const CREATE_ERROR_MESSAGES = {
+  ROLE_FORBIDDEN: MENSAJE_ROLE_FORBIDDEN, // FASE 3A
   EMPTY_ESPECIES: 'Selecciona al menos una especie de pastura.',
   INVALID_ESPECIES: 'Revisa las especies seleccionadas.',
   ESPECIE_NOT_FOUND: 'Una de las especies seleccionadas ya no está disponible. Quítala e intenta de nuevo.',
@@ -41,6 +44,7 @@ const CREATE_ERROR_MESSAGES = {
 };
 
 const PASTURA_CREATE_ERROR_MESSAGES = {
+  ROLE_FORBIDDEN: MENSAJE_ROLE_FORBIDDEN, // FASE 3A
   INVALID_NOMBRE_COMUN: 'Escribe un nombre para la nueva pastura.',
   INVALID_TIPO: 'Selecciona un tipo válido de pastura.',
 };
@@ -112,6 +116,8 @@ function FichaSummary({ ficha, areaHa }) {
 // server-side) -- catálogo pequeño/mediano, sin necesidad de debounce por
 // request.
 function EspecieSelector({ especiesSeleccionadas, onAdd, onRemove, onPorcentajeChange }) {
+  // FASE 3A: catálogo personalizado ("Otra pastura") = owner/admin.
+  const permisos = useGanaderiaPermisos();
   const [catalogo, setCatalogo] = useState([]);
   const [catalogoLoading, setCatalogoLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -214,7 +220,7 @@ function EspecieSelector({ especiesSeleccionadas, onAdd, onRemove, onPorcentajeC
         <p className="gan-potrero-points-hint">Sin resultados para "{search}".</p>
       ) : null}
 
-      {!showOtra ? (
+      {!permisos.crearCatalogoPersonalizado ? null : !showOtra ? (
         <button type="button" className="gan-secondary-button" onClick={() => setShowOtra(true)}>
           + Otra pastura
         </button>
@@ -251,6 +257,8 @@ function EspecieSelector({ especiesSeleccionadas, onAdd, onRemove, onPorcentajeC
 // PotreroRegistrationPanel -- el GET real es la fuente de verdad, nunca
 // una inserción optimista del body enviado).
 export default function PotreroFichaProductivaPanel({ predioId, potreroId, areaHa }) {
+  // FASE 3A: la ficha productiva es estructura del potrero (owner/admin).
+  const permisos = useGanaderiaPermisos();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [actual, setActual] = useState(null);
@@ -367,9 +375,11 @@ export default function PotreroFichaProductivaPanel({ predioId, potreroId, areaH
       {!showForm && !actual ? (
         <div className="gan-ficha-productiva-empty">
           <p className="gan-potrero-points-hint">Aún no has registrado información productiva para este potrero.</p>
-          <button type="button" className="gan-secondary-button" onClick={openForm}>
-            Crear ficha productiva
-          </button>
+          {permisos.editarPotrero ? (
+            <button type="button" className="gan-secondary-button" onClick={openForm}>
+              Crear ficha productiva
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -377,9 +387,11 @@ export default function PotreroFichaProductivaPanel({ predioId, potreroId, areaH
         <>
           <FichaSummary ficha={actual} areaHa={areaHa} />
           <div className="gan-potrero-actions">
-            <button type="button" className="gan-secondary-button" onClick={openForm}>
-              Registrar nuevo aforo
-            </button>
+            {permisos.editarPotrero ? (
+              <button type="button" className="gan-secondary-button" onClick={openForm}>
+                Registrar nuevo aforo
+              </button>
+            ) : null}
             {historial.length > 0 ? (
               <button type="button" className="gan-back-inline" onClick={() => setShowHistorial((v) => !v)}>
                 {showHistorial ? 'Ocultar historial' : 'Ver historial'}
@@ -415,11 +427,11 @@ export default function PotreroFichaProductivaPanel({ predioId, potreroId, areaH
           potreroId={potreroId}
           areaHa={areaHa}
           tieneFicha={Boolean(actual)}
-          onCrearFicha={openForm}
+          onCrearFicha={permisos.editarPotrero ? openForm : undefined}
         />
       ) : null}
 
-      {showForm ? (
+      {showForm && permisos.editarPotrero ? (
         <div className="gan-stack">
           <EspecieSelector
             especiesSeleccionadas={especies}

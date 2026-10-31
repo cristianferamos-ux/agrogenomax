@@ -29,12 +29,15 @@ import {
 } from './ganaderiaRecomendacionPastoreoApi.js';
 import PotreroDescansoReentradaPanel from './PotreroDescansoReentradaPanel.jsx';
 import PotreroCicloPastoreoPanel from './PotreroCicloPastoreoPanel.jsx';
+import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
+import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
 
 const GENERIC_ERROR = 'No fue posible completar la operación en este momento. Intenta nuevamente.';
 
 // §18 del sprint: estados explícitos del motor -- copy por código de error
 // semántico devuelto por el backend.
 const RECOMENDACION_ERROR_MESSAGES = {
+  ROLE_FORBIDDEN: MENSAJE_ROLE_FORBIDDEN, // FASE 3A
   INSUFFICIENT_FORAGE_DATA: 'Primero registra una ficha productiva con un aforo del potrero.',
   NO_PRODUCTIVE_PROFILE: 'Selecciona una categoría productiva válida.',
   NO_TECHNICAL_PARAMETERS: 'Esta categoría todavía no tiene parámetros técnicos configurados.',
@@ -223,6 +226,8 @@ function ResultadoBlock({ payload }) {
 const INITIAL_FORM = { numeroAnimales: '', pesoPromedioKg: '', produccionLecheLDia: '', diasEnLeche: '', grasaLechePct: '', terneroAlPie: false };
 
 export default function PotreroRecomendacionPastoreoPanel({ predioId, potreroId, tieneFicha, onCrearFicha }) {
+  // FASE 3A: nueva recomendación (persistente) = operación.
+  const permisos = useGanaderiaPermisos();
   const [categorias, setCategorias] = useState([]);
   const [categoriasError, setCategoriasError] = useState('');
 
@@ -361,9 +366,11 @@ export default function PotreroRecomendacionPastoreoPanel({ predioId, potreroId,
       <div className="gan-ficha-productiva-panel gan-recomendacion-panel">
         <div className="gan-ficha-productiva-empty">
           <p className="gan-potrero-points-hint">Primero registra una ficha productiva con un aforo del potrero.</p>
-          <button type="button" className="gan-secondary-button" onClick={onCrearFicha}>
-            Crear ficha productiva
-          </button>
+          {onCrearFicha ? (
+            <button type="button" className="gan-secondary-button" onClick={onCrearFicha}>
+              Crear ficha productiva
+            </button>
+          ) : null}
         </div>
       </div>
     );
@@ -381,7 +388,7 @@ export default function PotreroRecomendacionPastoreoPanel({ predioId, potreroId,
 
   return (
     <div className="gan-ficha-productiva-panel gan-recomendacion-panel">
-      {!showForm && !actual ? (
+      {!showForm && !actual && permisos.planificarPastoreo ? (
         <div className="gan-ficha-productiva-empty">
           <button type="button" className="gan-secondary-button" onClick={openForm}>
             Recomendación automática
@@ -402,9 +409,11 @@ export default function PotreroRecomendacionPastoreoPanel({ predioId, potreroId,
             }}
           />
           <div className="gan-potrero-actions">
-            <button type="button" className="gan-secondary-button" onClick={openForm}>
-              Nueva recomendación
-            </button>
+            {permisos.planificarPastoreo ? (
+              <button type="button" className="gan-secondary-button" onClick={openForm}>
+                Nueva recomendación
+              </button>
+            ) : null}
             {historial.length > 0 ? (
               <button type="button" className="gan-back-inline" onClick={() => setShowHistorial((v) => !v)}>
                 {showHistorial ? 'Ocultar historial' : 'Ver historial'}

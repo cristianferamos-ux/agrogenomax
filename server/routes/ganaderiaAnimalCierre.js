@@ -21,13 +21,15 @@ import {
   createRequireGanaderiaRole,
   createRequireGanaderiaSession,
 } from '../security/ganaderiaSession.js';
+import { ROLES_ADMINISTRACION } from '../security/ganaderiaPermisos.js';
 import { resolveFechaHoyNegocio } from '../services/ganaderia/motorDescansoAuto/businessTimezone.js';
 import { isValidPositiveId } from '../services/ganaderia/animalValidation.js';
 import { TIPOS_CIERRE, validateCierreBody } from '../services/ganaderia/cierreValidation.js';
 import { registrarCierreIdempotente } from '../services/ganaderia/cierreRepository.js';
 
-// Roles de membresía (agx.membresias.rol) autorizados a cerrar un animal.
-export const ROLES_CIERRE = Object.freeze(['owner', 'admin']);
+// Roles de membresía (agx.membresias.rol) autorizados a cerrar un animal
+// (FASE 3A: misma fuente que la matriz central).
+export const ROLES_CIERRE = ROLES_ADMINISTRACION;
 
 function sendSemanticError(res, error) {
   if (typeof error?.status === 'number' && typeof error?.code === 'string') {

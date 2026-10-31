@@ -34,6 +34,8 @@ import {
 import useHatoCatalogos from './useHatoCatalogos.js';
 import { normalizeCodigoChapeta } from './qrToken.js';
 import { useGanaderiaOffline } from '../offline/GanaderiaOfflineProvider.jsx';
+import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
+import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
 import '../styles/ganaderia-hato.css';
 
 const FAILURE_NETWORK_ERROR = 'NETWORK_ERROR';
@@ -52,6 +54,8 @@ export default function HatoRegistroPage() {
   const chapetaInvalida = chapetaParam !== null && !chapeta;
   const catalogos = useHatoCatalogos();
   const offline = useGanaderiaOffline();
+  // FASE 3A: lector no registra (ni en línea ni en el outbox offline).
+  const permisos = useGanaderiaPermisos();
   const local = offline.preparado && offline.repo ? offline.repo : null;
   const [form, setForm] = useState(INITIAL_ANIMAL_FORM);
   const [saving, setSaving] = useState(false);
@@ -101,6 +105,10 @@ export default function HatoRegistroPage() {
   async function handleSubmit(event) {
     event.preventDefault();
     if (saving || operationReused || chapetaInvalida) return;
+    if (!permisos.crearAnimal) {
+      setError(MENSAJE_ROLE_FORBIDDEN);
+      return;
+    }
 
     const problema = validateAnimalForm(form);
     if (problema) {
@@ -229,13 +237,16 @@ export default function HatoRegistroPage() {
           <button type="button" className="gan-secondary-button" onClick={catalogos.reload}>Reintentar</button>
         </div>
       ) : null}
-      {catalogos.status === 'ok' && catalogos.predios.length === 0 ? (
+      {permisos.crearAnimal && catalogos.status === 'ok' && catalogos.predios.length === 0 ? (
         <StatusMessage type="info">
-          Para registrar animales primero necesitas un predio activo. <Link to="/ganaderia/predios">Registrar predio</Link>
+          Para registrar animales primero necesitas un predio activo.{' '}
+          {permisos.editarPredio ? <Link to="/ganaderia/predios">Registrar predio</Link> : 'Pide a un administrador que registre uno.'}
         </StatusMessage>
       ) : null}
 
-      {catalogos.status === 'ok' && catalogos.predios.length > 0 ? (
+      {!permisos.crearAnimal ? <StatusMessage type="info">{MENSAJE_ROLE_FORBIDDEN}</StatusMessage> : null}
+
+      {permisos.crearAnimal && catalogos.status === 'ok' && catalogos.predios.length > 0 ? (
         <form className="gan-form" onSubmit={handleSubmit} noValidate>
           <HatoAnimalFields
             form={form}

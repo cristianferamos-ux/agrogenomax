@@ -17,6 +17,8 @@
 //   sesión expirada / CSRF            -> vuelve a PENDIENTE; el ciclo se detiene (requiere login)
 //   409 / 404 / 410                   -> CONFLICTO (dato incompatible: se conserva todo)
 //   otros 4xx (400 validación)        -> RECHAZADO (requiere corrección del usuario)
+//   403 ROLE_FORBIDDEN (FASE 3A)      -> RECHAZADO terminal: el rol ya no permite la
+//                                        operación; nunca se reintenta en bucle
 // Una operación idempotente repetida (200 yaExistia) es un éxito más.
 //
 // Concurrencia (FASE-14): un `lock` opcional (navigator.locks, clave por
@@ -58,9 +60,15 @@ function isRetryable(result) {
   return status === 0 || status === 408 || status === 429 || status >= 500;
 }
 
+/** 403 por rol (RBAC): nunca sesión ni CSRF, nunca reintentable. */
+export function isRoleForbidden(result) {
+  return result?.failure === 'ROLE_FORBIDDEN' || (result?.status === 403 && result?.data?.error === 'ROLE_FORBIDDEN');
+}
+
 export function classifyResult(result) {
   if (result?.ok) return 'OK';
   if (isSessionFailure(result)) return 'SESION';
+  if (isRoleForbidden(result)) return 'RECHAZADO';
   if (isRetryable(result)) return 'REINTENTABLE';
   if ([404, 409, 410].includes(result.status)) return 'CONFLICTO';
   return 'RECHAZADO';

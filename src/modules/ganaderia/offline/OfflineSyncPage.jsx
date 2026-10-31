@@ -10,6 +10,8 @@ import { formatUltimaSync } from './OfflineStatusBar.jsx';
 import { OUTBOX_ESTADOS } from './outbox.js';
 import { formatFecha, formatKg, formatMetodo } from '../hato/pesajesModel.js';
 import { mensajeBloqueoPesaje } from '../hato/pesajesOfflineModel.js';
+import { MENSAJE_OFFLINE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
+import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
 import '../styles/ganaderia-hato.css';
 import '../styles/ganaderia-offline.css';
 
@@ -21,6 +23,8 @@ const CONFLICTO_MENSAJES = Object.freeze({
   CLIENT_OPERATION_ID_REUSED: 'Este registro ya existe en el servidor con otros datos.',
   PREDIO_NOT_FOUND: 'El predio ya no está disponible.',
   PREDIO_ARCHIVADO: 'El predio fue archivado.',
+  // FASE 3A: 403 por rol -> RECHAZADO terminal, sin reintentos.
+  ROLE_FORBIDDEN: MENSAJE_OFFLINE_ROLE_FORBIDDEN,
 });
 
 // FASE 1D.1: un pesaje (PESAJE_CREAR) que el servidor no aceptó. No se
@@ -64,6 +68,10 @@ function ConflictoItem({ op, animal, repo, onDone }) {
   const [valor, setValor] = useState('');
   const [error, setError] = useState('');
   const codigo = op.ultimoError?.codigo;
+  // FASE 3A: sin permiso (rol actual o rechazo 403 ROLE_FORBIDDEN) no se
+  // ofrece reenviar; solo descartar el registro local.
+  const permisos = useGanaderiaPermisos();
+  const puedeReenviar = permisos.crearAnimal && codigo !== 'ROLE_FORBIDDEN';
 
   async function ejecutar(accion) {
     setError('');
@@ -83,13 +91,13 @@ function ConflictoItem({ op, animal, repo, onDone }) {
       {op.payload?.chapetaCodigo ? <span>Chapeta: {op.payload.chapetaCodigo}</span> : null}
       {animal ? <Link to={`/ganaderia/animales/local:${op.localUuid}`}>Ver registro local</Link> : null}
       <div className="gan-hato-actions">
-        {op.payload?.chapetaCodigo ? (
+        {puedeReenviar && op.payload?.chapetaCodigo ? (
           <>
             <button type="button" className="gan-secondary-button" onClick={() => ejecutar(() => repo.resolverSinChapeta(op.localUuid))}>Registrar sin chapeta</button>
             <button type="button" className="gan-secondary-button" onClick={() => setModo('chapeta')}>Usar otra chapeta</button>
           </>
         ) : null}
-        {codigo === 'ANIMAL_NUMERO_VISUAL_DUPLICADO' ? (
+        {puedeReenviar && codigo === 'ANIMAL_NUMERO_VISUAL_DUPLICADO' ? (
           <button type="button" className="gan-secondary-button" onClick={() => setModo('numero')}>Cambiar número</button>
         ) : null}
         <button type="button" className="gan-secondary-button" onClick={() => setModo('descartar')}>Descartar registro local</button>

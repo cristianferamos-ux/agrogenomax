@@ -12,6 +12,7 @@
 //           409 ANIMAL_ANULADO | CLIENT_OPERATION_ID_REUSED
 import { Router } from 'express';
 import { createRequireGanaderiaCsrf, createRequireGanaderiaSession } from '../security/ganaderiaSession.js';
+import { createRequireOperacion } from '../security/ganaderiaPermisos.js';
 import { resolveFechaHoyNegocio } from '../services/ganaderia/motorDescansoAuto/businessTimezone.js';
 import { isValidPositiveId } from '../services/ganaderia/animalValidation.js';
 import { validateCreatePesajeBody } from '../services/ganaderia/pesajeValidation.js';
@@ -46,6 +47,8 @@ export default function createGanaderiaAnimalPesajesRouter({ appEnv, csrfServerS
 
   router.use(createRequireGanaderiaSession({ appEnv }));
   router.use(createRequireGanaderiaCsrf({ csrfServerSecret, allowedOrigins }));
+  // FASE 3A: RBAC por acción (ver server/security/ganaderiaPermisos.js).
+  const requireOperacion = createRequireOperacion();
 
   router.get('/', withAnimalId(async (req, res) => {
     const historial = await obtenerHistorialPesajes(req.ganaderiaAuth.organizacionId, req.params.animalId);
@@ -56,7 +59,7 @@ export default function createGanaderiaAnimalPesajesRouter({ appEnv, csrfServerS
     res.json({ ok: true, ...historial });
   }));
 
-  router.post('/', withAnimalId(async (req, res) => {
+  router.post('/', requireOperacion, withAnimalId(async (req, res) => {
     const value = validateCreatePesajeBody(req.body, { hoy: resolveFechaHoyNegocio() });
     const { organizacionId, cuentaId } = req.ganaderiaAuth;
     const { pesaje, yaExistia } = await registrarPesaje(organizacionId, req.params.animalId, value, { actorCuentaId: cuentaId });

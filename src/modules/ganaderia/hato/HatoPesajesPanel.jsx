@@ -57,6 +57,8 @@ import {
 import { construirAlertasPesajes } from './pesajesAlertas.js';
 import { fechaHoyNegocio } from '../engine/fechaNegocio.js';
 import { TEXTO_SIN_ALERTAS_CERRADO, mensajePesajesCerrado } from './cierreModel.js';
+import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
+import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
 
 const HatoPesajesGrafica = lazy(() => import('./HatoPesajesGrafica.jsx'));
 /** Relectura del outbox local mientras haya pendientes (confirmaciones de otra pestaña / SW). */
@@ -64,6 +66,8 @@ const RELECTURA_PENDIENTES_MS = 4_000;
 
 export default function HatoPesajesPanel({ animalId, animalActivo, estadoOperativo = 'EN_HATO', online = true, repoOffline = null, onPesajeRegistrado }) {
   const fechaNegocio = fechaHoyNegocio();
+  // FASE 3A: lector consulta pesajes pero no registra (ni encola sin red).
+  const permisos = useGanaderiaPermisos();
   const [state, setState] = useState({ status: 'loading', data: null });
   const [form, setForm] = useState(() => initialPesajeForm(fechaNegocio));
   const [errores, setErrores] = useState({});
@@ -178,6 +182,10 @@ export default function HatoPesajesPanel({ animalId, animalActivo, estadoOperati
   async function guardar(event) {
     event.preventDefault();
     if (savingRef.current) return;
+    if (!permisos.registrarPesaje) {
+      setMensaje({ type: 'error', text: MENSAJE_ROLE_FORBIDDEN });
+      return;
+    }
     setMensaje(null);
     const { valido, errores: problemas } = validatePesajeForm(form, { hoy: fechaNegocio });
     if (!valido) {
@@ -242,7 +250,7 @@ export default function HatoPesajesPanel({ animalId, animalActivo, estadoOperati
   // El formulario: con red, cuando el historial confirmado cargó; sin red,
   // siempre que el dispositivo pueda guardar en el outbox (aunque el
   // historial del servidor no esté disponible).
-  const mostrarFormulario = admitePesajes && (online ? state.status === 'ok' : puedeGuardarOffline && state.status !== 'not_found');
+  const mostrarFormulario = permisos.registrarPesaje && admitePesajes && (online ? state.status === 'ok' : puedeGuardarOffline && state.status !== 'not_found');
 
   const formulario = mostrarFormulario ? (
     <HatoPesajeForm
@@ -316,7 +324,7 @@ export default function HatoPesajesPanel({ animalId, animalActivo, estadoOperati
           {!admitePesajes && !cerrado ? (
             <StatusMessage type="info">Este animal está anulado y no admite nuevos pesajes.</StatusMessage>
           ) : null}
-          {admitePesajes && !online && !repoOffline ? (
+          {permisos.registrarPesaje && admitePesajes && !online && !repoOffline ? (
             <p className="gan-hato-hint">Registrar un pesaje requiere conexión.</p>
           ) : null}
           {formulario}

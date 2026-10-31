@@ -22,6 +22,7 @@ import {
   createRequireGanaderiaSession,
   createRequireGanaderiaCsrf,
 } from '../security/ganaderiaSession.js';
+import { createRequireAdministracion } from '../security/ganaderiaPermisos.js';
 import { potrerosPreviewLimiter } from '../middleware/rateLimit.js';
 import {
   listPotrerosByPredio,
@@ -209,6 +210,8 @@ export default function createGanaderiaPotrerosRouter({ appEnv, csrfServerSecret
 
   router.use(requireSession);
   router.use(requireCsrf);
+  // FASE 3A: RBAC por acción (ver server/security/ganaderiaPermisos.js).
+  const requireAdministracion = createRequireAdministracion();
 
   // GET /api/ganaderia/predios/:predioId/potreros
   router.get('/', async (req, res, next) => {
@@ -256,7 +259,7 @@ export default function createGanaderiaPotrerosRouter({ appEnv, csrfServerSecret
   });
 
   // §13: POST /api/ganaderia/predios/:predioId/potreros/preview-coordinates
-  router.post('/preview-coordinates', potrerosPreviewLimiter, async (req, res, next) => {
+  router.post('/preview-coordinates', requireAdministracion, potrerosPreviewLimiter, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const { predioId } = req.params;
@@ -298,7 +301,7 @@ export default function createGanaderiaPotrerosRouter({ appEnv, csrfServerSecret
   // accuracy en ningún punto, se aplica el margen fijo conservador
   // GPS_FALLBACK_NO_ACCURACY (ver potreroSpatialTolerance.js) -- nunca se
   // inventa un valor de precisión.
-  router.post('/preview-gps', potrerosPreviewLimiter, async (req, res, next) => {
+  router.post('/preview-gps', requireAdministracion, potrerosPreviewLimiter, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const { predioId } = req.params;
@@ -364,7 +367,7 @@ export default function createGanaderiaPotrerosRouter({ appEnv, csrfServerSecret
     res.status(400).json({ error: 'INVALID_KML', message: 'No fue posible leer el archivo enviado.' });
   }
 
-  router.post('/preview-file', potrerosPreviewLimiter, rawKmlFileParser, handleRawFileParseError, async (req, res, next) => {
+  router.post('/preview-file', requireAdministracion, potrerosPreviewLimiter, rawKmlFileParser, handleRawFileParseError, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const { predioId } = req.params;
@@ -460,7 +463,7 @@ export default function createGanaderiaPotrerosRouter({ appEnv, csrfServerSecret
 
   // §6: POST /api/ganaderia/predios/:predioId/potreros -- crear potrero
   // definitivo a partir de un candidate ya reservado.
-  router.post('/', async (req, res, next) => {
+  router.post('/', requireAdministracion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const { predioId } = req.params;
@@ -523,7 +526,7 @@ export default function createGanaderiaPotrerosRouter({ appEnv, csrfServerSecret
   // SPRINT-3D9.2: archivar/restaurar -- "Eliminar potrero" en la UI
   // internamente llama a este endpoint (reemplaza el hard DELETE,
   // revocado en 0010).
-  router.post('/:potreroId/archivar', async (req, res, next) => {
+  router.post('/:potreroId/archivar', requireAdministracion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       if (!/^\d+$/.test(String(req.params.potreroId))) {
@@ -541,7 +544,7 @@ export default function createGanaderiaPotrerosRouter({ appEnv, csrfServerSecret
     }
   });
 
-  router.post('/:potreroId/restaurar', async (req, res, next) => {
+  router.post('/:potreroId/restaurar', requireAdministracion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       if (!/^\d+$/.test(String(req.params.potreroId))) {

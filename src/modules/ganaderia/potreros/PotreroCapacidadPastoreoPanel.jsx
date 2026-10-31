@@ -28,10 +28,13 @@ import {
   previewCapacidadPastoreo,
   createCapacidadPastoreo,
 } from './ganaderiaCapacidadPastoreoApi.js';
+import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
+import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
 
 const GENERIC_ERROR = 'No fue posible completar la operación en este momento. Intenta nuevamente.';
 
 const CALCULO_ERROR_MESSAGES = {
+  ROLE_FORBIDDEN: MENSAJE_ROLE_FORBIDDEN, // FASE 3A
   FICHA_NOT_FOUND: 'Primero registra una ficha productiva con un aforo del potrero.',
   POTRERO_NOT_FOUND: 'Este potrero ya no está disponible.',
   INVALID_MODO: 'Selecciona un modo de cálculo válido.',
@@ -186,6 +189,8 @@ const INITIAL_FORM = {
 };
 
 export default function PotreroCapacidadPastoreoPanel({ predioId, potreroId, areaHa, tieneFicha, onCrearFicha }) {
+  // FASE 3A: guardar un cálculo (persistente) = operación.
+  const permisos = useGanaderiaPermisos();
   const [loading, setLoading] = useState(tieneFicha);
   const [loadError, setLoadError] = useState('');
   const [actual, setActual] = useState(null);
@@ -292,9 +297,11 @@ export default function PotreroCapacidadPastoreoPanel({ predioId, potreroId, are
       <div className="gan-ficha-productiva-panel gan-capacidad-panel">
         <div className="gan-ficha-productiva-empty">
           <p className="gan-potrero-points-hint">Primero registra una ficha productiva con un aforo del potrero.</p>
-          <button type="button" className="gan-secondary-button" onClick={onCrearFicha}>
-            Crear ficha productiva
-          </button>
+          {onCrearFicha ? (
+            <button type="button" className="gan-secondary-button" onClick={onCrearFicha}>
+              Crear ficha productiva
+            </button>
+          ) : null}
         </div>
       </div>
     );
@@ -310,7 +317,7 @@ export default function PotreroCapacidadPastoreoPanel({ predioId, potreroId, are
 
   return (
     <div className="gan-ficha-productiva-panel gan-capacidad-panel">
-      {!showForm && !actual ? (
+      {!showForm && !actual && permisos.planificarPastoreo ? (
         <div className="gan-ficha-productiva-empty">
           <button type="button" className="gan-secondary-button" onClick={openForm}>
             Calcular capacidad de pastoreo
@@ -329,9 +336,11 @@ export default function PotreroCapacidadPastoreoPanel({ predioId, potreroId, are
             resultadoExtremo={actual.resultadoExtremo}
           />
           <div className="gan-potrero-actions">
-            <button type="button" className="gan-secondary-button" onClick={openForm}>
-              Nuevo cálculo
-            </button>
+            {permisos.planificarPastoreo ? (
+              <button type="button" className="gan-secondary-button" onClick={openForm}>
+                Nuevo cálculo
+              </button>
+            ) : null}
             {historial.length > 0 ? (
               <button type="button" className="gan-back-inline" onClick={() => setShowHistorial((v) => !v)}>
                 {showHistorial ? 'Ocultar historial' : 'Ver historial'}

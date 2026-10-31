@@ -14,6 +14,7 @@ import {
   createRequireGanaderiaSession,
   createRequireGanaderiaCsrf,
 } from '../security/ganaderiaSession.js';
+import { createRequireAdministracion } from '../security/ganaderiaPermisos.js';
 import {
   listCatalogoPasturas,
   createPasturaPersonalizada,
@@ -111,6 +112,8 @@ export default function createGanaderiaCatalogoPasturasRouter({ appEnv, csrfServ
 
   router.use(requireSession);
   router.use(requireCsrf);
+  // FASE 3A: RBAC por acción (ver server/security/ganaderiaPermisos.js).
+  const requireAdministracion = createRequireAdministracion();
 
   // GET /api/ganaderia/catalogo-pasturas?q=... -- sistema + personalizado
   // propio (RLS), nunca personalizado de otra organización.
@@ -134,7 +137,7 @@ export default function createGanaderiaCatalogoPasturasRouter({ appEnv, csrfServ
 
   // POST /api/ganaderia/catalogo-pasturas/personalizadas -- crea una
   // entrada personalizada (scope = organización activa, §9 del sprint).
-  router.post('/personalizadas', async (req, res, next) => {
+  router.post('/personalizadas', requireAdministracion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const payload = validateCreatePasturaPersonalizadaBody(req.body);

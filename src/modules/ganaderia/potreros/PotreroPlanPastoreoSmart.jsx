@@ -27,6 +27,8 @@ import {
 import PotreroDescansoReentradaPanel from './PotreroDescansoReentradaPanel.jsx';
 import PotreroCicloPastoreoPanel from './PotreroCicloPastoreoPanel.jsx';
 import { buildBodyAuto, isFormComplete } from './potreroPlanPastoreoSmartLogic.js';
+import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
+import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
 
 export { buildBodyAuto, isFormComplete };
 
@@ -35,6 +37,7 @@ const GENERIC_ERROR = 'No fue posible completar la operación en este momento. I
 // §28 del sprint: traducir códigos HTTP/negocio a lenguaje humano -- nunca
 // mostrar el código crudo, SQL ni stack al productor.
 const ERROR_MESSAGES = {
+  ROLE_FORBIDDEN: MENSAJE_ROLE_FORBIDDEN, // FASE 3A
   NO_PRODUCTIVE_PROFILE: 'Selecciona una categoría productiva válida.',
   INVALID_CATEGORIA_CODIGO: 'Selecciona una categoría productiva válida.',
   INVALID_PESO_PROMEDIO: 'El peso promedio debe ser mayor que 0.',
@@ -103,6 +106,8 @@ function DetalleTecnicoAutomatico({ detalle }) {
 }
 
 export default function PotreroPlanPastoreoSmart({ predioId, potreroId, tieneFicha, onCrearFicha }) {
+  // FASE 3A: el cálculo (preview) es lectura; guardar el plan = operación.
+  const permisos = useGanaderiaPermisos();
   const [categorias, setCategorias] = useState([]);
   const [categoriasError, setCategoriasError] = useState('');
 
@@ -294,9 +299,11 @@ export default function PotreroPlanPastoreoSmart({ predioId, potreroId, tieneFic
           <p className="gan-potrero-points-hint">
             Necesitamos medir cuánto pasto hay disponible antes de recomendar el próximo pastoreo.
           </p>
-          <button type="button" className="gan-secondary-button" onClick={onCrearFicha}>
-            Registrar aforo
-          </button>
+          {onCrearFicha ? (
+            <button type="button" className="gan-secondary-button" onClick={onCrearFicha}>
+              Registrar aforo
+            </button>
+          ) : null}
         </div>
       </div>
     );
@@ -473,9 +480,11 @@ export default function PotreroPlanPastoreoSmart({ predioId, potreroId, tieneFic
 
                 <StatusMessage type="error">{saveError}</StatusMessage>
                 <div className="gan-potrero-actions">
-                  <button type="button" className="gan-submit" onClick={handleGuardar} disabled={saving}>
-                    {saving ? 'Guardando...' : 'Usar esta recomendación'}
-                  </button>
+                  {permisos.planificarPastoreo ? (
+                    <button type="button" className="gan-submit" onClick={handleGuardar} disabled={saving}>
+                      {saving ? 'Guardando...' : 'Usar esta recomendación'}
+                    </button>
+                  ) : null}
                   <button type="button" className="gan-back-inline" onClick={() => setShowEscenario(true)} disabled={saving}>
                     Quiero ingresar otra cantidad
                   </button>

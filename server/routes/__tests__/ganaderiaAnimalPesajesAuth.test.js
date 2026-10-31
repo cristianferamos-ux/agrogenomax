@@ -71,7 +71,7 @@ function wireFakeTenantSession() {
       };
     }
     if (text.includes('fn_resolver_autorizacion_sesion') && params[0] === tokenHash) {
-      return { rows: [{ sesion_id: 'sesion-1', cuenta_id: 'cuenta-1', organizacion_id: ORG_ID, rol: 'propietario' }] };
+      return { rows: [{ sesion_id: 'sesion-1', cuenta_id: 'cuenta-1', organizacion_id: ORG_ID, rol: 'owner' }] }; // FASE 3A: rol real de membresía (RBAC)
     }
     return { rows: [] };
   };

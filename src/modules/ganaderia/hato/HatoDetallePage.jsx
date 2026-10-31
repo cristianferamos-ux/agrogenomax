@@ -36,7 +36,7 @@ import HatoPesajesPanel from './HatoPesajesPanel.jsx';
 import HatoActividadPanel from './HatoActividadPanel.jsx';
 import HatoCierreAnimal from './HatoCierreAnimal.jsx';
 import { ETIQUETAS_ESTADO_REGISTRO, ETIQUETAS_SITUACION, bloqueSituacion, situacionDe } from './cierreModel.js';
-import { useGanaderiaAuthOptional } from '../auth/GanaderiaAuthContext.jsx';
+import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
 import { anularAnimal, corregirAnimal, getAnimal } from './hatoApi.js';
 import {
   GENERIC_ERROR_MESSAGE,
@@ -135,10 +135,11 @@ export default function HatoDetallePage() {
   const idValido = /^(?:[1-9]\d{0,17}|local:[0-9a-f-]{36})$/i.test(String(animalId));
   const esLocal = String(animalId).startsWith('local:');
   const offline = useGanaderiaOffline();
-  const auth = useGanaderiaAuthOptional();
   // Rol de la organización activa (resuelto por el servidor en /session):
   // solo decide qué se MUESTRA; el servidor vuelve a exigirlo (RBAC).
-  const rol = auth?.organizacionActiva?.rol ?? null;
+  // FASE 3A: capacidades desde la matriz central (auth/ganaderiaPermisos.js).
+  const permisos = useGanaderiaPermisos();
+  const rol = permisos.rol;
   const local = offline.preparado && offline.repo ? offline.repo : null;
   const [chapetaLocal, setChapetaLocal] = useState(null);
   const [tieneQrActiva, setTieneQrActiva] = useState(false);
@@ -384,26 +385,30 @@ export default function HatoDetallePage() {
                 />
               ) : null}
               {error ? <StatusMessage type="error">{error}</StatusMessage> : null}
-              {animal.estado === 'ACTIVO' && !accionesDisponibles && !esLocal ? (
+              {animal.estado === 'ACTIVO' && !accionesDisponibles && !esLocal && (permisos.corregirAnimal || permisos.anularAnimal || permisos.asociarQr) ? (
                 <p className="gan-hato-hint">Corregir, anular o cambiar la chapeta requiere conexión.</p>
               ) : null}
-              {animal.estado === 'ACTIVO' && accionesDisponibles ? (
+              {animal.estado === 'ACTIVO' && accionesDisponibles && (permisos.corregirAnimal || permisos.anularAnimal) ? (
                 <div className="gan-hato-actions">
-                  <button type="button" className="gan-submit" onClick={abrirCorreccion} disabled={catalogos.status !== 'ok'}>
-                    Corregir datos
-                  </button>
-                  <button
-                    type="button"
-                    className="gan-secondary-button"
-                    onClick={() => {
-                      setMotivo('');
-                      setError('');
-                      setAviso('');
-                      setModo('anular');
-                    }}
-                  >
-                    Anular registro
-                  </button>
+                  {permisos.corregirAnimal ? (
+                    <button type="button" className="gan-submit" onClick={abrirCorreccion} disabled={catalogos.status !== 'ok'}>
+                      Corregir datos
+                    </button>
+                  ) : null}
+                  {permisos.anularAnimal ? (
+                    <button
+                      type="button"
+                      className="gan-secondary-button"
+                      onClick={() => {
+                        setMotivo('');
+                        setError('');
+                        setAviso('');
+                        setModo('anular');
+                      }}
+                    >
+                      Anular registro
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
               {accionesDisponibles ? (
@@ -429,7 +434,7 @@ export default function HatoDetallePage() {
             </div>
           ) : null}
 
-          {modo === 'corregir' && form ? (
+          {modo === 'corregir' && form && permisos.corregirAnimal ? (
             <form className="gan-form" onSubmit={guardarCorreccion} noValidate>
               <p className="gan-hato-hint">El predio y el peso no se corrigen desde aquí.</p>
               <HatoAnimalFields
@@ -448,7 +453,7 @@ export default function HatoDetallePage() {
             </form>
           ) : null}
 
-          {modo === 'anular' ? (
+          {modo === 'anular' && permisos.anularAnimal ? (
             <form className="gan-form" onSubmit={confirmarAnulacion} noValidate>
               <StatusMessage type="info">
                 Anula solo un registro hecho por error (por ejemplo, un animal duplicado). El registro se conserva como

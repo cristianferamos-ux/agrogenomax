@@ -12,6 +12,7 @@ import {
   createRequireGanaderiaSession,
   createRequireGanaderiaCsrf,
 } from '../security/ganaderiaSession.js';
+import { createRequireOperacion } from '../security/ganaderiaPermisos.js';
 import {
   getContextoAgroclimatico,
   refreshContextoAgroclimatico,
@@ -41,6 +42,8 @@ export default function createGanaderiaPotreroContextoAgroclimaticoRouter({ appE
 
   router.use(requireSession);
   router.use(requireCsrf);
+  // FASE 3A: RBAC por acción (ver server/security/ganaderiaPermisos.js).
+  const requireOperacion = createRequireOperacion();
 
   // GET .../contexto-agroclimatico -- snapshot más reciente + historial
   // resumido (§9/§12/§13 del sprint). Sin snapshots todavía -> 200 con
@@ -67,7 +70,7 @@ export default function createGanaderiaPotreroContextoAgroclimaticoRouter({ appE
   // POST .../contexto-agroclimatico/refresh -- resuelve geometry
   // server-side, consulta ERA5-Land/IDEAM, normaliza y persiste un
   // snapshot NUEVO (histórico append-only, §9). Nunca acepta body (§12).
-  router.post('/refresh', async (req, res, next) => {
+  router.post('/refresh', requireOperacion, async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
       const { predioId, potreroId } = req.params;

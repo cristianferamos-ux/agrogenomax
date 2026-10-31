@@ -89,7 +89,7 @@ function wireFakeSession({ superAdmin = false } = {}) {
       };
     }
     if (text.includes('fn_resolver_autorizacion_sesion') && params[0] === tokenHash) {
-      return { rowCount: 1, rows: [{ sesion_id: 'sesion-1', cuenta_id: 'cuenta-1', organizacion_id: ORG_ID, rol: 'propietario' }] };
+      return { rowCount: 1, rows: [{ sesion_id: 'sesion-1', cuenta_id: 'cuenta-1', organizacion_id: ORG_ID, rol: 'owner' }] }; // FASE 3A: rol real de membresía (RBAC)
     }
     if (text.includes('from agx.staff_crh')) {
       return superAdmin ? { rowCount: 1, rows: [{ rol_interno: 'administrador_plataforma' }] } : { rowCount: 0, rows: [] };

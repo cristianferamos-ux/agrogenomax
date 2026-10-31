@@ -22,6 +22,8 @@ import {
   aplicarResidualRealADescanso,
   anularResidualReal,
 } from './ganaderiaCicloPastoreoApi.js';
+import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
+import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
 
 const GENERIC_ERROR = 'No fue posible completar la operación en este momento. Intenta nuevamente.';
 
@@ -45,6 +47,7 @@ const REGISTRO_VERIFICAR_ERROR_MESSAGE = 'No pudimos verificar el estado del afo
 const MAX_AFORO_G_M2 = 10000;
 
 const RESIDUAL_ERROR_MESSAGES = {
+  ROLE_FORBIDDEN: MENSAJE_ROLE_FORBIDDEN, // FASE 3A
   RESIDUAL_ANTERIOR_O_IGUAL_A_SALIDA: 'La fecha y hora deben ser posteriores a la salida del pastoreo.',
   RESIDUAL_FUTURO_INVALIDO: 'La fecha y hora no pueden ser posteriores al momento actual.',
   INVALID_NUMERO_MUESTRAS: 'El número de muestras debe ser un entero mayor o igual a 1.',
@@ -165,6 +168,9 @@ function DetalleTecnico({ residual, visible, onToggle }) {
 }
 
 export default function PotreroResidualRealPanel({ predioId, potreroId, ciclo, destacado, onDescansoChange }) {
+  // FASE 3A: registrar/actualizar comparativo/aplicar a descanso = operación;
+  // corregir/anular la medición = owner/admin.
+  const permisos = useGanaderiaPermisos();
   const [expandido, setExpandido] = useState(Boolean(destacado));
   const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -485,9 +491,11 @@ export default function PotreroResidualRealPanel({ predioId, potreroId, ciclo, d
         <div className="gan-ficha-productiva-empty">
           <p className="gan-capacidad-section-label">Aforo de salida</p>
           <p className="gan-potrero-points-hint">Aún no has registrado el aforo después del pastoreo.</p>
-          <button type="button" className="gan-secondary-button" onClick={handleAbrirForm}>
-            Registrar aforo
-          </button>
+          {permisos.operarCiclo ? (
+            <button type="button" className="gan-secondary-button" onClick={handleAbrirForm}>
+              Registrar aforo
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -565,27 +573,27 @@ export default function PotreroResidualRealPanel({ predioId, potreroId, ciclo, d
 
           {!mostrarConfirmarAplicar ? (
             <div className="gan-potrero-actions">
-              {PUEDE_ACTUALIZAR_COMPARATIVO.has(comparativoEstado) ? (
+              {permisos.operarCiclo && PUEDE_ACTUALIZAR_COMPARATIVO.has(comparativoEstado) ? (
                 <button type="button" className="gan-secondary-button" onClick={handleActualizarComparativo} disabled={mutando}>
                   {actualizando ? 'Actualizando...' : 'Actualizar comparativo'}
                 </button>
               ) : null}
-              {comparativoEstado === 'INCOMPATIBLE_TEMPORAL' ? (
+              {permisos.administrarCiclo && comparativoEstado === 'INCOMPATIBLE_TEMPORAL' ? (
                 <button type="button" className="gan-secondary-button" onClick={handleAbrirCorregir} disabled={mutando}>
                   Corregir medición
                 </button>
               ) : null}
-              {comparativoEstado === 'COMPLETO' ? (
+              {permisos.operarCiclo && comparativoEstado === 'COMPLETO' ? (
                 <button type="button" className="gan-submit" onClick={() => setMostrarConfirmarAplicar(true)} disabled={mutando}>
                   Actualizar descanso con esta medición
                 </button>
               ) : null}
-              {comparativoEstado !== 'INCOMPATIBLE_TEMPORAL' && !mostrarCorregir ? (
+              {permisos.administrarCiclo && comparativoEstado !== 'INCOMPATIBLE_TEMPORAL' && !mostrarCorregir ? (
                 <button type="button" className="gan-back-inline" onClick={handleAbrirCorregir} disabled={mutando}>
                   Corregir información
                 </button>
               ) : null}
-              {!mostrarAnular ? (
+              {permisos.administrarCiclo && !mostrarAnular ? (
                 <button type="button" className="gan-back-inline" onClick={handleAbrirAnular} disabled={mutando}>
                   Anular medición
                 </button>
