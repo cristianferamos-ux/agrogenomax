@@ -18,6 +18,7 @@
 import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaAuthedRequest.js';
 import { CAPACIDADES, canCerrarAnimal } from '../auth/ganaderiaPermisos.js';
 import { formatFecha } from './pesajesModel.js';
+import { conCodigoSeguimiento } from '../api/errorModel.js';
 
 export const SITUACIONES = Object.freeze({ EN_HATO: 'EN_HATO', SALIDO: 'SALIDO', MUERTO: 'MUERTO' });
 export const ETIQUETAS_SITUACION = Object.freeze({ EN_HATO: 'En hato', SALIDO: 'Salido', MUERTO: 'Muerto' });
@@ -265,7 +266,8 @@ export function resultadoCierre(tipo, result) {
   }
   const base = { exito: false, descartarOperacion: false, recargarFicha: false };
   if (code === 'NETWORK_ERROR' || result?.status >= 500 || !result) {
-    return { ...base, tipo: 'INCIERTO', mensaje: MENSAJE_CIERRE_INCIERTO };
+    // FASE 3C: 5xx con correlationId -> mismo aviso + código de seguimiento.
+    return { ...base, tipo: 'INCIERTO', mensaje: conCodigoSeguimiento(MENSAJE_CIERRE_INCIERTO, result?.correlationId) };
   }
   if (code === 'CSRF_UNAVAILABLE' || result?.failure === 'REQUEST_NOT_SENT') {
     return { ...base, tipo: 'NO_ENVIADO', mensaje: 'No pudimos enviar el registro. Revisa tu conexión e inténtalo de nuevo.' };

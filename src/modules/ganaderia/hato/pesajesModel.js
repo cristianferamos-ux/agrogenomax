@@ -11,6 +11,7 @@
 // (Excelente/Aceptable/Crítico): no existe todavía una configuración oficial.
 import { numeroDeDia } from '../engine/fechas.js';
 import { PESO_METODOS } from './hatoFormModel.js';
+import { conCodigoSeguimiento } from '../api/errorModel.js';
 
 export const MAX_PESO_KG = 2000;
 export const MAX_OBSERVACIONES_PESAJE = 500;
@@ -92,7 +93,8 @@ export function resultadoRegistro(result) {
   // Sin respuesta o 5xx (p. ej. 502/504 de un proxy intermedio): el servidor
   // pudo haber guardado. Es incierto, no un fallo definitivo.
   if (code === 'NETWORK_ERROR' || result?.status >= 500) {
-    return { tipo: 'INCIERTO', mensaje: 'No pudimos confirmar si el pesaje se guardó. Puedes reintentar: no se duplicará.' };
+    // FASE 3C: 5xx con correlationId -> mismo aviso + código de seguimiento.
+    return { tipo: 'INCIERTO', mensaje: conCodigoSeguimiento('No pudimos confirmar si el pesaje se guardó. Puedes reintentar: no se duplicará.', result?.correlationId) };
   }
   if (code === 'CSRF_UNAVAILABLE') {
     return { tipo: 'NO_ENVIADO', mensaje: 'No pudimos enviar el pesaje. Revisa tu conexión e inténtalo de nuevo.' };

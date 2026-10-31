@@ -247,7 +247,7 @@ test('8. handleConfirmarIniciarConAjuste corta temprano si ya hay una request en
 
 test('9. tras un éxito con ajuste, se limpia el estado temporal de edición (ajustando vuelve a false); tras un error se conservan los valores para corregir', () => {
   const bloque = panelSource.match(/async function handleConfirmarIniciarConAjuste\(\)[\s\S]*?\n  \}/)?.[0] ?? '';
-  const idxErrorReturn = bloque.indexOf("setAjusteError(resolveErrorMessage(data?.error));\n      return;");
+  const idxErrorReturn = bloque.indexOf("setAjusteError(mensajeError(respuestaApi, resolveErrorMessage));\n      return;");
   const idxSetAjustandoFalse = bloque.indexOf('setAjustando(false);');
   assert.ok(idxErrorReturn >= 0 && idxSetAjustandoFalse >= 0);
   assert.ok(idxSetAjustandoFalse > idxErrorReturn, 'setAjustando(false) debe ocurrir DESPUÉS del camino de error (solo en éxito), nunca antes');
@@ -528,7 +528,7 @@ test('3D10.6: el literal FAILURE_NETWORK_ERROR del panel coincide con REQUEST_FA
 });
 
 test('3D10.6: NETWORK_ERROR activa registroIncierto y sale sin resetForm ni reintento, conservando los datos', () => {
-  assert.match(bloqueRegistrar3D106, /const \{ ok, data, failure \} = await registrarResidualReal\(/);
+  assert.match(bloqueRegistrar3D106, /const respuestaApi = await registrarResidualReal\([\s\S]*?const \{ ok, data, failure \} = respuestaApi;/);
   const rama = bloqueRegistrar3D106.match(/if \(failure === FAILURE_NETWORK_ERROR\) \{[\s\S]*?\n      \}/)?.[0] ?? '';
   assert.notEqual(rama, '', 'debe existir la rama explícita de NETWORK_ERROR');
   assert.match(rama, /setRegistroIncierto\(true\);/);

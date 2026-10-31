@@ -27,6 +27,9 @@ import { useGanaderiaOffline } from '../offline/GanaderiaOfflineProvider.jsx';
 import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
 import '../styles/ganaderia-offline.css';
 import '../styles/ganaderia-hato.css';
+import { mensajeDeExcepcion, mensajeError } from '../api/errorModel.js';
+
+const MENSAJE_CARGA_LISTA = 'No fue posible cargar tus animales. Intenta nuevamente.';
 
 const PAGE_SIZE = 50;
 
@@ -105,15 +108,17 @@ export default function HatoListaPage() {
     }
     setState((current) => ({ ...current, status: 'loading' }));
     try {
-      const { ok, data } = await listAnimales({ ...filtros, limit: PAGE_SIZE, offset: 0 });
+      const respuestaApi = await listAnimales({ ...filtros, limit: PAGE_SIZE, offset: 0 });
+      const { ok, data } = respuestaApi;
       if (!vigente()) return;
       if (!ok || !Array.isArray(data?.animales)) {
-        setState({ status: 'error', animales: [], total: 0 });
+        // FASE 3C: 5xx con código de seguimiento; nunca texto del servidor.
+        setState({ status: 'error', animales: [], total: 0, mensaje: ok ? MENSAJE_CARGA_LISTA : mensajeError(respuestaApi, null, { fallback: MENSAJE_CARGA_LISTA }) });
         return;
       }
       setState({ status: 'ok', animales: data.animales, total: data.total ?? data.animales.length });
-    } catch {
-      if (vigente()) setState({ status: 'error', animales: [], total: 0 });
+    } catch (err) {
+      if (vigente()) setState({ status: 'error', animales: [], total: 0, mensaje: mensajeDeExcepcion(err, MENSAJE_CARGA_LISTA) });
     }
   }, [filtros, local]);
 
@@ -216,7 +221,7 @@ export default function HatoListaPage() {
       {state.status === 'loading' ? <StatusMessage>Cargando animales...</StatusMessage> : null}
       {state.status === 'error' ? (
         <div className="gan-hato-actions">
-          <StatusMessage type="error">No fue posible cargar tus animales. Intenta nuevamente.</StatusMessage>
+          <StatusMessage type="error">{state.mensaje ?? MENSAJE_CARGA_LISTA}</StatusMessage>
           <button type="button" className="gan-secondary-button" onClick={load}>Reintentar</button>
         </div>
       ) : null}

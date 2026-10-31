@@ -7,6 +7,7 @@
 // Ambos se resuelven contra la copia local (offline) o /api/ganaderia/qr/*
 // bajo la organización de la sesión. Misma normalización y control que el
 // servidor (server/services/ganaderia/qrCodigos.js) y SQL.
+import { codigoSeguimiento as codigoCorto, esCorrelationIdValido } from '../api/errorModel.js';
 
 export const QR_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32}$/;
 export const CODIGO_VISIBLE_PATTERN = /^AGX-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]$/;
@@ -107,13 +108,14 @@ export function tokenEnRutaPrivada(pathname) {
   return match ? match[1] : null;
 }
 
-const CORRELATION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-/** FASE 3B: 5xx con correlationId del servidor -> código de seguimiento corto (8 hex), o null. */
-export function codigoSeguimiento({ status, data } = {}) {
+/**
+ * FASE 3B: 5xx con correlationId del servidor -> código de seguimiento corto
+ * (8 hex), o null. FASE 3C: delega en api/errorModel.js y acepta también el
+ * correlationId que el cliente autenticado toma de X-Request-ID.
+ */
+export function codigoSeguimiento({ status, data, correlationId } = {}) {
   if (typeof status !== 'number' || status < 500) return null;
-  const id = data?.correlationId;
-  return typeof id === 'string' && CORRELATION_ID_PATTERN.test(id) ? id.slice(0, 8).toLowerCase() : null;
+  return codigoCorto(esCorrelationIdValido(correlationId) ? correlationId : data?.correlationId);
 }
 
 export const ESTADO_CHAPETA_LABELS = Object.freeze({
@@ -133,7 +135,7 @@ export const ESTADO_CHAPETA_LABELS = Object.freeze({
  * FASE 2B: el 410 puede traer animalId (vínculo histórico) SOLO si el
  * servidor lo resolvió bajo la organización de la sesión -> "Ver ficha".
  */
-export function qrResolutionOutcome({ ok, status, data } = {}) {
+export function qrResolutionOutcome({ ok, status, data, correlationId } = {}) {
   // FASE 3B: POST /resolver sin token en memoria ni cookie (recarga, cookie
   // vencida o ya consumida) -> pedir escanear de nuevo. No revela nada.
   if (status === 404 && data?.error === 'QR_PENDIENTE_AUSENTE') return { status: 'sin_pendiente' };
@@ -149,6 +151,6 @@ export function qrResolutionOutcome({ ok, status, data } = {}) {
     const animalId = typeof data?.animalId === 'string' && /^[1-9]\d{0,17}$/.test(data.animalId) ? data.animalId : null;
     return { status: 'no_operativa', estado: ESTADO_CHAPETA_LABELS[data?.estado] ?? 'Fuera de uso', animalId };
   }
-  const seguimiento = codigoSeguimiento({ status, data });
+  const seguimiento = codigoSeguimiento({ status, data, correlationId });
   return seguimiento ? { status: 'error', seguimiento } : { status: 'error' };
 }

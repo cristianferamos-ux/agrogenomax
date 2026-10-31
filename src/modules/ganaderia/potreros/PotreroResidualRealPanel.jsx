@@ -24,6 +24,7 @@ import {
 } from './ganaderiaCicloPastoreoApi.js';
 import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
 import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
+import { mensajeError } from '../api/errorModel.js';
 
 const GENERIC_ERROR = 'No fue posible completar la operación en este momento. Intenta nuevamente.';
 
@@ -290,12 +291,13 @@ export default function PotreroResidualRealPanel({ predioId, potreroId, ciclo, d
     setRegistrarError('');
     setRegistroAviso('');
     setResidualYaRegistrado(false);
-    const { ok, data, failure } = await registrarResidualReal(predioId, potreroId, ciclo.cicloId, {
+    const respuestaApi = await registrarResidualReal(predioId, potreroId, ciclo.cicloId, {
       numeroMuestras: numMuestras,
       aforoPromedioGM2: aforo,
       medicionRealAt: datetimeLocalInputToIso(medicionRealAtLocal),
       observacion: observacion.trim() ? observacion.trim() : undefined,
     });
+    const { ok, data, failure } = respuestaApi;
     setRegistrando(false);
     if (!ok) {
       if (failure === FAILURE_NETWORK_ERROR) {
@@ -310,7 +312,7 @@ export default function PotreroResidualRealPanel({ predioId, potreroId, ciclo, d
         setResidualYaRegistrado(true);
         loadResidual();
       }
-      setRegistrarError(resolveErrorMessage(data?.error));
+      setRegistrarError(mensajeError(respuestaApi, resolveErrorMessage));
       return;
     }
     setMostrarForm(false);
@@ -360,10 +362,11 @@ export default function PotreroResidualRealPanel({ predioId, potreroId, ciclo, d
     if (mutando) return;
     setActualizando(true);
     setActualizarError('');
-    const { ok, data } = await actualizarComparativoResidualReal(predioId, potreroId, ciclo.cicloId);
+    const respuestaApi = await actualizarComparativoResidualReal(predioId, potreroId, ciclo.cicloId);
+    const { ok, data } = respuestaApi;
     setActualizando(false);
     if (!ok) {
-      setActualizarError(resolveErrorMessage(data?.error));
+      setActualizarError(mensajeError(respuestaApi, resolveErrorMessage));
       return;
     }
     loadResidual();
@@ -411,10 +414,11 @@ export default function PotreroResidualRealPanel({ predioId, potreroId, ciclo, d
     }
     setCorrigiendo(true);
     setCorregirError('');
-    const { ok, data } = await corregirResidualReal(predioId, potreroId, ciclo.cicloId, cambios);
+    const respuestaApi = await corregirResidualReal(predioId, potreroId, ciclo.cicloId, cambios);
+    const { ok, data } = respuestaApi;
     setCorrigiendo(false);
     if (!ok) {
-      setCorregirError(resolveErrorMessage(data?.error));
+      setCorregirError(mensajeError(respuestaApi, resolveErrorMessage));
       return;
     }
     setMostrarCorregir(false);
@@ -436,10 +440,11 @@ export default function PotreroResidualRealPanel({ predioId, potreroId, ciclo, d
     }
     setAnulando(true);
     setAnularError('');
-    const { ok, data } = await anularResidualReal(predioId, potreroId, ciclo.cicloId, motivoAnular.trim());
+    const respuestaApi = await anularResidualReal(predioId, potreroId, ciclo.cicloId, motivoAnular.trim());
+    const { ok, data } = respuestaApi;
     setAnulando(false);
     if (!ok) {
-      setAnularError(resolveErrorMessage(data?.error));
+      setAnularError(mensajeError(respuestaApi, resolveErrorMessage));
       return;
     }
     setMostrarAnular(false);
@@ -452,10 +457,11 @@ export default function PotreroResidualRealPanel({ predioId, potreroId, ciclo, d
     if (mutando) return;
     setAplicando(true);
     setAplicarError('');
-    const { ok, data } = await aplicarResidualRealADescanso(predioId, potreroId, ciclo.cicloId);
+    const respuestaApi = await aplicarResidualRealADescanso(predioId, potreroId, ciclo.cicloId);
+    const { ok, data } = respuestaApi;
     setAplicando(false);
     if (!ok) {
-      setAplicarError(resolveErrorMessage(data?.error));
+      setAplicarError(mensajeError(respuestaApi, resolveErrorMessage));
       return;
     }
     setMostrarConfirmarAplicar(false);

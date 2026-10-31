@@ -9,6 +9,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { fetchCsrfToken } from '../auth/GanaderiaAuthContext.jsx';
 import '../styles/ganaderia-admin.css';
 import '../styles/ganaderia-login.css';
+import { correlationIdDeRespuesta, mensajeServidor } from '../api/errorModel.js';
 
 const GENERIC_NETWORK_MESSAGE = 'No fue posible conectar con el servicio. Intenta nuevamente.';
 // HOTFIX E2E-001 (ajuste UX): un 5xx significa que SÍ hubo comunicación con
@@ -25,7 +26,7 @@ const SUCCESS_MESSAGE = 'Cuenta provisionada. Se envió el enlace de activación
 const SUCCESS_EMAIL_FAILED_MESSAGE =
   'Cuenta creada, pero no pudimos enviar el correo de activación. No vuelvas a crear la cuenta. La persona puede usar "Recuperar acceso" desde la pantalla de inicio de sesión para establecer su contraseña.';
 
-function resolveErrorMessage(status, body) {
+function resolveErrorMessage(status, body, headers) {
   if (status === 409) return 'Ya existe una cuenta asociada a este correo.';
   if (status === 400) {
     if (body?.error === 'INVALID_EMAIL') return 'Ingresa un correo electrónico válido.';
@@ -35,7 +36,11 @@ function resolveErrorMessage(status, body) {
     return 'Revisa los datos ingresados.';
   }
   if (status === 401 || status === 403) return 'Tu sesión no tiene permisos para esta acción. Vuelve a iniciar sesión.';
-  if (status >= 500) return SERVER_ERROR_MESSAGE;
+  // FASE 3C: 5xx con correlationId válido -> código de seguimiento.
+  if (status >= 500) {
+    const correlationId = correlationIdDeRespuesta(status, body, headers);
+    return correlationId ? mensajeServidor(correlationId) : SERVER_ERROR_MESSAGE;
+  }
   return GENERIC_NETWORK_MESSAGE;
 }
 
@@ -77,7 +82,7 @@ export default function GanaderiaAdminCrearCuenta() {
         } catch {
           body = null;
         }
-        setErrorMessage(resolveErrorMessage(response.status, body));
+        setErrorMessage(resolveErrorMessage(response.status, body, response.headers));
         setSubmitting(false);
         return;
       }

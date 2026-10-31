@@ -144,7 +144,8 @@ test('HOTFIX E2E-001 UX 1: response.status >= 500 muestra el mensaje de error de
     /const SERVER_ERROR_MESSAGE =\s*\n?\s*'Ocurrió un error al crear la cuenta\. No vuelvas a intentarlo hasta verificar el estado\.'/,
   );
   const resolveErrorMessageBody = crearCuentaSource.match(/function resolveErrorMessage[\s\S]*?\n\}/)?.[0] ?? '';
-  assert.match(resolveErrorMessageBody, /if \(status >= 500\) return SERVER_ERROR_MESSAGE;/);
+  // FASE 3C: 5xx con correlationId válido -> código de seguimiento; sin él, SERVER_ERROR_MESSAGE.
+  assert.match(resolveErrorMessageBody, /if \(status >= 500\) \{[\s\S]*?return correlationId \? mensajeServidor\(correlationId\) : SERVER_ERROR_MESSAGE;/);
   // La rama 5xx debe evaluarse ANTES del fallback genérico -- si no, un 500
   // real nunca alcanzaría SERVER_ERROR_MESSAGE.
   const serverErrorIndex = resolveErrorMessageBody.indexOf('status >= 500');

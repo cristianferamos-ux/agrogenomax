@@ -11,7 +11,7 @@ import { StatusMessage } from '../components/FormField.jsx';
 import { formatDateDisplay } from '../utils/dateFormat.js';
 import { getContextoAgroclimatico, refreshContextoAgroclimatico } from './ganaderiaAgroClimaApi.js';
 import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
-import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
+import { mensajeError } from '../api/errorModel.js';
 
 const GENERIC_ERROR = 'No fue posible completar la operación en este momento. Intenta nuevamente.';
 
@@ -130,10 +130,11 @@ export default function PotreroAgroClimaPanel({ predioId, potreroId }) {
     setRefreshError('');
     setLastStatus(null);
 
-    const { ok, data } = await refreshContextoAgroclimatico(predioId, potreroId);
+    const respuestaApi = await refreshContextoAgroclimatico(predioId, potreroId);
+    const { ok, data } = respuestaApi;
     setRefreshing(false);
     if (!ok) {
-      setRefreshError(data?.error === 'ROLE_FORBIDDEN' ? MENSAJE_ROLE_FORBIDDEN : GENERIC_ERROR);
+      setRefreshError(mensajeError(respuestaApi, null, { fallback: GENERIC_ERROR }));
       return;
     }
     setLastStatus(data?.status ?? null);

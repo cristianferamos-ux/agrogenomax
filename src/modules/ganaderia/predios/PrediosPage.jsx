@@ -28,6 +28,7 @@ import { cargarPrediosLocalFirst } from './prediosLocalFirst.js';
 import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
 import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
 import '../../catastrox/styles/catastrox.css';
+import { mensajeError } from '../api/errorModel.js';
 
 // SPRINT-3D11.3 (R1) offline-first: con el dispositivo preparado la lista y
 // la consulta de predios (y de sus potreros) salen de la copia local y
@@ -387,7 +388,8 @@ export default function PrediosPage() {
     };
 
     try {
-      const { ok, status, data } = await postGanaderiaPredios('/api/ganaderia/predios', body);
+      const respuestaApi = await postGanaderiaPredios('/api/ganaderia/predios', body);
+      const { ok, status, data } = respuestaApi;
 
       if (ok) {
         setSaving(false);
@@ -398,7 +400,7 @@ export default function PrediosPage() {
         return;
       }
 
-      setSaveError(SAVE_ERROR_MESSAGES[data?.error] || GENERIC_SAVE_ERROR);
+      setSaveError(mensajeError(respuestaApi, SAVE_ERROR_MESSAGES, { fallback: GENERIC_SAVE_ERROR }));
       setSaving(false);
       void status;
     } catch {
@@ -688,12 +690,12 @@ function PredioCard({ predio, onArchivoChanged, sinConexion = false, localRepo =
     }
     setArchivoEnCurso(true);
     setArchivoError('');
-    const { ok, data } = await postGanaderiaPredios(`/api/ganaderia/predios/${predio.predioId}/archivar`, { motivo: motivoArchivar.trim() });
+    const respuestaApi = await postGanaderiaPredios(`/api/ganaderia/predios/${predio.predioId}/archivar`, { motivo: motivoArchivar.trim() });
     setArchivoEnCurso(false);
-    if (!ok) {
-      setArchivoError(data?.error === 'PREDIO_CON_CICLO_EN_CURSO'
-        ? 'No se puede archivar: al menos un potrero de este predio tiene un pastoreo en curso.'
-        : data?.error === 'ROLE_FORBIDDEN' ? MENSAJE_ROLE_FORBIDDEN : 'No fue posible completar la operación en este momento. Intenta nuevamente.');
+    if (!respuestaApi.ok) {
+      setArchivoError(mensajeError(respuestaApi, {
+        PREDIO_CON_CICLO_EN_CURSO: 'No se puede archivar: al menos un potrero de este predio tiene un pastoreo en curso.',
+      }, { fallback: 'No fue posible completar la operación en este momento. Intenta nuevamente.' }));
       return;
     }
     setMostrarArchivar(false);
@@ -704,10 +706,10 @@ function PredioCard({ predio, onArchivoChanged, sinConexion = false, localRepo =
     if (archivoEnCurso) return;
     setArchivoEnCurso(true);
     setArchivoError('');
-    const { ok, data } = await postGanaderiaPredios(`/api/ganaderia/predios/${predio.predioId}/restaurar`, {});
+    const respuestaApi = await postGanaderiaPredios(`/api/ganaderia/predios/${predio.predioId}/restaurar`, {});
     setArchivoEnCurso(false);
-    if (!ok) {
-      setArchivoError(data?.error === 'ROLE_FORBIDDEN' ? MENSAJE_ROLE_FORBIDDEN : 'No fue posible completar la operación en este momento. Intenta nuevamente.');
+    if (!respuestaApi.ok) {
+      setArchivoError(mensajeError(respuestaApi, null, { fallback: 'No fue posible completar la operación en este momento. Intenta nuevamente.' }));
       return;
     }
     onArchivoChanged?.();

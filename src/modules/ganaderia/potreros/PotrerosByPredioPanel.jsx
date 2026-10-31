@@ -10,7 +10,7 @@ import GanaderiaPotreroCardMap from './GanaderiaPotreroCardMap.jsx';
 import PotreroFichaProductivaPanel from './PotreroFichaProductivaPanel.jsx';
 import PotreroAgroClimaPanel from './PotreroAgroClimaPanel.jsx';
 import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
-import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
+import { mensajeError } from '../api/errorModel.js';
 
 const LIST_ERROR_MESSAGE = 'No fue posible cargar los potreros de este predio. Intenta nuevamente.';
 const LIST_EMPTY_MESSAGE = 'Aún no tienes potreros registrados en este predio.';
@@ -217,12 +217,12 @@ function PotreroCard({
     }
     setArchivoEnCurso(true);
     setArchivoError('');
-    const { ok, data } = await archivarPotrero(predioId, potrero.potreroId, motivoArchivar.trim());
+    const respuestaApi = await archivarPotrero(predioId, potrero.potreroId, motivoArchivar.trim());
     setArchivoEnCurso(false);
-    if (!ok) {
-      setArchivoError(data?.error === 'POTRERO_CON_CICLO_EN_CURSO'
-        ? 'No se puede archivar: este potrero tiene un pastoreo en curso.'
-        : data?.error === 'ROLE_FORBIDDEN' ? MENSAJE_ROLE_FORBIDDEN : 'No fue posible completar la operación en este momento. Intenta nuevamente.');
+    if (!respuestaApi.ok) {
+      setArchivoError(mensajeError(respuestaApi, {
+        POTRERO_CON_CICLO_EN_CURSO: 'No se puede archivar: este potrero tiene un pastoreo en curso.',
+      }, { fallback: 'No fue posible completar la operación en este momento. Intenta nuevamente.' }));
       return;
     }
     setMostrarArchivar(false);
@@ -233,12 +233,12 @@ function PotreroCard({
     if (archivoEnCurso) return;
     setArchivoEnCurso(true);
     setArchivoError('');
-    const { ok, data } = await restaurarPotrero(predioId, potrero.potreroId);
+    const respuestaApi = await restaurarPotrero(predioId, potrero.potreroId);
     setArchivoEnCurso(false);
-    if (!ok) {
-      setArchivoError(data?.error === 'PREDIO_ARCHIVADO'
-        ? 'No se puede restaurar: el predio de este potrero sigue archivado. Restaura primero el predio.'
-        : data?.error === 'ROLE_FORBIDDEN' ? MENSAJE_ROLE_FORBIDDEN : 'No fue posible completar la operación en este momento. Intenta nuevamente.');
+    if (!respuestaApi.ok) {
+      setArchivoError(mensajeError(respuestaApi, {
+        PREDIO_ARCHIVADO: 'No se puede restaurar: el predio de este potrero sigue archivado. Restaura primero el predio.',
+      }, { fallback: 'No fue posible completar la operación en este momento. Intenta nuevamente.' }));
       return;
     }
     onArchivoChanged?.();

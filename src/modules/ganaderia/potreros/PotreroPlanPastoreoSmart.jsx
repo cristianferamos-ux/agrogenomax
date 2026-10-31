@@ -29,6 +29,7 @@ import PotreroCicloPastoreoPanel from './PotreroCicloPastoreoPanel.jsx';
 import { buildBodyAuto, isFormComplete } from './potreroPlanPastoreoSmartLogic.js';
 import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
 import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
+import { mensajeError } from '../api/errorModel.js';
 
 export { buildBodyAuto, isFormComplete };
 
@@ -216,14 +217,15 @@ export default function PotreroPlanPastoreoSmart({ predioId, potreroId, tieneFic
     if (previewLoading || !isFormComplete(categoriaSeleccionada, form)) return;
     setPreviewLoading(true);
     setPreviewError('');
-    const { ok, data } = await previewCargaAutomatica(predioId, potreroId, buildBodyAuto(categoriaSeleccionada, form));
+    const respuestaApi = await previewCargaAutomatica(predioId, potreroId, buildBodyAuto(categoriaSeleccionada, form));
+    const { ok, data } = respuestaApi;
     setPreviewLoading(false);
     if (!ok) {
       if (data?.error === 'INSUFFICIENT_FORAGE_DATA') {
         setAforoFaltante(true);
         return;
       }
-      setPreviewError(resolveErrorMessage(data?.error));
+      setPreviewError(mensajeError(respuestaApi, resolveErrorMessage));
       return;
     }
     setPreview(data);
@@ -233,14 +235,15 @@ export default function PotreroPlanPastoreoSmart({ predioId, potreroId, tieneFic
     if (saving || !preview || preview.estado !== 'OK') return;
     setSaving(true);
     setSaveError('');
-    const { ok, data } = await guardarCargaAutomatica(predioId, potreroId, buildBodyAuto(categoriaSeleccionada, form));
+    const respuestaApi = await guardarCargaAutomatica(predioId, potreroId, buildBodyAuto(categoriaSeleccionada, form));
+    const { ok, data } = respuestaApi;
     setSaving(false);
     if (!ok) {
       if (data?.error === 'INSUFFICIENT_FORAGE_DATA') {
         setAforoFaltante(true);
         return;
       }
-      setSaveError(resolveErrorMessage(data?.error));
+      setSaveError(mensajeError(respuestaApi, resolveErrorMessage));
       return;
     }
     setSavedThisSession({
@@ -261,17 +264,18 @@ export default function PotreroPlanPastoreoSmart({ predioId, potreroId, tieneFic
     if (escenarioLoading || !Number.isInteger(parsed) || parsed < 1) return;
     setEscenarioLoading(true);
     setEscenarioError('');
-    const { ok, data } = await evaluarEscenarioCargaAutomatica(predioId, potreroId, {
+    const respuestaApi = await evaluarEscenarioCargaAutomatica(predioId, potreroId, {
       ...buildBodyAuto(categoriaSeleccionada, form),
       numeroAnimalesUsuario: parsed,
     });
+    const { ok, data } = respuestaApi;
     setEscenarioLoading(false);
     if (!ok) {
       if (data?.error === 'INSUFFICIENT_FORAGE_DATA') {
         setAforoFaltante(true);
         return;
       }
-      setEscenarioError(resolveErrorMessage(data?.error));
+      setEscenarioError(mensajeError(respuestaApi, resolveErrorMessage));
       return;
     }
     setEscenario(data);

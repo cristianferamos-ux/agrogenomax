@@ -5,6 +5,7 @@
 // red vive como 'loc:<localUuid>' hasta que el servidor confirma su id.
 import { OUTBOX_ESTADOS, newOperation, ordenarOutbox } from './outbox.js';
 import { normalizeCodigoChapeta, isQrToken } from '../hato/qrToken.js';
+import { errorConMensajeSeguro } from '../api/errorModel.js';
 
 // FASE 2B: situación del animal (EN_HATO | SALIDO | MUERTO). Una copia local
 // anterior a 0025 no trae el campo: se trata como EN_HATO (fallback).
@@ -28,6 +29,14 @@ export async function sha256Hex(text) {
 
 function localError(code, message) {
   return Object.assign(new Error(message), { code });
+}
+
+// FASE 3C: errores de dominio que la UI muestra tal cual (OfflineSyncPage:
+// descartar pesaje y resolver conflictos). Solo estos -- con mensaje redactado
+// para el productor y auditado -- se marcan como seguros; tener un code NO
+// basta para mostrar el message (ver api/errorModel.js#mensajeDeExcepcion).
+function errorVisible(code, message) {
+  return Object.assign(errorConMensajeSeguro(message), { code });
 }
 
 /** animal_id de PostgreSQL (nunca 'local:<uuid>' ni un id fabricado). */
@@ -340,9 +349,9 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
     /** Descarta un pesaje que el servidor rechazó (decisión explícita del usuario). */
     async descartarPesajePendiente(operationId) {
       const op = await storage.get('outbox', operationId);
-      if (!op || op.tipoOperacion !== 'PESAJE_CREAR') throw localError('PESAJE_PENDIENTE_NO_ENCONTRADO', 'No hay un pesaje pendiente con ese identificador.');
+      if (!op || op.tipoOperacion !== 'PESAJE_CREAR') throw errorVisible('PESAJE_PENDIENTE_NO_ENCONTRADO', 'No hay un pesaje pendiente con ese identificador.');
       if (![OUTBOX_ESTADOS.CONFLICTO, OUTBOX_ESTADOS.RECHAZADO].includes(op.estado)) {
-        throw localError('PESAJE_PENDIENTE_EN_CURSO', 'Solo se descartan pesajes que el servidor no aceptó.');
+        throw errorVisible('PESAJE_PENDIENTE_EN_CURSO', 'Solo se descartan pesajes que el servidor no aceptó.');
       }
       await storage.batch([{ op: 'delete', store: 'outbox', key: operationId }]);
       notify();
@@ -444,7 +453,7 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
     async resolverSinChapeta(localUuid) {
       const op = await repo._operacionDe(localUuid);
       const local = await storage.get('animales', `loc:${localUuid}`);
-      if (!op || !local) throw localError('CONFLICTO_NO_ENCONTRADO', 'No hay conflicto para este animal.');
+      if (!op || !local) throw errorVisible('CONFLICTO_NO_ENCONTRADO', 'No hay conflicto para este animal.');
       await storage.batch([
         { op: 'put', store: 'outbox', value: { ...op, tipoOperacion: 'ANIMAL_CREAR', payload: { animal: op.payload.animal, chapetaCodigo: null }, estado: OUTBOX_ESTADOS.PENDIENTE, ultimoError: null, siguienteIntentoAt: null, updatedAt: now().toISOString() } },
         { op: 'put', store: 'animales', value: { ...local, chapetaCodigo: null, estadoSync: ESTADO_SYNC.PENDIENTE, conflicto: null } },
@@ -455,13 +464,13 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
     /** Reencola el animal con OTRA chapeta disponible en este dispositivo. */
     async resolverConOtraChapeta(localUuid, codigoRaw) {
       const codigo = normalizeCodigoChapeta(codigoRaw);
-      if (!codigo) throw localError('QR_CODIGO_INVALIDO', 'Código de chapeta inválido.');
+      if (!codigo) throw errorVisible('QR_CODIGO_INVALIDO', 'Código de chapeta inválido.');
       const op = await repo._operacionDe(localUuid);
       const local = await storage.get('animales', `loc:${localUuid}`);
       const chapeta = await repo.getChapetaPorCodigo(codigo);
-      if (!op || !local) throw localError('CONFLICTO_NO_ENCONTRADO', 'No hay conflicto para este animal.');
+      if (!op || !local) throw errorVisible('CONFLICTO_NO_ENCONTRADO', 'No hay conflicto para este animal.');
       if (!chapeta || chapeta.estado !== 'ASIGNADO_ORGANIZACION' || chapeta.reservaLocalUuid) {
-        throw localError('QR_NO_DISPONIBLE', 'La chapeta no está disponible.');
+        throw errorVisible('QR_NO_DISPONIBLE', 'La chapeta no está disponible.');
       }
       await storage.batch([
         { op: 'put', store: 'outbox', value: { ...op, tipoOperacion: 'ANIMAL_CREAR_CON_CHAPETA', payload: { animal: op.payload.animal, chapetaCodigo: codigo }, estado: OUTBOX_ESTADOS.PENDIENTE, ultimoError: null, siguienteIntentoAt: null, updatedAt: now().toISOString() } },
@@ -475,7 +484,7 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
     async resolverEditando(localUuid, cambios) {
       const op = await repo._operacionDe(localUuid);
       const local = await storage.get('animales', `loc:${localUuid}`);
-      if (!op || !local) throw localError('CONFLICTO_NO_ENCONTRADO', 'No hay conflicto para este animal.');
+      if (!op || !local) throw errorVisible('CONFLICTO_NO_ENCONTRADO', 'No hay conflicto para este animal.');
       const animalBody = { ...op.payload.animal, ...cambios };
       await storage.batch([
         { op: 'put', store: 'outbox', value: { ...op, payload: { ...op.payload, animal: animalBody }, estado: OUTBOX_ESTADOS.PENDIENTE, ultimoError: null, siguienteIntentoAt: null, updatedAt: now().toISOString() } },

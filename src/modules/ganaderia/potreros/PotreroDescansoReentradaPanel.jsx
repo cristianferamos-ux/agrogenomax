@@ -26,6 +26,7 @@ import {
 } from './ganaderiaDescansoReentradaApi.js';
 import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
 import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
+import { mensajeError } from '../api/errorModel.js';
 
 const GENERIC_ERROR = 'No fue posible completar la operación en este momento. Intenta nuevamente.';
 
@@ -422,10 +423,11 @@ export default function PotreroDescansoReentradaPanel({ predioId, potreroId, ref
     setPreviewLoading(true);
     setPreviewError('');
     setClimatologiaRecienGenerada(false);
-    const { ok, data } = await previewDescansoReentrada(predioId, potreroId, { anclarAFechaExistente: anclado });
+    const respuestaApi = await previewDescansoReentrada(predioId, potreroId, { anclarAFechaExistente: anclado });
+    const { ok, data } = respuestaApi;
     setPreviewLoading(false);
     if (!ok) {
-      setPreviewError(resolveErrorMessage(data?.error));
+      setPreviewError(mensajeError(respuestaApi, resolveErrorMessage));
       return;
     }
     setPreviewAnclado(anclado);
@@ -464,10 +466,11 @@ export default function PotreroDescansoReentradaPanel({ predioId, potreroId, ref
     if (saving || !preview) return;
     setSaving(true);
     setSaveError('');
-    const { ok, data } = await createDescansoReentrada(predioId, potreroId, {
+    const respuestaApi = await createDescansoReentrada(predioId, potreroId, {
       anclarAFechaExistente: previewAnclado,
       confirmedFechaInicioPastoreo: preview.fechaInicioPastoreo,
     });
+    const { ok, data } = respuestaApi;
     setSaving(false);
     if (!ok) {
       if (data?.error === 'STALE_PREVIEW_DATE_CHANGED') {
@@ -475,7 +478,7 @@ export default function PotreroDescansoReentradaPanel({ predioId, potreroId, ref
         calcularPreview(previewAnclado);
         return;
       }
-      setSaveError(resolveErrorMessage(data?.error));
+      setSaveError(mensajeError(respuestaApi, resolveErrorMessage));
       return;
     }
     setPreview(null);

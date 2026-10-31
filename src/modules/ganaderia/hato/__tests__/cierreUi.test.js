@@ -383,7 +383,7 @@ test('listado: respuestas fuera de orden se descartan (solo aplica la consulta v
   assert.match(lista, /const consultaRef = useRef\(0\);/);
   assert.match(lista, /const consulta = \+\+consultaRef\.current;\s*const vigente = \(\) => consulta === consultaRef\.current;/);
   // Servidor: nada se aplica tras el await sin comprobar vigencia.
-  assert.match(lista, /await listAnimales\(\{ \.\.\.filtros, limit: PAGE_SIZE, offset: 0 \}\);\s*if \(!vigente\(\)\) return;/);
+  assert.match(lista, /await listAnimales\(\{ \.\.\.filtros, limit: PAGE_SIZE, offset: 0 \}\);\s*const \{ ok, data \} = respuestaApi;\s*if \(!vigente\(\)\) return;/);
   assert.match(lista, /if \(vigente\(\)\) setState\(\{ status: 'ok', animales, total: animales\.length, origen: 'local' \}\);/);
   assert.match(lista, /catch \{\s*if \(vigente\(\)\) setState\(\{ status: 'error'/);
   // Cambio de filtros / desmontaje invalida lo que esté en vuelo.

@@ -558,7 +558,8 @@ test('PotreroCard: archivar/restaurar usan archivarPotrero/restaurarPotrero de g
 test('PotreroCard: restaurarPotrero maneja explícitamente el 409 PREDIO_ARCHIVADO -- mensaje claro, nunca un error genérico ni un código expuesto sin traducir', () => {
   const fn = extractPotreroCardFn();
   const handler = fn.match(/async function handleRestaurar\(\)\s*\{[\s\S]*?\n  \}/)?.[0] ?? '';
-  assert.match(handler, /data\?\.error === 'PREDIO_ARCHIVADO'/);
+  // FASE 3C: el mensaje funcional del 409 va en el mapa de mensajeError().
+  assert.match(handler, /mensajeError\(respuestaApi, \{\s*PREDIO_ARCHIVADO: 'No se puede restaurar/);
   assert.match(handler, /No se puede restaurar: el predio de este potrero sigue archivado/);
 });
 

@@ -32,12 +32,14 @@ import {
   ESTADO_CHAPETA_ADMIN_LABELS,
   ESTADO_LOTE_LABELS,
   adminQrErrorMessage,
+  mensajeErrorAdminQr,
   codigosLegacyConsecutivos,
   etiquetaEstadoOperativoAnimal,
   newOperationId,
   parseCodigosTexto,
   siguienteEstadoLote,
 } from './adminQrModel.js';
+import { errorConMensajeSeguro, mensajeDeExcepcion } from '../api/errorModel.js';
 import '../styles/ganaderia-admin.css';
 import '../styles/ganaderia-admin-qr.css';
 
@@ -52,11 +54,11 @@ function Msg({ type = 'info', children }) {
   return <p className={`gan-aqr-msg gan-aqr-msg-${type}`} role={type === 'error' ? 'alert' : 'status'}>{children}</p>;
 }
 
-/** Ejecuta un POST y devuelve data o lanza un mensaje legible. */
+/** Ejecuta un POST y devuelve data o lanza un mensaje legible (FASE 3C: 5xx con código de seguimiento). */
 async function run(action) {
-  const { ok, data } = await action();
-  if (!ok) throw new Error(adminQrErrorMessage(data));
-  return data;
+  const resultado = await action();
+  if (!resultado.ok) throw errorConMensajeSeguro(mensajeErrorAdminQr(resultado));
+  return resultado.data;
 }
 
 // ---------------------------------------------------------------------
@@ -97,7 +99,7 @@ function CrearLoteForm({ onCreated }) {
       setObservaciones('');
       onCreated(data.lote);
     } catch (err) {
-      setError(err.message);
+      setError(mensajeDeExcepcion(err));
     } finally {
       setSaving(false);
     }
@@ -149,7 +151,7 @@ function DescargasFabricacion({ loteId }) {
     try {
       const result = await descargarPaqueteFabricacion(loteId);
       if (!result.ok) {
-        setError(adminQrErrorMessage(result.data));
+        setError(mensajeErrorAdminQr(result));
         return;
       }
       const calculado = await sha256DelArchivo(result.blob);
@@ -166,8 +168,8 @@ function DescargasFabricacion({ loteId }) {
       enlace.remove();
       setTimeout(() => URL.revokeObjectURL(href), 60_000);
       setSha({ filename: result.filename, valor: calculado });
-    } catch {
-      setError(adminQrErrorMessage(null));
+    } catch (err) {
+      setError(mensajeDeExcepcion(err, adminQrErrorMessage(null)));
     } finally {
       setDescargando(false);
     }
@@ -210,11 +212,11 @@ function LoteDetalle({ loteId, organizaciones, nombreOrg, onChanged }) {
   const load = useCallback(async () => {
     setError('');
     try {
-      const { ok, data } = await getLote(loteId);
-      if (ok) setDetalle(data);
-      else setError(adminQrErrorMessage(data));
-    } catch {
-      setError(adminQrErrorMessage(null));
+      const resultado = await getLote(loteId);
+      if (resultado.ok) setDetalle(resultado.data);
+      else setError(mensajeErrorAdminQr(resultado));
+    } catch (err) {
+      setError(mensajeDeExcepcion(err, adminQrErrorMessage(null)));
     }
   }, [loteId]);
 
@@ -234,7 +236,7 @@ function LoteDetalle({ loteId, organizaciones, nombreOrg, onChanged }) {
       await load();
       onChanged();
     } catch (err) {
-      setError(err.message);
+      setError(mensajeDeExcepcion(err));
     } finally {
       setSaving(false);
     }
@@ -280,7 +282,7 @@ function LoteDetalle({ loteId, organizaciones, nombreOrg, onChanged }) {
       await load();
       onChanged();
     } catch (err) {
-      setError(err.message);
+      setError(mensajeDeExcepcion(err));
     } finally {
       setSaving(false);
     }
@@ -384,11 +386,11 @@ function ChapetaDetalle({ qrId, nombreOrg, onChanged }) {
 
   const load = useCallback(async () => {
     try {
-      const { ok, data } = await getChapeta(qrId);
-      if (ok) setDetalle(data);
-      else setError(adminQrErrorMessage(data));
-    } catch {
-      setError(adminQrErrorMessage(null));
+      const resultado = await getChapeta(qrId);
+      if (resultado.ok) setDetalle(resultado.data);
+      else setError(mensajeErrorAdminQr(resultado));
+    } catch (err) {
+      setError(mensajeDeExcepcion(err, adminQrErrorMessage(null)));
     }
   }, [qrId]);
 
@@ -418,7 +420,7 @@ function ChapetaDetalle({ qrId, nombreOrg, onChanged }) {
       await load();
       onChanged();
     } catch (err) {
-      setError(err.message);
+      setError(mensajeDeExcepcion(err));
     } finally {
       setSaving(false);
     }
@@ -493,16 +495,16 @@ function BuscarChapetas({ lotes, organizaciones, nombreOrg, refreshKey, onChange
     event?.preventDefault();
     setError('');
     try {
-      const { ok, data } = await buscarChapetas({
+      const respuestaApi = await buscarChapetas({
         codigo: filtros.codigo.trim() || undefined,
         estado: filtros.estado || undefined,
         loteId: filtros.loteId || undefined,
         organizacionId: filtros.organizacionId || undefined,
       });
-      if (ok) setResultado(data);
-      else setError(adminQrErrorMessage(data));
-    } catch {
-      setError(adminQrErrorMessage(null));
+      if (respuestaApi.ok) setResultado(respuestaApi.data);
+      else setError(mensajeErrorAdminQr(respuestaApi));
+    } catch (err) {
+      setError(mensajeDeExcepcion(err, adminQrErrorMessage(null)));
     }
   }
 
@@ -601,7 +603,7 @@ function ImportarLegacy({ onImported }) {
       setOperationId(newOperationId());
       onImported(data.lote);
     } catch (err) {
-      setError(err.message);
+      setError(mensajeDeExcepcion(err));
     } finally {
       setSaving(false);
     }
@@ -642,11 +644,11 @@ export default function GanaderiaAdminQrInventario() {
 
   const loadLotes = useCallback(async () => {
     try {
-      const { ok, data } = await listLotes();
-      if (ok) setLotes(data.lotes ?? []);
-      else setError(adminQrErrorMessage(data));
-    } catch {
-      setError(adminQrErrorMessage(null));
+      const resultado = await listLotes();
+      if (resultado.ok) setLotes(resultado.data.lotes ?? []);
+      else setError(mensajeErrorAdminQr(resultado));
+    } catch (err) {
+      setError(mensajeDeExcepcion(err, adminQrErrorMessage(null)));
     }
   }, []);
 

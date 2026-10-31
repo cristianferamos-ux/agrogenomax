@@ -1,5 +1,6 @@
 // SPRINT-3D11.3 (R1): lógica pura del módulo Administración > QR Ganadería
 // / Inventario de chapetas. Sin React ni red.
+import { mensajeError } from '../api/errorModel.js';
 
 export const ESTADO_LOTE_LABELS = Object.freeze({
   GENERADO: 'Generado',
@@ -87,6 +88,11 @@ const ERROR_MESSAGES = Object.freeze({
   EXPORT_VERIFICATION_FAILED: 'La verificación del paquete de fabricación falló; no se generó ningún archivo.',
   LOTE_LEGACY_SIN_ARCHIVO: 'Los lotes legacy no tienen archivo de fabricación.',
 });
+
+/** FASE 3C: resultado fallido -> mensaje (5xx con código de seguimiento, red, 4xx funcional). */
+export function mensajeErrorAdminQr(resultado) {
+  return mensajeError(resultado, () => adminQrErrorMessage(resultado?.data));
+}
 
 export function adminQrErrorMessage(data) {
   const base = ERROR_MESSAGES[data?.error] ?? 'No fue posible completar la acción. Intenta nuevamente.';
