@@ -1,5 +1,6 @@
 // SPRINT-3D11.3 (R1): /ganaderia/escanear-qr (privada). Cámara o código de
-// chapeta digitado -> parseQrContent -> /ganaderia/qr/:valor. La entrada
+// chapeta digitado -> parseQrContent -> resolver (FASE 3B: un token va a la
+// URL limpia /ganaderia/qr con el token solo en memoria). La entrada
 // manual resuelve EXACTAMENTE igual que el escaneo (mismo resolver): es la
 // alternativa obligatoria en campo cuando falla la cámara o el QR está
 // sucio, dañado o mal iluminado.
@@ -8,7 +9,8 @@ import { useNavigate } from 'react-router-dom';
 import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
 import HatoQrScanner from './HatoQrScanner.jsx';
-import { parseQrContent, qrResolverPath } from './qrToken.js';
+import { parseQrContent } from './qrToken.js';
+import { rutaResolverQr } from './qrPendiente.js';
 import '../styles/ganaderia-hato.css';
 
 const INVALID_SCAN_MESSAGE = 'El QR leído no es una chapeta AgroGenomaX.';
@@ -26,7 +28,7 @@ export default function HatoEscanearQrPage() {
       return;
     }
     setError('');
-    navigate(qrResolverPath(parsed));
+    navigate(rutaResolverQr(parsed));
   }
 
   return (

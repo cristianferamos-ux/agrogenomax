@@ -95,6 +95,35 @@ test('con red, la navegación devuelve la respuesta de la red tal cual (sin pasa
   assert.equal(online.body, 'red /ganaderia/qr/AGX-000001');
 });
 
+test('FASE 3B: la redirección 303 de /qr/<token> nunca reemplaza el shell offline cacheado', async () => {
+  const sw = await swPreparado();
+  const redireccion = await sw.navegar('/qr/aB3_-xYz09QwErTyUiOpAsDfGhJkLzXc');
+  assert.equal(redireccion.status, 303);
+  sw.red.modo = 'offline';
+  assertShell(await sw.navegar('/ganaderia/animales'), '/ganaderia/animales');
+});
+
+test('FASE 3B.2: respuestas 4xx y 5xx de navegación nunca reemplazan el shell offline', async () => {
+  for (const status of [400, 403, 404, 500, 502, 503]) {
+    const sw = await swPreparado();
+    const conError = await sw.navegar(`/ganaderia/error-${status}`);
+    assert.equal(conError.status, status, `la red responde ${status} tal cual`);
+    sw.red.modo = 'offline';
+    assertShell(await sw.navegar('/ganaderia/animales'), `tras ${status}`);
+  }
+});
+
+test('FASE 3B.2: una navegación 2xx sí renueva el shell offline', async () => {
+  const sw = await swPreparado();
+  const ok = await sw.navegar('/ganaderia/predios');
+  assert.equal(ok.status, 200);
+  sw.red.modo = 'offline';
+  const shell = await sw.navegar('/ganaderia/animales');
+  assert.equal(shell.networkError, false);
+  assert.equal(shell.status, 200);
+  assert.equal(shell.body, 'red /ganaderia/predios', 'el shell es la última navegación 2xx');
+});
+
 test('17. assets del precache: caché primero sin red, incluido <script type="module" crossorigin> con Vary: Origin', async () => {
   const sw = await swPreparado();
   sw.red.modo = 'offline';

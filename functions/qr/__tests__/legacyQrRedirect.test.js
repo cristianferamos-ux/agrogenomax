@@ -97,8 +97,97 @@ describe('functions/qr/[codigo].js -- redirección canónica de QR legacy', () =
     for (const file of ['functions/api/qr/[codigo].js', 'functions/_data/agxStatic.js']) {
       assert.equal(fs.existsSync(path.join(REPO_ROOT, file)), false, file);
     }
-    for (const forbidden of [/fetch\(/, /agxStatic/, /\/api\//, /import\s/]) {
+    for (const forbidden of [/fetch\(/, /agxStatic/, /import\s/]) {
       assert.doesNotMatch(source, forbidden);
     }
+    // FASE 3B: la única mención de /api/ es el Path de la cookie efímera
+    // (atributo, no una consulta).
+    const sinComentarios = source.replace(/^\s*\/\/.*$/gm, '');
+    assert.deepEqual(sinComentarios.match(/['"`][^'"`]*\/api\/[^'"`]*['"`]/g), ["'/api/ganaderia/qr'"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FASE 3B: token QR fuera de la URL. La chapeta impresa abre GET /qr/<token>;
+// la Function responde 303 a la URL limpia /ganaderia/qr y deja el token
+// solo en una cookie HttpOnly acotada al resolver.
+// ---------------------------------------------------------------------------
+const TOKEN = 'aB3_-xYz09QwErTyUiOpAsDfGhJkLzXc';
+
+describe('FASE 3B: functions/qr/[codigo].js -- token fuera de la URL', () => {
+  test('3B-1. /qr/<token> en el origen canónico -> 303 a /ganaderia/qr; Location sin token', () => {
+    for (const url of [
+      `https://agrogenomax.com/qr/${TOKEN}`,
+      `https://www.agrogenomax.com/qr/${TOKEN}`,
+      `https://feature-x.agrogenomax.pages.dev/qr/${TOKEN}`,
+    ]) {
+      const { response, nextCalls } = call(url);
+      assert.equal(nextCalls, 0, url);
+      assert.equal(response.status, 303, url);
+      assert.equal(response.headers.get('Location'), '/ganaderia/qr', url);
+      assert.ok(!response.headers.get('Location').includes(TOKEN));
+    }
+  });
+
+  test('3B-2. cookie efímera: HttpOnly, Secure (__Secure-) en https, Path acotado al resolver, SameSite=Lax, 10 min', () => {
+    const { response } = call(`https://agrogenomax.com/qr/${TOKEN}`);
+    assert.equal(
+      response.headers.get('Set-Cookie'),
+      `__Secure-agx_qr_pendiente=${TOKEN}; Max-Age=600; Path=/api/ganaderia/qr; HttpOnly; SameSite=Lax; Secure`,
+    );
+    const local = call(`http://localhost:8788/qr/${TOKEN}`).response;
+    assert.equal(local.headers.get('Set-Cookie'), `agx_qr_pendiente=${TOKEN}; Max-Age=600; Path=/api/ganaderia/qr; HttpOnly; SameSite=Lax`);
+  });
+
+  test('3B-3. cabeceras: no-store, no-cache, Referrer-Policy no-referrer, nosniff; sin body', async () => {
+    const { response } = call(`https://agrogenomax.com/qr/${TOKEN}`);
+    assert.equal(response.headers.get('Cache-Control'), 'no-store, no-cache');
+    assert.equal(response.headers.get('Pragma'), 'no-cache');
+    assert.equal(response.headers.get('Referrer-Policy'), 'no-referrer');
+    assert.equal(response.headers.get('X-Content-Type-Options'), 'nosniff');
+    assert.equal(await response.text(), '');
+  });
+
+  test('3B-4. códigos visibles (no secretos) y valores inválidos siguen al SPA sin cambios', () => {
+    for (const valor of ['AGX-000003', 'AGX-7KM4-P2XZ-R', 'corto', `${TOKEN}x`, TOKEN.slice(1)]) {
+      const { response, nextCalls } = call(`https://agrogenomax.com/qr/${encodeURIComponent(valor)}`, { codigo: valor });
+      assert.equal(nextCalls, 1, valor);
+      assert.equal(response, NEXT, valor);
+    }
+  });
+
+  test('3B-5. chapeta impresa con pages.dev: 302 al canónico (sin caché, sin Referer) y allí 303 + cookie', () => {
+    const legacy = call(`https://agrogenomax.pages.dev/qr/${TOKEN}`).response;
+    assert.equal(legacy.status, 302);
+    assert.equal(legacy.headers.get('Referrer-Policy'), 'no-referrer');
+    assert.equal(legacy.headers.get('Set-Cookie'), null, 'la cookie solo se fija en el origen canónico');
+    const canonical = call(legacy.headers.get('Location')).response;
+    assert.equal(canonical.status, 303);
+    assert.equal(canonical.headers.get('Location'), '/ganaderia/qr');
+  });
+
+  test('3B-6. solo GET: HEAD/POST con token -> next(), sin cookie', () => {
+    for (const method of ['HEAD', 'POST']) {
+      const { nextCalls } = call(`https://agrogenomax.com/qr/${TOKEN}`, { method });
+      assert.equal(nextCalls, 1, method);
+    }
+  });
+
+  test('3B-7. misma cookie que el servidor (qrPendienteCookie.js): nombre, Path y Max-Age', async () => {
+    const server = await import('../../../server/security/qrPendienteCookie.js');
+    const fn = await import('../[codigo].js');
+    assert.equal(fn.qrPendienteCookieName(true), server.qrPendienteCookieName('production'));
+    assert.equal(fn.qrPendienteCookieName(true), server.qrPendienteCookieName('staging'));
+    assert.equal(fn.qrPendienteCookieName(false), server.qrPendienteCookieName('development'));
+    assert.equal(fn.QR_PENDIENTE_COOKIE_PATH, server.QR_PENDIENTE_COOKIE_PATH);
+    assert.equal(fn.QR_PENDIENTE_MAX_AGE_SECONDS, server.QR_PENDIENTE_MAX_AGE_SECONDS);
+    const { response } = call(`https://agrogenomax.com/qr/${TOKEN}`);
+    const cookieHeader = response.headers.get('Set-Cookie').split(';')[0];
+    assert.equal(server.getQrPendienteTokenFromCookieHeader(`otra=1; ${cookieHeader}`, 'production'), TOKEN);
+    assert.equal(server.getQrPendienteTokenFromCookieHeader(cookieHeader, 'development'), null, 'nombre distinto por ambiente');
+    assert.equal(server.getQrPendienteTokenFromCookieHeader('__Secure-agx_qr_pendiente=../../x', 'production'), null);
+    assert.equal(server.hasQrPendienteCookie('__Secure-agx_qr_pendiente=../../x', 'production'), true);
+    assert.equal(server.hasQrPendienteCookie('agx_session=1', 'production'), false);
+    assert.match(server.buildQrPendienteClearCookieHeader('production'), /^__Secure-agx_qr_pendiente=; Max-Age=0; Path=\/api\/ganaderia\/qr; HttpOnly; SameSite=Lax; Secure$/);
   });
 });

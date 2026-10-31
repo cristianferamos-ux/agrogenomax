@@ -57,7 +57,7 @@ test('HatoQrEntradaPublica.jsx: sin API -- solo redirige un token o código de c
     assert.doesNotMatch(entryCode, forbidden);
   }
   assert.match(entryCode, /const parsed = parseQrContent\(codigo\);/);
-  assert.match(entryCode, /if \(parsed\.kind !== 'invalid'\) return <Navigate to=\{qrResolverPath\(parsed\)\} replace \/>;/);
+  assert.match(entryCode, /if \(parsed\.kind !== 'invalid'\) return <Navigate to=\{rutaResolverQr\(parsed\)\} replace \/>;/);
   assert.match(entryCode, /return <QrNoDisponiblePage \/>;/);
 });
 

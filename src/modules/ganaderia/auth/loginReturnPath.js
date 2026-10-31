@@ -1,10 +1,12 @@
 // SPRINT-3D11.3 (R1): destino post-login para el flujo QR. Una chapeta
 // escaneada sin sesión pasa por /ganaderia/login y, tras autenticarse,
 // vuelve a resolverse bajo la organización de la sesión. Lista blanca
-// estricta: solo el resolver /ganaderia/qr/<token | código canónico> y el
-// escáner. Cualquier otro valor -- URL absoluta, //host, otra ruta -- se
-// ignora (sin open redirect).
-const QR_RESOLVER_PATH = /^\/ganaderia\/qr\/(?:[A-Za-z0-9_-]{32}|AGX-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]|AGX-[0-9]{6})$/;
+// estricta: solo el resolver /ganaderia/qr (URL limpia, FASE 3B) o
+// /ganaderia/qr/<código canónico> y el escáner. Un token NUNCA es destino
+// (no debe quedar en location.state): RequireGanaderiaAuth lo saca de la
+// URL antes de llegar aquí. Cualquier otro valor -- URL absoluta, //host,
+// otra ruta -- se ignora (sin open redirect).
+const QR_RESOLVER_PATH = /^\/ganaderia\/qr(?:\/(?:AGX-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]|AGX-[0-9]{6}))?$/;
 const QR_SCANNER_PATH = '/ganaderia/escanear-qr';
 
 export function safeLoginReturnPath(value) {
