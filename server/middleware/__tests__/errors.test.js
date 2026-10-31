@@ -88,7 +88,7 @@ describe('LOTE-009: server/middleware/errors.js', () => {
     const error = Object.assign(new Error('detalle interno sensible'), { status: 500 });
     captureConsoleError(() => errorHandler(error, {}, res, () => {}));
     assert.equal(res.statusCode, 500);
-    assert.deepEqual(res.body, { error: 'Error interno del servidor' });
+    assert.deepEqual(res.body, { error: 'Error interno del servidor', code: 'INTERNAL_ERROR' });
     const serialized = JSON.stringify(res.body);
     assert.ok(!serialized.includes('detalle interno sensible'));
   });
@@ -98,7 +98,7 @@ describe('LOTE-009: server/middleware/errors.js', () => {
     const error = Object.assign(new Error('pool_exhausted en agx'), { status: 503 });
     captureConsoleError(() => errorHandler(error, {}, res, () => {}));
     assert.equal(res.statusCode, 503);
-    assert.deepEqual(res.body, { error: 'Error interno del servidor' });
+    assert.deepEqual(res.body, { error: 'Error interno del servidor', code: 'INTERNAL_ERROR' });
   });
 
   test('error simulado de driver pg (5xx) no expone mensaje crudo ni credenciales', () => {
@@ -109,7 +109,7 @@ describe('LOTE-009: server/middleware/errors.js', () => {
     );
     captureConsoleError(() => errorHandler(pgError, {}, res, () => {}));
     assert.equal(res.statusCode, 500);
-    assert.deepEqual(res.body, { error: 'Error interno del servidor' });
+    assert.deepEqual(res.body, { error: 'Error interno del servidor', code: 'INTERNAL_ERROR' });
     const serialized = JSON.stringify(res.body);
     assert.ok(!serialized.includes('password'));
     assert.ok(!serialized.includes('10.0.0.5'));
@@ -121,7 +121,7 @@ describe('LOTE-009: server/middleware/errors.js', () => {
     const error = new Error('sin status definido');
     captureConsoleError(() => errorHandler(error, {}, res, () => {}));
     assert.equal(res.statusCode, 500);
-    assert.deepEqual(res.body, { error: 'Error interno del servidor' });
+    assert.deepEqual(res.body, { error: 'Error interno del servidor', code: 'INTERNAL_ERROR' });
   });
 
   test('status inválido (string, decimal o fuera de rango) normaliza a 500', () => {
@@ -130,7 +130,7 @@ describe('LOTE-009: server/middleware/errors.js', () => {
       const error = Object.assign(new Error('mensaje irrelevante'), { status: rawStatus });
       captureConsoleError(() => errorHandler(error, {}, res, () => {}));
       assert.equal(res.statusCode, 500, `status=${JSON.stringify(rawStatus)} debía normalizar a 500`);
-      assert.deepEqual(res.body, { error: 'Error interno del servidor' });
+      assert.deepEqual(res.body, { error: 'Error interno del servidor', code: 'INTERNAL_ERROR' });
     }
   });
 
@@ -165,7 +165,10 @@ describe('LOTE-009: server/middleware/errors.js', () => {
     assert.ok(!serializedCall.includes('DatabaseError'));
     assert.ok(!serializedCall.includes(error.stack));
     assert.ok(!serializedCall.includes(error.message));
-    assert.deepEqual(calls[0], ['[errorHandler] status=500 category=internal_error']);
+    const evento = JSON.parse(calls[0][0]);
+    assert.deepEqual(Object.keys(evento).sort(), ['event', 'level', 'status', 'timestamp']);
+    assert.equal(evento.event, 'request_error');
+    assert.equal(evento.level, 'error');
   });
 
   test('error.name con SQL, token, salto de línea y credencial nunca llega a console.error', () => {
@@ -179,8 +182,8 @@ describe('LOTE-009: server/middleware/errors.js', () => {
     assert.ok(!serializedCall.includes('SQL'));
     assert.ok(!serializedCall.includes('token'));
     assert.ok(!serializedCall.includes('credencial'));
-    assert.ok(!serializedCall.includes('\n'));
-    assert.deepEqual(calls[0], ['[errorHandler] status=500 category=internal_error']);
+    assert.ok(!serializedCall.includes('\\n'));
+    assert.equal(JSON.parse(calls[0][0]).status, 500);
   });
 
   test('con headersSent=true, delega con next(error) sin llamar status/json de nuevo', () => {
