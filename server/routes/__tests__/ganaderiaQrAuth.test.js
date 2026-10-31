@@ -217,6 +217,7 @@ const TENANT_SURFACE = [
   ['GET', `/qr/token/${TOKEN_SHAPE}`],
   ['GET', '/qr/codigo/AGX-7KM4-P2XZ-R-R'],
   ['GET', '/qr/chapetas'],
+  ['POST', '/qr/resolver', {}],
   ['POST', '/qr/chapetas/AGX-7KM4-P2XZ-R/registrar-animal', {}],
   ['GET', '/animales/1/qr'],
   ['POST', '/animales/1/qr/asociar', { codigoVisible: 'AGX-7KM4-P2XZ-R' }],
@@ -268,6 +269,21 @@ describe('SPRINT-3D11.3: organización -- validación antes de tocar la base', (
       const { status, json } = await call('GET', path);
       assert.equal(status, 404);
       assert.deepEqual(json, { error: 'QR_NOT_FOUND' });
+    });
+  }
+});
+
+describe('FASE 3B: POST /qr/resolver -- token fuera de la URL, validación antes de tocar la base', () => {
+  for (const [name, body, error] of [
+    ['token del body con formato inválido', { token: 'corto' }, 'QR_NOT_FOUND'],
+    ['token del body no string', { token: 12345 }, 'QR_NOT_FOUND'],
+    ['token del body con relleno', { token: `${'A'.repeat(31)}=` }, 'QR_NOT_FOUND'],
+    ['sin token en body ni cookie', {}, 'QR_PENDIENTE_AUSENTE'],
+  ]) {
+    test(`${name} -> 404 ${error} sin consultar la base`, async () => {
+      const { status, json } = await call('POST', '/qr/resolver', { body });
+      assert.equal(status, 404);
+      assert.deepEqual(json, { error });
     });
   }
 });

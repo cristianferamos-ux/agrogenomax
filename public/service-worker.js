@@ -201,8 +201,13 @@ function navigationResponse(request, requestUrl) {
     : fetch(request);
   return network
     .then((response) => {
-      const copy = response.clone();
-      caches.open(CACHE_VERSION).then((cache) => cache.put('/index.html', copy));
+      // FASE 3B: solo una respuesta 2xx renueva el shell offline. Una
+      // redirección (p. ej. el 303 de /qr/<token>, opaqueredirect en el
+      // navegador) o un error nunca reemplazan /index.html.
+      if (response && response.ok) {
+        const copy = response.clone();
+        caches.open(CACHE_VERSION).then((cache) => cache.put('/index.html', copy));
+      }
       return response;
     })
     .catch(() => shellResponse());

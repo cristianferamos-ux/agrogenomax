@@ -73,6 +73,9 @@ export function loadServiceWorker(source, { clients = [], withSyncBundle = true 
     if (url.pathname === '/agx-precache.json') return new Response(JSON.stringify(MANIFEST), { status: 200 });
     if (url.pathname.startsWith('/api/')) return new Response('{"ok":true}', { status: 200 });
     if (url.pathname === '/index.html') return marcarRedirigida(new Response('red /', { status: 200 }), `${ORIGIN}/`);
+    // FASE 3B: chapeta impresa /qr/<token> -> 303 de la Pages Function (en el
+    // navegador, una navegación con redirect 'manual' la ve como opaqueredirect, ok=false).
+    if (/^\/qr\/[A-Za-z0-9_-]{32}$/.test(url.pathname)) return new Response(null, { status: 303, headers: { Location: '/ganaderia/qr' } });
     return new Response(`red ${url.pathname}`, { status: 200 });
   };
   const fetchImpl = async (input) => {

@@ -13,10 +13,15 @@ import {
   createRequireGanaderiaSession,
   createRequireGanaderiaCsrf,
 } from '../security/ganaderiaSession.js';
-import { createRequireAdministracion, createRequireOperacion } from '../security/ganaderiaPermisos.js';
+import { createRequireAdministracion, createRequireLectura, createRequireOperacion } from '../security/ganaderiaPermisos.js';
 import { resolveFechaHoyNegocio } from '../services/ganaderia/motorDescansoAuto/businessTimezone.js';
 import { isValidPositiveId, validateCreateAnimalBody } from '../services/ganaderia/animalValidation.js';
 import { isQrToken, normalizeCodigoVisible } from '../services/ganaderia/qrCodigos.js';
+import {
+  buildQrPendienteClearCookieHeader,
+  getQrPendienteTokenFromCookieHeader,
+  hasQrPendienteCookie,
+} from '../security/qrPendienteCookie.js';
 import {
   requireCodigoVisible,
   validateAsociarBody,
@@ -99,7 +104,40 @@ export function createGanaderiaQrRouter({ appEnv, csrfServerSecret, allowedOrigi
   // FASE 3A: RBAC por acción (ver server/security/ganaderiaPermisos.js).
   // El inventario de la organización (GET) es de lectura para todos los roles.
   const requireOperacion = createRequireOperacion();
+  const requireLectura = createRequireLectura();
 
+  // FASE 3B: resolución SIN token en la URL. El token llega en el body
+  // (escáner del SPA, en memoria) o en la cookie efímera HttpOnly que fija
+  // la Pages Function al abrir la chapeta impresa (qrPendienteCookie.js).
+  // Misma resolución, mismo tenant y mismas respuestas que GET /token/:token.
+  // La cookie se borra en cuanto hay respuesta definitiva (no en 5xx: el
+  // usuario puede reintentar sin volver a escanear). Una sola consulta.
+  router.post('/resolver', requireLectura, handler(async (req, res) => {
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    const cookieHeader = req.headers.cookie;
+    const traeCookie = hasQrPendienteCookie(cookieHeader, appEnv);
+    const clearCookie = () => {
+      if (traeCookie) res.append('Set-Cookie', buildQrPendienteClearCookieHeader(appEnv));
+    };
+    const bodyToken = req.body && typeof req.body === 'object' ? req.body.token : undefined;
+    if (bodyToken !== undefined && !isQrToken(bodyToken)) {
+      clearCookie();
+      res.status(404).json({ error: 'QR_NOT_FOUND' });
+      return;
+    }
+    const token = bodyToken ?? getQrPendienteTokenFromCookieHeader(cookieHeader, appEnv);
+    if (!token) {
+      clearCookie();
+      res.status(404).json({ error: 'QR_PENDIENTE_AUSENTE' });
+      return;
+    }
+    const resolved = await resolverChapeta(req.ganaderiaAuth.organizacionId, { token });
+    clearCookie();
+    sendResolution(res, resolved);
+  }));
+
+  // Compatibilidad (SPA en caché anterior a FASE 3B): el token viaja en la
+  // ruta. El SPA vigente usa POST /resolver. Ningún log registra la URL.
   router.get('/token/:token', handler(async (req, res) => {
     res.setHeader('Referrer-Policy', 'no-referrer');
     const { token } = req.params;

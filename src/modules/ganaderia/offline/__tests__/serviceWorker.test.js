@@ -95,6 +95,14 @@ test('con red, la navegación devuelve la respuesta de la red tal cual (sin pasa
   assert.equal(online.body, 'red /ganaderia/qr/AGX-000001');
 });
 
+test('FASE 3B: la redirección 303 de /qr/<token> nunca reemplaza el shell offline cacheado', async () => {
+  const sw = await swPreparado();
+  const redireccion = await sw.navegar('/qr/aB3_-xYz09QwErTyUiOpAsDfGhJkLzXc');
+  assert.equal(redireccion.status, 303);
+  sw.red.modo = 'offline';
+  assertShell(await sw.navegar('/ganaderia/animales'), '/ganaderia/animales');
+});
+
 test('17. assets del precache: caché primero sin red, incluido <script type="module" crossorigin> con Vary: Origin', async () => {
   const sw = await swPreparado();
   sw.red.modo = 'offline';

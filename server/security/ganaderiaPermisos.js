@@ -29,3 +29,10 @@ export function createRequireOperacion() {
 export function createRequireAdministracion() {
   return createRequireGanaderiaRole(...ROLES_ADMINISTRACION);
 }
+
+// FASE 3B: lectura por POST (POST /qr/resolver: el token va en el body o en
+// una cookie, nunca en la URL). Explícito para que el inventario RBAC vea
+// el rol como primer middleware de la ruta.
+export function createRequireLectura() {
+  return createRequireGanaderiaRole(...ROLES_LECTURA);
+}

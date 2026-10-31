@@ -88,6 +88,8 @@
   "server/middleware/__tests__/errors.test.js",
   "server/middleware/__tests__/rateLimit.test.js",
   "server/observability/__tests__/requestLogging.test.js",
+  "server/observability/__tests__/sanitize.test.js",
+  "server/observability/__tests__/errorObservability.test.js",
   "server/routes/__tests__/catastroxLookupByCode.test.js",
   "server/routes/__tests__/catastroxLookupByPoint.test.js",
   "server/routes/__tests__/catastroxFullResultEntitlement.test.js",

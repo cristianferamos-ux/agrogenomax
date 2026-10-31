@@ -37,7 +37,8 @@ function ComingSoon({ title }) {
 //
 // SPRINT-3D11.3 (R1): escanear-qr y qr/:valor (token o código de chapeta)
 // montan el flujo QR de hato/ (solo /api/ganaderia/qr y
-// /api/ganaderia/animales/:id/qr).
+// /api/ganaderia/animales/:id/qr). FASE 3B: qr (sin valor) es la URL limpia
+// del resolver: token en memoria o cookie HttpOnly, nunca en la ruta.
 //
 // SPRINT-3D11.3 (R1): offline-first -- GanaderiaOfflineProvider (copia
 // local + sincronización automática), indicador siempre visible y
@@ -57,6 +58,7 @@ export default function GanaderiaApp() {
           <Route path="animales/:animalId" element={<HatoDetallePage />} />
           <Route path="animales/*" element={<Navigate to="/ganaderia/animales" replace />} />
           <Route path="escanear-qr" element={<HatoEscanearQrPage />} />
+          <Route path="qr" element={<HatoQrResolverPage />} />
           <Route path="qr/:valor" element={<HatoQrResolverPage />} />
           <Route path="sincronizacion" element={<OfflineSyncPage />} />
           <Route path="animal/*" element={<Navigate to="/ganaderia/animales" replace />} />
