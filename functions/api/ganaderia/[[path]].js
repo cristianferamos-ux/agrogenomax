@@ -60,6 +60,20 @@ export async function onRequest(context) {
 
   const headers = new Headers(request.headers);
   headers.delete('host');
+  // FASE 3B: el Referer nunca llega al backend con ruta ni query (podría
+  // llevar un token QR de una URL antigua). Solo su origen, que es lo
+  // único que usa el CSRF como respaldo cuando falta Origin.
+  const referer = headers.get('referer');
+  if (referer) {
+    let refererOrigin = null;
+    try {
+      refererOrigin = new URL(referer).origin;
+    } catch {
+      refererOrigin = null;
+    }
+    if (refererOrigin && refererOrigin !== 'null') headers.set('referer', `${refererOrigin}/`);
+    else headers.delete('referer');
+  }
 
   const init = {
     method: request.method,

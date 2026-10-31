@@ -194,3 +194,27 @@ describe('BFF-001: functions/api/ganaderia/[[path]].js (relay dedicado)', () => 
     assert.ok(!relaySource.includes('"auth"'));
   });
 });
+
+describe('FASE 3B: el relay nunca reenvía la ruta ni la query del Referer', () => {
+  const TOKEN = 'aB3_-xYz09QwErTyUiOpAsDfGhJkLzXc';
+  async function refererRecibido(referer) {
+    let recibido;
+    stubFetch((_url, init) => {
+      recibido = init.headers.get('referer');
+      return new Response(null, { status: 200 });
+    });
+    await onRequest({ request: makeRequest({ method: 'POST', headers: referer === undefined ? {} : { Referer: referer } }), env: PRODUCTION_ENV });
+    return recibido;
+  }
+
+  test('Referer con token en ruta/query/fragmento -> solo el origen', async () => {
+    assert.equal(await refererRecibido(`https://agrogenomax.com/ganaderia/qr/${TOKEN}?t=${TOKEN}`), 'https://agrogenomax.com/');
+    assert.equal(await refererRecibido(`https://agrogenomax.com/qr/${TOKEN}`), 'https://agrogenomax.com/');
+  });
+
+  test('Referer ausente sigue ausente; inválido u opaco se elimina', async () => {
+    assert.equal(await refererRecibido(undefined), null);
+    assert.equal(await refererRecibido('no es una url'), null);
+    assert.equal(await refererRecibido('data:text/plain,hola'), null);
+  });
+});

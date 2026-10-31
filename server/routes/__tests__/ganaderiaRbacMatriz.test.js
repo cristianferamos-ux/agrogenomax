@@ -88,6 +88,8 @@ const ESCRITURAS = [
   ['POST', '/animales/1/qr/reemplazar', ADM],
   ['POST', '/animales/1/qr/baja', ADM],
   ['POST', '/qr/chapetas/AGX-000001/registrar-animal', OP],
+  // FASE 3B: resolver por POST (token fuera de la URL) -- lectura, 4 roles.
+  ['POST', '/qr/resolver', ALL],
   // Cierres
   ['POST', '/animales/1/salida', ADM],
   ['POST', '/animales/1/muerte', ADM],
@@ -280,7 +282,9 @@ const norm = (p) => p
   .replace('/predios/:predioId', P)
   .replace(/:cicloId/g, '5').replace(/:animalId/g, '1').replace(':codigo', 'AGX-000001');
 // Únicas rutas POST abiertas a los 4 roles: previews de cálculo que NUNCA persisten.
-const PREVIEWS_ABIERTOS = new Set(ESCRITURAS.filter(([, , roles]) => roles === ALL).map(([m, p]) => `${m} ${p}`));
+// FASE 3B: POST de LECTURA (con rol de lectura explícito), no es un preview.
+const LECTURAS_POST = new Set(['POST /qr/resolver']);
+const PREVIEWS_ABIERTOS = new Set(ESCRITURAS.filter(([, , roles]) => roles === ALL).map(([m, p]) => `${m} ${p}`).filter((k) => !LECTURAS_POST.has(k)));
 
 function inventario() {
   const filas = [];
