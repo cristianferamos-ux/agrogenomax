@@ -17,6 +17,11 @@
 //   ANIMAL_SALIDO       agx.animal_eventos SALIDO (FASE 2A; metadata.fecha =
 //   ANIMAL_MUERTO       fecha efectiva, motivo/causa). animales.cierre_* es el
 //                       MISMO hecho: no se usa.
+//   CELO / SERVICIO /   agx.reproduccion_eventos (FASE 4A; fecha = fecha_evento,
+//   INSEMINACION / IATF hora declarada). Los ANULADO se muestran marcados
+//   / TRANSFERENCIA_    "(anulado)" (trazabilidad); el estado reproductivo
+//   EMBRION / PRENEZ /  NO se deriva aquí (reproduccionEstado.js).
+//   ABORTO / PARTO
 //   agx.qr_chapeta_eventos registra los MISMOS hechos QR desde la chapeta
 //   (ASOCIADA_ANIMAL, REVOCADA, ...) y ASIGNADA_ORGANIZACION no es un hecho
 //   del animal: se EXCLUYE por diseño (deduplicación).
@@ -45,6 +50,15 @@ export const TIPOS_TIMELINE = Object.freeze({
   QR_REEMPLAZADO: 'QR_REEMPLAZADO',
   ANIMAL_SALIDO: 'ANIMAL_SALIDO',
   ANIMAL_MUERTO: 'ANIMAL_MUERTO',
+  // FASE 4A: agx.reproduccion_eventos (fecha efectiva = fecha_evento).
+  CELO: 'CELO',
+  SERVICIO: 'SERVICIO',
+  INSEMINACION: 'INSEMINACION',
+  IATF: 'IATF',
+  TRANSFERENCIA_EMBRION: 'TRANSFERENCIA_EMBRION',
+  PRENEZ: 'PRENEZ',
+  ABORTO: 'ABORTO',
+  PARTO: 'PARTO',
 });
 
 // Menor = aparece antes (más reciente) ante empate de fecha e instante. El
@@ -58,8 +72,30 @@ const PRIORIDAD = Object.freeze({
   QR_ASIGNADO: 4,
   ANIMAL_CORREGIDO: 5,
   PESAJE_REGISTRADO: 6,
+  CELO: 6,
+  SERVICIO: 6,
+  INSEMINACION: 6,
+  IATF: 6,
+  TRANSFERENCIA_EMBRION: 6,
+  PRENEZ: 6,
+  ABORTO: 6,
+  PARTO: 6,
   ANIMAL_REGISTRADO: 7,
 });
+
+// FASE 4A: tipo reproductivo -> [tipo de línea de tiempo, título].
+const REPRODUCCION = Object.freeze({
+  CELO_OBSERVADO: ['CELO', 'Celo observado'],
+  SERVICIO_MONTA: ['SERVICIO', 'Servicio por monta'],
+  INSEMINACION_ARTIFICIAL: ['INSEMINACION', 'Inseminación artificial'],
+  IATF: ['IATF', 'Inseminación a tiempo fijo (IATF)'],
+  TRANSFERENCIA_EMBRION: ['TRANSFERENCIA_EMBRION', 'Transferencia de embrión'],
+  DIAGNOSTICO_PRENEZ: ['PRENEZ', 'Diagnóstico de preñez'],
+  ABORTO: ['ABORTO', 'Aborto'],
+  PARTO: ['PARTO', 'Parto'],
+});
+const RESULTADOS_PRENEZ = Object.freeze({ PRENADA: 'Preñada', VACIA: 'Vacía', DUDOSA: 'Dudosa' });
+const TIPOS_PARTO = Object.freeze({ NORMAL: 'Normal', ASISTIDO: 'Asistido', CESAREA: 'Cesárea', OTRO: 'Otro' });
 
 // FASE 2A: catálogos de cierre (cierreValidation.js) -> texto.
 const MOTIVOS_SALIDA = Object.freeze({
@@ -263,6 +299,70 @@ function eventoPesaje(p) {
   };
 }
 
+function descripcionReproductiva(e) {
+  const partes = [];
+  const toro = textoSeguro(e.toroExterno, 120);
+  switch (e.tipoEvento) {
+    case 'DIAGNOSTICO_PRENEZ':
+      partes.push(`Resultado: ${RESULTADOS_PRENEZ[e.diagnosticoResultado] ?? 'sin dato'}.`);
+      if (e.diasGestacion) partes.push(`${e.diasGestacion} días de gestación estimados.`);
+      break;
+    case 'PARTO':
+      partes.push(`Tipo: ${TIPOS_PARTO[e.partoTipo] ?? 'sin dato'}. Crías: ${e.numeroCrias ?? 'sin dato'}.`);
+      break;
+    case 'ABORTO': {
+      const causa = textoSeguro(e.abortoCausa, 200);
+      if (e.diasGestacion) partes.push(`${e.diasGestacion} días de gestación estimados.`);
+      if (causa) partes.push(`Causa: ${causa}.`);
+      break;
+    }
+    case 'TRANSFERENCIA_EMBRION': {
+      const codigo = textoSeguro(e.embrionCodigo, 80);
+      const raza = textoSeguro(e.embrionRaza, 120);
+      partes.push(`Embrión ${e.embrionConservacion === 'CONGELADO' ? 'congelado' : 'fresco'}${codigo ? ` ${codigo}` : ''}${raza ? ` (${raza})` : ''}.`);
+      break;
+    }
+    default:
+      if (toro) partes.push(`Toro/genética: ${toro}.`);
+      break;
+  }
+  const observaciones = textoSeguro(e.observaciones, 500);
+  if (observaciones) partes.push(`Observaciones: ${observaciones}`);
+  if (e.estadoRegistro === 'ANULADO') {
+    const motivo = textoSeguro(e.anulacion?.motivo);
+    partes.push(`Anulado${motivo ? `: ${motivo}` : '.'}`);
+  }
+  return partes.length ? partes.join(' ') : 'Sin detalle registrado.';
+}
+
+function eventoReproductivo(e) {
+  const mapeo = REPRODUCCION[e.tipoEvento];
+  if (!mapeo) return null; // tipo desconocido: nunca se inventa ni se expone crudo
+  const [tipo, titulo] = mapeo;
+  const anulado = e.estadoRegistro === 'ANULADO';
+  return {
+    id: `reproduccion:${e.eventoId}`,
+    tipo,
+    // Fecha EFECTIVA del evento (calendario) y hora declarada, como pesajes.
+    fechaHora: null,
+    fecha: e.fechaEvento,
+    hora: typeof e.horaEvento === 'string' && /^\d{2}:\d{2}$/.test(e.horaEvento) ? e.horaEvento : null,
+    titulo: anulado ? `${titulo} (anulado)` : titulo,
+    descripcion: descripcionReproductiva(e),
+    datos: {
+      tipoEvento: e.tipoEvento,
+      detalle: e.detalle && typeof e.detalle === 'object' ? { ...e.detalle } : {},
+      observaciones: textoSeguro(e.observaciones, 500),
+      estadoRegistro: anulado ? 'ANULADO' : 'ACTIVO',
+      motivoAnulacion: anulado ? textoSeguro(e.anulacion?.motivo) : null,
+      corrigeEventoId: e.corrigeEventoId ?? null,
+      registradoEn: e.registradoEn ?? null,
+    },
+    origen: 'reproduccion_eventos',
+    _orden: { instante: e.registradoEn, fuenteId: Number(e.eventoId) },
+  };
+}
+
 function comparar(a, b) {
   const fa = a.fecha ?? '';
   const fb = b.fecha ?? '';
@@ -284,7 +384,7 @@ function comparar(a, b) {
  * @param {number} [p.limit]
  * @returns {{ eventos: Array, total: number, truncado: boolean }}
  */
-export function construirTimelineAnimal({ animal, pesajes = [], eventosAnimal = [], limit = TIMELINE_LIMIT_DEFAULT }) {
+export function construirTimelineAnimal({ animal, pesajes = [], eventosAnimal = [], eventosReproductivos = [], limit = TIMELINE_LIMIT_DEFAULT }) {
   const eventos = [];
   const vistos = new Set();
   const agregar = (evento) => {
@@ -294,6 +394,7 @@ export function construirTimelineAnimal({ animal, pesajes = [], eventosAnimal = 
   };
   for (const row of eventosAnimal) agregar(eventoAnimal(row));
   for (const p of pesajes) agregar(eventoPesaje(p));
+  for (const e of eventosReproductivos) agregar(eventoReproductivo(e));
   // Respaldo de registro SOLO si no existe el evento canónico REGISTRADO.
   if (!eventos.some((e) => e.tipo === TIPOS_TIMELINE.ANIMAL_REGISTRADO) && animal?.fechaCreacion) {
     const creado = animal.fechaCreacion instanceof Date ? animal.fechaCreacion.toISOString() : animal.fechaCreacion;

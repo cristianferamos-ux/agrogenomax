@@ -191,3 +191,32 @@ las columnas nuevas (no las lee ni las escribe). Rollback:
 sin eventos `SALIDO`/`MUERTO` (si existen, el rollback falla a propósito).
 Pruebas: `server/services/__tests__/animalCierreIntegration.test.js`
 (incluida en `npm run test:ganaderia-animales-integration`).
+
+## 0026 -- reproducción bovina: historial de eventos (FASE 4A)
+
+Aditiva pura: crea `agx.reproduccion_eventos` (no modifica tablas ni datos
+existentes; solo referencia `agx.animales`).
+
+- Fuente de verdad ÚNICA del historial reproductivo. Ocho tipos:
+  `CELO_OBSERVADO`, `SERVICIO_MONTA`, `INSEMINACION_ARTIFICIAL`, `IATF`,
+  `TRANSFERENCIA_EMBRION`, `DIAGNOSTICO_PRENEZ`, `ABORTO`, `PARTO`.
+  Columnas tipadas por tipo (sin JSONB) con un CHECK por grupo: cada campo
+  solo existe en los tipos donde aplica.
+- El estado reproductivo **no se guarda**: se deriva de los eventos
+  `ACTIVO` (`server/services/ganaderia/reproduccionEstado.js`).
+- FKs compuestas tenant-safe: animal y toro (`toro_animal_id`) de la misma
+  organización; `corrige_evento_id` del MISMO animal y organización (un
+  evento se corrige como máximo una vez).
+- Idempotencia: `client_operation_id` UNIQUE por organización +
+  `intent_hash` v1; `anulacion_client_operation_id` UNIQUE parcial.
+- Inmutable: `agx_app` tiene SELECT/INSERT y UPDATE solo de las columnas de
+  anulación; sin DELETE. Trigger `reproduccion_eventos_guard`: solo
+  `ACTIVO -> ANULADO`, `ANULADO` terminal, contenido inmutable y sin DELETE
+  (también para conexiones distintas de la app). RLS ENABLE + FORCE.
+
+**Secuencia de despliegue:** aplicar `0026` en Postgres-AGX-Business
+**antes** del merge del código de FASE 4A (el código anterior no la usa).
+Rollback: `0026_reproduccion_bovina_rollback.sql`, solo tras revertir el
+código; si la tabla tiene datos el rollback falla a propósito (no borra
+historial). Pruebas: `npm run test:ganaderia-reproduccion-integration`
+(`server/services/__tests__/reproduccionIntegration.test.js`).

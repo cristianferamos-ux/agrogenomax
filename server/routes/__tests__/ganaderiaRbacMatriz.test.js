@@ -27,6 +27,7 @@ import createGanaderiaAnimalPesajesRouter from '../ganaderiaAnimalPesajes.js';
 import createGanaderiaAnimalReporteRouter from '../ganaderiaAnimalReporte.js';
 import createGanaderiaAnimalTimelineRouter from '../ganaderiaAnimalTimeline.js';
 import createGanaderiaAnimalCierreRouter from '../ganaderiaAnimalCierre.js';
+import createGanaderiaAnimalReproduccionRouter from '../ganaderiaAnimalReproduccion.js';
 import createGanaderiaSyncRouter from '../ganaderiaSync.js';
 import createGanaderiaCatalogoRazasRouter from '../ganaderiaCatalogoRazas.js';
 import { getAgxAuthPool, __resetAgxAuthPoolForTests } from '../../db/agxAuthPool.js';
@@ -60,6 +61,7 @@ const MOUNTS = [
   ['/animales/:animalId/timeline', createGanaderiaAnimalTimelineRouter(CONFIG)],
   ['/animales/:animalId/salida', createGanaderiaAnimalCierreRouter({ ...CONFIG, tipo: 'SALIDA' })],
   ['/animales/:animalId/muerte', createGanaderiaAnimalCierreRouter({ ...CONFIG, tipo: 'MUERTE' })],
+  ['/animales/:animalId/reproduccion', createGanaderiaAnimalReproduccionRouter(CONFIG)],
   ['/animales/:animalId/reporte-productivo.pdf', createGanaderiaAnimalReporteRouter(CONFIG)],
   ['/animales/:animalId/qr', createGanaderiaAnimalQrRouter(CONFIG)],
   ['/qr', createGanaderiaQrRouter(CONFIG)],
@@ -93,6 +95,10 @@ const ESCRITURAS = [
   // Cierres
   ['POST', '/animales/1/salida', ADM],
   ['POST', '/animales/1/muerte', ADM],
+  // Reproducción (FASE 4A): registrar = operación; anular/corregir = administración
+  ['POST', '/animales/1/reproduccion/eventos', OP],
+  ['POST', '/animales/1/reproduccion/eventos/7/anular', ADM],
+  ['POST', '/animales/1/reproduccion/eventos/7/corregir', ADM],
   // Predios (incluye búsquedas del flujo de alta)
   ['POST', '/predios', ADM],
   ['POST', '/predios/buscar-por-coordenadas', ADM],
@@ -138,6 +144,7 @@ const ESCRITURAS = [
 const LECTURAS = [
   '/animales', '/animales/resumen', '/animales/1', '/animales/1/pesajes', '/animales/1/timeline',
   '/animales/1/reporte-productivo.pdf', '/animales/1/qr', '/qr/chapetas', '/qr/codigo/AGX-000001',
+  '/animales/1/reproduccion', '/animales/1/reproduccion/estado',
   '/predios', P, `${P}/potreros`, POT, `${POT}/ficha-productiva`, `${POT}/capacidad-pastoreo`,
   `${POT}/contexto-agroclimatico`, `${POT}/recomendacion-pastoreo`, `${POT}/descanso-reentrada`,
   `${CIC}/actual`, `${CIC}/historial`, `${CIC}/estado-operativo`, '/catalogo-pasturas',
@@ -280,7 +287,7 @@ describe('FASE 3A: matriz RBAC de escrituras /api/ganaderia/*', () => {
 const norm = (p) => p
   .replace('/predios/:predioId/potreros/:potreroId', POT)
   .replace('/predios/:predioId', P)
-  .replace(/:cicloId/g, '5').replace(/:animalId/g, '1').replace(':codigo', 'AGX-000001');
+  .replace(/:cicloId/g, '5').replace(/:eventoId/g, '7').replace(/:animalId/g, '1').replace(':codigo', 'AGX-000001');
 // Únicas rutas POST abiertas a los 4 roles: previews de cálculo que NUNCA persisten.
 // FASE 3B: POST de LECTURA (con rol de lectura explícito), no es un preview.
 const LECTURAS_POST = new Set(['POST /qr/resolver']);

@@ -10,6 +10,6 @@ export async function obtenerTimelineAnimal(organizacionId, animalId, { limit, l
   const fuentes = await leerFuentes(organizacionId, animalId);
   if (!fuentes) return null;
   const { pesajes } = construirHistorialPesajes({ animalId: String(animalId), pesajes: fuentes.pesajes });
-  const timeline = construirTimelineAnimal({ animal: fuentes.animal, pesajes, eventosAnimal: fuentes.eventosAnimal, limit });
+  const timeline = construirTimelineAnimal({ animal: fuentes.animal, pesajes, eventosAnimal: fuentes.eventosAnimal, eventosReproductivos: fuentes.eventosReproductivos, limit });
   return { animalId: String(fuentes.animal.animalId), ...timeline };
 }
