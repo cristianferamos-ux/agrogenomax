@@ -13,6 +13,7 @@
 // CSRF o red). Exactamente 1 GET /csrf y como máximo 1 POST por
 // invocación; cero reintentos; si /csrf falla el POST no se envía.
 import { AUTH_NOTICE_KINDS, emitAuthNotice } from './ganaderiaAuthNoticeSignal.js';
+import { correlationIdDeRespuesta, MENSAJE_SIN_PERMISOS } from '../api/errorModel.js';
 
 // Mismo relay same-origin ya usado por functions/api/ganaderia/[[path]].js
 // (BFF-001) -- nunca una URL absoluta de Railway.
@@ -21,7 +22,7 @@ const CSRF_URL = '/api/ganaderia/auth/csrf';
 export const SESSION_EXPIRED_CODES = Object.freeze(['SESSION_REQUIRED', 'SESSION_INVALID']);
 export const CSRF_REJECTED_CODES = Object.freeze(['CSRF_REQUIRED', 'CSRF_INVALID', 'ORIGIN_INVALID']);
 export const ROLE_FORBIDDEN_CODE = 'ROLE_FORBIDDEN';
-export const MENSAJE_ROLE_FORBIDDEN = 'No tienes permisos para realizar esta acción.';
+export const MENSAJE_ROLE_FORBIDDEN = MENSAJE_SIN_PERMISOS;
 
 export const REQUEST_FAILURES = Object.freeze({
   SESSION_EXPIRED: 'SESSION_EXPIRED',
@@ -37,6 +38,14 @@ async function parseJson(response) {
   } catch {
     return null;
   }
+}
+
+// FASE 3C: resultado { ok, status, data } + correlationId (solo 5xx con UUID
+// válido, del body o de X-Request-ID; ver api/errorModel.js). Aditivo: los
+// consumidores existentes siguen leyendo ok/status/data igual.
+function withCorrelationId(result, response) {
+  const correlationId = correlationIdDeRespuesta(result.status, result.data, response.headers);
+  return correlationId ? { ...result, correlationId } : result;
 }
 
 function errorCodeOf(data) {
@@ -144,7 +153,7 @@ export async function postWithCsrf(path, { body, headers } = {}) {
   }
 
   const data = await parseJson(response);
-  const result = { ok: response.ok, status: response.status, data };
+  const result = withCorrelationId({ ok: response.ok, status: response.status, data }, response);
 
   if (isSessionExpiredResponse(response.status, data)) {
     emitAuthNotice(AUTH_NOTICE_KINDS.SESSION_EXPIRED);
@@ -221,7 +230,7 @@ export async function getJsonWithSession(path) {
   if (isSessionExpiredResponse(response.status, data)) {
     emitAuthNotice(AUTH_NOTICE_KINDS.SESSION_EXPIRED);
   }
-  return { ok: response.ok, status: response.status, data };
+  return withCorrelationId({ ok: response.ok, status: response.status, data }, response);
 }
 
 // GET autenticado de un archivo binario (descargas del Super Admin): mismo
@@ -233,7 +242,7 @@ export async function getFileWithSession(path) {
     if (isSessionExpiredResponse(response.status, data)) {
       emitAuthNotice(AUTH_NOTICE_KINDS.SESSION_EXPIRED);
     }
-    return { ok: false, status: response.status, data, headers: response.headers };
+    return withCorrelationId({ ok: false, status: response.status, data, headers: response.headers }, response);
   }
   return { ok: true, status: response.status, blob: await response.blob(), headers: response.headers };
 }

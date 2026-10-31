@@ -12,6 +12,7 @@ import { formatFecha, formatKg, formatMetodo } from '../hato/pesajesModel.js';
 import { mensajeBloqueoPesaje } from '../hato/pesajesOfflineModel.js';
 import { MENSAJE_OFFLINE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
 import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
+import { mensajeDeExcepcion } from '../api/errorModel.js';
 import '../styles/ganaderia-hato.css';
 import '../styles/ganaderia-offline.css';
 
@@ -40,7 +41,8 @@ function ConflictoPesajeItem({ op, animal, repo, onDone }) {
       await repo.descartarPesajePendiente(op.operationId);
       onDone();
     } catch (err) {
-      setError(err?.message ?? 'No fue posible descartar el pesaje.');
+      // FASE 3C: solo errores de dominio del repositorio local (con código) o un genérico.
+      setError(mensajeDeExcepcion(err, 'No fue posible descartar el pesaje.'));
     }
   }
   return (
@@ -80,7 +82,7 @@ function ConflictoItem({ op, animal, repo, onDone }) {
       setModo(null);
       onDone();
     } catch (err) {
-      setError(err?.message ?? 'No fue posible aplicar el cambio.');
+      setError(mensajeDeExcepcion(err, 'No fue posible aplicar el cambio.'));
     }
   }
 

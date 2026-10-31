@@ -19,6 +19,7 @@ import { messageForError } from './hatoFormModel.js';
 import { ESTADO_CHAPETA_LABELS, normalizeCodigoChapeta } from './qrToken.js';
 import { MENSAJE_QR_HISTORICA, chapetaHistoricaDeCierre } from './cierreModel.js';
 import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
+import { mensajeError } from '../api/errorModel.js';
 
 const CODIGO_INVALIDO = 'Revisa el código de la chapeta (forma AGX-7KM4-P2XZ-R).';
 const MOTIVO_REQUERIDO = 'Escribe el motivo (máximo 500 caracteres).';
@@ -77,14 +78,15 @@ export default function HatoQrPanel({ animalId, animalActivo, estadoOperativo = 
     setSaving(true);
     setError('');
     try {
-      const { ok, data } = await accion();
+      const respuestaApi = await accion();
+      const { ok, data } = respuestaApi;
       if (ok) {
         setModo('ver');
         setAviso(mensajeExito);
         await load();
         onCambio?.();
       } else {
-        setError(messageForError(data?.error));
+        setError(mensajeError(respuestaApi, messageForError));
       }
     } catch {
       setError(messageForError(null));

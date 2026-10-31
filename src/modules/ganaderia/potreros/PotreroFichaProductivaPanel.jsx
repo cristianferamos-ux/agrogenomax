@@ -25,6 +25,7 @@ import {
 import PotreroMotorPastoreoPanel from './PotreroMotorPastoreoPanel.jsx';
 import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
 import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
+import { mensajeError } from '../api/errorModel.js';
 
 const GENERIC_ERROR = 'No fue posible completar la operación en este momento. Intenta nuevamente.';
 const MAX_AFORO_G_M2 = 10000;
@@ -154,10 +155,11 @@ function EspecieSelector({ especiesSeleccionadas, onAdd, onRemove, onPorcentajeC
     if (otraCreating || !otraNombre.trim()) return;
     setOtraCreating(true);
     setOtraError('');
-    const { ok, data } = await createPasturaPersonalizada({ nombreComun: otraNombre.trim(), tipo: otraTipo });
+    const respuestaApi = await createPasturaPersonalizada({ nombreComun: otraNombre.trim(), tipo: otraTipo });
+    const { ok, data } = respuestaApi;
     setOtraCreating(false);
     if (!ok) {
-      setOtraError(PASTURA_CREATE_ERROR_MESSAGES[data?.error] || GENERIC_ERROR);
+      setOtraError(mensajeError(respuestaApi, PASTURA_CREATE_ERROR_MESSAGES, { fallback: GENERIC_ERROR }));
       return;
     }
     onAdd(data.pastura);
@@ -350,10 +352,11 @@ export default function PotreroFichaProductivaPanel({ predioId, potreroId, areaH
       ...(observaciones.trim() ? { observaciones: observaciones.trim() } : {}),
     };
 
-    const { ok, data } = await createFichaProductiva(predioId, potreroId, body);
+    const respuestaApi = await createFichaProductiva(predioId, potreroId, body);
+    const { ok, data } = respuestaApi;
     setSaving(false);
     if (!ok) {
-      setSaveError(resolveCreateErrorMessage(data?.error));
+      setSaveError(mensajeError(respuestaApi, resolveCreateErrorMessage));
       return;
     }
     setShowForm(false);

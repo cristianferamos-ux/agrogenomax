@@ -37,6 +37,7 @@ import { useGanaderiaOffline } from '../offline/GanaderiaOfflineProvider.jsx';
 import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
 import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
 import '../styles/ganaderia-hato.css';
+import { mensajeError } from '../api/errorModel.js';
 
 const FAILURE_NETWORK_ERROR = 'NETWORK_ERROR';
 const CODIGO_NO_DISPONIBLE_MESSAGE = 'Código no disponible en este dispositivo. Conéctese para verificarlo.';
@@ -160,7 +161,7 @@ export default function HatoRegistroPage() {
 
     try {
       const body = buildCreateAnimalBody(form, operationIdRef.current);
-      const { ok, status, data, failure } = chapeta
+      const { ok, status, data, failure, correlationId } = chapeta
         ? await registrarAnimalConChapeta(chapeta, body)
         : await createAnimal(body);
       if (ok && data?.animal && chapeta) {
@@ -186,7 +187,7 @@ export default function HatoRegistroPage() {
         // Sesión expirada / CSRF: el aviso global ya informa; el formulario conserva lo escrito.
         setError('No se pudo enviar el registro. Revisa el aviso de sesión e inténtalo de nuevo.');
       } else {
-        setError(messageForError(data?.error));
+        setError(mensajeError({ status, data, failure, correlationId }, messageForError));
       }
     } catch {
       setError(NETWORK_UNCERTAIN_MESSAGE);

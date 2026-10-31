@@ -36,6 +36,7 @@ import { getFichaProductiva } from './ganaderiaFichaProductivaApi.js';
 import PotreroResidualRealPanel from './PotreroResidualRealPanel.jsx';
 import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
 import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
+import { mensajeError } from '../api/errorModel.js';
 
 const GENERIC_ERROR = 'No fue posible completar la operación en este momento. Intenta nuevamente.';
 
@@ -277,10 +278,11 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
     if (iniciando) return;
     setIniciando(true);
     setIniciarError('');
-    const { ok, data } = await iniciarCicloPastoreo(predioId, potreroId);
+    const respuestaApi = await iniciarCicloPastoreo(predioId, potreroId);
+    const { ok, data } = respuestaApi;
     setIniciando(false);
     if (!ok) {
-      setIniciarError(resolveErrorMessage(data?.error));
+      setIniciarError(mensajeError(respuestaApi, resolveErrorMessage));
       return;
     }
     setDescansoResultado(null);
@@ -324,7 +326,7 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
     setIniciando(true);
     setAjusteError('');
     const categoriaAjustada = resolveCategoriaSeleccionada(ajusteCategoriaCodigo, categorias);
-    const { ok, data } = await iniciarCicloPastoreo(predioId, potreroId, {
+    const respuestaApi = await iniciarCicloPastoreo(predioId, potreroId, {
       numeroAnimales,
       pesoPromedioKg,
       categoriaCodigo: ajusteCategoriaCodigo,
@@ -337,11 +339,12 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
       } : {}),
       ...(categoriaAjustada?.requiereTerneroAlPie ? { terneroAlPie: ajusteTerneroAlPie } : {}),
     });
+    const { ok, data } = respuestaApi;
     setIniciando(false);
     if (!ok) {
       // Se conservan los valores ingresados para que el usuario corrija y
       // reintente -- nunca se limpia el formulario en un error.
-      setAjusteError(resolveErrorMessage(data?.error));
+      setAjusteError(mensajeError(respuestaApi, resolveErrorMessage));
       return;
     }
     setAjustando(false);
@@ -353,10 +356,11 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
     if (finalizando || !actual) return;
     setFinalizando(true);
     setFinalizarError('');
-    const { ok, data } = await finalizarCicloPastoreo(predioId, potreroId, actual.cicloId);
+    const respuestaApi = await finalizarCicloPastoreo(predioId, potreroId, actual.cicloId);
+    const { ok, data } = respuestaApi;
     setFinalizando(false);
     if (!ok) {
-      setFinalizarError(resolveErrorMessage(data?.error));
+      setFinalizarError(mensajeError(respuestaApi, resolveErrorMessage));
       return;
     }
     setDescansoResultado(data?.descansoEstado ?? null);
@@ -371,10 +375,11 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
     if (reintentandoDescanso || !cicloOrigenId) return;
     setReintentandoDescanso(true);
     setReintentarDescansoError('');
-    const { ok, data } = await finalizarCicloPastoreo(predioId, potreroId, cicloOrigenId);
+    const respuestaApi = await finalizarCicloPastoreo(predioId, potreroId, cicloOrigenId);
+    const { ok, data } = respuestaApi;
     setReintentandoDescanso(false);
     if (!ok) {
-      setReintentarDescansoError(resolveErrorMessage(data?.error));
+      setReintentarDescansoError(mensajeError(respuestaApi, resolveErrorMessage));
       return;
     }
     setDescansoResultado(data?.descansoEstado ?? null);
@@ -393,10 +398,11 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
     }
     setGuardandoDescansoDeclarado(true);
     setDescansoDeclaradoError('');
-    const { ok, data } = await declararDescansoProductor(predioId, potreroId, cicloOrigenId, diasDescanso);
+    const respuestaApi = await declararDescansoProductor(predioId, potreroId, cicloOrigenId, diasDescanso);
+    const { ok, data } = respuestaApi;
     setGuardandoDescansoDeclarado(false);
     if (!ok) {
-      setDescansoDeclaradoError(resolveErrorMessage(data?.error));
+      setDescansoDeclaradoError(mensajeError(respuestaApi, resolveErrorMessage));
       if (data?.error === 'DESCANSO_YA_EXISTE') loadActual();
       return;
     }
@@ -420,10 +426,11 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
     }
     setCancelando(true);
     setCancelarError('');
-    const { ok, data } = await cancelarCicloPastoreo(predioId, potreroId, actual.cicloId, motivoCancelacion.trim());
+    const respuestaApi = await cancelarCicloPastoreo(predioId, potreroId, actual.cicloId, motivoCancelacion.trim());
+    const { ok, data } = respuestaApi;
     setCancelando(false);
     if (!ok) {
-      setCancelarError(resolveErrorMessage(data?.error));
+      setCancelarError(mensajeError(respuestaApi, resolveErrorMessage));
       return;
     }
     setMostrarCancelar(false);
@@ -445,12 +452,13 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
     }
     setEvaluando(true);
     setEvaluarError('');
-    const { ok, data } = await evaluarReingreso(predioId, potreroId, {
+    const respuestaApi = await evaluarReingreso(predioId, potreroId, {
       fichaId: fichaEvaluacion.fichaId, resultado, observacion: resultado === 'NO_APTO' ? observacionEvaluacion.trim() : undefined,
     });
+    const { ok, data } = respuestaApi;
     setEvaluando(false);
     if (!ok) {
-      setEvaluarError(resolveErrorMessage(data?.error));
+      setEvaluarError(mensajeError(respuestaApi, resolveErrorMessage));
       return;
     }
     setMostrarObservacionNoApto(false);
@@ -501,10 +509,11 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
     }
     setAccionEnCurso(true);
     setAccionError('');
-    const { ok, data } = await anularCicloPastoreo(predioId, potreroId, accionCicloId, motivoAccion.trim());
+    const respuestaApi = await anularCicloPastoreo(predioId, potreroId, accionCicloId, motivoAccion.trim());
+    const { ok, data } = respuestaApi;
     setAccionEnCurso(false);
     if (!ok) {
-      setAccionError(resolveErrorMessage(data?.error));
+      setAccionError(mensajeError(respuestaApi, resolveErrorMessage));
       return;
     }
     handleCerrarAccion();
@@ -530,10 +539,11 @@ export default function PotreroCicloPastoreoPanel({ predioId, potreroId, planLot
     }
     setAccionEnCurso(true);
     setAccionError('');
-    const { ok, data } = await corregirCicloPastoreo(predioId, potreroId, accionCicloId, cambios, motivoAccion.trim());
+    const respuestaApi = await corregirCicloPastoreo(predioId, potreroId, accionCicloId, cambios, motivoAccion.trim());
+    const { ok, data } = respuestaApi;
     setAccionEnCurso(false);
     if (!ok) {
-      setAccionError(resolveErrorMessage(data?.error));
+      setAccionError(mensajeError(respuestaApi, resolveErrorMessage));
       return;
     }
     handleCerrarAccion();

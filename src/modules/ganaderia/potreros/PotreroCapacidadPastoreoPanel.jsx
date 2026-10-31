@@ -30,6 +30,7 @@ import {
 } from './ganaderiaCapacidadPastoreoApi.js';
 import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
 import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
+import { mensajeError } from '../api/errorModel.js';
 
 const GENERIC_ERROR = 'No fue posible completar la operación en este momento. Intenta nuevamente.';
 
@@ -267,10 +268,11 @@ export default function PotreroCapacidadPastoreoPanel({ predioId, potreroId, are
     if (previewLoading || !isFormComplete(modo, form)) return;
     setPreviewLoading(true);
     setPreviewError('');
-    const { ok, data } = await previewCapacidadPastoreo(predioId, potreroId, buildBody(modo, form));
+    const respuestaApi = await previewCapacidadPastoreo(predioId, potreroId, buildBody(modo, form));
+    const { ok, data } = respuestaApi;
     setPreviewLoading(false);
     if (!ok) {
-      setPreviewError(resolveErrorMessage(data?.error));
+      setPreviewError(mensajeError(respuestaApi, resolveErrorMessage));
       return;
     }
     setPreview(data.preview);
@@ -280,10 +282,11 @@ export default function PotreroCapacidadPastoreoPanel({ predioId, potreroId, are
     if (saving || !preview) return;
     setSaving(true);
     setSaveError('');
-    const { ok, data } = await createCapacidadPastoreo(predioId, potreroId, buildBody(modo, form));
+    const respuestaApi = await createCapacidadPastoreo(predioId, potreroId, buildBody(modo, form));
+    const { ok, data } = respuestaApi;
     setSaving(false);
     if (!ok) {
-      setSaveError(resolveErrorMessage(data?.error));
+      setSaveError(mensajeError(respuestaApi, resolveErrorMessage));
       return;
     }
     setShowForm(false);

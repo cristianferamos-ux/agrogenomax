@@ -31,6 +31,7 @@ import PotreroDescansoReentradaPanel from './PotreroDescansoReentradaPanel.jsx';
 import PotreroCicloPastoreoPanel from './PotreroCicloPastoreoPanel.jsx';
 import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
 import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
+import { mensajeError } from '../api/errorModel.js';
 
 const GENERIC_ERROR = 'No fue posible completar la operación en este momento. Intenta nuevamente.';
 
@@ -337,10 +338,11 @@ export default function PotreroRecomendacionPastoreoPanel({ predioId, potreroId,
     if (previewLoading || !isFormComplete(categoriaSeleccionada, form)) return;
     setPreviewLoading(true);
     setPreviewError('');
-    const { ok, data } = await previewRecomendacionPastoreo(predioId, potreroId, buildBody(categoriaSeleccionada, form));
+    const respuestaApi = await previewRecomendacionPastoreo(predioId, potreroId, buildBody(categoriaSeleccionada, form));
+    const { ok, data } = respuestaApi;
     setPreviewLoading(false);
     if (!ok) {
-      setPreviewError(resolveErrorMessage(data?.error));
+      setPreviewError(mensajeError(respuestaApi, resolveErrorMessage));
       return;
     }
     setPreview(data.preview);
@@ -350,10 +352,11 @@ export default function PotreroRecomendacionPastoreoPanel({ predioId, potreroId,
     if (saving || !preview) return;
     setSaving(true);
     setSaveError('');
-    const { ok, data } = await createRecomendacionPastoreo(predioId, potreroId, buildBody(categoriaSeleccionada, form));
+    const respuestaApi = await createRecomendacionPastoreo(predioId, potreroId, buildBody(categoriaSeleccionada, form));
+    const { ok, data } = respuestaApi;
     setSaving(false);
     if (!ok) {
-      setSaveError(resolveErrorMessage(data?.error));
+      setSaveError(mensajeError(respuestaApi, resolveErrorMessage));
       return;
     }
     setShowForm(false);

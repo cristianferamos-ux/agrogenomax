@@ -18,6 +18,7 @@ import {
 } from './ganaderiaPotrerosApi.js';
 import GanaderiaPotreroPreviewMap from './GanaderiaPotreroPreviewMap.jsx';
 import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
+import { mensajeError } from '../api/errorModel.js';
 
 const GENERIC_PREVIEW_ERROR = 'No fue posible generar la vista previa en este momento. Intenta nuevamente.';
 const GENERIC_CREATE_ERROR = 'No fue posible registrar el potrero en este momento. Intenta nuevamente.';
@@ -333,11 +334,12 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
 
     setFileLoading(true);
     try {
-      const { ok, data } = await previewPotreroFile(predioId, file);
+      const respuestaApi = await previewPotreroFile(predioId, file);
+      const { ok, data } = respuestaApi;
       setFileLoading(false);
 
       if (!ok) {
-        setFileError(resolveFileErrorMessage(data?.error));
+        setFileError(mensajeError(respuestaApi, resolveFileErrorMessage));
         return;
       }
 
@@ -411,10 +413,11 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
     }));
 
     try {
-      const { ok, data } =
+      const respuestaApi =
         metodo === 'coordenadas'
           ? await previewPotreroCoordinates(predioId, puntos)
           : await previewPotreroGps(predioId, puntos);
+      const { ok, data } = respuestaApi;
 
       if (ok && data?.candidateId && data?.preview) {
         setPreviewData({
@@ -435,7 +438,7 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
       if (data?.error === 'POTRERO_OUTSIDE_PREDIO' && data?.rejected?.geometry) {
         setRejectedPreview({ geometry: data.rejected.geometry });
       }
-      setPreviewError(resolvePreviewErrorMessage(data?.error));
+      setPreviewError(mensajeError(respuestaApi, resolvePreviewErrorMessage));
       setPreviewLoading(false);
     } catch {
       setPreviewError(GENERIC_PREVIEW_ERROR);
@@ -470,13 +473,14 @@ export default function PotreroRegistrationPanel({ predioId, predioNombre, onClo
     };
 
     try {
-      const { ok, data } = await createPotrero(predioId, body);
+      const respuestaApi = await createPotrero(predioId, body);
+      const { ok, data } = respuestaApi;
       if (ok) {
         setCreating(false);
         onCreated();
         return;
       }
-      setCreateError(resolveCreateErrorMessage(data?.error));
+      setCreateError(mensajeError(respuestaApi, resolveCreateErrorMessage));
       setCreating(false);
     } catch {
       setCreateError(GENERIC_CREATE_ERROR);

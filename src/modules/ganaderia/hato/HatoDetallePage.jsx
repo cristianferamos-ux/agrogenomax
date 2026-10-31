@@ -56,6 +56,9 @@ import {
 import useHatoCatalogos from './useHatoCatalogos.js';
 import { useGanaderiaOffline } from '../offline/GanaderiaOfflineProvider.jsx';
 import '../styles/ganaderia-hato.css';
+import { mensajeDeExcepcion, mensajeError } from '../api/errorModel.js';
+
+const MENSAJE_CARGA_ANIMAL = 'No fue posible cargar el animal.';
 
 function Row({ label, children }) {
   return (
@@ -183,12 +186,18 @@ export default function HatoDetallePage() {
     }
     if (!localEncontrado && !silencioso) setState((current) => ({ ...current, status: 'loading' }));
     try {
-      const { ok, status, data } = await getAnimal(animalId);
+      const respuestaApi = await getAnimal(animalId);
+      const { ok, status, data } = respuestaApi;
       if (ok && data?.animal) setState({ status: 'ok', animal: data.animal, origen: 'servidor' });
-      else if (!localEncontrado) setState({ status: status === 404 ? 'not_found' : 'error', animal: null });
-    } catch {
+      else if (!localEncontrado) {
+        // FASE 3C: 404 tenant-safe sin cambios; 5xx con código de seguimiento.
+        setState(status === 404
+          ? { status: 'not_found', animal: null }
+          : { status: 'error', animal: null, mensaje: ok ? MENSAJE_CARGA_ANIMAL : mensajeError(respuestaApi, null, { fallback: MENSAJE_CARGA_ANIMAL }) });
+      }
+    } catch (err) {
       // Sin red: se mantiene la copia local si existe.
-      if (!localEncontrado) setState({ status: 'error', animal: null });
+      if (!localEncontrado) setState({ status: 'error', animal: null, mensaje: mensajeDeExcepcion(err, MENSAJE_CARGA_ANIMAL) });
     }
   }, [animalId, idValido, esLocal, local]);
 
@@ -243,7 +252,8 @@ export default function HatoDetallePage() {
     setSaving(true);
     setError('');
     try {
-      const { ok, data } = await corregirAnimal(animal.animalId, buildCorreccionBody(form, animal.fechaActualizacion));
+      const respuestaApi = await corregirAnimal(animal.animalId, buildCorreccionBody(form, animal.fechaActualizacion));
+      const { ok, data } = respuestaApi;
       if (ok && data?.animal) {
         setState({ status: 'ok', animal: data.animal });
         setModo('ver');
@@ -252,12 +262,12 @@ export default function HatoDetallePage() {
         return;
       }
       if (data?.error === 'ANIMAL_MODIFICADO') {
-        setError(messageForError(data.error));
+        setError(mensajeError(respuestaApi, messageForError));
         await load();
         setModo('ver');
         return;
       }
-      setError(messageForError(data?.error));
+      setError(mensajeError(respuestaApi, messageForError));
     } catch {
       setError(GENERIC_ERROR_MESSAGE);
     } finally {
@@ -275,7 +285,8 @@ export default function HatoDetallePage() {
     setSaving(true);
     setError('');
     try {
-      const { ok, data } = await anularAnimal(animal.animalId, motivo.trim());
+      const respuestaApi = await anularAnimal(animal.animalId, motivo.trim());
+      const { ok, data } = respuestaApi;
       if (ok && data?.animal) {
         setState({ status: 'ok', animal: data.animal });
         setModo('ver');
@@ -283,7 +294,7 @@ export default function HatoDetallePage() {
         if (!data.yaAnulado) marcarActividad();
         return;
       }
-      setError(messageForError(data?.error));
+      setError(mensajeError(respuestaApi, messageForError));
     } catch {
       setError(GENERIC_ERROR_MESSAGE);
     } finally {
@@ -299,7 +310,7 @@ export default function HatoDetallePage() {
       {state.status === 'not_found' ? <StatusMessage type="error">Este animal no está disponible.</StatusMessage> : null}
       {state.status === 'error' ? (
         <div className="gan-hato-actions">
-          <StatusMessage type="error">No fue posible cargar el animal.</StatusMessage>
+          <StatusMessage type="error">{state.mensaje ?? MENSAJE_CARGA_ANIMAL}</StatusMessage>
           <button type="button" className="gan-secondary-button" onClick={load}>Reintentar</button>
         </div>
       ) : null}
