@@ -122,16 +122,62 @@ test('correlationId: body primero, luego X-Request-ID; solo 5xx; nunca de un 4xx
   assert.equal(correlationIdDeRespuesta(409, { correlationId: UUID }, new Headers({ 'X-Request-ID': otro })), null);
 });
 
-test('excepciones: solo mensajes seguros o de dominio; nunca message técnico', () => {
+test('excepciones: solo errorConMensajeSeguro muestra su message; nunca message técnico', () => {
   assert.equal(mensajeDeExcepcion(errorConMensajeSeguro('Lote no encontrado.')), 'Lote no encontrado.');
-  const dominio = Object.assign(new Error('La chapeta ya no está disponible.'), { code: 'QR_NO_DISPONIBLE' });
-  assert.equal(mensajeDeExcepcion(dominio), 'La chapeta ya no está disponible.');
+  // Un code con forma de código de dominio NO habilita el message (sin mensajeSeguro).
+  const conCode = Object.assign(new Error('La chapeta ya no está disponible.'), { code: 'QR_NO_DISPONIBLE' });
+  assert.equal(mensajeDeExcepcion(conCode, 'Genérico.'), 'Genérico.');
   assert.equal(mensajeDeExcepcion(new Error(TECNICO), 'Genérico.'), 'Genérico.');
   assert.equal(mensajeDeExcepcion(new DOMException('QuotaExceededError: IndexedDB', 'QuotaExceededError'), 'Genérico.'), 'Genérico.');
   assert.equal(mensajeDeExcepcion(new Error('STORE_DESCONOCIDO:animales'), 'Genérico.'), 'Genérico.');
   const csrf = Object.assign(new Error('CSRF_FETCH_FAILED_500'), { status: 500, code: 'SESSION_REQUIRED' });
   assert.equal(mensajeDeExcepcion(csrf), MENSAJE_ERROR_SERVIDOR, 'error HTTP: nunca su message técnico');
   assert.equal(mensajeDeExcepcion(null, 'F'), 'F');
+});
+
+test('excepciones: códigos técnicos en MAYÚSCULAS (ERR_*, SQL_*, IDB_*, NETWORK_*, INTERNAL_*) nunca exponen su message', () => {
+  const casos = [
+    ['ERR_INTERNAL', 'detalle técnico: TypeError at Object.<anonymous> (/app/src/x.js:10)'],
+    ['SQL_ERROR', 'syntax error at or near "SELECT" -- tabla agx.animales'],
+    ['IDB_FAILURE', 'IndexedDB: transaction aborted (QuotaExceededError) store=outbox'],
+    ['NETWORK_ERROR', 'getaddrinfo ENOTFOUND agrogenomax-production.up.railway.app'],
+    ['INTERNAL_SERVER', 'postgres://agx:pw@10.0.0.5/db'],
+    ['QR_NO_DISPONIBLE', 'mensaje con forma de dominio pero sin marcar como seguro'],
+  ];
+  for (const [code, message] of casos) {
+    const err = Object.assign(new Error(message), { code });
+    const visto = mensajeDeExcepcion(err, 'Genérico.');
+    assert.equal(visto, 'Genérico.', code);
+    assert.ok(!visto.includes(message), code);
+  }
+  // Error con code y además `cause`/opciones nativas: tampoco.
+  assert.equal(mensajeDeExcepcion(Object.assign(new Error('detalle técnico', { cause: 'x' }), { code: 'ERR_INTERNAL' }), 'G'), 'G');
+});
+
+test('excepciones: mensaje funcional seguro sí; AbortError null; TypeError de red -> conexión', () => {
+  assert.equal(mensajeDeExcepcion(errorConMensajeSeguro('mensaje funcional')), 'mensaje funcional');
+  const seguroConCode = Object.assign(errorConMensajeSeguro('No hay conflicto para este animal.'), { code: 'CONFLICTO_NO_ENCONTRADO' });
+  assert.equal(mensajeDeExcepcion(seguroConCode, 'G'), 'No hay conflicto para este animal.');
+  assert.equal(mensajeDeExcepcion(new DOMException('aborted', 'AbortError')), null);
+  assert.equal(mensajeDeExcepcion(new TypeError('Failed to fetch')), MENSAJE_SIN_CONEXION);
+  // mensajeSeguro debe ser exactamente true (no un valor "truthy" inyectado).
+  assert.equal(mensajeDeExcepcion(Object.assign(new Error('x técnico'), { mensajeSeguro: 'true' }), 'G'), 'G');
+});
+
+test('modelo: ningún criterio de seguridad por forma de code; localRepo marca solo los errores que la UI muestra', () => {
+  const modelo = read('api/errorModel.js').replace(/^\s*(\/\/|\*).*$/gm, '');
+  assert.doesNotMatch(modelo, /error\.code/, 'mensajeDeExcepcion no decide por error.code');
+  assert.doesNotMatch(modelo, /CODIGO_DOMINIO/);
+  const repo = read('offline/localRepo.js');
+  const visibles = [...repo.matchAll(/throw errorVisible\('([A-Z_]+)'/g)].map((m) => m[1]).sort();
+  assert.deepEqual(visibles, [
+    'CONFLICTO_NO_ENCONTRADO', 'CONFLICTO_NO_ENCONTRADO', 'CONFLICTO_NO_ENCONTRADO',
+    'PESAJE_PENDIENTE_EN_CURSO', 'PESAJE_PENDIENTE_NO_ENCONTRADO', 'QR_CODIGO_INVALIDO', 'QR_NO_DISPONIBLE',
+  ]);
+  // Los errores locales que la UI traduce por código (registro, pesajes) siguen sin marcarse.
+  for (const code of ['OPERACION_SIN_ID', 'QR_NO_EN_DISPOSITIVO', 'PESAJE_REQUIERE_ANIMAL_SINCRONIZADO', 'CAMPO_NO_PERMITIDO', 'ORGANIZACION_DISTINTA']) {
+    assert.match(repo, new RegExp(`throw localError\\('${code}'`), code);
+  }
 });
 
 test('conCodigoSeguimiento: agrega el código solo si el correlationId es válido', () => {

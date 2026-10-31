@@ -146,8 +146,6 @@ export function mensajeError(fallo, porCodigo = null, { fallback = MENSAJE_FALLB
 // que sea un mensaje ya traducido para el usuario.
 // ---------------------------------------------------------------------------
 
-const CODIGO_DOMINIO = /^[A-Z][A-Z0-9_]+$/;
-
 /** Error cuyo message es apto para mostrar (ya traducido por un modelo de errores). */
 export function errorConMensajeSeguro(mensaje) {
   return Object.assign(new Error(mensaje), { mensajeSeguro: true });
@@ -155,11 +153,13 @@ export function errorConMensajeSeguro(mensaje) {
 
 /**
  * Excepción -> mensaje para el usuario (o null si fue una cancelación).
- *   - errorConMensajeSeguro(...)                  -> su mensaje
- *   - error de dominio local ({ code: 'QR_NO_DISPONIBLE', message }) -> su mensaje
+ *   - errorConMensajeSeguro(...)                  -> su mensaje (ÚNICO caso que muestra message)
  *   - AbortError                                  -> null
+ *   - Error HTTP con status                       -> mensajeError() (nunca su message)
  *   - TypeError de fetch (sin respuesta)          -> MENSAJE_SIN_CONEXION
- *   - cualquier otro (DOMException, Error técnico) -> fallback (nunca su message)
+ *   - cualquier otro (con o sin code: ERR_*, IDB_*, SQL_*, DOMException...) -> fallback
+ * Un code (aunque tenga forma de código de dominio) NUNCA habilita el message:
+ * los errores de dominio aptos para la UI se crean con errorConMensajeSeguro().
  */
 export function mensajeDeExcepcion(error, fallback = MENSAJE_ERROR_SERVIDOR) {
   if (!error) return fallback;
@@ -168,7 +168,6 @@ export function mensajeDeExcepcion(error, fallback = MENSAJE_ERROR_SERVIDOR) {
   if (error.mensajeSeguro === true && message) return message;
   // Error HTTP (p. ej. csrfFetchError: message técnico CSRF_FETCH_FAILED_500).
   if (typeof error.status === 'number' && error.status > 0) return mensajeError(error, null, { fallback });
-  if (typeof error.code === 'string' && CODIGO_DOMINIO.test(error.code) && message) return message;
   if (error instanceof TypeError) return MENSAJE_SIN_CONEXION;
   return fallback;
 }
