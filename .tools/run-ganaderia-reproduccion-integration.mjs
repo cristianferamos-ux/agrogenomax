@@ -11,7 +11,7 @@ try {
   process.exitCode = await runTestFiles([
     'server/services/__tests__/reproduccionIntegration.test.js',
   ], { requiredPasses: {
-    'server/services/__tests__/reproduccionIntegration.test.js': 25,
+    'server/services/__tests__/reproduccionIntegration.test.js': 35,
   } });
 } catch (error) {
   console.error(error.message);

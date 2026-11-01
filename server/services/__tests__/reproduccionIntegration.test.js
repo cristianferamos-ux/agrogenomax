@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
-import { validateCreateAnimalBody } from '../ganaderia/animalValidation.js';
+import { validateCorregirAnimalBody, validateCreateAnimalBody } from '../ganaderia/animalValidation.js';
 import { validateCierreBody } from '../ganaderia/cierreValidation.js';
 import {
   validateAnularEventoReproductivoBody,
@@ -526,6 +526,159 @@ describe('FASE 4A: reproducción bovina (Postgres real)', { skip: !dbAvailable &
       const r = await corregir(org, a, diag.evento.eventoId, { evento: { ...VACIA, fechaEvento: '2026-01-30' } });
       assert.equal(r.estado.estado, 'VACIA');
       await expectSemantic(corregir(org, a, r.evento.eventoId, { evento: { ...VACIA, fechaEvento: '2023-12-31' } }), 'INVALID_FECHA', 400);
+    });
+  });
+
+  describe('corrección del animal frente al historial reproductivo', () => {
+    const corregirAnimal = async (org, animalId, body) => {
+      const animal = await animalesRepo.getAnimal(org, animalId);
+      return animalesRepo.corregirAnimal(org, animalId, validateCorregirAnimalBody({
+        fechaActualizacionEsperada: animal.fechaActualizacion, ...body,
+      }, { hoy: HOY }), { actorCuentaId: ACTOR });
+    };
+    const sexoDe = async (animalId) => (await adminPool.query('select sexo from agx.animales where animal_id = $1', [animalId])).rows[0].sexo;
+    const NAC = (fechaNacimiento) => ({ nacimientoTipo: 'EXACTA', fechaNacimiento, edadAproximadaMeses: null });
+
+    test('A) hembra sin historial: HEMBRA -> MACHO sigue permitido', async () => {
+      const org = newOrg();
+      const a = await seedAnimal(org);
+      assert.equal((await corregirAnimal(org, a, { sexo: 'MACHO' })).sinCambios, false);
+      assert.equal(await sexoDe(a), 'MACHO');
+    });
+
+    test('B) con evento ACTIVO: HEMBRA -> MACHO -> 409; sexo y evento intactos', async () => {
+      const org = newOrg();
+      const a = await seedAnimal(org);
+      await reg(org, a, CELO);
+      const antes = await filas(a);
+      await expectSemantic(corregirAnimal(org, a, { sexo: 'MACHO' }), 'HISTORIAL_REPRODUCTIVO_INCOMPATIBLE', 409);
+      assert.equal(await sexoDe(a), 'HEMBRA');
+      assert.deepEqual(await filas(a), antes);
+      // Corregir otros datos sigue permitido.
+      assert.equal((await corregirAnimal(org, a, { observaciones: 'Nota' })).sinCambios, false);
+    });
+
+    test('C) con único evento ANULADO: HEMBRA -> MACHO -> 409 (el historial auditado sigue existiendo)', async () => {
+      const org = newOrg();
+      const a = await seedAnimal(org);
+      const { evento } = await reg(org, a, CELO);
+      await anular(org, a, evento.eventoId);
+      await expectSemantic(corregirAnimal(org, a, { sexo: 'MACHO' }), 'HISTORIAL_REPRODUCTIVO_INCOMPATIBLE', 409);
+      assert.equal(await sexoDe(a), 'HEMBRA');
+    });
+
+    test('toro referenciado en un servicio: MACHO -> HEMBRA -> 409', async () => {
+      const org = newOrg();
+      const toro = await seedAnimal(org, { sexo: 'MACHO' });
+      await reg(org, await seedAnimal(org), { ...IA, toroAnimalId: toro });
+      await expectSemantic(corregirAnimal(org, toro, { sexo: 'HEMBRA' }), 'HISTORIAL_REPRODUCTIVO_INCOMPATIBLE', 409);
+      assert.equal(await sexoDe(toro), 'MACHO');
+    });
+
+    test('D/E) fechaNacimiento: anterior o igual al primer evento (incluido ANULADO) -> permitido; posterior -> 409', async () => {
+      const org = newOrg();
+      const a = await seedAnimal(org, NAC('2024-01-01'));
+      const { evento } = await reg(org, a, { ...CELO, fechaEvento: '2026-05-01' });
+      await anular(org, a, evento.eventoId);
+      await reg(org, a, { ...IA, fechaEvento: '2026-07-01' });
+      assert.equal((await corregirAnimal(org, a, NAC('2023-06-01'))).sinCambios, false);
+      assert.equal((await corregirAnimal(org, a, NAC('2026-05-01'))).sinCambios, false);
+      await expectSemantic(corregirAnimal(org, a, NAC('2026-06-01')), 'HISTORIAL_REPRODUCTIVO_FECHA_INCOMPATIBLE', 409);
+      const fecha = (await adminPool.query(`select to_char(fecha_nacimiento, 'YYYY-MM-DD') as f from agx.animales where animal_id = $1`, [a])).rows[0].f;
+      assert.equal(fecha, '2026-05-01');
+      assert.equal((await filas(a)).length, 2, 'eventos sin modificar');
+      // Pasar a nacimiento DESCONOCIDA no contradice el historial.
+      assert.equal((await corregirAnimal(org, a, { nacimientoTipo: 'DESCONOCIDA', fechaNacimiento: null, edadAproximadaMeses: null })).sinCambios, false);
+    });
+
+    test('F) concurrencia registro vs HEMBRA -> MACHO (ambos órdenes): nunca MACHO + historial', async () => {
+      const org = newOrg();
+      for (let i = 0; i < 6; i += 1) {
+        const a = await seedAnimal(org);
+        const correccion = () => corregirAnimal(org, a, { sexo: 'MACHO' });
+        const registro = () => reg(org, a, CELO);
+        const [r1, r2] = await Promise.allSettled(i % 2 ? [registro(), correccion()] : [correccion(), registro()]);
+        const [reg_, corr] = i % 2 ? [r1, r2] : [r2, r1];
+        assert.ok((reg_.status === 'fulfilled') !== (corr.status === 'fulfilled'), `exactamente uno gana (${reg_.status}/${corr.status})`);
+        if (reg_.status === 'rejected') assert.equal(reg_.reason.code, 'SEXO_INCOMPATIBLE');
+        if (corr.status === 'rejected') assert.ok(['HISTORIAL_REPRODUCTIVO_INCOMPATIBLE', 'ANIMAL_MODIFICADO'].includes(corr.reason.code), corr.reason.code);
+        const sexo = await sexoDe(a);
+        const n = (await filas(a)).length;
+        assert.ok(!(sexo === 'MACHO' && n > 0), `estado inválido: ${sexo} con ${n} eventos`);
+      }
+    });
+
+    /** Transacción agx_app abierta (tenant = org) que se confirma desde el test. */
+    async function txAbierta(org) {
+      const client = await appPool.connect();
+      await client.query('begin');
+      await client.query("select set_config('app.current_org_id', $1, true)", [org]);
+      return {
+        q: (sql, params) => client.query(sql, params),
+        fin: async (sql = 'commit') => { await client.query(sql); client.release(); },
+      };
+    }
+    const espera = (ms) => new Promise((r) => { setTimeout(r, ms); });
+
+    test('F) determinista: corrección a MACHO en curso (FOR UPDATE) -> el registro espera y se rechaza', async () => {
+      const org = newOrg();
+      const a = await seedAnimal(org);
+      const tx = await txAbierta(org);
+      await tx.q('select 1 from agx.animales where animal_id = $1 for update', [a]);
+      await tx.q(`update agx.animales set sexo = 'MACHO', updated_at = now() where animal_id = $1`, [a]);
+      let terminado = false;
+      const registro = reg(org, a, CELO).finally(() => { terminado = true; });
+      await espera(300);
+      assert.equal(terminado, false, 'el registro debe esperar al bloqueo de la corrección');
+      await tx.fin();
+      await expectSemantic(registro, 'SEXO_INCOMPATIBLE', 409);
+      assert.equal((await filas(a)).length, 0);
+    });
+
+    test('F) determinista: registro en curso (FOR SHARE + INSERT) -> la corrección espera y se rechaza', async () => {
+      const org = newOrg();
+      const a = await seedAnimal(org);
+      const tx = await txAbierta(org);
+      await tx.q('select 1 from agx.animales where animal_id = $1 for share', [a]);
+      await tx.q(
+        `insert into agx.reproduccion_eventos (organizacion_id, animal_id, tipo_evento, fecha_evento, registrado_por, client_operation_id, intent_hash)
+         values ($1, $2, 'CELO_OBSERVADO', '2026-01-05', $3, gen_random_uuid(), $4)`,
+        [org, a, ACTOR, `v1:${'0'.repeat(64)}`],
+      );
+      let terminado = false;
+      const correccion = corregirAnimal(org, a, { sexo: 'MACHO' }).finally(() => { terminado = true; });
+      await espera(300);
+      assert.equal(terminado, false, 'la corrección debe esperar al registro en curso');
+      await tx.fin();
+      await expectSemantic(correccion, 'HISTORIAL_REPRODUCTIVO_INCOMPATIBLE', 409);
+      assert.equal(await sexoDe(a), 'HEMBRA');
+    });
+
+    test('F) concurrencia registro con toro vs MACHO -> HEMBRA del toro: nunca toro hembra referenciado', async () => {
+      const org = newOrg();
+      for (let i = 0; i < 4; i += 1) {
+        const toro = await seedAnimal(org, { sexo: 'MACHO' });
+        const hembra = await seedAnimal(org);
+        await Promise.allSettled([reg(org, hembra, { ...IA, toroAnimalId: toro }), corregirAnimal(org, toro, { sexo: 'HEMBRA' })]);
+        const sexo = await sexoDe(toro);
+        const n = (await adminPool.query('select count(*)::int as n from agx.reproduccion_eventos where toro_animal_id = $1', [toro])).rows[0].n;
+        assert.ok(!(sexo === 'HEMBRA' && n > 0), `estado inválido: toro ${sexo} con ${n} servicios`);
+      }
+    });
+
+    test('G) otra organización: su historial no influye ni se revela', async () => {
+      const orgA = newOrg();
+      const orgB = newOrg();
+      const deB = await seedAnimal(orgB);
+      await reg(orgB, deB, CELO);
+      // org A no ve el animal de B: 404 indistinguible, sin mencionar historial.
+      await expectSemantic(animalesRepo.corregirAnimal(orgA, deB, validateCorregirAnimalBody({
+        fechaActualizacionEsperada: '2026-01-01T00:00:00.000Z', sexo: 'MACHO',
+      }, { hoy: HOY }), { actorCuentaId: ACTOR }), 'ANIMAL_NOT_FOUND', 404);
+      // Un animal de A sin historial propio se corrige libremente.
+      const deA = await seedAnimal(orgA);
+      assert.equal((await corregirAnimal(orgA, deA, { sexo: 'MACHO' })).sinCambios, false);
+      assert.equal(await sexoDe(deB), 'HEMBRA');
     });
   });
 

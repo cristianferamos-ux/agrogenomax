@@ -217,14 +217,54 @@ async function validarEventoContraAnimal(client, animal, evento) {
   }
   if (evento.toroAnimalId) {
     // RLS: un toro de otra organización es invisible (mismo 400 que inexistente).
+    // FOR SHARE: una corrección de sexo concurrente del toro (FOR UPDATE en
+    // corregirAnimal) espera al COMMIT y entonces ve esta referencia.
     const toro = await client.query(
-      `select sexo, estado from agx.animales where animal_id = $1`,
+      `select sexo, estado from agx.animales where animal_id = $1 for share`,
       [evento.toroAnimalId],
     );
     const row = toro.rows[0];
     if (!row || row.estado !== 'ACTIVO' || row.sexo !== 'MACHO' || evento.toroAnimalId === animal.animal_id) {
       throw semanticError('INVALID_TORO', 400, 'toroAnimalId debe ser un macho registrado (activo) de la organización.');
     }
+  }
+}
+
+/**
+ * Corrección de datos del animal (animalesRepository.corregirAnimal) frente a
+ * su historial reproductivo -- ACTIVO y ANULADO: el historial auditado sigue
+ * existiendo. Se llama dentro de la MISMA transacción, con el animal ya
+ * bloqueado FOR UPDATE: un registro reproductivo concurrente (FOR SHARE del
+ * animal y del toro) o espera y ve el sexo/fecha nuevos, o terminó antes y
+ * su fila es visible aquí (READ COMMITTED: nueva instantánea por sentencia).
+ * Solo agregados (count/min), nunca el historial completo. Tenant: RLS.
+ *   - sujeto de eventos -> el sexo debe seguir siendo HEMBRA;
+ *   - toro referenciado -> el sexo debe seguir siendo MACHO;
+ *   - fechaNacimiento nueva <= evento reproductivo más antiguo.
+ * Nunca modifica eventos para permitir el cambio.
+ */
+export async function assertCorreccionCompatibleConReproduccionEnTx(client, animalId, { sexo, fechaNacimiento, cambiaSexo, cambiaFechaNacimiento }) {
+  if (!cambiaSexo && !cambiaFechaNacimiento) return;
+  const result = await client.query(
+    `select (select count(*)::int from agx.reproduccion_eventos where animal_id = $1) as como_hembra,
+            (select to_char(min(fecha_evento), 'YYYY-MM-DD') from agx.reproduccion_eventos where animal_id = $1) as primer_evento,
+            (select count(*)::int from agx.reproduccion_eventos where toro_animal_id = $1) as como_toro`,
+    [animalId],
+  );
+  const { como_hembra: comoHembra, primer_evento: primerEvento, como_toro: comoToro } = result.rows[0];
+  if (cambiaSexo && ((comoHembra > 0 && sexo !== 'HEMBRA') || (comoToro > 0 && sexo !== 'MACHO'))) {
+    throw semanticError(
+      'HISTORIAL_REPRODUCTIVO_INCOMPATIBLE',
+      409,
+      'El sexo del animal no puede modificarse porque ya tiene historial reproductivo.',
+    );
+  }
+  if (cambiaFechaNacimiento && fechaNacimiento && primerEvento && fechaNacimiento > primerEvento) {
+    throw semanticError(
+      'HISTORIAL_REPRODUCTIVO_FECHA_INCOMPATIBLE',
+      409,
+      `La fecha de nacimiento no puede ser posterior al primer evento reproductivo del animal (${primerEvento}).`,
+    );
   }
 }
 

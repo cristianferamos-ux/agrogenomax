@@ -12,6 +12,7 @@ import { resolveFechaHoyNegocio } from './motorDescansoAuto/businessTimezone.js'
 import { computeCreationIntentHash } from './animalIntentHash.js';
 import { isCategoriaCompatibleConSexo } from './categoriaSexoCompat.js';
 import { validateAnimalConsistency } from './animalValidation.js';
+import { assertCorreccionCompatibleConReproduccionEnTx } from './reproduccionRepository.js';
 
 const NUMERO_VISUAL_UNIQUE_CONSTRAINT = 'animales_org_numero_visual_activo_key';
 const CLIENT_OPERATION_UNIQUE_CONSTRAINT = 'animales_org_client_operation_key';
@@ -468,6 +469,15 @@ export async function corregirAnimal(
         'El animal fue modificado mientras lo editabas. Recarga sus datos y vuelve a intentarlo.',
       );
     }
+
+    // FASE 4A: el sexo y la fecha de nacimiento no pueden contradecir el
+    // historial reproductivo (misma transacción, animal ya FOR UPDATE).
+    await assertCorreccionCompatibleConReproduccionEnTx(client, animalId, {
+      sexo: merged.sexo,
+      fechaNacimiento: merged.fechaNacimiento,
+      cambiaSexo: changedKeys.includes('sexo'),
+      cambiaFechaNacimiento: changedKeys.includes('fechaNacimiento'),
+    });
 
     if (changedKeys.includes('razaPrincipalId') && merged.razaPrincipalId) {
       await assertRazaDisponible(client, merged.razaPrincipalId);

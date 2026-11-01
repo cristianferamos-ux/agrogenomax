@@ -216,6 +216,9 @@ existentes; solo referencia `agx.animales`).
 
 **Secuencia de despliegue:** aplicar `0026` en Postgres-AGX-Business
 **antes** del merge del código de FASE 4A (el código anterior no la usa).
+Imprescindible: desde 4A, `corregirAnimal` también consulta
+`agx.reproduccion_eventos` al cambiar sexo o fecha de nacimiento (sin 0026
+esas correcciones fallarían con 42P01).
 Rollback: `0026_reproduccion_bovina_rollback.sql`, solo tras revertir el
 código; si la tabla tiene datos el rollback falla a propósito (no borra
 historial). Pruebas: `npm run test:ganaderia-reproduccion-integration`
