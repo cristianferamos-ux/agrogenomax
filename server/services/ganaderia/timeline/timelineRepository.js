@@ -9,6 +9,9 @@
 import { withOrganizacionTransaction } from '../../../db/agxBusinessPool.js';
 import { fetchAnimal } from '../animalesRepository.js';
 import { listPesajesEnTx } from '../pesajesRepository.js';
+// FASE 4A: agx.reproduccion_eventos (fuente única del historial
+// reproductivo, ACTIVO y ANULADO). No se copia a animal_eventos.
+import { listEventosReproductivosEnTx } from '../reproduccionRepository.js';
 
 export async function leerFuentesTimeline(organizacionId, animalId) {
   return withOrganizacionTransaction(organizacionId, async (client) => {
@@ -25,6 +28,7 @@ export async function leerFuentesTimeline(organizacionId, animalId) {
       [animalId],
     );
     const pesajes = await listPesajesEnTx(client, animalId);
+    const eventosReproductivos = await listEventosReproductivosEnTx(client, animalId);
     return {
       animal,
       eventosAnimal: eventos.rows.map((r) => ({
@@ -34,6 +38,7 @@ export async function leerFuentesTimeline(organizacionId, animalId) {
         ocurridoEn: r.ocurrido_en,
       })),
       pesajes,
+      eventosReproductivos,
     };
   });
 }

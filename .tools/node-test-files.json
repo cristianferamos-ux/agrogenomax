@@ -216,5 +216,8 @@
   "server/routes/__tests__/ganaderiaQrNoOperativo.test.js",
   "src/modules/ganaderia/hato/__tests__/cierreUi.test.js",
   "server/routes/__tests__/ganaderiaRbacMatriz.test.js",
-  "src/modules/ganaderia/auth/__tests__/ganaderiaPermisos.test.js"
+  "src/modules/ganaderia/auth/__tests__/ganaderiaPermisos.test.js",
+  "server/services/ganaderia/__tests__/reproduccion.test.js",
+  "server/routes/__tests__/ganaderiaAnimalReproduccionAuth.test.js",
+  "server/services/__tests__/reproduccionIntegration.test.js"
 ]
