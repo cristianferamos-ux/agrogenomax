@@ -35,6 +35,7 @@ import createGanaderiaAnimalReporteRouter from './routes/ganaderiaAnimalReporte.
 import createGanaderiaAnimalTimelineRouter from './routes/ganaderiaAnimalTimeline.js';
 import createGanaderiaAnimalCierreRouter from './routes/ganaderiaAnimalCierre.js';
 import createGanaderiaAnimalReproduccionRouter from './routes/ganaderiaAnimalReproduccion.js';
+import createGanaderiaReproduccionRouter from './routes/ganaderiaReproduccion.js';
 import createGanaderiaAdminQrRouter from './routes/ganaderiaAdminQr.js';
 import createGanaderiaSyncRouter from './routes/ganaderiaSync.js';
 import createGanaderiaCatalogoRazasRouter from './routes/ganaderiaCatalogoRazas.js';
@@ -345,6 +346,16 @@ for (const [ruta, tipo] of [['salida', 'SALIDA'], ['muerte', 'MUERTE']]) {
 app.use(
   '/api/ganaderia/animales/:animalId/reproduccion',
   createGanaderiaAnimalReproduccionRouter({
+    appEnv: appConfig.appEnv,
+    csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
+    allowedOrigins: appConfig.cors.allowedOrigins,
+  }),
+);
+// FASE 4C: tablero reproductivo de la organización (solo lectura, alertas
+// derivadas en SQL sobre agx.reproduccion_eventos). Sesión + lectura.
+app.use(
+  '/api/ganaderia/reproduccion',
+  createGanaderiaReproduccionRouter({
     appEnv: appConfig.appEnv,
     csrfServerSecret: process.env.AGX_CSRF_SERVER_SECRET,
     allowedOrigins: appConfig.cors.allowedOrigins,

@@ -31,7 +31,7 @@
 // Actividad, se monta al abrirla y queda montada; cada evento registrado,
 // anulado o corregido marca la Actividad para recargarla.
 import { useCallback, useEffect, useState } from 'react';
-import { Link, Navigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom';
 import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
 import HatoAnimalFields from './HatoAnimalFields.jsx';
@@ -141,6 +141,10 @@ function formatNacimiento(animal) {
 
 export default function HatoDetallePage() {
   const { animalId } = useParams();
+  // FASE 4C: ?pestana=<id> abre esa pestaña (el tablero reproductivo enlaza
+  // con ?pestana=reproduccion). Un valor desconocido se ignora.
+  const [searchParams] = useSearchParams();
+  const pestanaInicial = PESTANAS.some((p) => p.id === searchParams.get('pestana')) ? searchParams.get('pestana') : 'resumen';
   const idValido = /^(?:[1-9]\d{0,17}|local:[0-9a-f-]{36})$/i.test(String(animalId));
   const esLocal = String(animalId).startsWith('local:');
   const offline = useGanaderiaOffline();
@@ -160,9 +164,9 @@ export default function HatoDetallePage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [aviso, setAviso] = useState('');
-  const [pestana, setPestana] = useState('resumen');
-  const [actividadAbierta, setActividadAbierta] = useState(false);
-  const [reproduccionAbierta, setReproduccionAbierta] = useState(false);
+  const [pestana, setPestana] = useState(pestanaInicial);
+  const [actividadAbierta, setActividadAbierta] = useState(pestanaInicial === 'actividad');
+  const [reproduccionAbierta, setReproduccionAbierta] = useState(pestanaInicial === 'reproduccion');
   const [actividadVersion, setActividadVersion] = useState(0);
   const marcarActividad = useCallback(() => setActividadVersion((v) => v + 1), []);
   const cambiarPestana = useCallback((id) => {

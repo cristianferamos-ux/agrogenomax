@@ -127,11 +127,16 @@ test('GanaderiaSidebar.jsx: sin entradas legacy de animales/QR/potreros; "Mis an
     'Pesajes',
     'Vacunaciones',
     'Tratamientos',
-    'Reproducción',
     'Genética',
   ]) {
     assert.ok(!navItems.includes(`'${label}'`), `el sidebar no debe incluir ${label}`);
   }
+  // FASE 4C: "Reproducción" solo puede llevar al tablero nuevo
+  // (/ganaderia/reproduccion, API Business); nunca a la ruta legacy.
+  const reproduccion = navItems.match(/\{ label: 'Reproducción'[^}]*\}/g) ?? [];
+  assert.ok(reproduccion.length <= 1);
+  for (const item of reproduccion) assert.match(item, /to: '\/ganaderia\/reproduccion' \}$/);
+  assert.doesNotMatch(navItems, /to: '\/reproduccion'|ganaderia\/animal\/.*reproduccion/);
   assert.match(navItems, /\{ label: 'Mis animales', icon: Beef, to: '\/ganaderia\/animales' \}/);
 });
 

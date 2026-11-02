@@ -71,7 +71,9 @@ test('ficha: pestañas Resumen | Pesajes accesibles (tablist, aria-selected, ari
   assert.match(detalle, /aria-controls=\{`ficha-panel-\$\{/);
   assert.match(detalle, /role="tabpanel"/);
   for (const key of ['ArrowRight', 'ArrowLeft', 'Home', 'End']) assert.match(detalle, new RegExp(`\\b${key}:`));
-  assert.match(detalle, /useState\('resumen'\)/);
+  // FASE 4C: la pestaña inicial puede venir de ?pestana=<id válido>; por defecto Resumen.
+  assert.match(detalle, /\? searchParams\.get\('pestana'\) : 'resumen'/);
+  assert.match(detalle, /useState\(pestanaInicial\)/);
 });
 
 test('ficha: tras registrar un pesaje refresca la ficha en silencio (sin recargar la página)', () => {

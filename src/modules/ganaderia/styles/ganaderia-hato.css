@@ -1249,3 +1249,168 @@
     width: 100%;
   }
 }
+
+/* FASE 4C: tablero reproductivo de la organización (/ganaderia/reproduccion).
+   Smartphone-first: KPIs en rejilla, filtros que se envuelven (sin scroll
+   horizontal), tarjetas en vez de tabla y el nivel de alerta en TEXTO. */
+.gan-tablero-subtitulo {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.gan-tablero-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gan-tablero-kpi {
+  display: grid;
+  gap: 0.15rem;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gan-tablero-kpi.is-active {
+  border-color: #9cff1a;
+  background: rgba(156, 255, 26, 0.08);
+}
+
+.gan-tablero-kpi.con-alerta .gan-tablero-kpi-valor {
+  color: #ffc44d;
+}
+
+.gan-tablero-kpi-valor {
+  color: #e6edf3;
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.gan-tablero-kpi-label {
+  color: #a7b3c2;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.gan-tablero-reglas {
+  margin: 0.5rem 0 0;
+}
+
+.gan-tablero-filtros {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 1rem 0 0.25rem;
+}
+
+.gan-tablero-chip {
+  min-height: 36px;
+  padding: 0.3rem 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: transparent;
+  color: #c9d1d9;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.gan-tablero-chip.is-active {
+  border-color: #9cff1a;
+  background: rgba(156, 255, 26, 0.1);
+  color: #e6edf3;
+}
+
+.gan-tablero-chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.gan-tablero-kpi:focus-visible,
+.gan-tablero-chip:focus-visible,
+.gan-tablero-card:focus-visible {
+  outline: 3px solid #9cff1a;
+  outline-offset: 2px;
+}
+
+.gan-tablero-card {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.gan-tablero-card .gan-hato-card-head .gan-repro-badge {
+  margin-left: 0;
+}
+
+.gan-tablero-datos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.25rem 1rem;
+  margin: 0.2rem 0 0;
+}
+
+.gan-tablero-datos div {
+  min-width: 0;
+}
+
+.gan-tablero-datos dt {
+  color: #8b96a5;
+  font-size: 0.75rem;
+}
+
+.gan-tablero-datos dd {
+  margin: 0;
+  color: #e6edf3;
+  font-size: 0.88rem;
+}
+
+.gan-tablero-alertas {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.3rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gan-tablero-alerta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15rem 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border-left: 3px solid #6ea8ff;
+  border-radius: 0.4rem;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.85rem;
+}
+
+.gan-tablero-alerta[data-nivel="ATENCION"] { border-left-color: #ffc44d; }
+.gan-tablero-alerta[data-nivel="PROXIMA_ACCION"] { border-left-color: #6ea8ff; }
+.gan-tablero-alerta[data-nivel="INFORMATIVA"] { border-left-color: #8b96a5; }
+
+.gan-tablero-alerta-nivel {
+  color: #8b96a5;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 640px) {
+  .gan-tablero-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .gan-tablero-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

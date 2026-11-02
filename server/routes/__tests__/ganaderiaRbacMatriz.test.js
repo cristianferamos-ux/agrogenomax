@@ -28,6 +28,7 @@ import createGanaderiaAnimalReporteRouter from '../ganaderiaAnimalReporte.js';
 import createGanaderiaAnimalTimelineRouter from '../ganaderiaAnimalTimeline.js';
 import createGanaderiaAnimalCierreRouter from '../ganaderiaAnimalCierre.js';
 import createGanaderiaAnimalReproduccionRouter from '../ganaderiaAnimalReproduccion.js';
+import createGanaderiaReproduccionRouter from '../ganaderiaReproduccion.js';
 import createGanaderiaSyncRouter from '../ganaderiaSync.js';
 import createGanaderiaCatalogoRazasRouter from '../ganaderiaCatalogoRazas.js';
 import { getAgxAuthPool, __resetAgxAuthPoolForTests } from '../../db/agxAuthPool.js';
@@ -62,6 +63,7 @@ const MOUNTS = [
   ['/animales/:animalId/salida', createGanaderiaAnimalCierreRouter({ ...CONFIG, tipo: 'SALIDA' })],
   ['/animales/:animalId/muerte', createGanaderiaAnimalCierreRouter({ ...CONFIG, tipo: 'MUERTE' })],
   ['/animales/:animalId/reproduccion', createGanaderiaAnimalReproduccionRouter(CONFIG)],
+  ['/reproduccion', createGanaderiaReproduccionRouter(CONFIG)],
   ['/animales/:animalId/reporte-productivo.pdf', createGanaderiaAnimalReporteRouter(CONFIG)],
   ['/animales/:animalId/qr', createGanaderiaAnimalQrRouter(CONFIG)],
   ['/qr', createGanaderiaQrRouter(CONFIG)],
@@ -145,6 +147,7 @@ const LECTURAS = [
   '/animales', '/animales/resumen', '/animales/1', '/animales/1/pesajes', '/animales/1/timeline',
   '/animales/1/reporte-productivo.pdf', '/animales/1/qr', '/qr/chapetas', '/qr/codigo/AGX-000001',
   '/animales/1/reproduccion', '/animales/1/reproduccion/estado',
+  '/reproduccion/resumen', '/reproduccion/animales',
   '/predios', P, `${P}/potreros`, POT, `${POT}/ficha-productiva`, `${POT}/capacidad-pastoreo`,
   `${POT}/contexto-agroclimatico`, `${POT}/recomendacion-pastoreo`, `${POT}/descanso-reentrada`,
   `${CIC}/actual`, `${CIC}/historial`, `${CIC}/estado-operativo`, '/catalogo-pasturas',

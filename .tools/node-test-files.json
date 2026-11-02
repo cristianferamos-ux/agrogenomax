@@ -217,9 +217,12 @@
   "src/modules/ganaderia/hato/__tests__/cierreUi.test.js",
   "src/modules/ganaderia/hato/__tests__/reproduccionUi.test.js",
   "src/modules/ganaderia/hato/__tests__/fichaTabsResponsive.test.js",
+  "src/modules/ganaderia/reproduccion/__tests__/tableroUi.test.js",
   "server/routes/__tests__/ganaderiaRbacMatriz.test.js",
   "src/modules/ganaderia/auth/__tests__/ganaderiaPermisos.test.js",
   "server/services/ganaderia/__tests__/reproduccion.test.js",
   "server/routes/__tests__/ganaderiaAnimalReproduccionAuth.test.js",
-  "server/services/__tests__/reproduccionIntegration.test.js"
+  "server/services/__tests__/reproduccionIntegration.test.js",
+  "server/services/ganaderia/__tests__/reproduccionTablero.test.js",
+  "server/services/__tests__/reproduccionTableroIntegration.test.js"
 ]
