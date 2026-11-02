@@ -43,7 +43,7 @@ import {
   buildCrearBody,
   camposDelFormulario,
   cambiarTipoForm,
-  crearControlOperacion,
+  crearOperacionesReproduccion,
   detalleEvento,
   estadoCarga,
   etiquetaCampo,
@@ -387,12 +387,10 @@ export default function HatoReproduccionPanel({ animal, visible, online, onCambi
   const cargadoRef = useRef(null);
   const torosRef = useRef(false);
   const abridorRef = useRef(null);
-  // Un control (y por tanto un clientOperationId) por tipo de operación.
-  const controles = useRef({
-    crear: crearControlOperacion(newClientOperationId),
-    anular: crearControlOperacion(newClientOperationId),
-    corregir: crearControlOperacion(newClientOperationId),
-  });
+  // Un clientOperationId por tipo de operación (crearOperacionesReproduccion):
+  // sobrevive a cerrar/reabrir mientras el panel esté montado.
+  const operaciones = useRef(null);
+  if (!operaciones.current) operaciones.current = crearOperacionesReproduccion(newClientOperationId);
 
   const cargar = useCallback(async () => {
     cargadoRef.current = animalId;
@@ -428,9 +426,11 @@ export default function HatoReproduccionPanel({ animal, visible, online, onCambi
     online,
   });
 
+  // Cerrar NO descarta el clientOperationId: tras un resultado incierto el
+  // servidor pudo haber guardado la operación, y reabrir la misma intención
+  // debe reutilizar el mismo id (solo un resultado definitivo lo descarta).
   function cerrar() {
     if (enviandoRef.current) return;
-    if (modo?.accion) controles.current[modo.accion].descartar();
     setModo(null);
     setErrores({});
     setMotivo('');
@@ -466,7 +466,7 @@ export default function HatoReproduccionPanel({ animal, visible, online, onCambi
 
   async function ejecutar(accion, firma, enviar) {
     if (enviandoRef.current || !online) return;
-    const clientOperationId = controles.current[accion].revisar(firma);
+    const clientOperationId = operaciones.current.idPara(accion, firma);
     if (!clientOperationId) {
       setMensaje({ type: 'error', text: MENSAJE_NAVEGADOR });
       return;
@@ -482,7 +482,7 @@ export default function HatoReproduccionPanel({ animal, visible, online, onCambi
       enviandoRef.current = false;
       setEnviando(false);
     }
-    if (resultado.descartarOperacion) controles.current[accion].descartar();
+    operaciones.current.resolver(accion, resultado);
     setMensaje({ type: resultado.exito ? 'success' : 'error', text: resultado.mensaje });
     if (resultado.exito) {
       setModo(null);

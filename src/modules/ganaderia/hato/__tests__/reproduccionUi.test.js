@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  ACCIONES_OPERACION,
   CAMPOS_POR_TIPO,
   ETIQUETAS_ESTADO_REPRODUCTIVO,
   ETIQUETAS_TIPO_EVENTO,
@@ -23,6 +24,7 @@ import {
   camposDelFormulario,
   cambiarTipoForm,
   crearControlOperacion,
+  crearOperacionesReproduccion,
   detalleEvento,
   estadoCarga,
   fechaHoraEvento,
@@ -401,10 +403,149 @@ test('clientOperationId: uno por operación; crear, anular y corregir nunca comp
   const idCorregir = corregir.revisar(firmaOperacion('corregir', { eventoId: '10', form: f, motivo: 'm' }));
   assert.equal(new Set([idCrear, idAnular, idCorregir]).size, 3);
   assert.notEqual(firmaOperacion('anular', { eventoId: '10', motivo: 'm' }), firmaOperacion('corregir', { eventoId: '10', motivo: 'm' }));
-  // El panel usa un control por acción.
-  assert.match(panel, /crear: crearControlOperacion\(newClientOperationId\)/);
-  assert.match(panel, /anular: crearControlOperacion\(newClientOperationId\)/);
-  assert.match(panel, /corregir: crearControlOperacion\(newClientOperationId\)/);
+  // El panel usa un control por acción (crearOperacionesReproduccion).
+  assert.deepEqual([...ACCIONES_OPERACION], ['crear', 'anular', 'corregir']);
+  assert.match(panel, /crearOperacionesReproduccion\(newClientOperationId\)/);
+  const ops = crearOperacionesReproduccion((() => { let n = 0; return () => `id-${++n}`; })());
+  const firma = firmaOperacion('anular', { eventoId: '10', motivo: 'm' });
+  assert.notEqual(ops.idPara('anular', firma), ops.idPara('corregir', firma));
+});
+
+// ---------------------------------------------------------------------------
+// Idempotencia tras resultado INCIERTO + cerrar/reabrir (revisión PR #105)
+// ---------------------------------------------------------------------------
+
+// Simula el panel con el controlador real: enviar = idPara + resultadoOperacion
+// + resolver; cerrar/reabrir NO toca los ids (ver invariante de fuente abajo).
+function simulador() {
+  let n = 0;
+  const ops = crearOperacionesReproduccion(() => `id-${++n}`);
+  const posts = [];
+  return {
+    posts,
+    enviar(accion, firma, respuesta) {
+      const id = ops.idPara(accion, firma);
+      posts.push({ accion, id });
+      const resultado = resultadoOperacion(accion, respuesta);
+      ops.resolver(accion, resultado);
+      return { id, resultado };
+    },
+    cerrarYReabrir() {
+      // cerrar() del panel: sin descartar (no hay llamada sobre `ops`).
+    },
+  };
+}
+
+const R500 = Object.freeze({ ok: false, status: 500, data: { error: 'Error interno del servidor', correlationId: CORRELATION }, correlationId: CORRELATION });
+const RED = Object.freeze({ ok: false, status: 0, data: { error: 'NETWORK_ERROR' }, failure: 'NETWORK_ERROR' });
+const okCon = (status = 201) => ({ ok: true, status, data: { evento: CORRECTOR, yaExistia: false } });
+
+test('incierto 1 — crear: 500 o NETWORK_ERROR, cerrar y reabrir la misma intención reutiliza el id A', () => {
+  for (const fallo of [R500, RED]) {
+    const s = simulador();
+    const firma = firmaOperacion('crear', { form: form('CELO_OBSERVADO', { intensidadCelo: 'ALTA' }) });
+    const a = s.enviar('crear', firma, fallo);
+    assert.equal(a.resultado.tipo, 'INCIERTO');
+    assert.equal(a.resultado.descartarOperacion, false);
+    s.cerrarYReabrir();
+    // Reabre con formulario nuevo y vuelve a cargar los mismos datos.
+    const reintento = s.enviar('crear', firmaOperacion('crear', { form: form('CELO_OBSERVADO', { intensidadCelo: 'ALTA' }) }), okCon());
+    assert.equal(reintento.id, a.id);
+    assert.equal(a.id, 'id-1');
+  }
+});
+
+test('incierto 2 — crear: tras incierto, cambiar un dato genera un id nuevo (B)', () => {
+  const s = simulador();
+  const a = s.enviar('crear', firmaOperacion('crear', { form: form('CELO_OBSERVADO', { intensidadCelo: 'ALTA' }) }), R500);
+  s.cerrarYReabrir();
+  const b = s.enviar('crear', firmaOperacion('crear', { form: form('CELO_OBSERVADO', { intensidadCelo: 'MEDIA' }) }), okCon());
+  assert.notEqual(b.id, a.id);
+  assert.equal(b.id, 'id-2');
+});
+
+test('incierto 3 — anular: cerrar y reabrir el mismo evento con el mismo motivo reutiliza el id', () => {
+  const s = simulador();
+  const a = s.enviar('anular', firmaOperacion('anular', { eventoId: '10', motivo: 'Toro equivocado' }), RED);
+  assert.equal(a.resultado.tipo, 'INCIERTO');
+  s.cerrarYReabrir();
+  // Espacios extra en el motivo: misma intención (se normaliza como en el body).
+  const b = s.enviar('anular', firmaOperacion('anular', { eventoId: '10', motivo: ' Toro equivocado ' }), { ok: true, status: 200, data: { evento: ORIGINAL, yaExistia: true } });
+  assert.equal(b.id, a.id);
+  assert.equal(b.resultado.tipo, 'YA_EXISTIA');
+  // Otro evento u otro motivo = otra intención.
+  const c = s.enviar('anular', firmaOperacion('anular', { eventoId: '11', motivo: 'Toro equivocado' }), R500);
+  assert.notEqual(c.id, a.id);
+});
+
+test('incierto 4 — corregir: cerrar y reabrir la misma corrección reutiliza el id', () => {
+  const s = simulador();
+  const corregido = { ...formDesdeEvento(ORIGINAL), toroAnimalId: '', toroExterno: 'Brahman 123' };
+  const a = s.enviar('corregir', firmaOperacion('corregir', { eventoId: '10', form: corregido, motivo: 'toro' }), R500);
+  s.cerrarYReabrir();
+  // Reabre: formulario precargado del original y vuelve a aplicar el mismo cambio.
+  const otraVez = { ...formDesdeEvento(ORIGINAL), toroAnimalId: '', toroExterno: 'Brahman 123' };
+  const b = s.enviar('corregir', firmaOperacion('corregir', { eventoId: '10', form: otraVez, motivo: 'toro' }), okCon());
+  assert.equal(b.id, a.id);
+});
+
+test('incierto 5 — éxito: la misma intención posterior obtiene un id nuevo', () => {
+  for (const [accion, opciones] of [
+    ['crear', { form: form('PARTO', { partoTipo: 'NORMAL' }) }],
+    ['anular', { eventoId: '10', motivo: 'm' }],
+    ['corregir', { eventoId: '10', form: form('PARTO', { partoTipo: 'NORMAL' }), motivo: 'm' }],
+  ]) {
+    const s = simulador();
+    const firma = firmaOperacion(accion, opciones);
+    const a = s.enviar(accion, firma, okCon(accion === 'anular' ? 200 : 201));
+    assert.equal(a.resultado.exito, true, accion);
+    const b = s.enviar(accion, firma, okCon());
+    assert.notEqual(b.id, a.id, accion);
+  }
+});
+
+test('incierto 6 — rechazo definitivo 400/403/409: se descarta y el siguiente intento obtiene id nuevo', () => {
+  const rechazos = [
+    { ok: false, status: 400, data: { error: 'INVALID_FECHA' } },
+    { ok: false, status: 403, data: { error: 'ROLE_FORBIDDEN' }, failure: 'ROLE_FORBIDDEN' },
+    { ok: false, status: 409, data: { error: 'EVENTO_NO_PERMITIDO_POR_ESTADO' } },
+  ];
+  for (const accion of ['crear', 'anular', 'corregir']) {
+    for (const rechazo of rechazos) {
+      const s = simulador();
+      const firma = firmaOperacion(accion, { eventoId: accion === 'crear' ? null : '10', form: form('ABORTO'), motivo: 'm' });
+      const a = s.enviar(accion, firma, rechazo);
+      assert.equal(a.resultado.descartarOperacion, true, `${accion} ${rechazo.status}`);
+      const b = s.enviar(accion, firma, okCon());
+      assert.notEqual(b.id, a.id, `${accion} ${rechazo.status}`);
+    }
+  }
+});
+
+test('incierto 7 — doble clic: un solo POST (bloqueo) y, si llegara a repetirse, el mismo id', () => {
+  const s = simulador();
+  const firma = firmaOperacion('crear', { form: form('CELO_OBSERVADO') });
+  const ops = crearOperacionesReproduccion((() => { let n = 0; return () => `x-${++n}`; })());
+  assert.equal(ops.idPara('crear', firma), ops.idPara('crear', firma));
+  assert.equal(s.posts.length, 0);
+  // El panel bloquea el segundo envío mientras el primero está en curso.
+  assert.match(panel, /async function ejecutar\(accion, firma, enviar\) \{\n\s+if \(enviandoRef\.current \|\| !online\) return;/);
+  assert.match(panel, /enviandoRef\.current = true;\n\s+setEnviando\(true\);/);
+});
+
+test('invariante: cerrar() del panel nunca descarta ids; solo resolver() tras resultado definitivo', () => {
+  const cuerpoCerrar = panel.slice(panel.indexOf('function cerrar() {'), panel.indexOf('function abrirCrear('));
+  assert.ok(cuerpoCerrar.length > 0);
+  assert.doesNotMatch(cuerpoCerrar, /descartar|resolver|operaciones\.current/);
+  assert.doesNotMatch(panel, /\.descartar\(\)/);
+  assert.equal((panel.match(/operaciones\.current\.resolver\(accion, resultado\)/g) ?? []).length, 1);
+  // Un incierto (red, 5xx, no enviado, sesión, CSRF) conserva; éxito y rechazos descartan.
+  for (const r of [R500, RED, { ok: false, status: 0, data: { error: 'CSRF_UNAVAILABLE' }, failure: 'REQUEST_NOT_SENT' },
+    { ok: false, status: 401, data: { error: 'SESSION_EXPIRED' }, failure: 'SESSION_EXPIRED' },
+    { ok: false, status: 403, data: { error: 'CSRF_INVALID' }, failure: 'CSRF_REJECTED' }]) {
+    assert.equal(resultadoOperacion('crear', r).descartarOperacion, false, JSON.stringify(r.data));
+  }
+  assert.equal(resultadoOperacion('crear', okCon()).descartarOperacion, true);
 });
 
 test('doble submit: mismo id mientras la intención no cambia; nuevo tras éxito o cambio de datos', () => {

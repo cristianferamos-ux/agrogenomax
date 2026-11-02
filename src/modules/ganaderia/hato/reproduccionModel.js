@@ -14,9 +14,9 @@
 import { MENSAJE_ROLE_FORBIDDEN } from '../auth/ganaderiaAuthedRequest.js';
 import { MENSAJE_SIN_CONEXION, conCodigoSeguimiento, mensajeError } from '../api/errorModel.js';
 import { formatFecha } from './pesajesModel.js';
-import { MENSAJE_CSRF, MENSAJE_SESION_EXPIRADA } from './cierreModel.js';
+import { MENSAJE_CSRF, MENSAJE_SESION_EXPIRADA, crearControlOperacion } from './cierreModel.js';
 
-export { crearControlOperacion } from './cierreModel.js';
+export { crearControlOperacion };
 
 export const MAX_OBSERVACIONES_REPRODUCCION = 500;
 export const MAX_MOTIVO_ANULACION = 500;
@@ -264,6 +264,34 @@ export function validarMotivo(motivo) {
 // anular y corregir.
 export function firmaOperacion(accion, { eventoId = null, form = null, motivo = '' } = {}) {
   return JSON.stringify([accion, eventoId, form ? buildEventoBody(form) : null, limpio(motivo)]);
+}
+
+export const ACCIONES_OPERACION = Object.freeze(['crear', 'anular', 'corregir']);
+
+/**
+ * clientOperationId de las tres acciones (un control por acción; nunca
+ * comparten UUID). Vive mientras el panel esté montado (sin persistir):
+ *   idPara(accion, firma)        misma intención -> mismo id (reintento,
+ *                                doble clic, o cerrar y reabrir tras un
+ *                                resultado INCIERTO); datos distintos -> id nuevo;
+ *   resolver(accion, resultado)  descarta SOLO tras un resultado definitivo
+ *                                (éxito o rechazo); un incierto lo conserva.
+ * Cerrar o cancelar el formulario NUNCA descarta: el POST pudo haberse
+ * guardado y un id nuevo para la misma intención podría duplicarlo.
+ */
+export function crearOperacionesReproduccion(generarId) {
+  const controles = Object.fromEntries(ACCIONES_OPERACION.map((accion) => [accion, crearControlOperacion(generarId)]));
+  return {
+    idPara(accion, firma) {
+      return controles[accion].revisar(firma);
+    },
+    resolver(accion, resultado) {
+      if (resultado?.descartarOperacion) controles[accion].descartar();
+    },
+    idActual(accion) {
+      return controles[accion].id;
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
