@@ -130,3 +130,24 @@ export function getTimelineAnimal(animalId, { limit } = {}) {
   const query = limit ? `?limit=${encodeURIComponent(limit)}` : '';
   return getJsonWithSession(`${BASE}/animales/${encodeURIComponent(animalId)}/timeline${query}`);
 }
+
+// FASE 4B: reproducción del animal (backend de la Fase 4A). GET con el
+// historial + estado DERIVADO por el servidor; los POST son idempotentes por
+// clientOperationId (uno por operación) y nunca se reintentan automáticamente.
+const reproduccionBase = (animalId) => `${BASE}/animales/${encodeURIComponent(animalId)}/reproduccion`;
+
+export function getReproduccion(animalId) {
+  return getJsonWithSession(reproduccionBase(animalId));
+}
+
+export function registrarEventoReproductivo(animalId, body) {
+  return postJsonWithCsrf(`${reproduccionBase(animalId)}/eventos`, body);
+}
+
+export function anularEventoReproductivo(animalId, eventoId, body) {
+  return postJsonWithCsrf(`${reproduccionBase(animalId)}/eventos/${encodeURIComponent(eventoId)}/anular`, body);
+}
+
+export function corregirEventoReproductivo(animalId, eventoId, body) {
+  return postJsonWithCsrf(`${reproduccionBase(animalId)}/eventos/${encodeURIComponent(eventoId)}/corregir`, body);
+}

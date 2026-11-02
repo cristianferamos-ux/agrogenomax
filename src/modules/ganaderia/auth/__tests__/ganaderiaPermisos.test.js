@@ -44,9 +44,9 @@ import { estadoPesajePendiente, mensajeBloqueoPesaje } from '../../hato/pesajesO
 import { accionesCierre } from '../../hato/cierreModel.js';
 import { messageForError } from '../../hato/hatoFormModel.js';
 
-const OPERATIVAS = ['crearAnimal', 'registrarPesaje', 'asociarQr', 'operarCiclo', 'planificarPastoreo'];
+const OPERATIVAS = ['crearAnimal', 'registrarPesaje', 'asociarQr', 'operarCiclo', 'planificarPastoreo', 'registrarReproduccion'];
 const ADMINISTRATIVAS = ['corregirAnimal', 'anularAnimal', 'reemplazarQr', 'darBajaQr', 'cerrarAnimal',
-  'editarPredio', 'editarPotrero', 'administrarCiclo', 'crearCatalogoPersonalizado'];
+  'editarPredio', 'editarPotrero', 'administrarCiclo', 'crearCatalogoPersonalizado', 'administrarReproduccion'];
 
 // ---------------------------------------------------------------------------
 // Matriz
@@ -209,7 +209,7 @@ const src = (rel) => fs.readFileSync(new URL(`../../${rel}`, import.meta.url), '
 test('ninguna pantalla repite comparaciones de rol literales', () => {
   const archivos = [
     'hato/HatoListaPage.jsx', 'hato/HatoRegistroPage.jsx', 'hato/HatoDetallePage.jsx', 'hato/HatoQrPanel.jsx',
-    'hato/HatoPesajesPanel.jsx', 'hato/HatoCierreAnimal.jsx', 'hato/cierreModel.js', 'predios/PrediosPage.jsx',
+    'hato/HatoPesajesPanel.jsx', 'hato/HatoCierreAnimal.jsx', 'hato/cierreModel.js', 'hato/HatoReproduccionPanel.jsx', 'hato/reproduccionModel.js', 'predios/PrediosPage.jsx',
     'potreros/PotrerosByPredioPanel.jsx', 'potreros/PotreroFichaProductivaPanel.jsx', 'potreros/PotreroCicloPastoreoPanel.jsx',
     'potreros/PotreroResidualRealPanel.jsx', 'offline/OfflineSyncPage.jsx',
   ];

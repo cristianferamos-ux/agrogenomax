@@ -20,10 +20,24 @@ const ETIQUETAS = Object.freeze({
   // FASE 2B: el cierre del animal tiene etiqueta propia (nunca "Actividad").
   ANIMAL_SALIDO: 'Salida',
   ANIMAL_MUERTO: 'Muerte',
+  // FASE 4B: eventos reproductivos (tipos del timeline de la Fase 4A).
+  CELO: 'Celo observado',
+  SERVICIO: 'Servicio por monta',
+  INSEMINACION: 'Inseminación artificial',
+  IATF: 'IATF',
+  TRANSFERENCIA_EMBRION: 'Transferencia de embrión',
+  PRENEZ: 'Diagnóstico de preñez',
+  ABORTO: 'Aborto',
+  PARTO: 'Parto',
 });
 
 export function etiquetaTipoEvento(tipo) {
   return ETIQUETAS[tipo] ?? 'Actividad';
+}
+
+/** FASE 4B: evento reproductivo anulado (sigue visible como historia). */
+export function esEventoAnulado(evento) {
+  return evento?.origen === 'reproduccion_eventos' && evento?.datos?.estadoRegistro === 'ANULADO';
 }
 
 /** "dd/mm/yyyy" o "dd/mm/yyyy · HH:mm" (hora de Colombia, la calcula el servidor). */

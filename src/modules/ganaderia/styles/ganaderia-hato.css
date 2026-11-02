@@ -233,7 +233,7 @@
   cursor: pointer;
 }
 
-/* Tres pestañas en 320px: se reparten el ancho sin desbordar la página. */
+/* Cuatro pestañas (FASE 4B) en 320px: se reparten el ancho sin desbordar la página. */
 @media (max-width: 479px) {
   .gan-hato-tabs {
     gap: 0;
@@ -966,6 +966,246 @@
   .gan-cierre-botones > *,
   .gan-cierre-acciones > *,
   .gan-cierre-dialog-acciones > * {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+}
+
+/* FASE 4B: pestaña Reproducción. */
+.gan-hato-tabs {
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+@media (max-width: 479px) {
+  .gan-hato-tabs [role='tab'] {
+    padding: 0.55rem 0.25rem;
+    font-size: 0.82rem;
+  }
+}
+
+.gan-repro {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.gan-repro h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.gan-repro-estado,
+.gan-repro-historial {
+  display: grid;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.gan-repro-estado-valor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+  margin: 0;
+}
+
+.gan-repro-estado .gan-hato-hint,
+.gan-repro-gestacion .gan-hato-hint {
+  margin: 0;
+}
+
+.gan-repro-gestacion {
+  padding-top: 0.5rem;
+  border-top: 1px dashed rgba(255, 255, 255, 0.14);
+}
+
+.gan-repro-badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.gan-repro-estado-valor .gan-repro-badge {
+  margin-left: 0;
+  font-size: 0.95rem;
+}
+
+.gan-repro-badge-sin_estado,
+.gan-repro-badge-no_aplica { color: #b6c0cc; }
+.gan-repro-badge-ciclando { color: #ffc44d; }
+.gan-repro-badge-servida { color: #6ea8ff; }
+.gan-repro-badge-prenada { color: #9cff1a; }
+.gan-repro-badge-vacia { color: #ff9f80; }
+.gan-repro-badge-posparto { color: #c792ea; }
+.gan-repro-badge-activo { color: #9cff1a; }
+.gan-repro-badge-anulado { color: #ff6b6b; }
+
+.gan-repro-acciones {
+  margin: 0;
+}
+
+.gan-repro-form {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 40rem;
+  padding: 0.9rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.6rem;
+}
+
+.gan-repro-form h4 {
+  margin: 0;
+}
+
+.gan-repro-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.gan-repro-form input,
+.gan-repro-form select,
+.gan-repro-form textarea,
+.gan-repro .gan-cierre-dialog textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.gan-repro-lista {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gan-repro-evento {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-left: 3px solid #6ea8ff;
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.03);
+  overflow-wrap: anywhere;
+}
+
+.gan-repro-evento.is-anulado {
+  border-left-color: #ff6b6b;
+  opacity: 0.8;
+}
+
+.gan-repro-evento.is-anulado .gan-repro-evento-tipo {
+  text-decoration: line-through;
+}
+
+.gan-repro-evento-estado {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.6rem;
+  margin: 0;
+}
+
+.gan-repro-evento-estado .gan-repro-badge {
+  margin-left: 0;
+}
+
+.gan-repro-detalle {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.25rem 1rem;
+  margin: 0;
+}
+
+.gan-repro-detalle div {
+  min-width: 0;
+}
+
+.gan-repro-detalle dt {
+  color: #8b96a5;
+  font-size: 0.75rem;
+}
+
+.gan-repro-detalle dd {
+  margin: 0;
+  color: #e6edf3;
+  font-size: 0.9rem;
+}
+
+.gan-repro-observaciones {
+  margin: 0;
+  color: #c9d1d9;
+  font-size: 0.88rem;
+}
+
+/* Acciones administrativas discretas: no dominan la tarjeta. */
+.gan-repro-evento-acciones {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.25rem 1rem;
+}
+
+.gan-repro-accion {
+  min-height: 36px;
+  padding: 0.25rem 0;
+  border: 0;
+  background: transparent;
+  color: #9fb3c8;
+  font-size: 0.85rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.gan-repro-accion-peligro {
+  color: #ffb4a8;
+}
+
+.gan-repro-accion:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.gan-repro-accion:focus-visible {
+  outline: 2px solid #9cff1a;
+  outline-offset: 2px;
+}
+
+.gan-repro-confirmar {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0.75rem 0 1rem;
+  font-size: 0.9rem;
+}
+
+.gan-repro-confirmar input {
+  width: auto;
+  margin-top: 0.2rem;
+}
+
+@media (max-width: 640px) {
+  .gan-repro-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .gan-repro-form {
+    max-width: none;
+    padding: 0.75rem;
+  }
+
+  .gan-repro-form-acciones > * {
     flex: 1 1 100%;
     width: 100%;
   }

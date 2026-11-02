@@ -30,6 +30,9 @@ export const CAPACIDADES = Object.freeze({
   reemplazarQr: ADMINISTRACION,
   darBajaQr: ADMINISTRACION,
   cerrarAnimal: ADMINISTRACION, // salida / muerte
+  // Reproducción (FASE 4B)
+  registrarReproduccion: OPERACION, // nuevo evento reproductivo
+  administrarReproduccion: ADMINISTRACION, // anular / corregir evento reproductivo
   // Estructura territorial
   editarPredio: ADMINISTRACION, // crear / archivar / restaurar
   editarPotrero: ADMINISTRACION, // crear / archivar / restaurar / ficha productiva
@@ -67,6 +70,8 @@ export const canAnularAnimal = (rol) => puede(rol, 'anularAnimal');
 export const canReemplazarQr = (rol) => puede(rol, 'reemplazarQr');
 export const canDarBajaQr = (rol) => puede(rol, 'darBajaQr');
 export const canCerrarAnimal = (rol) => puede(rol, 'cerrarAnimal');
+export const canRegistrarReproduccion = (rol) => puede(rol, 'registrarReproduccion');
+export const canAdministrarReproduccion = (rol) => puede(rol, 'administrarReproduccion');
 export const canEditarPredio = (rol) => puede(rol, 'editarPredio');
 export const canEditarPotrero = (rol) => puede(rol, 'editarPotrero');
 export const canOperarCiclo = (rol) => puede(rol, 'operarCiclo');
