@@ -73,7 +73,8 @@ test('pestaña accesible "Actividad" en la ficha (tablist con teclado)', () => {
   assert.match(panel, /<section className="gan-actividad" aria-labelledby="actividad-titulo">/);
   assert.match(panel, /<h3 id="actividad-titulo">Actividad del animal<\/h3>/);
   assert.match(panel, /<ol className="gan-actividad-lista"/);
-  assert.match(panel, /<span className="gan-actividad-tipo">\{etiquetaTipoEvento\(evento\.tipo\)\}<\/span>/);
+  // FASE 4B: la etiqueta puede llevar la marca "Anulado" de un evento reproductivo.
+  assert.match(panel, /<span className="gan-actividad-tipo">\s*\{etiquetaTipoEvento\(evento\.tipo\)\}/);
   assert.match(panel, /<time className="gan-actividad-fecha"/);
 });
 

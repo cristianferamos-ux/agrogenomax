@@ -16,6 +16,7 @@ import {
   TEXTO_ERROR_ACTIVIDAD,
   TEXTO_SIN_ACTIVIDAD,
   detallesEvento,
+  esEventoAnulado,
   estadoActividad,
   etiquetaTipoEvento,
   fechaEvento,
@@ -91,7 +92,10 @@ export default function HatoActividadPanel({ animalId, visible, version = 0, rep
                 <span className="gan-actividad-marca" aria-hidden="true" />
                 <div className="gan-actividad-cuerpo">
                   <div className="gan-actividad-cabecera">
-                    <span className="gan-actividad-tipo">{etiquetaTipoEvento(evento.tipo)}</span>
+                    <span className="gan-actividad-tipo">
+                      {etiquetaTipoEvento(evento.tipo)}
+                      {esEventoAnulado(evento) ? <span className="gan-repro-badge gan-repro-badge-anulado">Anulado</span> : null}
+                    </span>
                     <time className="gan-actividad-fecha" dateTime={evento.fechaHora ?? evento.fecha ?? undefined}>{fechaEvento(evento)}</time>
                   </div>
                   <strong className="gan-actividad-titulo">{evento.titulo}</strong>

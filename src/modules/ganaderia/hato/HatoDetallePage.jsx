@@ -26,6 +26,10 @@
 // bloque Situación del Resumen muestra el cierre (fecha, motivo/causa,
 // observaciones) aunque el registro quede ANULADO. Registrar salida/muerte
 // (HatoCierreAnimal) solo para ACTIVO + EN_HATO + rol owner|admin y con red.
+//
+// FASE 4B: pestaña "Reproducción" (HatoReproduccionPanel, backend 4A). Como
+// Actividad, se monta al abrirla y queda montada; cada evento registrado,
+// anulado o corregido marca la Actividad para recargarla.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
 import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
@@ -34,6 +38,7 @@ import HatoAnimalFields from './HatoAnimalFields.jsx';
 import HatoQrPanel from './HatoQrPanel.jsx';
 import HatoPesajesPanel from './HatoPesajesPanel.jsx';
 import HatoActividadPanel from './HatoActividadPanel.jsx';
+import HatoReproduccionPanel from './HatoReproduccionPanel.jsx';
 import HatoCierreAnimal from './HatoCierreAnimal.jsx';
 import { ETIQUETAS_ESTADO_REGISTRO, ETIQUETAS_SITUACION, bloqueSituacion, situacionDe } from './cierreModel.js';
 import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
@@ -72,6 +77,7 @@ function Row({ label, children }) {
 const PESTANAS = Object.freeze([
   { id: 'resumen', label: 'Resumen' },
   { id: 'pesajes', label: 'Pesajes' },
+  { id: 'reproduccion', label: 'Reproducción' },
   { id: 'actividad', label: 'Actividad' },
 ]);
 
@@ -156,11 +162,13 @@ export default function HatoDetallePage() {
   const [aviso, setAviso] = useState('');
   const [pestana, setPestana] = useState('resumen');
   const [actividadAbierta, setActividadAbierta] = useState(false);
+  const [reproduccionAbierta, setReproduccionAbierta] = useState(false);
   const [actividadVersion, setActividadVersion] = useState(0);
   const marcarActividad = useCallback(() => setActividadVersion((v) => v + 1), []);
   const cambiarPestana = useCallback((id) => {
     setPestana(id);
     if (id === 'actividad') setActividadAbierta(true);
+    if (id === 'reproduccion') setReproduccionAbierta(true);
   }, []);
 
   // silencioso (FASE 1B): refresca la ficha sin pasar por "cargando" (tras
@@ -353,6 +361,17 @@ export default function HatoDetallePage() {
                   load({ silencioso: true });
                   marcarActividad();
                 }}
+              />
+            </div>
+          ) : null}
+
+          {modo === 'ver' && !esLocal && reproduccionAbierta ? (
+            <div role="tabpanel" id="ficha-panel-reproduccion" aria-labelledby="ficha-tab-reproduccion" tabIndex={0} hidden={pestana !== 'reproduccion'}>
+              <HatoReproduccionPanel
+                animal={animal}
+                visible={pestana === 'reproduccion'}
+                online={offline.online}
+                onCambio={marcarActividad}
               />
             </div>
           ) : null}
