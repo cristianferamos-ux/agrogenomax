@@ -971,16 +971,55 @@
   }
 }
 
-/* FASE 4B: pestaña Reproducción. */
+/* FASE 4B.1: cuatro pestañas en móvil sin recortar texto.
+   Causa del recorte (320 px): la barra mide 248 px y el texto de las cuatro
+   etiquetas suma ~257 px; con min-width: 0 los botones se encogían por debajo
+   de su texto, que desbordaba la caja y la barra (scroll interno de ~6 px que
+   ocultaba el final de "Actividad").
+   - Un botón nunca es más estrecho que su texto (min-width: max-content,
+     nowrap): si algún día no caben, la barra se desplaza entera, con barra de
+     scroll visible, en lugar de solapar o recortar texto.
+   - Medidas reales de la barra en la ficha: 248 px a 320, 273 a 360, 288 a
+     375, 392 a 479. Hasta 374 px se compacta (padding 2 px, 0.75rem) y hasta
+     479 px se usa 0.82rem con padding 3 px: las cuatro caben sin scroll con
+     margen en todo el rango.
+   - Foco hacia dentro: el overflow de la barra recorta un outline exterior. */
 .gan-hato-tabs {
   overflow-x: auto;
-  scrollbar-width: none;
+  scrollbar-width: thin;
+}
+
+.gan-hato-tabs [role='tab']:focus-visible {
+  outline-offset: -3px;
+}
+
+/* 480-600 px: con el tamaño de escritorio (0.95rem, padding 1rem) las cuatro
+   necesitan ~437 px y la barra mide ~393 a 480. */
+@media (max-width: 600px) {
+  .gan-hato-tabs [role='tab'] {
+    flex: 1 0 auto;
+    min-width: max-content;
+    padding: 0.55rem 0.5rem;
+    font-size: 0.9rem;
+    white-space: nowrap;
+  }
 }
 
 @media (max-width: 479px) {
   .gan-hato-tabs [role='tab'] {
-    padding: 0.55rem 0.25rem;
+    flex: 1 0 auto;
+    min-width: max-content;
+    padding: 0.55rem 0.1875rem;
     font-size: 0.82rem;
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 374px) {
+  .gan-hato-tabs [role='tab'] {
+    padding: 0.55rem 0.125rem;
+    font-size: 0.75rem;
+    letter-spacing: -0.02em;
   }
 }
 
