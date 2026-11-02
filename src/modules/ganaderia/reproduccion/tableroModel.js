@@ -6,7 +6,7 @@
 // servidor (SQL con paridad con reproduccionEstado.js); aquí nunca se
 // recalculan ni se filtra el subconjunto cargado: cada filtro es una consulta.
 // Los errores pasan por el modelo de la Fase 3C.
-import { mensajeError } from '../api/errorModel.js';
+import { mensajeDeExcepcion, mensajeError } from '../api/errorModel.js';
 import { formatFecha } from '../hato/pesajesModel.js';
 import { formatIdentidad } from '../hato/hatoFormModel.js';
 import { ETIQUETAS_ESTADO_REPRODUCTIVO, ETIQUETAS_TIPO_EVENTO, etiquetaOpcion } from '../hato/reproduccionModel.js';
@@ -160,6 +160,70 @@ export function rutaFichaReproduccion(animalId) {
 export function resultadoCarga(result, clave) {
   if (result?.ok && result.data && (clave ? Array.isArray(result.data[clave]) : true)) return { ok: true, data: result.data };
   return { ok: false, mensaje: mensajeError(result, null, { fallback: MENSAJE_CARGA_TABLERO }) };
+}
+
+// ---------------------------------------------------------------------------
+// Response-race: solo la petición más reciente de cada flujo aplica su
+// resultado (éxito, error funcional o excepción). Resumen y listado tienen
+// secuencias independientes; "Ver más" usa la del listado sin avanzarla.
+// ---------------------------------------------------------------------------
+
+export function crearSecuencia() {
+  let actual = 0;
+  return {
+    iniciar() {
+      actual += 1;
+      return actual;
+    },
+    vigente(id) {
+      return id === actual;
+    },
+    get actual() {
+      return actual;
+    },
+  };
+}
+
+/**
+ * Ejecuta `cargar` y llama a `aplicar({ ok, valor } | { ok:false, error })`
+ * SOLO si la petición `id` sigue vigente al responder (incluido el fallo).
+ * Por defecto inicia una petición nueva; `{ id }` reutiliza una existente.
+ * Devuelve true si aplicó el resultado.
+ */
+export async function cargarVigente(secuencia, cargar, aplicar, { id = secuencia.iniciar() } = {}) {
+  let resultado;
+  try {
+    resultado = { ok: true, valor: await cargar() };
+  } catch (error) {
+    resultado = { ok: false, error };
+  }
+  if (!secuencia.vigente(id)) return false;
+  aplicar(resultado);
+  return true;
+}
+
+// Resultado de cargarVigente -> estado de cada bloque (seguro, Fase 3C).
+const mensajeFallo = (resultado) => (resultado.ok ? null : mensajeDeExcepcion(resultado.error, MENSAJE_CARGA_TABLERO));
+
+export function estadoResumen(resultado) {
+  if (!resultado.ok) return { status: 'error', data: null, mensaje: mensajeFallo(resultado) };
+  const r = resultadoCarga(resultado.valor);
+  return r.ok ? { status: 'ok', data: r.data, mensaje: null } : { status: 'error', data: null, mensaje: r.mensaje };
+}
+
+export function estadoLista(resultado) {
+  if (!resultado.ok) return { status: 'error', animales: [], total: 0, mensaje: mensajeFallo(resultado) };
+  const r = resultadoCarga(resultado.valor, 'animales');
+  return r.ok
+    ? { status: 'ok', animales: r.data.animales, total: r.data.total ?? r.data.animales.length, mensaje: null }
+    : { status: 'error', animales: [], total: 0, mensaje: r.mensaje };
+}
+
+/** "Ver más": añade la página o deja un aviso sin perder lo ya cargado. */
+export function anexarPagina(lista, resultado) {
+  if (!resultado.ok) return { ...lista, mensaje: mensajeFallo(resultado) };
+  const r = resultadoCarga(resultado.valor, 'animales');
+  return r.ok ? { ...lista, animales: [...lista.animales, ...r.data.animales], total: r.data.total, mensaje: null } : { ...lista, mensaje: r.mensaje };
 }
 
 /** Mensaje del estado vacío según filtros. */

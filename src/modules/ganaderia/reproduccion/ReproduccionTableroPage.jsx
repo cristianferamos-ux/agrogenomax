@@ -13,18 +13,20 @@ import { Link } from 'react-router-dom';
 import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
 import { StatusMessage } from '../components/FormField.jsx';
 import { getResumenReproductivo, listPrediosActivos, listTableroReproductivo } from '../hato/hatoApi.js';
-import { mensajeDeExcepcion } from '../api/errorModel.js';
 import {
   FILTROS_RAPIDOS,
-  MENSAJE_CARGA_TABLERO,
   SITUACIONES,
   TABLERO_PAGINA,
   TEXTO_CARGANDO_TABLERO,
+  anexarPagina,
+  cargarVigente,
+  crearSecuencia,
   esFiltroAlerta,
+  estadoLista,
+  estadoResumen,
   filtrosConSituacion,
   kpisDe,
   queryListado,
-  resultadoCarga,
   tarjetaAnimal,
   textoUmbrales,
   textoVacio,
@@ -80,7 +82,12 @@ export default function ReproduccionTableroPage() {
   const [resumen, setResumen] = useState({ status: 'loading', data: null, mensaje: null });
   const [lista, setLista] = useState({ status: 'loading', animales: [], total: 0, mensaje: null });
   const [cargandoMas, setCargandoMas] = useState(false);
-  const peticion = useRef(0);
+  // Response-race: secuencias INDEPENDIENTES para KPIs y listado; solo la
+  // petición más reciente de cada una aplica su resultado (incluido un fallo).
+  const secuenciaResumen = useRef(null);
+  const secuenciaLista = useRef(null);
+  if (!secuenciaResumen.current) secuenciaResumen.current = crearSecuencia();
+  if (!secuenciaLista.current) secuenciaLista.current = crearSecuencia();
 
   useEffect(() => {
     let activo = true;
@@ -93,42 +100,37 @@ export default function ReproduccionTableroPage() {
   // KPIs: siempre del hato actual (ACTIVO + EN_HATO), opcionalmente por predio.
   const cargarResumen = useCallback(async () => {
     setResumen((r) => ({ ...r, status: 'loading' }));
-    try {
-      const r = resultadoCarga(await getResumenReproductivo({ predioId: filtros.predioId || undefined }));
-      setResumen(r.ok ? { status: 'ok', data: r.data, mensaje: null } : { status: 'error', data: null, mensaje: r.mensaje });
-    } catch (error) {
-      setResumen({ status: 'error', data: null, mensaje: mensajeDeExcepcion(error, MENSAJE_CARGA_TABLERO) });
-    }
+    await cargarVigente(
+      secuenciaResumen.current,
+      () => getResumenReproductivo({ predioId: filtros.predioId || undefined }),
+      (resultado) => setResumen(estadoResumen(resultado)),
+    );
   }, [filtros.predioId]);
 
   const cargarLista = useCallback(async () => {
-    const id = ++peticion.current;
     setLista((l) => ({ ...l, status: 'loading' }));
-    try {
-      const r = resultadoCarga(await listTableroReproductivo(queryListado(filtros)), 'animales');
-      if (id !== peticion.current) return;
-      setLista(r.ok
-        ? { status: 'ok', animales: r.data.animales, total: r.data.total ?? r.data.animales.length, mensaje: null }
-        : { status: 'error', animales: [], total: 0, mensaje: r.mensaje });
-    } catch (error) {
-      if (id === peticion.current) setLista({ status: 'error', animales: [], total: 0, mensaje: mensajeDeExcepcion(error, MENSAJE_CARGA_TABLERO) });
-    }
+    await cargarVigente(
+      secuenciaLista.current,
+      () => listTableroReproductivo(queryListado(filtros)),
+      (resultado) => setLista(estadoLista(resultado)),
+    );
   }, [filtros]);
 
   useEffect(() => { cargarResumen(); }, [cargarResumen]);
   useEffect(() => { cargarLista(); }, [cargarLista]);
 
+  // "Ver más" pertenece al listado vigente: no avanza la secuencia, y si los
+  // filtros cambian mientras está en vuelo su resultado (o fallo) se descarta.
   async function cargarMas() {
     if (cargandoMas) return;
-    const id = peticion.current;
     setCargandoMas(true);
     try {
-      const r = resultadoCarga(await listTableroReproductivo(queryListado(filtros, { offset: lista.animales.length })), 'animales');
-      if (id !== peticion.current) return;
-      if (r.ok) setLista((l) => ({ ...l, animales: [...l.animales, ...r.data.animales], total: r.data.total }));
-      else setLista((l) => ({ ...l, mensaje: r.mensaje }));
-    } catch (error) {
-      setLista((l) => ({ ...l, mensaje: mensajeDeExcepcion(error, MENSAJE_CARGA_TABLERO) }));
+      await cargarVigente(
+        secuenciaLista.current,
+        () => listTableroReproductivo(queryListado(filtros, { offset: lista.animales.length })),
+        (resultado) => setLista((l) => anexarPagina(l, resultado)),
+        { id: secuenciaLista.current.actual },
+      );
     } finally {
       setCargandoMas(false);
     }

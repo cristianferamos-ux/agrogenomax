@@ -11,7 +11,12 @@ import {
   ETIQUETAS_NIVEL,
   FILTROS_RAPIDOS,
   MENSAJE_CARGA_TABLERO,
+  anexarPagina,
+  cargarVigente,
+  crearSecuencia,
   esFiltroAlerta,
+  estadoLista,
+  estadoResumen,
   filtrosConSituacion,
   kpisDe,
   presentarAlerta,
@@ -206,8 +211,121 @@ test('errores seguros (Fase 3C): red, 403 y 5xx con código de seguimiento; nunc
   const invalido = resultadoCarga({ ok: false, status: 400, data: { error: 'INVALID_QUERY', message: 'estadoReproductivo debe ser uno de: SQL' } });
   assert.equal(invalido.mensaje, MENSAJE_CARGA_TABLERO);
   assert.deepEqual(resultadoCarga({ ok: true, data: { animales: [] } }, 'animales'), { ok: true, data: { animales: [] } });
-  assert.match(pagina, /mensajeDeExcepcion\(error, MENSAJE_CARGA_TABLERO\)/);
+  // Excepciones (red/TypeError) -> mensaje seguro, vía el modelo.
+  assert.deepEqual(estadoLista({ ok: false, error: new TypeError('Failed to fetch') }), { status: 'error', animales: [], total: 0, mensaje: MENSAJE_SIN_CONEXION });
+  assert.equal(estadoResumen({ ok: false, error: new Error('SQL boom') }).mensaje, MENSAJE_CARGA_TABLERO);
   assert.doesNotMatch(pagina, /error\.message|data\.message/);
+});
+
+// ---------------------------------------------------------------------------
+// Response-race (revisión PR #107): solo la petición vigente aplica resultados
+// ---------------------------------------------------------------------------
+
+// Promesa controlada desde el test: orden de respuesta determinista.
+function diferida() {
+  let resolver;
+  let rechazar;
+  const promesa = new Promise((res, rej) => { resolver = res; rechazar = rej; });
+  return { promesa, resolver, rechazar };
+}
+const okResumen = (n) => ({ ok: true, status: 200, data: { ...RESUMEN, hembrasEnSeguimiento: n } });
+const okLista = (ids, total = ids.length) => ({ ok: true, status: 200, data: { total, animales: ids.map((id) => ({ ...FILA, animalId: id })) } });
+
+test('race 1 — resumen: A inicia, B inicia, B responde primero y A después: solo B queda', async () => {
+  const seq = crearSecuencia();
+  let estado = null;
+  const aplicar = (r) => { estado = estadoResumen(r); };
+  const a = diferida();
+  const b = diferida();
+  const pa = cargarVigente(seq, () => a.promesa, aplicar); // predio A
+  const pb = cargarVigente(seq, () => b.promesa, aplicar); // predio B
+  b.resolver(okResumen(7));
+  assert.equal(await pb, true);
+  assert.equal(estado.data.hembrasEnSeguimiento, 7);
+  a.resolver(okResumen(99));
+  assert.equal(await pa, false);
+  assert.equal(estado.data.hembrasEnSeguimiento, 7);
+});
+
+test('race 2 — resumen: A vieja falla después (error funcional o excepción) y no reemplaza a B', async () => {
+  for (const fallo of [
+    (d) => d.resolver({ ok: false, status: 500, data: { correlationId: CORRELATION }, correlationId: CORRELATION }),
+    (d) => d.rechazar(new TypeError('Failed to fetch')),
+  ]) {
+    const seq = crearSecuencia();
+    let estado = null;
+    const aplicar = (r) => { estado = estadoResumen(r); };
+    const a = diferida();
+    const b = diferida();
+    const pa = cargarVigente(seq, () => a.promesa, aplicar);
+    const pb = cargarVigente(seq, () => b.promesa, aplicar);
+    b.resolver(okResumen(4));
+    await pb;
+    fallo(a);
+    assert.equal(await pa, false);
+    assert.deepEqual(estado, { status: 'ok', data: okResumen(4).data, mensaje: null });
+  }
+});
+
+test('race 3 — listado principal: la respuesta (o el fallo) de filtros viejos nunca pisa la de los nuevos', async () => {
+  const seq = crearSecuencia();
+  let lista = null;
+  const aplicar = (r) => { lista = estadoLista(r); };
+  const viejo = diferida();
+  const nuevo = diferida();
+  const pv = cargarVigente(seq, () => viejo.promesa, aplicar); // filtro "Todos"
+  const pn = cargarVigente(seq, () => nuevo.promesa, aplicar); // filtro "Preñadas"
+  nuevo.resolver(okLista(['2']));
+  await pn;
+  viejo.rechazar(new TypeError('Failed to fetch'));
+  assert.equal(await pv, false);
+  assert.deepEqual(lista.animales.map((a) => a.animalId), ['2']);
+  assert.equal(lista.status, 'ok');
+});
+
+test('race 4 — "Ver más" en vuelo + cambio de filtros: su fallo o su página vieja no tocan el listado nuevo', async () => {
+  for (const desenlace of ['falla', 'responde']) {
+    const seq = crearSecuencia();
+    let lista = null;
+    const aplicarLista = (r) => { lista = estadoLista(r); };
+    await cargarVigente(seq, async () => okLista(['1', '2'], 4), aplicarLista); // página 1 de los filtros viejos
+    const mas = diferida();
+    // "Ver más" usa el id vigente SIN avanzar la secuencia.
+    const pMas = cargarVigente(seq, () => mas.promesa, (r) => { lista = anexarPagina(lista, r); }, { id: seq.actual });
+    const nuevo = diferida();
+    const pNuevo = cargarVigente(seq, () => nuevo.promesa, aplicarLista); // el usuario cambia filtros
+    nuevo.resolver(okLista(['9']));
+    await pNuevo;
+    if (desenlace === 'falla') mas.rechazar(new TypeError('Failed to fetch'));
+    else mas.resolver(okLista(['3', '4'], 4));
+    assert.equal(await pMas, false, desenlace);
+    assert.deepEqual(lista, { status: 'ok', animales: okLista(['9']).data.animales, total: 1, mensaje: null }, desenlace);
+  }
+});
+
+test('"Ver más" vigente: añade la página o deja aviso seguro sin perder lo cargado', async () => {
+  const seq = crearSecuencia();
+  let lista = null;
+  await cargarVigente(seq, async () => okLista(['1', '2'], 4), (r) => { lista = estadoLista(r); });
+  await cargarVigente(seq, async () => okLista(['3', '4'], 4), (r) => { lista = anexarPagina(lista, r); }, { id: seq.actual });
+  assert.deepEqual(lista.animales.map((a) => a.animalId), ['1', '2', '3', '4']);
+  assert.equal(seq.actual, 1);
+  await cargarVigente(seq, async () => { throw new TypeError('Failed to fetch'); }, (r) => { lista = anexarPagina(lista, r); }, { id: seq.actual });
+  assert.equal(lista.animales.length, 4);
+  assert.equal(lista.mensaje, MENSAJE_SIN_CONEXION);
+});
+
+test('la página usa secuencias independientes y protege resumen, listado y "Ver más" (éxito, error y catch)', () => {
+  assert.match(pagina, /secuenciaResumen\.current = crearSecuencia\(\)/);
+  assert.match(pagina, /secuenciaLista\.current = crearSecuencia\(\)/);
+  assert.match(pagina, /cargarVigente\(\s*secuenciaResumen\.current,[\s\S]*?setResumen\(estadoResumen\(resultado\)\)/);
+  assert.match(pagina, /cargarVigente\(\s*secuenciaLista\.current,\s*\(\) => listTableroReproductivo\(queryListado\(filtros\)\),\s*\(resultado\) => setLista\(estadoLista\(resultado\)\)/);
+  assert.match(pagina, /anexarPagina\(l, resultado\)\),\s*\{ id: secuenciaLista\.current\.actual \}/);
+  // Ningún setResumen/setLista con datos fuera de cargarVigente (solo el "loading" previo).
+  const sets = pagina.match(/set(Resumen|Lista)\(.*$/gm) ?? [];
+  assert.ok(sets.length >= 4);
+  for (const s of sets) assert.match(s, /status: 'loading'|estadoResumen|estadoLista|anexarPagina/, s);
+  assert.doesNotMatch(pagina, /try \{[\s\S]*?await (getResumenReproductivo|listTableroReproductivo)/);
 });
 
 // ---------------------------------------------------------------------------
