@@ -1,4 +1,4 @@
-import { Beef, ClipboardList, FileBarChart, Home, LayoutDashboard, LogOut, MapPin } from 'lucide-react';
+import { Beef, ClipboardList, FileBarChart, HeartPulse, Home, LayoutDashboard, LogOut, MapPin } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useGanaderiaAuthOptional } from '../auth/GanaderiaAuthContext.jsx';
@@ -29,6 +29,8 @@ const navItems = [
   { label: 'Registro de Predio', icon: MapPin, to: '/ganaderia/predios' },
   { label: 'Mis animales', icon: Beef, to: '/ganaderia/animales' },
   { label: 'Registrar animal', icon: ClipboardList, to: '/ganaderia/animales/nuevo' },
+  // FASE 4C: tablero reproductivo de la organización (solo lectura).
+  { label: 'Reproducción', icon: HeartPulse, to: '/ganaderia/reproduccion' },
   { label: 'Reportes', icon: FileBarChart, to: '/ganaderia/proximamente/reportes' },
 ];
 

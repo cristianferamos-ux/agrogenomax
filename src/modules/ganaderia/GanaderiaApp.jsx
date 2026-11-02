@@ -10,6 +10,7 @@ import { GanaderiaOfflineProvider } from './offline/GanaderiaOfflineProvider.jsx
 import OfflineStatusBar from './offline/OfflineStatusBar.jsx';
 import OfflineSyncPage from './offline/OfflineSyncPage.jsx';
 import PrediosPage from './predios/PrediosPage.jsx';
+import ReproduccionTableroPage from './reproduccion/ReproduccionTableroPage.jsx';
 
 function ComingSoon({ title }) {
   return (
@@ -53,6 +54,7 @@ export default function GanaderiaApp() {
           <Route path="predios" element={<PrediosPage />} />
           <Route path="potreros" element={<Navigate to="/ganaderia/predios" replace />} />
           <Route path="animales" element={<HatoListaPage />} />
+          <Route path="reproduccion" element={<ReproduccionTableroPage />} />
           <Route path="animales/nuevo" element={<HatoRegistroPage />} />
           <Route path="animales/listado" element={<Navigate to="/ganaderia/animales" replace />} />
           <Route path="animales/:animalId" element={<HatoDetallePage />} />

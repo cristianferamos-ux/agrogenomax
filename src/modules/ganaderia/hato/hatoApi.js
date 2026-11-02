@@ -151,3 +151,16 @@ export function anularEventoReproductivo(animalId, eventoId, body) {
 export function corregirEventoReproductivo(animalId, eventoId, body) {
   return postJsonWithCsrf(`${reproduccionBase(animalId)}/eventos/${encodeURIComponent(eventoId)}/corregir`, body);
 }
+
+// FASE 4C: tablero reproductivo de la organización (solo lectura). Filtros
+// y paginación los resuelve el backend; nunca se filtra lo ya cargado.
+export function getResumenReproductivo({ predioId } = {}) {
+  const query = predioId ? `?predioId=${encodeURIComponent(predioId)}` : '';
+  return getJsonWithSession(`${BASE}/reproduccion/resumen${query}`);
+}
+
+export function listTableroReproductivo(query = {}) {
+  const params = new URLSearchParams(Object.entries(query).filter(([, v]) => v !== undefined && v !== null && v !== ''));
+  const qs = params.toString();
+  return getJsonWithSession(`${BASE}/reproduccion/animales${qs ? `?${qs}` : ''}`);
+}
