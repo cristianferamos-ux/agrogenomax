@@ -9,6 +9,11 @@
 //     -> 200 { ok, fecha, configuracion, hembrasEnSeguimiento, porEstado, porAlerta }
 //   GET /animales?estadoReproductivo&alerta&predioId&q&situacion&registro&limit&offset
 //     -> 200 { ok, fecha, total, limit, offset, animales[] }
+//   GET /analitica?predioId&desde&hasta (FASE 4D)
+//     -> 200 { ok, fecha, periodo, configuracion, muestraMinima, poblacion, metricas }
+//     -> 422 ANALITICA_VOLUMEN_EXCEDIDO (sin conteos internos)
+//     -> 429 ANALITICA_OCUPADA + Retry-After (sin cola; solo esta ruta)
+//     -> 503 ANALITICA_TIMEOUT (statement_timeout de esta transacción)
 //   400 INVALID_QUERY · 401 SESSION_* · 403 ROLE_FORBIDDEN
 import { Router } from 'express';
 import { createRequireGanaderiaCsrf, createRequireGanaderiaSession } from '../security/ganaderiaSession.js';
@@ -19,6 +24,20 @@ import {
   validateListadoTableroQuery,
   validateResumenTableroQuery,
 } from '../services/ganaderia/reproduccionAlertas.js';
+import {
+  CODIGO_ANALITICA_OCUPADA,
+  CODIGO_TIMEOUT_ANALITICA,
+  CODIGO_VOLUMEN_ANALITICA,
+  CONFIGURACION_ANALITICA_REPRODUCCION,
+  CONFIGURACION_CALIDAD_REPRODUCCION,
+  MENSAJE_ANALITICA_OCUPADA,
+  MENSAJE_TIMEOUT_ANALITICA,
+  MENSAJE_VOLUMEN_ANALITICA,
+  MUESTRA_MINIMA_ANALITICA,
+  crearSemaforoAnalitica,
+  validateAnaliticaQuery,
+} from '../services/ganaderia/reproduccionAnalitica.js';
+import { analiticaReproductiva } from '../services/ganaderia/reproduccionAnaliticaRepository.js';
 import { listarTableroReproductivo, resumenTableroReproductivo } from '../services/ganaderia/reproduccionTableroRepository.js';
 
 function sendValidationError(res, error) {
@@ -33,8 +52,9 @@ export default function createGanaderiaReproduccionRouter({
   appEnv,
   csrfServerSecret,
   allowedOrigins,
-  repo = { listarTableroReproductivo, resumenTableroReproductivo },
+  repo = { analiticaReproductiva, listarTableroReproductivo, resumenTableroReproductivo },
   fechaNegocio = () => resolveFechaHoraNegocio().fecha,
+  semaforoAnalitica = crearSemaforoAnalitica(),
 } = {}) {
   const router = Router();
 
@@ -65,6 +85,43 @@ export default function createGanaderiaReproduccionRouter({
     } catch (error) {
       if (sendValidationError(res, error)) return;
       next(error);
+    }
+  });
+
+  router.get('/analitica', async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    let liberar = null;
+    try {
+      const hoy = fechaNegocio();
+      const filtros = validateAnaliticaQuery(req.query, { hoy });
+      liberar = semaforoAnalitica.adquirir();
+      if (!liberar) {
+        res.setHeader('Retry-After', String(CONFIGURACION_ANALITICA_REPRODUCCION.reintentarTrasSegundos));
+        res.status(429).json({ error: CODIGO_ANALITICA_OCUPADA, message: MENSAJE_ANALITICA_OCUPADA });
+        return;
+      }
+      const analitica = await repo.analiticaReproductiva(req.ganaderiaAuth.organizacionId, filtros, { hoy });
+      res.json({
+        ok: true,
+        fecha: hoy,
+        periodo: { desde: filtros.desde, hasta: filtros.hasta },
+        configuracion: CONFIGURACION_CALIDAD_REPRODUCCION,
+        muestraMinima: MUESTRA_MINIMA_ANALITICA,
+        ...analitica,
+      });
+    } catch (error) {
+      if (sendValidationError(res, error)) return;
+      if (error?.code === CODIGO_VOLUMEN_ANALITICA) {
+        res.status(422).json({ error: CODIGO_VOLUMEN_ANALITICA, message: MENSAJE_VOLUMEN_ANALITICA });
+        return;
+      }
+      if (error?.code === CODIGO_TIMEOUT_ANALITICA) {
+        res.status(503).json({ error: CODIGO_TIMEOUT_ANALITICA, message: MENSAJE_TIMEOUT_ANALITICA });
+        return;
+      }
+      next(error);
+    } finally {
+      liberar?.();
     }
   });
 

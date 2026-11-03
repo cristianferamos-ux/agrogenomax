@@ -56,11 +56,11 @@ export const TABLERO_MAX_LIMIT = 200;
 export const TABLERO_MAX_OFFSET = 100000;
 const MAX_QUERY_LENGTH = 80;
 
-function badRequest(message) {
+export function badRequest(message) {
   return Object.assign(new Error(message), { status: 400, code: 'INVALID_QUERY' });
 }
 
-function rejectUnknown(query, allowed) {
+export function rejectUnknown(query, allowed) {
   const unknown = Object.keys(query || {}).filter((key) => !allowed.has(key));
   if (unknown.length) throw badRequest(`Parámetros no permitidos: ${unknown.join(', ')}`);
   for (const [key, value] of Object.entries(query || {})) {
@@ -82,7 +82,7 @@ function intParam(raw, { min, max, fallback }) {
   return n;
 }
 
-function predioParam(raw) {
+export function predioParam(raw) {
   return raw === undefined || raw === '' ? null : normalizeId(raw, { code: 'INVALID_QUERY', field: 'predioId' });
 }
 

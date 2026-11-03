@@ -151,6 +151,7 @@ export default function ReproduccionTableroPage() {
         <span className="gan-eyebrow">Reproducción</span>
         <h2>Tablero reproductivo</h2>
         <p>Hembras del hato que requieren seguimiento reproductivo. Para registrar eventos, abre la ficha del animal.</p>
+        <Link className="gan-secondary-button" to="/ganaderia/reproduccion/analitica">Ver analítica</Link>
       </div>
 
       <section aria-labelledby="tablero-kpis-titulo">

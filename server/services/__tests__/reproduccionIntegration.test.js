@@ -127,12 +127,13 @@ async function expectSemantic(promise, code, status) {
   });
 }
 
+// e.evento_id calificado: sin alias de tabla, ORDER BY ordenaría por la
+// proyección evento_id::text ('100' antes de '99').
+const FILAS_SQL = `select e.evento_id::text, e.tipo_evento, e.estado_registro, e.corrige_evento_id::text
+       from agx.reproduccion_eventos e where e.animal_id = $1 order by e.evento_id`;
+
 async function filas(animalId) {
-  return (await adminPool.query(
-    `select evento_id::text, tipo_evento, estado_registro, corrige_evento_id::text
-       from agx.reproduccion_eventos where animal_id = $1 order by evento_id`,
-    [animalId],
-  )).rows;
+  return (await adminPool.query(FILAS_SQL, [animalId])).rows;
 }
 
 /** Ejecuta `sql` como agx_app con app.current_org_id = org (transacción revertida). */
@@ -515,6 +516,30 @@ describe('FASE 4A: reproducción bovina (Postgres real)', { skip: !dbAvailable &
         ['INSEMINACION_ARTIFICIAL', 'ANULADO', null],
         ['IATF', 'ACTIVO', evento.eventoId],
       ]);
+    });
+
+    test('filas: orden numérico de evento_id al cruzar una frontera de dígitos (99 -> 100)', async () => {
+      const org = newOrg();
+      const a = await seedAnimal(org);
+      // Mismo borde que 99 -> 100, con ids explícitos fuera del rango de la
+      // secuencia y transacción revertida: determinista y reejecutable aunque
+      // otras suites inserten en la misma base.
+      const client = await adminPool.connect();
+      try {
+        await client.query('begin');
+        for (const eventoId of ['10000000000', '9999999999']) {
+          await client.query(
+            `insert into agx.reproduccion_eventos (evento_id, organizacion_id, animal_id, tipo_evento, fecha_evento, registrado_por, client_operation_id, intent_hash)
+             values ($1, $2, $3, 'CELO_OBSERVADO', '2026-01-05', $4, $5, $6)`,
+            [eventoId, org, a, ACTOR, op(), `v1:${'c'.repeat(64)}`],
+          );
+        }
+        const { rows } = await client.query(FILAS_SQL, [a]);
+        assert.deepEqual(rows.map((f) => f.evento_id), ['9999999999', '10000000000']);
+      } finally {
+        await client.query('rollback');
+        client.release();
+      }
     });
 
     test('corregir no valida la regla de transición, pero sí sexo/toro/fecha', async () => {
