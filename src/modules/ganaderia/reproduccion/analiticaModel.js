@@ -13,7 +13,8 @@ export const TEXTO_CARGANDO_ANALITICA = 'Cargando analítica reproductiva…';
 export const TEXTO_DATOS_INSUFICIENTES = 'Datos insuficientes';
 export const TEXTO_NO_CALCULABLE = 'No calculable';
 export const MENSAJE_VOLUMEN_ANALITICA = 'La analítica contiene demasiados eventos para procesarse en una sola consulta. Reduce el alcance por predio o contacta al administrador.';
-export const MENSAJE_ANALITICA_OCUPADA = 'Hay una analítica reproductiva en proceso. Intenta nuevamente en unos segundos.';
+export const MENSAJE_TIMEOUT_ANALITICA = 'La analítica tardó demasiado en procesarse. Reduce el alcance por predio e intenta nuevamente.';
+export const MENSAJE_ANALITICA_OCUPADA ='Hay una analítica reproductiva en proceso. Intenta nuevamente en unos segundos.';
 const MENSAJES_ANALITICA = Object.freeze({
   ANALITICA_VOLUMEN_EXCEDIDO: MENSAJE_VOLUMEN_ANALITICA,
   ANALITICA_OCUPADA: MENSAJE_ANALITICA_OCUPADA,
@@ -69,6 +70,10 @@ export function estadoAnalitica(resultado) {
   if (!resultado.ok) return { status: 'error', data: null, mensaje: mensajeDeExcepcion(resultado.error, MENSAJE_CARGA_ANALITICA) };
   const r = resultado.valor;
   if (r?.ok && r.data?.metricas) return { status: 'ok', data: r.data, mensaje: null };
+  // Único 5xx con texto funcional: el mensaje es propio; el del backend nunca se usa (3C).
+  if (r?.status === 503 && r.data?.error === 'ANALITICA_TIMEOUT') {
+    return { status: 'error', data: null, mensaje: MENSAJE_TIMEOUT_ANALITICA, reintentable: true };
+  }
   return {
     status: 'error',
     data: null,

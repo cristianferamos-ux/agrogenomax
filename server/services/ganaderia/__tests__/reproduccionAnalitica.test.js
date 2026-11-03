@@ -6,14 +6,17 @@ import fs from 'node:fs';
 import {
   CONFIGURACION_ANALITICA_REPRODUCCION,
   CONFIGURACION_CALIDAD_REPRODUCCION,
+  MENSAJE_TIMEOUT_ANALITICA,
   MENSAJE_VOLUMEN_ANALITICA,
   MUESTRA_MINIMA_ANALITICA,
   agregarMetricas,
   analizarHembra,
   crearSemaforoAnalitica,
+  errorVolumenAnalitica,
   indicador,
   percentil,
   periodoPorDefecto,
+  traducirTimeoutAnalitica,
   validateAnaliticaQuery,
 } from '../reproduccionAnalitica.js';
 import { agruparHembras, leerHistorialLimitado, sqlConteoAnalitica, sqlHistorialAnalitica } from '../reproduccionAnaliticaRepository.js';
@@ -406,20 +409,71 @@ test('semáforo: sin cola, respeta el máximo y liberar es idempotente', () => {
   assert.equal(dos.adquirir(), null);
 });
 
-function clienteFalso(total) {
+function clienteFalso(total, { falloEn = null } = {}) {
   const consultas = [];
+  const ajustes = [];
   return {
     consultas,
+    ajustes,
     query: async (sql, params) => {
+      if (sql.includes('set_config')) {
+        ajustes.push({ sql, params, antesDeConsultas: consultas.length === 0 });
+        return { rows: [] };
+      }
       consultas.push({ sql, params });
-      return sql.includes('count(*)') ? { rows: [{ total }] } : { rows: [{ animal_id: '1' }] };
+      const esConteo = sql.includes('count(*)');
+      if (falloEn === (esConteo ? 'COUNT' : 'HISTORIAL')) {
+        throw Object.assign(new Error('canceling statement due to statement timeout'), { code: '57014', severity: 'ERROR' });
+      }
+      return esConteo ? { rows: [{ total }] } : { rows: [{ animal_id: '1' }] };
     },
   };
 }
 
+test('timeout: local a la transacción, parametrizado y antes del COUNT', async () => {
+  const client = clienteFalso(1);
+  await leerHistorialLimitado(client, {}, { hoy: HOY, maxEventos: 100 });
+  assert.equal(client.ajustes.length, 1);
+  assert.equal(client.ajustes[0].antesDeConsultas, true);
+  assert.deepEqual(client.ajustes[0].params, ['10000ms']);
+  assert.match(client.ajustes[0].sql, /set_config\('statement_timeout', \$1, true\)/);
+  const propio = clienteFalso(1);
+  await leerHistorialLimitado(propio, {}, { hoy: HOY, maxEventos: 100, statementTimeoutMs: 250 });
+  assert.deepEqual(propio.ajustes[0].params, ['250ms']);
+});
+
+test('timeout: una cancelación en COUNT o historial da ANALITICA_TIMEOUT sin texto SQL', async () => {
+  for (const falloEn of ['COUNT', 'HISTORIAL']) {
+    const client = clienteFalso(1, { falloEn });
+    await assert.rejects(leerHistorialLimitado(client, {}, { hoy: HOY, maxEventos: 100 }), (e) => {
+      assert.equal(e.code, 'ANALITICA_TIMEOUT');
+      assert.equal(e.status, 503);
+      assert.equal(e.message, MENSAJE_TIMEOUT_ANALITICA);
+      assert.doesNotMatch(e.message, /statement|cancel|\d/);
+      assert.equal(e.severity, undefined);
+      return true;
+    }, falloEn);
+  }
+});
+
+test('timeout: otros errores de la base de datos no se disfrazan de timeout', () => {
+  const otro = Object.assign(new Error('deadlock'), { code: '40P01' });
+  assert.equal(traducirTimeoutAnalitica(otro), otro);
+  const volumen = errorVolumenAnalitica();
+  assert.equal(traducirTimeoutAnalitica(volumen), volumen);
+});
+
+test('timeout: exclusivo de la analítica, fuera del tablero y del pool global', () => {
+  const leer = (ruta) => fs.readFileSync(new URL(ruta, import.meta.url), 'utf8');
+  for (const ruta of ['../reproduccionTableroRepository.js', '../reproduccionRepository.js', '../../../db/agxBusinessPool.js']) {
+    assert.doesNotMatch(leer(ruta), /statement_timeout/, ruta);
+  }
+  assert.match(leer('../reproduccionAnaliticaRepository.js'), /statement_timeout/);
+});
+
 test('salvaguarda: máximo centralizado y congelado', () => {
   assert.ok(Object.isFrozen(CONFIGURACION_ANALITICA_REPRODUCCION));
-  assert.deepEqual({ ...CONFIGURACION_ANALITICA_REPRODUCCION }, { maxEventosProcesables: 100_000, maxConcurrentes: 1, reintentarTrasSegundos: 2 });
+  assert.deepEqual({ ...CONFIGURACION_ANALITICA_REPRODUCCION }, { maxEventosProcesables: 100_000, maxConcurrentes: 1, reintentarTrasSegundos: 2, statementTimeoutMs: 10_000 });
   const repo = fs.readFileSync(new URL('../reproduccionAnaliticaRepository.js', import.meta.url), 'utf8');
   assert.doesNotMatch(repo, /\b\d{4,}\b|\d_\d{3}/); // sin máximo mágico en el repositorio
 });

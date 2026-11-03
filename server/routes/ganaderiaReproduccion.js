@@ -13,6 +13,7 @@
 //     -> 200 { ok, fecha, periodo, configuracion, muestraMinima, poblacion, metricas }
 //     -> 422 ANALITICA_VOLUMEN_EXCEDIDO (sin conteos internos)
 //     -> 429 ANALITICA_OCUPADA + Retry-After (sin cola; solo esta ruta)
+//     -> 503 ANALITICA_TIMEOUT (statement_timeout de esta transacción)
 //   400 INVALID_QUERY · 401 SESSION_* · 403 ROLE_FORBIDDEN
 import { Router } from 'express';
 import { createRequireGanaderiaCsrf, createRequireGanaderiaSession } from '../security/ganaderiaSession.js';
@@ -25,10 +26,12 @@ import {
 } from '../services/ganaderia/reproduccionAlertas.js';
 import {
   CODIGO_ANALITICA_OCUPADA,
+  CODIGO_TIMEOUT_ANALITICA,
   CODIGO_VOLUMEN_ANALITICA,
   CONFIGURACION_ANALITICA_REPRODUCCION,
   CONFIGURACION_CALIDAD_REPRODUCCION,
   MENSAJE_ANALITICA_OCUPADA,
+  MENSAJE_TIMEOUT_ANALITICA,
   MENSAJE_VOLUMEN_ANALITICA,
   MUESTRA_MINIMA_ANALITICA,
   crearSemaforoAnalitica,
@@ -110,6 +113,10 @@ export default function createGanaderiaReproduccionRouter({
       if (sendValidationError(res, error)) return;
       if (error?.code === CODIGO_VOLUMEN_ANALITICA) {
         res.status(422).json({ error: CODIGO_VOLUMEN_ANALITICA, message: MENSAJE_VOLUMEN_ANALITICA });
+        return;
+      }
+      if (error?.code === CODIGO_TIMEOUT_ANALITICA) {
+        res.status(503).json({ error: CODIGO_TIMEOUT_ANALITICA, message: MENSAJE_TIMEOUT_ANALITICA });
         return;
       }
       next(error);

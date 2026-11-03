@@ -12,7 +12,7 @@ import { hashSessionSecret, sessionCookieName } from '../../security/ganaderiaSe
 import { __resetAgxBusinessPoolForTests } from '../../db/agxBusinessPool.js';
 import { getConfig, __resetValidationStateForTests } from '../../config/env.js';
 import { errorHandler, notFound } from '../../middleware/errors.js';
-import { CONFIGURACION_CALIDAD_REPRODUCCION, MENSAJE_ANALITICA_OCUPADA, MENSAJE_VOLUMEN_ANALITICA, crearSemaforoAnalitica, errorVolumenAnalitica } from '../../services/ganaderia/reproduccionAnalitica.js';
+import { CONFIGURACION_CALIDAD_REPRODUCCION, MENSAJE_ANALITICA_OCUPADA, MENSAJE_TIMEOUT_ANALITICA, MENSAJE_VOLUMEN_ANALITICA, crearSemaforoAnalitica, errorVolumenAnalitica } from '../../services/ganaderia/reproduccionAnalitica.js';
 import { leerHistorialLimitado } from '../../services/ganaderia/reproduccionAnaliticaRepository.js';
 
 const TEST_CSRF_SECRET = 'gwslZ1bKInXjQ0TLmMqWeV6vRAL2hONB6bTBqpAjVFs=';
@@ -169,8 +169,12 @@ describe('FASE 4D: concurrencia de /analitica (un servidor y un semáforo compar
         if (paso.falloAntes) throw paso.falloAntes;
         const client = {
           query: async (sql) => {
-            estado.consultas.push(sql.includes('count(*)') ? 'COUNT' : 'HISTORIAL');
-            return sql.includes('count(*)') ? { rows: [{ total: paso.total ?? 1 }] } : { rows: [] };
+            const tipo = sql.includes('set_config') ? 'TIMEOUT' : sql.includes('count(*)') ? 'COUNT' : 'HISTORIAL';
+            estado.consultas.push(tipo);
+            if (paso.canceladaEn === tipo) {
+              throw Object.assign(new Error('canceling statement due to statement timeout'), { code: '57014' });
+            }
+            return tipo === 'COUNT' ? { rows: [{ total: paso.total ?? 1 }] } : { rows: [] };
           },
         };
         await leerHistorialLimitado(client, filtros, { hoy, maxEventos: 100 });
@@ -238,7 +242,7 @@ describe('FASE 4D: concurrencia de /analitica (un servidor y un semáforo compar
 
       puerta.soltar();
       assert.equal((await primera).status, 200);
-      assert.deepEqual(estado.consultas, ['COUNT', 'HISTORIAL']); // solo los de la primera
+      assert.deepEqual(estado.consultas, ['TIMEOUT', 'COUNT', 'HISTORIAL']); // solo los de la primera
       assert.equal(semaforo.enCurso, 0);
 
       assert.equal((await llamar('/analitica')).status, 200);
@@ -284,9 +288,50 @@ describe('FASE 4D: concurrencia de /analitica (un servidor y un semáforo compar
       const r = await llamar('/analitica');
       assert.equal(r.status, 422);
       assert.equal(r.json.error, 'ANALITICA_VOLUMEN_EXCEDIDO');
-      assert.deepEqual(estado.consultas, ['COUNT']);
+      assert.deepEqual(estado.consultas, ['TIMEOUT', 'COUNT']);
       assert.equal(semaforo.enCurso, 0);
       assert.equal((await llamar('/analitica')).status, 200);
+    });
+  });
+
+  test('statement_timeout en COUNT o historial: 503 seguro, libera y la siguiente entra', async () => {
+    await conServidor(async ({ estado, llamar, semaforo }) => {
+      for (const canceladaEn of ['COUNT', 'HISTORIAL']) {
+        estado.pasos.push({ canceladaEn });
+        const r = await llamar('/analitica');
+        assert.equal(r.status, 503, canceladaEn);
+        assert.deepEqual(r.json, { error: 'ANALITICA_TIMEOUT', message: MENSAJE_TIMEOUT_ANALITICA });
+        assert.equal(r.cache, 'no-store');
+        assert.doesNotMatch(r.text, /statement|cancel|select|agx\.|stack|\d/i);
+        assert.equal(semaforo.enCurso, 0, canceladaEn);
+        assert.equal((await llamar('/analitica')).status, 200, canceladaEn);
+        assert.equal(semaforo.enCurso, 0, canceladaEn);
+      }
+    });
+  });
+
+  test('statement_timeout con otra petición rechazada mientras tanto: se recupera', async () => {
+    await conServidor(async ({ estado, llamar, semaforo }) => {
+      const puerta = compuerta();
+      estado.pasos.push({ compuerta: puerta.promesa, canceladaEn: 'COUNT' });
+      const primera = llamar('/analitica');
+      await hasta(() => estado.entradas === 1);
+      assertOcupada(await llamar('/analitica'));
+      assert.equal(semaforo.enCurso, 1);
+      puerta.soltar();
+      assert.equal((await primera).status, 503);
+      assert.equal(semaforo.enCurso, 0);
+      assert.equal((await llamar('/analitica')).status, 200);
+    });
+  });
+
+  test('/resumen y /animales no ajustan el timeout ni consultan por la analítica', async () => {
+    await conServidor(async ({ estado, llamar }) => {
+      assert.equal((await llamar('/resumen')).status, 200);
+      assert.equal((await llamar('/animales')).status, 200);
+      assert.equal(estado.tablero, 2);
+      assert.equal(estado.entradas, 0);
+      assert.deepEqual(estado.consultas, []);
     });
   });
 

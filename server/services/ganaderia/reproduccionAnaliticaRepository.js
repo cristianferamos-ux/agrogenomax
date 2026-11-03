@@ -12,8 +12,20 @@
 // Salvaguarda de volumen: antes de traer el historial, un COUNT con EXACTAMENTE
 // la misma población (misma cláusula, misma transacción y mismo tenant). Si
 // supera el máximo no se cargan las filas ni se pliega.
+//
+// Timeout solo de esta transacción: set_config(..., true) equivale a SET LOCAL y
+// admite parámetros (patrón de agxBusinessPool.js); no sobrevive al COMMIT ni
+// afecta a otras consultas del pool. Sin él, una consulta colgada retendría el
+// semáforo de la ruta hasta reiniciar el proceso.
 import { withOrganizacionTransaction } from '../../db/agxBusinessPool.js';
-import { agregarMetricas, CONFIGURACION_ANALITICA_REPRODUCCION, errorVolumenAnalitica } from './reproduccionAnalitica.js';
+import {
+  agregarMetricas,
+  CONFIGURACION_ANALITICA_REPRODUCCION,
+  errorVolumenAnalitica,
+  traducirTimeoutAnalitica,
+} from './reproduccionAnalitica.js';
+
+export const SQL_TIMEOUT_LOCAL = `select set_config('statement_timeout', $1, true)`;
 
 const poblacionHistorial = ({ conPredio }) => `
       from agx.reproduccion_eventos e
@@ -36,13 +48,22 @@ export function sqlHistorialAnalitica({ conPredio = false } = {}) {
 }
 
 /** COUNT y, solo si no supera el máximo, historial. Transacción YA abierta. */
-export async function leerHistorialLimitado(client, { predioId = null }, { hoy, maxEventos }) {
+export async function leerHistorialLimitado(client, { predioId = null }, {
+  hoy,
+  maxEventos,
+  statementTimeoutMs = CONFIGURACION_ANALITICA_REPRODUCCION.statementTimeoutMs,
+}) {
   const conPredio = Boolean(predioId);
   const params = conPredio ? [hoy, predioId] : [hoy];
-  const conteo = await client.query(sqlConteoAnalitica({ conPredio }), params);
-  if (conteo.rows[0].total > maxEventos) throw errorVolumenAnalitica();
-  const resultado = await client.query(sqlHistorialAnalitica({ conPredio }), params);
-  return resultado.rows;
+  try {
+    await client.query(SQL_TIMEOUT_LOCAL, [`${statementTimeoutMs}ms`]);
+    const conteo = await client.query(sqlConteoAnalitica({ conPredio }), params);
+    if (conteo.rows[0].total > maxEventos) throw errorVolumenAnalitica();
+    const resultado = await client.query(sqlHistorialAnalitica({ conPredio }), params);
+    return resultado.rows;
+  } catch (error) {
+    throw traducirTimeoutAnalitica(error);
+  }
 }
 
 /** Filas ordenadas por animal -> hembras con su historial. */
@@ -77,6 +98,10 @@ export function agruparHembras(rows) {
 
 /** GET .../reproduccion/analitica -- métricas del periodo con M14. */
 export async function analiticaReproductiva(organizacionId, { predioId = null, desde, hasta }, { hoy, config = CONFIGURACION_ANALITICA_REPRODUCCION }) {
-  const rows = await withOrganizacionTransaction(organizacionId, (client) => leerHistorialLimitado(client, { predioId }, { hoy, maxEventos: config.maxEventosProcesables }));
+  const rows = await withOrganizacionTransaction(organizacionId, (client) => leerHistorialLimitado(client, { predioId }, {
+    hoy,
+    maxEventos: config.maxEventosProcesables,
+    statementTimeoutMs: config.statementTimeoutMs,
+  }));
   return agregarMetricas(agruparHembras(rows), { desde, hasta, hoy });
 }

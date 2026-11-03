@@ -68,6 +68,7 @@ export const CONFIGURACION_ANALITICA_REPRODUCCION = Object.freeze({
   maxEventosProcesables: 100_000,
   maxConcurrentes: 1,
   reintentarTrasSegundos: 2,
+  statementTimeoutMs: 10_000,
 });
 
 export const CODIGO_VOLUMEN_ANALITICA = 'ANALITICA_VOLUMEN_EXCEDIDO';
@@ -76,6 +77,16 @@ export const MENSAJE_VOLUMEN_ANALITICA = 'La analítica contiene demasiados even
 /** Error funcional sin conteos ni detalles internos. */
 export function errorVolumenAnalitica() {
   return Object.assign(new Error(MENSAJE_VOLUMEN_ANALITICA), { status: 422, code: CODIGO_VOLUMEN_ANALITICA });
+}
+
+export const CODIGO_TIMEOUT_ANALITICA = 'ANALITICA_TIMEOUT';
+export const MENSAJE_TIMEOUT_ANALITICA = 'La analítica tardó demasiado en procesarse. Reduce el alcance por predio e intenta nuevamente.';
+const PG_QUERY_CANCELED = '57014';
+
+/** Cancelación de Postgres (statement_timeout) -> error funcional sin texto SQL. */
+export function traducirTimeoutAnalitica(error) {
+  if (error?.code !== PG_QUERY_CANCELED) return error;
+  return Object.assign(new Error(MENSAJE_TIMEOUT_ANALITICA), { status: 503, code: CODIGO_TIMEOUT_ANALITICA });
 }
 
 export const CODIGO_ANALITICA_OCUPADA = 'ANALITICA_OCUPADA';

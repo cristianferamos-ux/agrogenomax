@@ -23,6 +23,7 @@ import { MENSAJE_SIN_CONEXION } from '../../api/errorModel.js';
 import {
   CONFIGURACION_CALIDAD_REPRODUCCION,
   MENSAJE_ANALITICA_OCUPADA as MENSAJE_OCUPADA_BACKEND,
+  MENSAJE_TIMEOUT_ANALITICA as MENSAJE_TIMEOUT_BACKEND,
   MENSAJE_VOLUMEN_ANALITICA as MENSAJE_VOLUMEN_BACKEND,
   MUESTRA_MINIMA_ANALITICA,
   agregarMetricas,
@@ -145,6 +146,23 @@ test('ANALITICA_OCUPADA: mensaje funcional sin detalles técnicos y con reintent
   assert.equal(r.mensaje, MENSAJE_OCUPADA_BACKEND);
   assert.doesNotMatch(r.mensaje, /semaforo|select|\d/);
   assert.equal(r.reintentable, true);
+});
+
+test('ANALITICA_TIMEOUT: mensaje funcional propio; el texto del backend nunca se muestra', () => {
+  const r = estadoAnalitica({
+    ok: true,
+    valor: { ok: false, status: 503, data: { error: 'ANALITICA_TIMEOUT', message: 'canceling statement due to statement timeout' } },
+  });
+  assert.equal(r.status, 'error');
+  assert.equal(r.mensaje, 'La analítica tardó demasiado en procesarse. Reduce el alcance por predio e intenta nuevamente.');
+  assert.equal(r.mensaje, MENSAJE_TIMEOUT_BACKEND);
+  assert.doesNotMatch(r.mensaje, /statement|cancel|\d/);
+  assert.equal(r.reintentable, true);
+  // Solo el código exacto con 503: otro 5xx sigue siendo genérico (3C).
+  const generico = estadoAnalitica({ ok: true, valor: { ok: false, status: 503, data: { error: 'OTRO', message: 'canceling statement' } } });
+  assert.doesNotMatch(generico.mensaje, /cancel|tardó/);
+  const otroStatus = estadoAnalitica({ ok: true, valor: { ok: false, status: 500, data: { error: 'ANALITICA_TIMEOUT' } } });
+  assert.doesNotMatch(otroStatus.mensaje, /tardó/);
 });
 
 test('response-race: un 429 vigente se aplica; uno obsoleto no pisa el resultado vigente', async () => {

@@ -309,6 +309,57 @@ describe('FASE 4D: analítica reproductiva (Postgres real)', { skip: !dbAvailabl
     });
   });
 
+  describe('statement_timeout', () => {
+    const verTimeout = async (client) => (await client.query('show statement_timeout')).rows[0].statement_timeout;
+
+    test('aplica dentro de la transacción de analítica y no sobrevive en la conexión del pool', async () => {
+      const client = await businessDb.getAgxBusinessPool().connect();
+      try {
+        const inicial = await verTimeout(client);
+        await client.query('begin');
+        await client.query(`select set_config('app.current_org_id', $1, true)`, [ORG]);
+        await analitica.leerHistorialLimitado(client, {}, { hoy: HOY, maxEventos: 100 });
+        assert.equal(await verTimeout(client), '10s');
+        await client.query('commit');
+        assert.equal(await verTimeout(client), inicial);
+      } finally {
+        client.release();
+      }
+    });
+
+    test('Postgres cancela de verdad: ANALITICA_TIMEOUT, ROLLBACK y la siguiente consulta funciona', async () => {
+      // Lock breve solo sobre esta tabla, para que el COUNT espere de forma determinista.
+      const bloqueo = await adminPool.connect();
+      try {
+        await bloqueo.query('begin');
+        await bloqueo.query('lock table agx.reproduccion_eventos in access exclusive mode');
+        await assert.rejects(
+          analitica.analiticaReproductiva(ORG, validateAnaliticaQuery({}, { hoy: HOY }), {
+            hoy: HOY,
+            config: { maxEventosProcesables: 100, statementTimeoutMs: 150 },
+          }),
+          (e) => {
+            assert.equal(e.code, 'ANALITICA_TIMEOUT');
+            assert.equal(e.status, 503);
+            assert.doesNotMatch(e.message, /statement|cancel|select|agx\./i);
+            return true;
+          },
+        );
+      } finally {
+        await bloqueo.query('rollback');
+        bloqueo.release();
+      }
+      assert.equal((await leer(ORG)).metricas.M1.total, 5);
+      // La conexión devuelta al pool no conserva el timeout de 150 ms ni la transacción abierta.
+      const client = await businessDb.getAgxBusinessPool().connect();
+      try {
+        assert.equal(await verTimeout(client), '0');
+      } finally {
+        client.release();
+      }
+    });
+  });
+
   test('la analítica no escribe: el historial no cambia al leer', async () => {
     // Acotado a la organización: otras suites insertan en paralelo en la misma base.
     const contar = async () => (await adminPool.query(
