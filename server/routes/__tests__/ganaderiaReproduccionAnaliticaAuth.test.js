@@ -12,7 +12,7 @@ import { hashSessionSecret, sessionCookieName } from '../../security/ganaderiaSe
 import { __resetAgxBusinessPoolForTests } from '../../db/agxBusinessPool.js';
 import { getConfig, __resetValidationStateForTests } from '../../config/env.js';
 import { errorHandler, notFound } from '../../middleware/errors.js';
-import { CONFIGURACION_CALIDAD_REPRODUCCION } from '../../services/ganaderia/reproduccionAnalitica.js';
+import { CONFIGURACION_CALIDAD_REPRODUCCION, MENSAJE_VOLUMEN_ANALITICA, errorVolumenAnalitica } from '../../services/ganaderia/reproduccionAnalitica.js';
 
 const TEST_CSRF_SECRET = 'gwslZ1bKInXjQ0TLmMqWeV6vRAL2hONB6bTBqpAjVFs=';
 const ALLOWED_ORIGIN = 'https://agrogenomax.com';
@@ -132,6 +132,16 @@ describe('FASE 4D: GET /analitica', () => {
       assert.equal(r.json.error, 'INVALID_QUERY', qs);
     }
     assert.equal(llamadas.length, 0);
+  });
+
+  test('volumen excedido -> 422 funcional, sin conteos ni detalles técnicos', async () => {
+    respuesta = errorVolumenAnalitica();
+    const r = await get('/analitica');
+    assert.equal(r.status, 422);
+    assert.deepEqual(r.json, { error: 'ANALITICA_VOLUMEN_EXCEDIDO', message: MENSAJE_VOLUMEN_ANALITICA });
+    assert.equal(r.cache, 'no-store');
+    assert.doesNotMatch(r.text, /\d/);
+    assert.doesNotMatch(r.text, /select|agx\.|count|stack|maxEventos/i);
   });
 
   test('fallo interno -> sin detalles de SQL ni stack al cliente', async () => {

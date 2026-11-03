@@ -22,6 +22,7 @@ import { cargarVigente, crearSecuencia } from '../tableroModel.js';
 import { MENSAJE_SIN_CONEXION } from '../../api/errorModel.js';
 import {
   CONFIGURACION_CALIDAD_REPRODUCCION,
+  MENSAJE_VOLUMEN_ANALITICA as MENSAJE_VOLUMEN_BACKEND,
   MUESTRA_MINIMA_ANALITICA,
   agregarMetricas,
 } from '../../../../../server/services/ganaderia/reproduccionAnalitica.js';
@@ -113,6 +114,23 @@ test('estado: datos, error funcional y excepción con mensajes seguros', () => {
   assert.doesNotMatch(fallo.mensaje, /SELECT/);
   assert.equal(estadoAnalitica({ ok: true, valor: { ok: true, status: 200, data: {} } }).mensaje, MENSAJE_CARGA_ANALITICA);
   assert.equal(estadoAnalitica({ ok: false, error: new TypeError('Failed to fetch') }).mensaje, MENSAJE_SIN_CONEXION);
+});
+
+test('ANALITICA_VOLUMEN_EXCEDIDO: mensaje funcional seguro, sin reintento, alineado con el backend', () => {
+  const r = estadoAnalitica({
+    ok: true,
+    valor: { ok: false, status: 422, data: { error: 'ANALITICA_VOLUMEN_EXCEDIDO', message: 'select count(*) from agx.reproduccion_eventos: 300000' } },
+  });
+  assert.equal(r.status, 'error');
+  assert.equal(r.data, null);
+  assert.equal(r.mensaje, 'La analítica contiene demasiados eventos para procesarse en una sola consulta. Reduce el alcance por predio o contacta al administrador.');
+  assert.equal(r.mensaje, MENSAJE_VOLUMEN_BACKEND);
+  assert.doesNotMatch(r.mensaje, /select|agx\.|\d/);
+  assert.equal(r.reintentable, false);
+  assert.match(pagina, /estado\.reintentable !== false/);
+  // Otro error sí se puede reintentar y un 5xx no muestra texto del backend.
+  const fallo = estadoAnalitica({ ok: true, valor: { ok: false, status: 500, data: { error: 'ANALITICA_VOLUMEN_EXCEDIDO', message: 'select secreto' } } });
+  assert.doesNotMatch(fallo.mensaje, /secreto|demasiados/);
 });
 
 test('textos: periodo, población y umbrales como calidad de datos, no regla clínica', () => {

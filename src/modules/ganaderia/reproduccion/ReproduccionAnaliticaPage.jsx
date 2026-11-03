@@ -133,7 +133,7 @@ export default function ReproduccionAnaliticaPage() {
         {estado.status === 'error' ? (
           <div className="gan-hato-actions">
             <StatusMessage type="error">{estado.mensaje}</StatusMessage>
-            <button type="button" className="gan-secondary-button" onClick={cargar}>Reintentar</button>
+            {estado.reintentable !== false ? <button type="button" className="gan-secondary-button" onClick={cargar}>Reintentar</button> : null}
           </div>
         ) : null}
       </div>

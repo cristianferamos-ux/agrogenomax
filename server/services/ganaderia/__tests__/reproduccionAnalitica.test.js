@@ -4,7 +4,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
+  CONFIGURACION_ANALITICA_REPRODUCCION,
   CONFIGURACION_CALIDAD_REPRODUCCION,
+  MENSAJE_VOLUMEN_ANALITICA,
   MUESTRA_MINIMA_ANALITICA,
   agregarMetricas,
   analizarHembra,
@@ -13,7 +15,7 @@ import {
   periodoPorDefecto,
   validateAnaliticaQuery,
 } from '../reproduccionAnalitica.js';
-import { agruparHembras, sqlHistorialAnalitica } from '../reproduccionAnaliticaRepository.js';
+import { agruparHembras, leerHistorialLimitado, sqlConteoAnalitica, sqlHistorialAnalitica } from '../reproduccionAnaliticaRepository.js';
 
 const HOY = '2026-11-02';
 const PERIODO = { desde: '2000-01-01', hasta: HOY, hoy: HOY };
@@ -380,6 +382,72 @@ test('SQL: una lectura, solo ACTIVO, hembras con registro ACTIVO, predio paramet
   assert.match(repo, /withOrganizacionTransaction/);
   assert.doesNotMatch(repo, /from '\.\.\/\.\.\/db\.js'/);
   assert.doesNotMatch(repo, /insert |update |delete /i);
+});
+
+function clienteFalso(total) {
+  const consultas = [];
+  return {
+    consultas,
+    query: async (sql, params) => {
+      consultas.push({ sql, params });
+      return sql.includes('count(*)') ? { rows: [{ total }] } : { rows: [{ animal_id: '1' }] };
+    },
+  };
+}
+
+test('salvaguarda: máximo centralizado y congelado', () => {
+  assert.ok(Object.isFrozen(CONFIGURACION_ANALITICA_REPRODUCCION));
+  assert.ok(Number.isInteger(CONFIGURACION_ANALITICA_REPRODUCCION.maxEventosProcesables));
+  assert.ok(CONFIGURACION_ANALITICA_REPRODUCCION.maxEventosProcesables > 0);
+  const repo = fs.readFileSync(new URL('../reproduccionAnaliticaRepository.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(repo, /\b\d{4,}\b|\d_\d{3}/); // sin máximo mágico en el repositorio
+});
+
+test('salvaguarda: debajo del límite y exactamente en el límite se procesa', async () => {
+  for (const total of [99, 100]) {
+    const client = clienteFalso(total);
+    const rows = await leerHistorialLimitado(client, {}, { hoy: HOY, maxEventos: 100 });
+    assert.deepEqual(rows, [{ animal_id: '1' }], String(total));
+    assert.equal(client.consultas.length, 2);
+    assert.match(client.consultas[0].sql, /count\(\*\)/);
+    assert.match(client.consultas[1].sql, /order by a\.animal_id/);
+  }
+});
+
+test('salvaguarda: límite + 1 no ejecuta la consulta pesada y da un error funcional sin conteos', async () => {
+  const client = clienteFalso(101);
+  await assert.rejects(leerHistorialLimitado(client, {}, { hoy: HOY, maxEventos: 100 }), (e) => {
+    assert.equal(e.code, 'ANALITICA_VOLUMEN_EXCEDIDO');
+    assert.equal(e.status, 422);
+    assert.equal(e.message, MENSAJE_VOLUMEN_ANALITICA);
+    assert.doesNotMatch(e.message, /\d/);
+    assert.doesNotMatch(e.message, /select|agx\.|count/i);
+    return true;
+  });
+  assert.equal(client.consultas.length, 1);
+  assert.match(client.consultas[0].sql, /count\(\*\)/);
+  assert.doesNotMatch(client.consultas[0].sql, /order by/);
+});
+
+test('salvaguarda: COUNT e historial comparten población, parámetros y predio', async () => {
+  const poblacion = (sql) => sql.slice(sql.indexOf('from agx.reproduccion_eventos')).replace(/\s+order by[\s\S]*$/, '');
+  for (const conPredio of [false, true]) {
+    assert.equal(poblacion(sqlConteoAnalitica({ conPredio })), poblacion(sqlHistorialAnalitica({ conPredio })));
+  }
+  assert.match(sqlConteoAnalitica(), /a\.sexo = 'HEMBRA' and a\.estado = 'ACTIVO' and e\.estado_registro = 'ACTIVO'/);
+  assert.match(sqlConteoAnalitica(), /a\.organizacion_id = e\.organizacion_id/);
+  assert.match(sqlConteoAnalitica(), /e\.fecha_evento <= \$1::date/);
+  assert.doesNotMatch(sqlConteoAnalitica(), /organizacion_id = \$/); // tenant por RLS
+  assert.match(sqlConteoAnalitica({ conPredio: true }), /a\.predio_id = \$2/);
+
+  const client = clienteFalso(1);
+  await leerHistorialLimitado(client, { predioId: '7' }, { hoy: HOY, maxEventos: 100 });
+  assert.deepEqual(client.consultas.map((c) => c.params), [[HOY, '7'], [HOY, '7']]);
+  assert.ok(client.consultas.every((c) => /a\.predio_id = \$2/.test(c.sql)));
+
+  const sinPredio = clienteFalso(1);
+  await leerHistorialLimitado(sinPredio, {}, { hoy: HOY, maxEventos: 100 });
+  assert.deepEqual(sinPredio.consultas.map((c) => c.params), [[HOY], [HOY]]);
 });
 
 test('agruparHembras: conserva el orden y no expone columnas internas', () => {

@@ -259,6 +259,56 @@ describe('FASE 4D: analítica reproductiva (Postgres real)', { skip: !dbAvailabl
     assert.equal(r.metricas.M1.total, 0);
   });
 
+  describe('salvaguarda de volumen', () => {
+    const leerConMaximo = (org, maxEventosProcesables, query = {}) => analitica.analiticaReproductiva(
+      org, validateAnaliticaQuery(query, { hoy: HOY }), { hoy: HOY, config: { maxEventosProcesables } },
+    );
+    const excedido = (e) => e.code === 'ANALITICA_VOLUMEN_EXCEDIDO' && e.status === 422;
+    // Población real de la organización, medida aparte con admin: mismas condiciones.
+    const contarAdmin = async (org, predioId = null) => (await adminPool.query(
+      `select count(*)::int as total
+         from agx.reproduccion_eventos e join agx.animales a on a.animal_id = e.animal_id
+        where e.organizacion_id = $1 and a.sexo = 'HEMBRA' and a.estado = 'ACTIVO' and e.estado_registro = 'ACTIVO'
+          and ($2::bigint is null or a.predio_id = $2)`,
+      [org, predioId],
+    )).rows[0].total;
+
+    test('debajo y exactamente en el límite procesa; límite + 1 da el error funcional', async () => {
+      const total = await contarAdmin(ORG);
+      assert.ok(total > 1);
+      assert.equal((await leerConMaximo(ORG, total + 1)).metricas.M1.total, 5);
+      assert.equal((await leerConMaximo(ORG, total)).metricas.M1.total, 5);
+      await assert.rejects(leerConMaximo(ORG, total - 1), excedido);
+    });
+
+    test('tenant: el COUNT no incluye otra organización', async () => {
+      const propios = await contarAdmin(OTRA);
+      const ajenos = await contarAdmin(ORG);
+      assert.ok(ajenos > propios);
+      // Justo en su propio total: si contara eventos ajenos, excedería.
+      assert.equal((await leerConMaximo(OTRA, propios)).poblacion.hembrasConEventos, 1);
+      await assert.rejects(leerConMaximo(OTRA, propios - 1), excedido);
+    });
+
+    test('predio: el COUNT usa el mismo predio que la consulta principal', async () => {
+      const delPredio = await contarAdmin(ORG, predioA);
+      const totalOrg = await contarAdmin(ORG);
+      assert.ok(totalOrg > delPredio);
+      assert.equal((await leerConMaximo(ORG, delPredio, { predioId: predioA })).poblacion.hembrasConEventos, 2);
+      await assert.rejects(leerConMaximo(ORG, delPredio - 1, { predioId: predioA }), excedido);
+      // El mismo máximo excede sin filtro: reducir por predio sí desbloquea la consulta.
+      await assert.rejects(leerConMaximo(ORG, delPredio), excedido);
+    });
+
+    test('un evento ANULADO no cuenta para el máximo', async () => {
+      // AN-03 tiene un servicio anulado: la población admin lo excluye y el COUNT también.
+      const total = await contarAdmin(ORG);
+      const conAnulados = (await adminPool.query('select count(*)::int as n from agx.reproduccion_eventos where organizacion_id = $1', [ORG])).rows[0].n;
+      assert.ok(conAnulados > total);
+      assert.equal((await leerConMaximo(ORG, total)).metricas.M1.total, 5);
+    });
+  });
+
   test('la analítica no escribe: el historial no cambia al leer', async () => {
     // Acotado a la organización: otras suites insertan en paralelo en la misma base.
     const contar = async () => (await adminPool.query(

@@ -60,6 +60,22 @@ export const CONFIGURACION_CALIDAD_REPRODUCCION = Object.freeze({
 
 export const MUESTRA_MINIMA_ANALITICA = 10;
 
+/**
+ * Salvaguarda operativa de memoria y event loop: el motor materializa y pliega
+ * todo el historial en el proceso principal. No es una regla de negocio.
+ */
+export const CONFIGURACION_ANALITICA_REPRODUCCION = Object.freeze({
+  maxEventosProcesables: 100_000,
+});
+
+export const CODIGO_VOLUMEN_ANALITICA = 'ANALITICA_VOLUMEN_EXCEDIDO';
+export const MENSAJE_VOLUMEN_ANALITICA = 'La analítica contiene demasiados eventos para procesarse en una sola consulta. Reduce el alcance por predio o contacta al administrador.';
+
+/** Error funcional sin conteos ni detalles internos. */
+export function errorVolumenAnalitica() {
+  return Object.assign(new Error(MENSAJE_VOLUMEN_ANALITICA), { status: 422, code: CODIGO_VOLUMEN_ANALITICA });
+}
+
 export const ESTADOS_INDICADOR = Object.freeze({
   OK: 'OK',
   DATOS_INSUFICIENTES: 'DATOS_INSUFICIENTES',

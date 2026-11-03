@@ -12,6 +12,8 @@ export const MENSAJE_CARGA_ANALITICA = 'No fue posible cargar la analítica repr
 export const TEXTO_CARGANDO_ANALITICA = 'Cargando analítica reproductiva…';
 export const TEXTO_DATOS_INSUFICIENTES = 'Datos insuficientes';
 export const TEXTO_NO_CALCULABLE = 'No calculable';
+export const MENSAJE_VOLUMEN_ANALITICA = 'La analítica contiene demasiados eventos para procesarse en una sola consulta. Reduce el alcance por predio o contacta al administrador.';
+const MENSAJES_ANALITICA = Object.freeze({ ANALITICA_VOLUMEN_EXCEDIDO: MENSAJE_VOLUMEN_ANALITICA });
 
 export const ETIQUETAS_METRICA_CALIDAD = Object.freeze({
   'M2-M4': 'Concepción por servicio',
@@ -63,7 +65,13 @@ export function estadoAnalitica(resultado) {
   if (!resultado.ok) return { status: 'error', data: null, mensaje: mensajeDeExcepcion(resultado.error, MENSAJE_CARGA_ANALITICA) };
   const r = resultado.valor;
   if (r?.ok && r.data?.metricas) return { status: 'ok', data: r.data, mensaje: null };
-  return { status: 'error', data: null, mensaje: mensajeError(r, null, { fallback: MENSAJE_CARGA_ANALITICA }) };
+  return {
+    status: 'error',
+    data: null,
+    mensaje: mensajeError(r, MENSAJES_ANALITICA, { fallback: MENSAJE_CARGA_ANALITICA }),
+    // Reintentar con el mismo alcance daría el mismo resultado: hay que cambiar de predio.
+    reintentable: r?.data?.error !== 'ANALITICA_VOLUMEN_EXCEDIDO',
+  };
 }
 
 const conUnidad = (valor, unidad) => `${String(valor).replace('.', ',')}${unidad}`;

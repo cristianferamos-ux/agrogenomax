@@ -11,6 +11,7 @@
 //     -> 200 { ok, fecha, total, limit, offset, animales[] }
 //   GET /analitica?predioId&desde&hasta (FASE 4D)
 //     -> 200 { ok, fecha, periodo, configuracion, muestraMinima, poblacion, metricas }
+//     -> 422 ANALITICA_VOLUMEN_EXCEDIDO (sin conteos internos)
 //   400 INVALID_QUERY · 401 SESSION_* · 403 ROLE_FORBIDDEN
 import { Router } from 'express';
 import { createRequireGanaderiaCsrf, createRequireGanaderiaSession } from '../security/ganaderiaSession.js';
@@ -21,7 +22,13 @@ import {
   validateListadoTableroQuery,
   validateResumenTableroQuery,
 } from '../services/ganaderia/reproduccionAlertas.js';
-import { CONFIGURACION_CALIDAD_REPRODUCCION, MUESTRA_MINIMA_ANALITICA, validateAnaliticaQuery } from '../services/ganaderia/reproduccionAnalitica.js';
+import {
+  CODIGO_VOLUMEN_ANALITICA,
+  CONFIGURACION_CALIDAD_REPRODUCCION,
+  MENSAJE_VOLUMEN_ANALITICA,
+  MUESTRA_MINIMA_ANALITICA,
+  validateAnaliticaQuery,
+} from '../services/ganaderia/reproduccionAnalitica.js';
 import { analiticaReproductiva } from '../services/ganaderia/reproduccionAnaliticaRepository.js';
 import { listarTableroReproductivo, resumenTableroReproductivo } from '../services/ganaderia/reproduccionTableroRepository.js';
 
@@ -88,6 +95,10 @@ export default function createGanaderiaReproduccionRouter({
       });
     } catch (error) {
       if (sendValidationError(res, error)) return;
+      if (error?.code === CODIGO_VOLUMEN_ANALITICA) {
+        res.status(422).json({ error: CODIGO_VOLUMEN_ANALITICA, message: MENSAJE_VOLUMEN_ANALITICA });
+        return;
+      }
       next(error);
     }
   });
