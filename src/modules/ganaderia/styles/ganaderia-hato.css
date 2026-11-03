@@ -1414,3 +1414,126 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* FASE 4D: analítica reproductiva. Tarjetas en rejilla y calidad (M14) siempre
+   visible: al lado en escritorio, a continuación en móvil. Sin scroll horizontal. */
+.gan-analitica-toolbar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  align-items: end;
+  gap: 0.5rem;
+}
+
+.gan-analitica-toolbar label {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+  color: #a7b3c2;
+  font-size: 0.8rem;
+}
+
+.gan-analitica-toolbar input,
+.gan-analitica-toolbar select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+}
+
+.gan-analitica-cuerpo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.gan-analitica-cuerpo[aria-busy="true"] {
+  opacity: 0.6;
+}
+
+.gan-analitica-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(17rem, 100%), 1fr));
+  gap: 0.75rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gan-analitica-card,
+.gan-analitica-calidad {
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.03);
+  overflow-wrap: anywhere;
+}
+
+.gan-analitica-card h4,
+.gan-analitica-calidad-grupo h4 {
+  margin: 0;
+  color: #c9d1d9;
+  font-size: 0.9rem;
+}
+
+.gan-analitica-card .gan-tablero-datos {
+  grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr));
+}
+
+.gan-analitica-enlace-calidad {
+  color: #9cff1a;
+  font-size: 0.85rem;
+}
+
+.gan-analitica-valor {
+  margin: 0.25rem 0;
+  color: #e6edf3;
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+
+.gan-analitica-desglose,
+.gan-analitica-calidad-grupo ul {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.82rem;
+}
+
+.gan-analitica-desglose li,
+.gan-analitica-calidad-grupo li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: #a7b3c2;
+}
+
+.gan-analitica-desglose li span:last-child,
+.gan-analitica-calidad-grupo li strong {
+  flex-shrink: 0;
+  color: #e6edf3;
+}
+
+.gan-analitica-calidad-grupo {
+  margin-bottom: 0.75rem;
+}
+
+@media (min-width: 1100px) {
+  .gan-analitica-cuerpo {
+    grid-template-columns: minmax(0, 1fr) 20rem;
+    align-items: start;
+  }
+
+  .gan-analitica-calidad {
+    position: sticky;
+    top: 1rem;
+    max-height: calc(100vh - 2rem);
+    overflow-y: auto;
+  }
+
+  .gan-analitica-enlace-calidad {
+    display: none;
+  }
+}

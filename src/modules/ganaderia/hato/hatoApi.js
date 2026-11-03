@@ -164,3 +164,10 @@ export function listTableroReproductivo(query = {}) {
   const qs = params.toString();
   return getJsonWithSession(`${BASE}/reproduccion/animales${qs ? `?${qs}` : ''}`);
 }
+
+// FASE 4D: analítica reproductiva del periodo (solo lectura).
+export function getAnaliticaReproductiva(query = {}) {
+  const params = new URLSearchParams(Object.entries(query).filter(([, v]) => v !== undefined && v !== null && v !== ''));
+  const qs = params.toString();
+  return getJsonWithSession(`${BASE}/reproduccion/analitica${qs ? `?${qs}` : ''}`);
+}

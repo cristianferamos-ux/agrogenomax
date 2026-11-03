@@ -224,5 +224,9 @@
   "server/routes/__tests__/ganaderiaAnimalReproduccionAuth.test.js",
   "server/services/__tests__/reproduccionIntegration.test.js",
   "server/services/ganaderia/__tests__/reproduccionTablero.test.js",
-  "server/services/__tests__/reproduccionTableroIntegration.test.js"
+  "server/services/__tests__/reproduccionTableroIntegration.test.js",
+  "server/services/ganaderia/__tests__/reproduccionAnalitica.test.js",
+  "server/routes/__tests__/ganaderiaReproduccionAnaliticaAuth.test.js",
+  "server/services/__tests__/reproduccionAnaliticaIntegration.test.js",
+  "src/modules/ganaderia/reproduccion/__tests__/analiticaUi.test.js"
 ]

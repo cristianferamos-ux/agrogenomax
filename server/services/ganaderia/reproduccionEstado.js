@@ -43,11 +43,11 @@ function aDia(fecha) {
   return Date.UTC(y, m - 1, d);
 }
 
-function sumarDias(fecha, dias) {
+export function sumarDias(fecha, dias) {
   return new Date(aDia(fecha) + dias * DIA_MS).toISOString().slice(0, 10);
 }
 
-function diasEntre(desde, hasta) {
+export function diasEntre(desde, hasta) {
   return Math.round((aDia(hasta) - aDia(desde)) / DIA_MS);
 }
 
