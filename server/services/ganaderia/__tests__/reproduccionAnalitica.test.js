@@ -10,6 +10,7 @@ import {
   MUESTRA_MINIMA_ANALITICA,
   agregarMetricas,
   analizarHembra,
+  crearSemaforoAnalitica,
   indicador,
   percentil,
   periodoPorDefecto,
@@ -384,6 +385,27 @@ test('SQL: una lectura, solo ACTIVO, hembras con registro ACTIVO, predio paramet
   assert.doesNotMatch(repo, /insert |update |delete /i);
 });
 
+test('semáforo: sin cola, respeta el máximo y liberar es idempotente', () => {
+  const s = crearSemaforoAnalitica();
+  const primero = s.adquirir();
+  assert.equal(typeof primero, 'function');
+  assert.equal(s.adquirir(), null);
+  assert.equal(s.enCurso, 1);
+  primero();
+  primero(); // una doble liberación no abre dos cupos
+  assert.equal(s.enCurso, 0);
+  const segundo = s.adquirir();
+  assert.equal(typeof segundo, 'function');
+  assert.equal(s.adquirir(), null);
+  segundo();
+
+  const dos = crearSemaforoAnalitica(2);
+  const a = dos.adquirir();
+  const b = dos.adquirir();
+  assert.ok(a && b);
+  assert.equal(dos.adquirir(), null);
+});
+
 function clienteFalso(total) {
   const consultas = [];
   return {
@@ -397,8 +419,7 @@ function clienteFalso(total) {
 
 test('salvaguarda: máximo centralizado y congelado', () => {
   assert.ok(Object.isFrozen(CONFIGURACION_ANALITICA_REPRODUCCION));
-  assert.ok(Number.isInteger(CONFIGURACION_ANALITICA_REPRODUCCION.maxEventosProcesables));
-  assert.ok(CONFIGURACION_ANALITICA_REPRODUCCION.maxEventosProcesables > 0);
+  assert.deepEqual({ ...CONFIGURACION_ANALITICA_REPRODUCCION }, { maxEventosProcesables: 100_000, maxConcurrentes: 1, reintentarTrasSegundos: 2 });
   const repo = fs.readFileSync(new URL('../reproduccionAnaliticaRepository.js', import.meta.url), 'utf8');
   assert.doesNotMatch(repo, /\b\d{4,}\b|\d_\d{3}/); // sin máximo mágico en el repositorio
 });

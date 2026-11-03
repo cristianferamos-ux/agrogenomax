@@ -22,6 +22,7 @@ import { cargarVigente, crearSecuencia } from '../tableroModel.js';
 import { MENSAJE_SIN_CONEXION } from '../../api/errorModel.js';
 import {
   CONFIGURACION_CALIDAD_REPRODUCCION,
+  MENSAJE_ANALITICA_OCUPADA as MENSAJE_OCUPADA_BACKEND,
   MENSAJE_VOLUMEN_ANALITICA as MENSAJE_VOLUMEN_BACKEND,
   MUESTRA_MINIMA_ANALITICA,
   agregarMetricas,
@@ -131,6 +132,35 @@ test('ANALITICA_VOLUMEN_EXCEDIDO: mensaje funcional seguro, sin reintento, aline
   // Otro error sí se puede reintentar y un 5xx no muestra texto del backend.
   const fallo = estadoAnalitica({ ok: true, valor: { ok: false, status: 500, data: { error: 'ANALITICA_VOLUMEN_EXCEDIDO', message: 'select secreto' } } });
   assert.doesNotMatch(fallo.mensaje, /secreto|demasiados/);
+});
+
+test('ANALITICA_OCUPADA: mensaje funcional sin detalles técnicos y con reintento', () => {
+  const r = estadoAnalitica({
+    ok: true,
+    valor: { ok: false, status: 429, data: { error: 'ANALITICA_OCUPADA', message: 'semaforo enCurso=1 select count(*)' } },
+  });
+  assert.equal(r.status, 'error');
+  assert.equal(r.data, null);
+  assert.equal(r.mensaje, 'Hay una analítica reproductiva en proceso. Intenta nuevamente en unos segundos.');
+  assert.equal(r.mensaje, MENSAJE_OCUPADA_BACKEND);
+  assert.doesNotMatch(r.mensaje, /semaforo|select|\d/);
+  assert.equal(r.reintentable, true);
+});
+
+test('response-race: un 429 vigente se aplica; uno obsoleto no pisa el resultado vigente', async () => {
+  const ocupada = { ok: false, status: 429, data: { error: 'ANALITICA_OCUPADA' } };
+  const secuencia = crearSecuencia();
+  const estados = [];
+  const aplicar = (x) => estados.push(estadoAnalitica(x).status);
+  let responderVieja;
+  const vieja = cargarVigente(secuencia, () => new Promise((r) => { responderVieja = r; }), aplicar);
+  const nueva = cargarVigente(secuencia, async () => ({ ok: true, data: { metricas: METRICAS } }), aplicar);
+  assert.equal(await nueva, true);
+  responderVieja(ocupada);
+  assert.equal(await vieja, false);
+  assert.deepEqual(estados, ['ok']);
+  assert.equal(await cargarVigente(secuencia, async () => ocupada, aplicar), true);
+  assert.deepEqual(estados, ['ok', 'error']);
 });
 
 test('textos: periodo, población y umbrales como calidad de datos, no regla clínica', () => {

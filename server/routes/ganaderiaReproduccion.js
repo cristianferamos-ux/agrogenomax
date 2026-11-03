@@ -12,6 +12,7 @@
 //   GET /analitica?predioId&desde&hasta (FASE 4D)
 //     -> 200 { ok, fecha, periodo, configuracion, muestraMinima, poblacion, metricas }
 //     -> 422 ANALITICA_VOLUMEN_EXCEDIDO (sin conteos internos)
+//     -> 429 ANALITICA_OCUPADA + Retry-After (sin cola; solo esta ruta)
 //   400 INVALID_QUERY · 401 SESSION_* · 403 ROLE_FORBIDDEN
 import { Router } from 'express';
 import { createRequireGanaderiaCsrf, createRequireGanaderiaSession } from '../security/ganaderiaSession.js';
@@ -23,10 +24,14 @@ import {
   validateResumenTableroQuery,
 } from '../services/ganaderia/reproduccionAlertas.js';
 import {
+  CODIGO_ANALITICA_OCUPADA,
   CODIGO_VOLUMEN_ANALITICA,
+  CONFIGURACION_ANALITICA_REPRODUCCION,
   CONFIGURACION_CALIDAD_REPRODUCCION,
+  MENSAJE_ANALITICA_OCUPADA,
   MENSAJE_VOLUMEN_ANALITICA,
   MUESTRA_MINIMA_ANALITICA,
+  crearSemaforoAnalitica,
   validateAnaliticaQuery,
 } from '../services/ganaderia/reproduccionAnalitica.js';
 import { analiticaReproductiva } from '../services/ganaderia/reproduccionAnaliticaRepository.js';
@@ -46,6 +51,7 @@ export default function createGanaderiaReproduccionRouter({
   allowedOrigins,
   repo = { analiticaReproductiva, listarTableroReproductivo, resumenTableroReproductivo },
   fechaNegocio = () => resolveFechaHoraNegocio().fecha,
+  semaforoAnalitica = crearSemaforoAnalitica(),
 } = {}) {
   const router = Router();
 
@@ -81,9 +87,16 @@ export default function createGanaderiaReproduccionRouter({
 
   router.get('/analitica', async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
+    let liberar = null;
     try {
       const hoy = fechaNegocio();
       const filtros = validateAnaliticaQuery(req.query, { hoy });
+      liberar = semaforoAnalitica.adquirir();
+      if (!liberar) {
+        res.setHeader('Retry-After', String(CONFIGURACION_ANALITICA_REPRODUCCION.reintentarTrasSegundos));
+        res.status(429).json({ error: CODIGO_ANALITICA_OCUPADA, message: MENSAJE_ANALITICA_OCUPADA });
+        return;
+      }
       const analitica = await repo.analiticaReproductiva(req.ganaderiaAuth.organizacionId, filtros, { hoy });
       res.json({
         ok: true,
@@ -100,6 +113,8 @@ export default function createGanaderiaReproduccionRouter({
         return;
       }
       next(error);
+    } finally {
+      liberar?.();
     }
   });
 

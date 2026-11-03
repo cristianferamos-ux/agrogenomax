@@ -13,7 +13,11 @@ export const TEXTO_CARGANDO_ANALITICA = 'Cargando analítica reproductiva…';
 export const TEXTO_DATOS_INSUFICIENTES = 'Datos insuficientes';
 export const TEXTO_NO_CALCULABLE = 'No calculable';
 export const MENSAJE_VOLUMEN_ANALITICA = 'La analítica contiene demasiados eventos para procesarse en una sola consulta. Reduce el alcance por predio o contacta al administrador.';
-const MENSAJES_ANALITICA = Object.freeze({ ANALITICA_VOLUMEN_EXCEDIDO: MENSAJE_VOLUMEN_ANALITICA });
+export const MENSAJE_ANALITICA_OCUPADA = 'Hay una analítica reproductiva en proceso. Intenta nuevamente en unos segundos.';
+const MENSAJES_ANALITICA = Object.freeze({
+  ANALITICA_VOLUMEN_EXCEDIDO: MENSAJE_VOLUMEN_ANALITICA,
+  ANALITICA_OCUPADA: MENSAJE_ANALITICA_OCUPADA,
+});
 
 export const ETIQUETAS_METRICA_CALIDAD = Object.freeze({
   'M2-M4': 'Concepción por servicio',

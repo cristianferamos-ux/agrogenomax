@@ -66,6 +66,8 @@ export const MUESTRA_MINIMA_ANALITICA = 10;
  */
 export const CONFIGURACION_ANALITICA_REPRODUCCION = Object.freeze({
   maxEventosProcesables: 100_000,
+  maxConcurrentes: 1,
+  reintentarTrasSegundos: 2,
 });
 
 export const CODIGO_VOLUMEN_ANALITICA = 'ANALITICA_VOLUMEN_EXCEDIDO';
@@ -74,6 +76,32 @@ export const MENSAJE_VOLUMEN_ANALITICA = 'La analítica contiene demasiados even
 /** Error funcional sin conteos ni detalles internos. */
 export function errorVolumenAnalitica() {
   return Object.assign(new Error(MENSAJE_VOLUMEN_ANALITICA), { status: 422, code: CODIGO_VOLUMEN_ANALITICA });
+}
+
+export const CODIGO_ANALITICA_OCUPADA = 'ANALITICA_OCUPADA';
+export const MENSAJE_ANALITICA_OCUPADA = 'Hay una analítica reproductiva en proceso. Intenta nuevamente en unos segundos.';
+
+/**
+ * Semáforo en memoria del proceso (1 réplica), sin cola: `adquirir()` devuelve
+ * la función de liberación (idempotente) o null si ya está al máximo.
+ */
+export function crearSemaforoAnalitica(maximo = CONFIGURACION_ANALITICA_REPRODUCCION.maxConcurrentes) {
+  let enCurso = 0;
+  return {
+    adquirir() {
+      if (enCurso >= maximo) return null;
+      enCurso += 1;
+      let liberado = false;
+      return () => {
+        if (liberado) return;
+        liberado = true;
+        enCurso -= 1;
+      };
+    },
+    get enCurso() {
+      return enCurso;
+    },
+  };
 }
 
 export const ESTADOS_INDICADOR = Object.freeze({

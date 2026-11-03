@@ -12,7 +12,8 @@ import { hashSessionSecret, sessionCookieName } from '../../security/ganaderiaSe
 import { __resetAgxBusinessPoolForTests } from '../../db/agxBusinessPool.js';
 import { getConfig, __resetValidationStateForTests } from '../../config/env.js';
 import { errorHandler, notFound } from '../../middleware/errors.js';
-import { CONFIGURACION_CALIDAD_REPRODUCCION, MENSAJE_VOLUMEN_ANALITICA, errorVolumenAnalitica } from '../../services/ganaderia/reproduccionAnalitica.js';
+import { CONFIGURACION_CALIDAD_REPRODUCCION, MENSAJE_ANALITICA_OCUPADA, MENSAJE_VOLUMEN_ANALITICA, crearSemaforoAnalitica, errorVolumenAnalitica } from '../../services/ganaderia/reproduccionAnalitica.js';
+import { leerHistorialLimitado } from '../../services/ganaderia/reproduccionAnaliticaRepository.js';
 
 const TEST_CSRF_SECRET = 'gwslZ1bKInXjQ0TLmMqWeV6vRAL2hONB6bTBqpAjVFs=';
 const ALLOWED_ORIGIN = 'https://agrogenomax.com';
@@ -149,5 +150,179 @@ describe('FASE 4D: GET /analitica', () => {
     const r = await get('/analitica');
     assert.equal(r.status, 500);
     assert.doesNotMatch(r.text, /secreto|reproduccion_eventos|at .*\.js/);
+  });
+});
+
+describe('FASE 4D: concurrencia de /analitica (un servidor y un semáforo compartidos)', () => {
+  const RESULTADO = { poblacion: { hembrasConEventos: 0 }, metricas: { M1: { total: 0 } } };
+
+  // Repositorio con el COUNT y el historial reales de leerHistorialLimitado sobre
+  // un cliente falso: registra cada consulta. `paso` controla cada entrada.
+  async function conServidor(fn) {
+    const estado = { entradas: 0, consultas: [], pasos: [], tablero: 0 };
+    const semaforo = crearSemaforoAnalitica();
+    const repo = {
+      analiticaReproductiva: async (org, filtros, { hoy }) => {
+        estado.entradas += 1;
+        const paso = estado.pasos.shift() ?? {};
+        if (paso.compuerta) await paso.compuerta;
+        if (paso.falloAntes) throw paso.falloAntes;
+        const client = {
+          query: async (sql) => {
+            estado.consultas.push(sql.includes('count(*)') ? 'COUNT' : 'HISTORIAL');
+            return sql.includes('count(*)') ? { rows: [{ total: paso.total ?? 1 }] } : { rows: [] };
+          },
+        };
+        await leerHistorialLimitado(client, filtros, { hoy, maxEventos: 100 });
+        if (paso.falloDespues) throw paso.falloDespues; // p. ej. una excepción de plegado
+        return RESULTADO;
+      },
+      resumenTableroReproductivo: async () => { estado.tablero += 1; return { hembrasEnSeguimiento: 0, porEstado: {}, porAlerta: {} }; },
+      listarTableroReproductivo: async () => { estado.tablero += 1; return { total: 0, animales: [] }; },
+    };
+    const app = express();
+    app.use(express.json());
+    app.use('/api/ganaderia/reproduccion', createGanaderiaReproduccionRouter({
+      appEnv: 'development', csrfServerSecret: TEST_CSRF_SECRET, allowedOrigins: [ALLOWED_ORIGIN], repo, fechaNegocio: () => HOY, semaforoAnalitica: semaforo,
+    }));
+    app.use(notFound);
+    app.use(errorHandler);
+    const server = await new Promise((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
+    const rawToken = wireFakeSession(ORG_A, 'owner');
+    const baseUrl = `http://127.0.0.1:${server.address().port}/api/ganaderia/reproduccion`;
+    const llamar = async (path) => {
+      const response = await fetch(`${baseUrl}${path}`, { headers: { Origin: ALLOWED_ORIGIN, Cookie: `${sessionCookieName('development')}=${rawToken}` } });
+      const text = await response.text();
+      return { status: response.status, text, json: JSON.parse(text), retryAfter: response.headers.get('retry-after'), cache: response.headers.get('cache-control') };
+    };
+    try {
+      await fn({ estado, llamar, semaforo });
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  }
+
+  function compuerta() {
+    let soltar;
+    const promesa = new Promise((resolve) => { soltar = resolve; });
+    return { promesa, soltar };
+  }
+
+  async function hasta(condicion) {
+    for (let i = 0; i < 500 && !condicion(); i += 1) await new Promise((resolve) => setTimeout(resolve, 2));
+    assert.ok(condicion(), 'la primera petición no llegó al repositorio');
+  }
+
+  function assertOcupada(r) {
+    assert.equal(r.status, 429);
+    assert.deepEqual(r.json, { error: 'ANALITICA_OCUPADA', message: MENSAJE_ANALITICA_OCUPADA });
+    assert.equal(r.retryAfter, '2');
+    assert.equal(r.cache, 'no-store');
+    assert.doesNotMatch(r.text, /\d|select|count|semaforo|enCurso|stack/i);
+  }
+
+  test('la primera entra; las siguientes reciben 429 sin COUNT ni historial; al terminar vuelve a entrar', async () => {
+    await conServidor(async ({ estado, llamar, semaforo }) => {
+      const puerta = compuerta();
+      estado.pasos.push({ compuerta: puerta.promesa });
+      const primera = llamar('/analitica');
+      await hasta(() => estado.entradas === 1);
+
+      assertOcupada(await llamar('/analitica'));
+      // Un 429 no libera el cupo de la petición en curso.
+      assertOcupada(await llamar('/analitica?predioId=7'));
+      assert.equal(estado.entradas, 1);
+      assert.deepEqual(estado.consultas, []);
+      assert.equal(semaforo.enCurso, 1);
+
+      puerta.soltar();
+      assert.equal((await primera).status, 200);
+      assert.deepEqual(estado.consultas, ['COUNT', 'HISTORIAL']); // solo los de la primera
+      assert.equal(semaforo.enCurso, 0);
+
+      assert.equal((await llamar('/analitica')).status, 200);
+      assert.equal(estado.entradas, 2);
+      assert.equal(semaforo.enCurso, 0);
+    });
+  });
+
+  test('excepción antes de consultar y excepción de plegado: responde 500 y libera', async () => {
+    await conServidor(async ({ estado, llamar, semaforo }) => {
+      estado.pasos.push({ falloAntes: new Error('fallo de conexión secreto') });
+      const antes = await llamar('/analitica');
+      assert.equal(antes.status, 500);
+      assert.doesNotMatch(antes.text, /secreto/);
+      assert.equal(semaforo.enCurso, 0);
+
+      estado.pasos.push({ falloDespues: new TypeError('plegado secreto') });
+      const despues = await llamar('/analitica');
+      assert.equal(despues.status, 500);
+      assert.doesNotMatch(despues.text, /secreto/);
+      assert.equal(semaforo.enCurso, 0);
+
+      assert.equal((await llamar('/analitica')).status, 200);
+    });
+  });
+
+  test('excepción con otra petición esperando: tras el fallo vuelve a entrar', async () => {
+    await conServidor(async ({ estado, llamar }) => {
+      const puerta = compuerta();
+      estado.pasos.push({ compuerta: puerta.promesa, falloAntes: new Error('boom') });
+      const primera = llamar('/analitica');
+      await hasta(() => estado.entradas === 1);
+      assertOcupada(await llamar('/analitica'));
+      puerta.soltar();
+      assert.equal((await primera).status, 500);
+      assert.equal((await llamar('/analitica')).status, 200);
+    });
+  });
+
+  test('ANALITICA_VOLUMEN_EXCEDIDO libera y no ejecuta la consulta pesada', async () => {
+    await conServidor(async ({ estado, llamar, semaforo }) => {
+      estado.pasos.push({ total: 101 });
+      const r = await llamar('/analitica');
+      assert.equal(r.status, 422);
+      assert.equal(r.json.error, 'ANALITICA_VOLUMEN_EXCEDIDO');
+      assert.deepEqual(estado.consultas, ['COUNT']);
+      assert.equal(semaforo.enCurso, 0);
+      assert.equal((await llamar('/analitica')).status, 200);
+    });
+  });
+
+  test('/resumen y /animales siguen funcionando mientras la analítica está ocupada', async () => {
+    await conServidor(async ({ estado, llamar, semaforo }) => {
+      const puerta = compuerta();
+      estado.pasos.push({ compuerta: puerta.promesa });
+      const primera = llamar('/analitica');
+      await hasta(() => estado.entradas === 1);
+
+      const resumen = await llamar('/resumen');
+      assert.equal(resumen.status, 200);
+      assert.equal(resumen.retryAfter, null);
+      assert.equal((await llamar('/animales')).status, 200);
+      assert.equal(estado.tablero, 2);
+      assert.equal(semaforo.enCurso, 1); // el tablero no toma ni libera el cupo
+      assertOcupada(await llamar('/analitica'));
+
+      puerta.soltar();
+      assert.equal((await primera).status, 200);
+    });
+  });
+
+  test('una query inválida responde 400 sin tomar el cupo ni liberar el ajeno', async () => {
+    await conServidor(async ({ estado, llamar, semaforo }) => {
+      assert.equal((await llamar('/analitica?desde=ayer')).status, 400);
+      assert.equal(semaforo.enCurso, 0);
+      const puerta = compuerta();
+      estado.pasos.push({ compuerta: puerta.promesa });
+      const primera = llamar('/analitica');
+      await hasta(() => estado.entradas === 1);
+      assert.equal((await llamar('/analitica?desde=ayer')).status, 400);
+      assert.equal(semaforo.enCurso, 1);
+      assertOcupada(await llamar('/analitica'));
+      puerta.soltar();
+      assert.equal((await primera).status, 200);
+    });
   });
 });
