@@ -15,7 +15,7 @@ try {
     'server/services/__tests__/reproduccionTableroIntegration.test.js',
     'server/services/__tests__/reproduccionAnaliticaIntegration.test.js',
   ], { requiredPasses: {
-    'server/services/__tests__/reproduccionIntegration.test.js': 35,
+    'server/services/__tests__/reproduccionIntegration.test.js': 36,
     'server/services/__tests__/reproduccionTableroIntegration.test.js': 14,
     'server/services/__tests__/reproduccionAnaliticaIntegration.test.js': 10,
   } });
