@@ -24,14 +24,37 @@
 // Concurrencia (FASE-14): un `lock` opcional (navigator.locks, clave por
 // organización) serializa los motores de varias pestañas y del Service
 // Worker. Sin lock, la idempotencia del servidor sigue evitando duplicados.
-import { OUTBOX_ESTADOS, backoffMs, estaLista, esErrorDeRed, ordenarOutbox } from './outbox.js';
-import { handlerFor } from './operationHandlers.js';
+//
+// FASE 4E.1 -- operaciones con `claveOrden` (cadena causal FIFO por animal):
+//   * una operación que no se envía DETIENE su cadena: backoff, enviándose,
+//     conflicto, rechazo, tipo desconocido o cuenta distinta. Las siguientes no
+//     se adelantan; las demás cadenas siguen. Un conflicto o rechazo espera
+//     resolución explícita: nunca se salta al siguiente evento.
+//   * se reclama con una transición ATÓMICA (doble envío entre motores sin lock
+//     y carrera con editar / cancelar) y `posibleEnServidor` queda persistido
+//     antes del POST.
+//   * identidad: antes de CADA envío se pregunta al servidor qué cuenta y
+//     organización tiene la sesión. Si no son las de `origen`, la operación queda
+//     BLOQUEADA_POR_IDENTIDAD sin enviarse y vuelve a salir con su cuenta
+//     original. Sesión expirada, respuesta no verificable u `origen` incompleto:
+//     tampoco se envía y queda igual de bloqueada (solo sin red sigue como
+//     estaba, porque no se puede enviar nada). La autoridad es el servidor: el
+//     POST lleva identidadEsperada y, si la cookie cambió tras la verificación,
+//     responde 409 IDENTIDAD_NO_COINCIDE sin escribir nada.
+// Tipo desconocido (bundle antiguo): la operación se conserva, se marca
+// `runtimeNoSoporta` y nunca se descarta. Las operaciones sin claveOrden
+// conservan su comportamiento anterior.
+import { OUTBOX_ESTADOS, SINCRONIZANDO_LEASE_MS, backoffMs, estaLista, esErrorDeRed, ordenarOutbox, origenVerificable } from './outbox.js';
+import { handlerDe } from './operationHandlers.js';
 
 const PULL_PATH = '/api/ganaderia/sync/pull';
+const SESSION_PATH = '/api/ganaderia/auth/session';
+const REPRO_PULL_PATH = '/api/ganaderia/sync/reproduccion';
+/** 40 páginas de 500: una descarga inicial grande reparte su coste entre ciclos. */
+export const REPRO_MAX_PAGINAS_POR_CICLO = 40;
 /** Reintento fijo tras un fallo de red (sin crecer): la red suele volver sola. */
 export const RED_REINTENTO_MS = 30_000;
-/** Sin lock exclusivo, una operación SINCRONIZANDO más reciente puede estar enviándose en otro motor. */
-export const SINCRONIZANDO_LEASE_MS = 2 * 60_000;
+export { SINCRONIZANDO_LEASE_MS };
 
 const FALLOS_SIN_ENVIO = new Set(['NETWORK_ERROR', 'REQUEST_NOT_SENT']);
 
@@ -67,12 +90,57 @@ export function isRoleForbidden(result) {
 
 export function classifyResult(result) {
   if (result?.ok) return 'OK';
+  if (result?.status === 409 && result?.data?.error === 'IDENTIDAD_NO_COINCIDE') return 'IDENTIDAD';
   if (isSessionFailure(result)) return 'SESION';
   if (isRoleForbidden(result)) return 'RECHAZADO';
   if (isRetryable(result)) return 'REINTENTABLE';
   if ([404, 409, 410].includes(result.status)) return 'CONFLICTO';
   return 'RECHAZADO';
 }
+
+/**
+ * FASE 4E.1: ¿pudo quedar guardada la operación tras este resultado? Red, 408,
+ * 429 y 5xx son inciertos. Un 404/409/410 viene de la transacción, después de
+ * la búsqueda idempotente: esta intención no está. El resto (sesión, CSRF, rol,
+ * validación, petición no enviada) se decide antes de esa búsqueda y no prueba
+ * nada sobre un intento previo: se conserva el valor anterior.
+ */
+export function posibleEnServidorTras(result, clase, anterior) {
+  if (result?.failure === 'REQUEST_NOT_SENT') return Boolean(anterior);
+  if (clase === 'REINTENTABLE') return true;
+  if (clase === 'CONFLICTO') return false;
+  return Boolean(anterior);
+}
+
+/**
+ * Cuenta y organización REALES de la sesión, preguntadas al servidor (nunca al
+ * contexto local: otra pestaña pudo cambiar la cookie). Mismo camino en la
+ * página y en el Service Worker.
+ */
+export async function leerIdentidadSesion(transport) {
+  let result;
+  try {
+    result = await transport.getJson(SESSION_PATH);
+  } catch {
+    result = { ok: false, status: 0, failure: 'NETWORK_ERROR', data: null };
+  }
+  if (result?.ok) {
+    if (!result.data?.authenticated || !result.data.cuenta?.cuentaId) return { estado: 'SIN_SESION' };
+    return { estado: 'OK', cuentaId: result.data.cuenta.cuentaId, organizacionId: result.data.organizacionActiva?.organizacionId ?? null };
+  }
+  if (isSessionFailure(result)) return { estado: 'SIN_SESION' };
+  return { estado: esFalloDeRed(result) ? 'SIN_RED' : 'NO_VERIFICABLE' };
+}
+
+const MOTIVO_IDENTIDAD = Object.freeze({
+  CUENTA: 'IDENTIDAD_NO_COINCIDE',
+  SESION: 'SESION_NO_VERIFICABLE',
+  ORIGEN: 'ORIGEN_NO_VERIFICABLE',
+});
+
+const errorDeIdentidad = (codigo) => ({ codigo, mensaje: null, status: 0 });
+
+const sesionEsDe = (sesion, op) => sesion.cuentaId === op.origen.cuentaId && sesion.organizacionId === op.origen.organizacionId;
 
 /**
  * @param {object} deps
@@ -103,6 +171,18 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
     return updated;
   }
 
+  /** Con cadena la escritura es atómica: null si la operación cambió desde que se leyó. */
+  async function actualizarOp(op, changes) {
+    if (!op.claveOrden) return guardarOp(op, changes);
+    return repo.transicionarOperacion(op, { ...changes, updatedAt: now().toISOString() });
+  }
+
+  /** Solo cambia estado y motivo; se reevalúa en cada ciclo y sale con su cuenta. */
+  async function bloquearPorIdentidad(op, motivo) {
+    if (op.estado === OUTBOX_ESTADOS.BLOQUEADA_POR_IDENTIDAD && op.ultimoError?.codigo === motivo) return;
+    await actualizarOp(op, { estado: OUTBOX_ESTADOS.BLOQUEADA_POR_IDENTIDAD, ultimoError: errorDeIdentidad(motivo) });
+  }
+
   async function push({ forzar, exclusivo }) {
     // Recuperación: una operación que quedó SINCRONIZANDO (pestaña cerrada,
     // corte a mitad) se reenvía -- es idempotente en el servidor. Con el lock
@@ -112,23 +192,67 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
     for (const op of await repo.listOutbox()) {
       if (op.estado !== OUTBOX_ESTADOS.SINCRONIZANDO) continue;
       if (exclusivo || !op.updatedAt || new Date(op.updatedAt).getTime() <= limiteLease) {
-        await guardarOp(op, { estado: OUTBOX_ESTADOS.PENDIENTE });
+        await actualizarOp(op, { estado: OUTBOX_ESTADOS.PENDIENTE });
       }
     }
     const pendientes = ordenarOutbox(await repo.listOutbox());
     const bloqueadas = new Set();
+    const cadenasDetenidas = new Set();
+    const detener = (op) => {
+      bloqueadas.add(op.localUuid);
+      if (op.claveOrden) cadenasDetenidas.add(op.claveOrden);
+    };
     for (const original of pendientes) {
-      if (bloqueadas.has(original.localUuid)) continue;
+      if (original.claveOrden ? cadenasDetenidas.has(original.claveOrden) : bloqueadas.has(original.localUuid)) continue;
       if (original.estado === OUTBOX_ESTADOS.CONFLICTO || original.estado === OUTBOX_ESTADOS.RECHAZADO) {
-        bloqueadas.add(original.localUuid);
+        detener(original);
         continue;
       }
-      if (!estaLista(original, now(), { forzar })) continue;
-      const handler = handlerFor(original.tipoOperacion);
+      // Tipo desconocido: se conserva tal cual y solo se detiene lo suyo.
+      const handler = handlerDe(original.tipoOperacion);
+      if (!handler) {
+        if (!original.runtimeNoSoporta) await repo.transicionarOperacion(original, { runtimeNoSoporta: { at: now().toISOString() } });
+        detener(original);
+        continue;
+      }
+      // BLOQUEADA_POR_IDENTIDAD se reevalúa abajo: puede haber vuelto su cuenta.
+      if (original.estado !== OUTBOX_ESTADOS.BLOQUEADA_POR_IDENTIDAD && !estaLista(original, now(), { forzar })) {
+        if (original.claveOrden) detener(original);
+        continue;
+      }
       const request = await handler.request(original, repo);
-      if (!request) continue;
+      if (!request) {
+        if (original.claveOrden) detener(original);
+        continue;
+      }
 
-      const op = await guardarOp(original, { estado: OUTBOX_ESTADOS.SINCRONIZANDO, intentos: original.intentos + 1 });
+      if (original.claveOrden) {
+        if (!origenVerificable(original)) {
+          await bloquearPorIdentidad(original, MOTIVO_IDENTIDAD.ORIGEN);
+          detener(original);
+          continue;
+        }
+        const sesion = await leerIdentidadSesion(transport);
+        // Sin red no hay nada que decidir: el ciclo termina y la operación sigue igual.
+        if (sesion.estado === 'SIN_RED') return RUN_RESULT.OFFLINE;
+        if (sesion.estado === 'SIN_SESION' || sesion.estado === 'NO_VERIFICABLE') {
+          await bloquearPorIdentidad(original, MOTIVO_IDENTIDAD.SESION);
+          return sesion.estado === 'SIN_SESION' ? RUN_RESULT.SESION_REQUERIDA : RUN_RESULT.ERROR;
+        }
+        if (!sesionEsDe(sesion, original)) {
+          await bloquearPorIdentidad(original, MOTIVO_IDENTIDAD.CUENTA);
+          detener(original);
+          continue;
+        }
+      }
+
+      const envio = { estado: OUTBOX_ESTADOS.SINCRONIZANDO, intentos: original.intentos + 1 };
+      const op = await actualizarOp(original, original.claveOrden ? { ...envio, posibleEnServidor: true, runtimeNoSoporta: null } : envio);
+      if (!op) {
+        // Otro motor la reclamó, o el usuario la editó o canceló: esta lectura ya no vale.
+        detener(original);
+        continue;
+      }
       let result;
       try {
         result = await transport.postJson(request.path, request.body);
@@ -145,13 +269,36 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
         mensaje: result?.data?.message ?? null,
         status: result?.status ?? 0,
       };
+      const incierto = op.claveOrden ? { posibleEnServidor: posibleEnServidorTras(result, clase, original.posibleEnServidor) } : {};
       if (clase === 'SESION') {
-        await guardarOp(op, { estado: OUTBOX_ESTADOS.PENDIENTE, intentos: original.intentos, ultimoError: error });
+        await guardarOp(op, { estado: OUTBOX_ESTADOS.PENDIENTE, intentos: original.intentos, ultimoError: error, ...incierto });
         return RUN_RESULT.SESION_REQUERIDA;
+      }
+      if (clase === 'IDENTIDAD') {
+        // No es un conflicto del dato: el servidor no escribió y vuelve a salir con su cuenta.
+        await guardarOp(op, { estado: OUTBOX_ESTADOS.BLOQUEADA_POR_IDENTIDAD, intentos: original.intentos, ultimoError: error, ...incierto });
+        detener(op);
+        continue;
+      }
+      if (op.claveOrden && clase === 'RECHAZADO' && result?.status === 403) {
+        // El rol se evalúa antes que la identidad: un 403 solo cuenta como rechazo
+        // si la sesión sigue siendo la de origen. Si no, es de la cuenta que entró.
+        const sesion = await leerIdentidadSesion(transport);
+        if (sesion.estado !== 'OK' || !sesionEsDe(sesion, op)) {
+          await guardarOp(op, {
+            estado: OUTBOX_ESTADOS.BLOQUEADA_POR_IDENTIDAD,
+            intentos: original.intentos,
+            ultimoError: errorDeIdentidad(sesion.estado === 'OK' ? MOTIVO_IDENTIDAD.CUENTA : MOTIVO_IDENTIDAD.SESION),
+            ...incierto,
+          });
+          detener(op);
+          continue;
+        }
       }
       if (clase === 'REINTENTABLE' && esFalloDeRed(result)) {
         // Sin red: no cuenta como intento ni hace crecer la espera.
         await guardarOp(op, {
+          ...incierto,
           estado: OUTBOX_ESTADOS.ERROR_REINTENTABLE,
           intentos: original.intentos,
           ultimoError: { ...error, tipo: 'red' },
@@ -163,17 +310,18 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
       if (clase === 'REINTENTABLE') {
         const espera = backoffMs(op.intentos, random);
         await guardarOp(op, {
+          ...incierto,
           estado: OUTBOX_ESTADOS.ERROR_REINTENTABLE,
           ultimoError: { ...error, tipo: 'http' },
           siguienteIntentoAt: new Date(now().getTime() + espera).toISOString(),
         });
         return RUN_RESULT.ERROR;
       }
-      await repo.marcarOperacionBloqueada(op, {
+      await repo.marcarOperacionBloqueada({ ...op, ...incierto }, {
         estado: clase === 'CONFLICTO' ? OUTBOX_ESTADOS.CONFLICTO : OUTBOX_ESTADOS.RECHAZADO,
         ...error,
       });
-      bloqueadas.add(op.localUuid);
+      detener(op);
     }
     return RUN_RESULT.OK;
   }
@@ -199,6 +347,41 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
     return result.status === 0 ? RUN_RESULT.OFFLINE : RUN_RESULT.ERROR;
   }
 
+  /**
+   * FASE 4E.1: pull reproductivo con su propio cursor. Un fallo aquí no cambia el
+   * resultado del ciclo: un servidor sin este endpoint no puede frenar la
+   * sincronización del resto. El cursor persiste en cada página, así que una
+   * descarga grande continúa en el siguiente ciclo.
+   */
+  async function pullReproduccion() {
+    // Solo si cambia: un fallo que se repite no debe notificar en cada ciclo.
+    const registrar = async (codigo, status) => {
+      const previo = (await repo.getMeta()).reproduccionUltimoError;
+      if (previo?.codigo === codigo && previo?.status === status) return;
+      await repo.putMeta({ reproduccionUltimoError: { codigo, status, at: now().toISOString() } });
+    };
+    try {
+      let cursor = (await repo.getMeta()).reproduccionCursor ?? null;
+      for (let pagina = 0; pagina < REPRO_MAX_PAGINAS_POR_CICLO; pagina += 1) {
+        const result = await transport.getJson(cursor ? `${REPRO_PULL_PATH}?cursor=${encodeURIComponent(cursor)}` : REPRO_PULL_PATH);
+        if (!result?.ok && result?.status === 400 && result?.data?.error === 'INVALID_CURSOR' && cursor) {
+          await repo.reiniciarCursorReproduccion();
+          cursor = null;
+          continue;
+        }
+        if (!result?.ok) {
+          await registrar(result?.data?.error ?? result?.failure ?? 'ERROR', result?.status ?? 0);
+          return;
+        }
+        const { hayMas } = await repo.aplicarPullReproduccion(result.data);
+        if (!hayMas) return;
+        cursor = result.data.cursor;
+      }
+    } catch (error) {
+      await registrar(error?.code ?? 'ERROR_LOCAL', 0).catch(() => {});
+    }
+  }
+
   async function run({ forzar = false, soloPush = false } = {}, { exclusivo = false } = {}) {
     if (!isOnline()) {
       state.ultimoResultado = RUN_RESULT.OFFLINE;
@@ -211,6 +394,7 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
     try {
       resultado = await push({ forzar, exclusivo });
       if (resultado === RUN_RESULT.OK && !soloPush) resultado = await pull();
+      if (resultado === RUN_RESULT.OK && !soloPush) await pullReproduccion();
     } catch (error) {
       resultado = RUN_RESULT.ERROR;
       await repo.putMeta({ ultimaSyncOk: false, ultimoError: { codigo: error?.code ?? 'ERROR_LOCAL', status: 0, at: now().toISOString() } }).catch(() => {});
@@ -254,8 +438,7 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
       for (const op of await repo.listOutbox()) {
         if (op.estado !== OUTBOX_ESTADOS.ERROR_REINTENTABLE || !esErrorDeRed(op)) continue;
         if (op.siguienteIntentoAt && op.siguienteIntentoAt <= ahora) continue;
-        await guardarOp(op, { siguienteIntentoAt: ahora });
-        adelantadas += 1;
+        if (await actualizarOp(op, { siguienteIntentoAt: ahora })) adelantadas += 1;
       }
       return adelantadas;
     },

@@ -7,6 +7,10 @@
 //   getAllByIndex(store, index, value) -> valor[]
 //   put(store, valor)  delete(store, key)  clear(store)
 //   batch([{ op:'put'|'delete'|'clear', store, value?, key? }]) -- ATÓMICO
+//   mutate(store, key, fn) -- lectura y escritura ATÓMICAS. `fn` es síncrona y
+//     recibe el valor actual: devuelve el nuevo valor, null para borrarlo o
+//     undefined para no cambiar nada; si lanza, no se aplica nada y el error se
+//     propaga. Resuelve con el valor resultante (null si se borró).
 //   close()
 //
 // Sin dependencias de React ni del DOM (window): utilizable desde el SW.
@@ -61,6 +65,17 @@ export function createMemoryStorage(schema) {
         throw error;
       }
     },
+    async mutate(name, key, fn) {
+      const actual = clone(storeOf(name).get(key));
+      const siguiente = fn(actual);
+      if (siguiente === undefined) return actual;
+      if (siguiente === null) {
+        apply({ op: 'delete', store: name, key });
+        return null;
+      }
+      apply({ op: 'put', store: name, value: siguiente });
+      return clone(siguiente);
+    },
     async close() {},
   };
 }
@@ -80,10 +95,23 @@ function txDone(tx) {
   });
 }
 
-/** Abre (y migra) una base IndexedDB según el esquema. */
-export function openIndexedDb(idb, name, version, schema) {
+/**
+ * Abre (y migra) una base IndexedDB según el esquema.
+ *
+ * FASE 4E.1 -- otra conexión puede impedir el upgrade. La petición NO se abandona:
+ * sigue pendiente y continúa sola cuando esa conexión se cierra.
+ *   onBlocked()         aviso de que el upgrade espera a otra conexión
+ *   onVersionChange()   esta conexión se cerró porque otra necesita actualizar o
+ *                       borrar la base (cerrarla es lo que permite continuar)
+ *   esperaBloqueoMs     si se indica, deja de esperar con IDB_BLOQUEADA (Service
+ *                       Worker); si la apertura se completa después, se cierra.
+ * Nada de esto borra datos: un upgrade abortado deja la versión anterior intacta.
+ */
+export function openIndexedDb(idb, name, version, schema, { onBlocked, onVersionChange, esperaBloqueoMs } = {}) {
   return new Promise((resolve, reject) => {
     const request = idb.open(name, version);
+    let abandonada = false;
+    let temporizador = null;
     request.onupgradeneeded = () => {
       const db = request.result;
       for (const [storeName, def] of Object.entries(schema)) {
@@ -95,9 +123,31 @@ export function openIndexedDb(idb, name, version, schema) {
         }
       }
     };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-    request.onblocked = () => reject(new Error('IDB_BLOCKED'));
+    request.onsuccess = () => {
+      if (temporizador) clearTimeout(temporizador);
+      const db = request.result;
+      if (abandonada) {
+        db.close();
+        return;
+      }
+      db.onversionchange = () => {
+        db.close();
+        onVersionChange?.();
+      };
+      resolve(db);
+    };
+    request.onerror = () => {
+      if (temporizador) clearTimeout(temporizador);
+      reject(request.error);
+    };
+    request.onblocked = () => {
+      onBlocked?.();
+      if (esperaBloqueoMs === undefined || temporizador) return;
+      temporizador = setTimeout(() => {
+        abandonada = true;
+        reject(Object.assign(new Error('IDB_BLOQUEADA'), { code: 'IDB_BLOQUEADA' }));
+      }, esperaBloqueoMs);
+    };
   });
 }
 
@@ -134,6 +184,33 @@ export function createIndexedDbStorage(db) {
     batch: (operations) => (operations.length === 0
       ? Promise.resolve()
       : write([...new Set(operations.map((operation) => operation.store))], operations)),
+    mutate: (name, key, fn) => new Promise((resolve, reject) => {
+      const tx = db.transaction(name, 'readwrite');
+      const store = tx.objectStore(name);
+      let resultado;
+      let fallo = null;
+      const lectura = store.get(key);
+      lectura.onsuccess = () => {
+        try {
+          const siguiente = fn(lectura.result);
+          if (siguiente === undefined) {
+            resultado = lectura.result;
+          } else if (siguiente === null) {
+            store.delete(key);
+            resultado = null;
+          } else {
+            store.put(siguiente);
+            resultado = siguiente;
+          }
+        } catch (error) {
+          fallo = error;
+          tx.abort();
+        }
+      };
+      tx.oncomplete = () => resolve(resultado);
+      tx.onerror = () => reject(fallo ?? tx.error);
+      tx.onabort = () => reject(fallo ?? tx.error ?? new Error('TX_ABORTED'));
+    }),
     async close() {
       db.close();
     },

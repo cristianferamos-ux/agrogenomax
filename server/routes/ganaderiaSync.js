@@ -9,12 +9,40 @@ import {
   createRequireGanaderiaCsrf,
 } from '../security/ganaderiaSession.js';
 import { pullCambios } from '../services/ganaderia/syncRepository.js';
+import { pullEventosReproductivos } from '../services/ganaderia/reproduccionSyncRepository.js';
 
-export default function createGanaderiaSyncRouter({ appEnv, csrfServerSecret, allowedOrigins } = {}) {
+export default function createGanaderiaSyncRouter({
+  appEnv,
+  csrfServerSecret,
+  allowedOrigins,
+  reproduccionRepo = { pullEventosReproductivos },
+} = {}) {
   const router = Router();
 
   router.use(createRequireGanaderiaSession({ appEnv }));
   router.use(createRequireGanaderiaCsrf({ csrfServerSecret, allowedOrigins }));
+
+  // FASE 4E.1: cursor propio (reproduccionSyncRepository.js). Mismas reglas que /pull.
+  router.get('/reproduccion', async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const unknown = Object.keys(req.query).filter((key) => key !== 'cursor');
+      if (unknown.length > 0) {
+        res.status(400).json({ error: 'INVALID_QUERY' });
+        return;
+      }
+      const { organizacionId, cuentaId } = req.ganaderiaAuth;
+      const result = await reproduccionRepo.pullEventosReproductivos(organizacionId, { cursor: req.query.cursor });
+      // cuentaId: la de esta misma sesión. El dispositivo solo concilia operaciones de esa cuenta.
+      res.json({ ok: true, ...result, organizacionId, cuentaId });
+    } catch (error) {
+      if (typeof error?.status === 'number' && typeof error?.code === 'string') {
+        res.status(error.status).json({ error: error.code, message: error.message });
+        return;
+      }
+      next(error);
+    }
+  });
 
   router.get('/pull', async (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');

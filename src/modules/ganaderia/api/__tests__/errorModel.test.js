@@ -171,8 +171,13 @@ test('modelo: ningún criterio de seguridad por forma de code; localRepo marca s
   const repo = read('offline/localRepo.js');
   const visibles = [...repo.matchAll(/throw errorVisible\('([A-Z_]+)'/g)].map((m) => m[1]).sort();
   assert.deepEqual(visibles, [
+    'ANIMAL_NO_ADMITE_REPRODUCCION', 'ANIMAL_NO_EN_DISPOSITIVO', 'CLIENT_OPERATION_ID_REUSED',
     'CONFLICTO_NO_ENCONTRADO', 'CONFLICTO_NO_ENCONTRADO', 'CONFLICTO_NO_ENCONTRADO',
+    'EVENTO_ENVIO_INCIERTO', 'EVENTO_ENVIO_INCIERTO', 'EVENTO_PENDIENTE_CAMBIO',
+    'EVENTO_PENDIENTE_EN_CURSO', 'EVENTO_PENDIENTE_EN_CURSO',
+    'EVENTO_PENDIENTE_NO_ENCONTRADO', 'EVENTO_PENDIENTE_NO_ENCONTRADO',
     'PESAJE_PENDIENTE_EN_CURSO', 'PESAJE_PENDIENTE_NO_ENCONTRADO', 'QR_CODIGO_INVALIDO', 'QR_NO_DISPONIBLE',
+    'REPRODUCCION_REQUIERE_ANIMAL_SINCRONIZADO', 'REPRODUCCION_SIN_COPIA_LOCAL',
   ]);
   // Los errores locales que la UI traduce por código (registro, pesajes) siguen sin marcarse.
   for (const code of ['OPERACION_SIN_ID', 'QR_NO_EN_DISPOSITIVO', 'PESAJE_REQUIERE_ANIMAL_SINCRONIZADO', 'CAMPO_NO_PERMITIDO', 'ORGANIZACION_DISTINTA']) {
