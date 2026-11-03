@@ -232,4 +232,6 @@ test('responsive: sin anchos fijos que desborden; M14 al lado solo en escritorio
   assert.match(bloque, /min-height: 44px/);
   assert.match(bloque, /overflow-wrap: anywhere/);
   assert.match(bloque, /@media \(min-width: 1100px\)[\s\S]*minmax\(0, 1fr\) 20rem/);
+  // El título de M14 queda bajo la barra sticky del shell al seguir el ancla.
+  assert.match(bloque, /@media \(max-width: 900px\) \{\s*\.gan-analitica-calidad \.gan-tablero-subtitulo \{\s*scroll-margin-top: 7\.5rem;/);
 });

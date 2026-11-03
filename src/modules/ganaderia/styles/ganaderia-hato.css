@@ -1520,6 +1520,15 @@
   margin-bottom: 0.75rem;
 }
 
+/* Hasta 900 px la barra del shell es sticky y más alta (175-214 px según la
+   cuenta) que el scroll-padding-top global (8.5-9.5rem, styles.css). El margen
+   se suma a ese padding: el ancla deja el título por debajo de la barra. */
+@media (max-width: 900px) {
+  .gan-analitica-calidad .gan-tablero-subtitulo {
+    scroll-margin-top: 7.5rem;
+  }
+}
+
 @media (min-width: 1100px) {
   .gan-analitica-cuerpo {
     grid-template-columns: minmax(0, 1fr) 20rem;
