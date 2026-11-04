@@ -129,7 +129,7 @@ export async function leerIdentidadSesion(transport) {
     return { estado: 'OK', cuentaId: result.data.cuenta.cuentaId, organizacionId: result.data.organizacionActiva?.organizacionId ?? null };
   }
   if (isSessionFailure(result)) return { estado: 'SIN_SESION' };
-  return { estado: esFalloDeRed(result) ? 'SIN_RED' : 'NO_VERIFICABLE' };
+  return esFalloDeRed(result) ? { estado: 'SIN_RED' } : { estado: 'NO_VERIFICABLE', reintentable: isRetryable(result) };
 }
 
 const MOTIVO_IDENTIDAD = Object.freeze({
@@ -155,7 +155,11 @@ const sesionEsDe = (sesion, op) => sesion.cuentaId === op.origen.cuentaId && ses
 export function createSyncEngine({ repo, transport, isOnline = () => true, now = () => new Date(), random = Math.random, lock = null }) {
   let running = null;
   const listeners = new Set();
-  const state = { enCurso: false, ultimoResultado: null, sesionRequerida: false, redCaidaAt: null };
+  // reconexionNecesaria: este motor aún no sabe si el servidor está disponible
+  // (nunca completó un ciclo, sin red, o error transitorio: 408/429/5xx). Un
+  // error definitivo o una sesión vencida no se arreglan reintentando.
+  const state = { enCurso: false, ultimoResultado: null, sesionRequerida: false, redCaidaAt: null, reconexionNecesaria: true };
+  let errorTransitorio = false;
 
   const emit = () => listeners.forEach((listener) => {
     try {
@@ -237,6 +241,7 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
         if (sesion.estado === 'SIN_RED') return RUN_RESULT.OFFLINE;
         if (sesion.estado === 'SIN_SESION' || sesion.estado === 'NO_VERIFICABLE') {
           await bloquearPorIdentidad(original, MOTIVO_IDENTIDAD.SESION);
+          errorTransitorio = Boolean(sesion.reintentable);
           return sesion.estado === 'SIN_SESION' ? RUN_RESULT.SESION_REQUERIDA : RUN_RESULT.ERROR;
         }
         if (!sesionEsDe(sesion, original)) {
@@ -315,6 +320,7 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
           ultimoError: { ...error, tipo: 'http' },
           siguienteIntentoAt: new Date(now().getTime() + espera).toISOString(),
         });
+        errorTransitorio = true;
         return RUN_RESULT.ERROR;
       }
       await repo.marcarOperacionBloqueada({ ...op, ...incierto }, {
@@ -344,6 +350,7 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
     const clase = classifyResult(result);
     if (clase === 'SESION') return RUN_RESULT.SESION_REQUERIDA;
     await repo.putMeta({ ultimaSyncOk: false, ultimoError: { codigo: result.data?.error ?? result.failure ?? 'ERROR', status: result.status ?? 0, at: now().toISOString() } });
+    errorTransitorio = clase === 'REINTENTABLE';
     return result.status === 0 ? RUN_RESULT.OFFLINE : RUN_RESULT.ERROR;
   }
 
@@ -385,11 +392,13 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
   async function run({ forzar = false, soloPush = false } = {}, { exclusivo = false } = {}) {
     if (!isOnline()) {
       state.ultimoResultado = RUN_RESULT.OFFLINE;
+      state.reconexionNecesaria = true;
       emit();
       return RUN_RESULT.OFFLINE;
     }
     state.enCurso = true;
     emit();
+    errorTransitorio = false;
     let resultado;
     try {
       resultado = await push({ forzar, exclusivo });
@@ -404,6 +413,7 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
     state.ultimoResultado = resultado;
     state.sesionRequerida = resultado === RUN_RESULT.SESION_REQUERIDA;
     state.redCaidaAt = resultado === RUN_RESULT.OFFLINE ? now().toISOString() : null;
+    state.reconexionNecesaria = resultado === RUN_RESULT.OFFLINE || errorTransitorio;
     emit();
     return resultado;
   }
@@ -449,10 +459,10 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
     getState: () => ({ ...state }),
     /**
      * El navegador dice que hay red, pero este motor no lo ha confirmado: su
-     * último ciclo no llegó al servidor o nunca completó uno porque cedió ante
-     * otro motor (los EN_CURSO no fijan resultado). Nada más lo va a revisar.
+     * último ciclo falló de forma transitoria o nunca completó uno porque cedió
+     * ante otro motor (los EN_CURSO no fijan resultado). Nada más lo va a revisar.
      */
-    reconexionPendiente: () => isOnline() && (state.ultimoResultado === RUN_RESULT.OFFLINE || state.ultimoResultado === null),
+    reconexionPendiente: () => isOnline() && state.reconexionNecesaria,
     /** Próximo instante en que conviene reintentar (backoff), o null. */
     async proximoReintentoAt() {
       // Solo lo que le toca salir: una retenida en su cadena con la fecha vencida reprogramaría cada segundo.
