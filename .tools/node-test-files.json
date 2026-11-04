@@ -184,6 +184,7 @@
   "src/modules/ganaderia/offline/__tests__/syncReconnect.test.js",
   "src/modules/ganaderia/offline/__tests__/pesajesOffline.test.js",
   "src/modules/ganaderia/offline/__tests__/indexedDbUpgrade.test.js",
+  "src/modules/ganaderia/offline/__tests__/reconexionEstado.test.js",
   "src/modules/ganaderia/offline/__tests__/reproduccionOutbox.test.js",
   "src/modules/ganaderia/offline/__tests__/reproduccionFifo.test.js",
   "src/modules/ganaderia/offline/__tests__/reproduccionPull.test.js",

@@ -447,6 +447,12 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
       return () => listeners.delete(listener);
     },
     getState: () => ({ ...state }),
+    /**
+     * El navegador dice que hay red, pero este motor no lo ha confirmado: su
+     * último ciclo no llegó al servidor o nunca completó uno porque cedió ante
+     * otro motor (los EN_CURSO no fijan resultado). Nada más lo va a revisar.
+     */
+    reconexionPendiente: () => isOnline() && (state.ultimoResultado === RUN_RESULT.OFFLINE || state.ultimoResultado === null),
     /** Próximo instante en que conviene reintentar (backoff), o null. */
     async proximoReintentoAt() {
       // Solo lo que le toca salir: una retenida en su cadena con la fecha vencida reprogramaría cada segundo.
@@ -457,6 +463,18 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
       return fechas[0] ?? null;
     },
   };
+}
+
+/**
+ * Conectividad que ve la interfaz. `sesionOffline` es la sesión reconstruida
+ * sin servidor: su revalidación es de un solo intento y un fallo transitorio
+ * la deja activa, así que una respuesta real del servidor a este motor la
+ * desmiente. Sin esa respuesta se sigue tratando como sin conexión.
+ */
+export function calcularOnline({ navegadorOnline, sesionOffline, ultimoResultado }) {
+  if (!navegadorOnline || ultimoResultado === RUN_RESULT.OFFLINE) return false;
+  if (!sesionOffline) return true;
+  return ultimoResultado === RUN_RESULT.OK || ultimoResultado === RUN_RESULT.SESION_REQUERIDA;
 }
 
 /**

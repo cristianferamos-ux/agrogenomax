@@ -21,7 +21,7 @@ for (const strict of [false, true]) {
 }
 test('manifiesto general: conserva los 221 archivos existentes, sin duplicados', () => {
   const files = JSON.parse(fs.readFileSync('.tools/node-test-files.json', 'utf8'));
-  assert.equal(files.length, 242);
+  assert.equal(files.length, 243);
   assert.equal(new Set(files).size, files.length);
   for (const file of files) assert.ok(fs.existsSync(file), file);
 });
