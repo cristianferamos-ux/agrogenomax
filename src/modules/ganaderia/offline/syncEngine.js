@@ -44,7 +44,7 @@
 // Tipo desconocido (bundle antiguo): la operación se conserva, se marca
 // `runtimeNoSoporta` y nunca se descarta. Las operaciones sin claveOrden
 // conservan su comportamiento anterior.
-import { OUTBOX_ESTADOS, SINCRONIZANDO_LEASE_MS, backoffMs, estaLista, esErrorDeRed, ordenarOutbox, origenVerificable } from './outbox.js';
+import { OUTBOX_ESTADOS, SINCRONIZANDO_LEASE_MS, backoffMs, estaLista, esErrorDeRed, operacionesEnTurno, ordenarOutbox, origenVerificable } from './outbox.js';
 import { handlerDe } from './operationHandlers.js';
 
 const PULL_PATH = '/api/ganaderia/sync/pull';
@@ -449,7 +449,8 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
     getState: () => ({ ...state }),
     /** Próximo instante en que conviene reintentar (backoff), o null. */
     async proximoReintentoAt() {
-      const fechas = (await repo.listOutbox())
+      // Solo lo que le toca salir: una retenida en su cadena con la fecha vencida reprogramaría cada segundo.
+      const fechas = operacionesEnTurno(await repo.listOutbox(), { soportado: (op) => Boolean(handlerDe(op.tipoOperacion)) })
         .filter((op) => op.estado === OUTBOX_ESTADOS.ERROR_REINTENTABLE && op.siguienteIntentoAt)
         .map((op) => op.siguienteIntentoAt)
         .sort();

@@ -299,22 +299,28 @@ export function crearOperacionesReproduccion(generarId) {
 // ---------------------------------------------------------------------------
 
 export const MENSAJE_REPRODUCCION_OFFLINE = 'Sin conexión. Registrar, anular o corregir eventos reproductivos requiere conexión.';
+export const MENSAJE_REGISTRO_SIN_CONEXION = 'Sin conexión: el evento se guardará en este dispositivo y se enviará al recuperar la señal. Anular o corregir requiere conexión.';
 
 /**
  * Acciones visibles en la pestaña:
  *   registrar  operación (owner/admin/operador) + hembra ACTIVA EN_HATO
  *   administrar  owner/admin (anular / corregir) + registro ACTIVO
- *   habilitado  con conexión (sin red se muestran deshabilitadas + aviso)
+ *   habilitado  con conexión: anular y corregir nunca van al outbox (Fase 4E.2)
+ *   registrarHabilitado  con conexión, o sin ella si el dispositivo ya descargó
+ *                el historial reproductivo (registroLocal)
  */
-export function accionesReproduccion({ animal, sexo, puedeRegistrar, puedeAdministrar, online }) {
+export function accionesReproduccion({ animal, sexo, puedeRegistrar, puedeAdministrar, online, registroLocal = false }) {
   const hembra = (sexo ?? animal?.sexo) === 'HEMBRA';
   const activo = animal?.estado === 'ACTIVO';
   const enHato = (animal?.estadoOperativo ?? 'EN_HATO') === 'EN_HATO';
+  let aviso = null;
+  if (!online) aviso = registroLocal ? MENSAJE_REGISTRO_SIN_CONEXION : MENSAJE_REPRODUCCION_OFFLINE;
   return {
     registrar: Boolean(puedeRegistrar && hembra && activo && enHato),
     administrar: Boolean(puedeAdministrar && hembra && activo),
     habilitado: Boolean(online),
-    aviso: online ? null : MENSAJE_REPRODUCCION_OFFLINE,
+    registrarHabilitado: Boolean(online || registroLocal),
+    aviso,
   };
 }
 

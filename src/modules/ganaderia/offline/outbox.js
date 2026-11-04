@@ -47,6 +47,9 @@ export const REPRODUCCION_EVENTO_CREAR = 'REPRODUCCION_EVENTO_CREAR';
 export const ESTADOS_ENVIABLES = Object.freeze([OUTBOX_ESTADOS.PENDIENTE, OUTBOX_ESTADOS.ERROR_REINTENTABLE]);
 export const ESTADOS_BLOQUEADOS = Object.freeze([OUTBOX_ESTADOS.CONFLICTO, OUTBOX_ESTADOS.RECHAZADO]);
 
+/** Reenviar el mismo id solo repetiría estos errores: el servidor ya tiene otros datos con él. */
+export const CODIGOS_SIN_REINTENTO = Object.freeze(['CONCILIACION_INTENCION_DISTINTA', 'CLIENT_OPERATION_ID_REUSED']);
+
 /** Sin lock exclusivo, una operación SINCRONIZANDO más reciente puede estar enviándose en otro motor. */
 export const SINCRONIZANDO_LEASE_MS = 2 * 60_000;
 
@@ -126,6 +129,29 @@ export function esErrorDeRed(op) {
   if (!error) return false;
   if (error.tipo) return error.tipo === 'red';
   return (error.status ?? 0) === 0;
+}
+
+/**
+ * Operaciones a las que les toca salir: lo que los disparadores automáticos deben
+ * mirar. Una operación retenida detrás de otra de su cadena (o de su mismo animal
+ * local), en un tipo que este runtime no conoce o ya en conflicto NO cuenta: seguir
+ * disparando por ella no la enviaría y mantendría un ciclo de sincronización sin fin.
+ */
+export function operacionesEnTurno(operaciones, { soportado = () => true } = {}) {
+  const detenidas = new Set();
+  const turno = [];
+  const activa = (op) => ESTADOS_ENVIABLES.includes(op.estado) || op.estado === OUTBOX_ESTADOS.SINCRONIZANDO;
+  for (const op of ordenarOutbox(operaciones)) {
+    const clave = op.claveOrden ?? op.localUuid;
+    if (detenidas.has(clave)) continue;
+    if (!soportado(op) || !activa(op)) {
+      detenidas.add(clave);
+      continue;
+    }
+    if (op.claveOrden) detenidas.add(clave);
+    turno.push(op);
+  }
+  return turno;
 }
 
 export function estaLista(op, now, { forzar = false } = {}) {

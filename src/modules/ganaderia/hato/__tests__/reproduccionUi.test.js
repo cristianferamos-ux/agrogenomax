@@ -696,14 +696,15 @@ test('carga: 404 y errores de red/5xx con mensajes seguros (Fase 3C)', () => {
 // Offline
 // ---------------------------------------------------------------------------
 
-test('offline: acciones deshabilitadas con mensaje de conexión; se conserva lo ya cargado; sin outbox', () => {
+test('offline sin copia descargada: acciones deshabilitadas con mensaje de conexión; se conserva lo ya cargado', () => {
   const a = accionesReproduccion({ animal: HEMBRA, puedeRegistrar: true, puedeAdministrar: true, online: false });
   assert.equal(a.habilitado, false);
+  assert.equal(a.registrarHabilitado, false);
   assert.equal(a.aviso, MENSAJE_REPRODUCCION_OFFLINE);
   assert.match(MENSAJE_REPRODUCCION_OFFLINE, /requiere conexión/);
-  assert.match(panel, /disabled=\{!acciones\.habilitado\}/);
+  assert.match(panel, /disabled=\{!acciones\.registrarHabilitado\}/);
   assert.match(panel, /siguiente\.status === 'error' && actual\.eventos\.length/);
-  assert.doesNotMatch(panel, /outbox|encolar|repoOffline/i);
+  // El registro offline se prueba en reproduccionPanelOffline.test.js.
 });
 
 // ---------------------------------------------------------------------------

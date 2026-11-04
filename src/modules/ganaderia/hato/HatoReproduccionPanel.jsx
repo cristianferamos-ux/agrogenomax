@@ -13,12 +13,17 @@
 //   corregir nunca comparten uno); se conserva en un resultado incierto
 //   (reintento seguro) y se descarta tras éxito o rechazo. Doble envío
 //   bloqueado (ref + botones deshabilitados).
-// - Sin conexión: se ve lo ya cargado; registrar/anular/corregir quedan
-//   deshabilitados con aviso. No hay outbox reproductiva (Fase 4C).
+// - FASE 4E.1 sin conexión: con el historial ya descargado se lee la copia local y
+//   registrar va al outbox (REPRODUCCION_EVENTO_CREAR); anular y corregir siguen
+//   requiriendo conexión (4E.2). Con pendientes del animal, registrar online también
+//   se encola para no adelantar la cadena FIFO. Un pendiente se muestra aparte, como no
+//   confirmado: no cambia el estado reproductivo ni la fecha probable de parto.
 // - Toros del hato: una sola consulta al listado (sexo=MACHO), nunca N+1.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { StatusMessage } from '../components/FormField.jsx';
+import { useGanaderiaAuthOptional } from '../auth/GanaderiaAuthContext.jsx';
 import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
+import { mensajeDeExcepcion } from '../api/errorModel.js';
 import {
   anularEventoReproductivo,
   corregirEventoReproductivo,
@@ -59,6 +64,19 @@ import {
   validarEvento,
   validarMotivo,
 } from './reproduccionModel.js';
+import {
+  MENSAJE_EVENTO_PENDIENTE,
+  MENSAJE_GUARDADO_LOCAL,
+  TEXTO_COPIA_LOCAL,
+  TEXTO_PENDIENTES_NO_CUENTAN,
+  accionesEventoPendiente,
+  destinoRegistro,
+  estadoEventoPendiente,
+  eventoDesdePendiente,
+  leerCopiaLocal,
+  torosLocales,
+} from './reproduccionOfflineModel.js';
+import { huboConfirmaciones, idsPendientes } from './pesajesOfflineModel.js';
 import { fechaHoyNegocio } from '../engine/fechaNegocio.js';
 
 const MENSAJE_NAVEGADOR = 'Este navegador no permite registrar de forma segura. Actualízalo e inténtalo de nuevo.';
@@ -369,8 +387,59 @@ function EventoHistorial({ evento, toros, administrar, habilitado, ocupado, onAn
   );
 }
 
-export default function HatoReproduccionPanel({ animal, visible, online, onCambio }) {
+function EventoPendiente({ pendiente, toros, cuentaId, puedeRegistrar, ocupado, onEditar, onCancelar, onReintentar }) {
+  const [confirmando, setConfirmando] = useState(false);
+  const evento = eventoDesdePendiente(pendiente);
+  const estado = estadoEventoPendiente(pendiente);
+  const acciones = accionesEventoPendiente(pendiente, { cuentaId, puedeRegistrar });
+  const filas = detalleEvento(evento, { toros: toros.mapa });
+  return (
+    <li className={`gan-repro-evento gan-repro-evento-pendiente is-${estado.clase}`} data-tipo={pendiente.tipoEvento}>
+      <div className="gan-actividad-cabecera">
+        <strong className="gan-repro-evento-tipo">{ETIQUETAS_TIPO_EVENTO[pendiente.tipoEvento] ?? 'Evento reproductivo'}</strong>
+        <time className="gan-actividad-fecha" dateTime={pendiente.fechaEvento}>{fechaHoraEvento(pendiente)}</time>
+      </div>
+      <p className="gan-repro-evento-estado">
+        <span className={`gan-repro-badge gan-repro-badge-${estado.clase}`}>{estado.etiqueta}</span>
+        <span className="gan-hato-hint">{estado.detalle}</span>
+      </p>
+      {filas.length ? (
+        <dl className="gan-repro-detalle">
+          {filas.map(([label, valor]) => (
+            <div key={label}>
+              <dt>{label}</dt>
+              <dd>{valor}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {pendiente.observaciones ? <p className="gan-repro-observaciones">Observaciones: {pendiente.observaciones}</p> : null}
+      {acciones.editar || acciones.cancelar || acciones.reintentar ? (
+        <div className="gan-repro-evento-acciones">
+          {acciones.reintentar ? <button type="button" className="gan-repro-accion" onClick={() => onReintentar(pendiente)} disabled={ocupado}>Reintentar</button> : null}
+          {acciones.editar ? <button type="button" className="gan-repro-accion" onClick={(e) => onEditar(pendiente, e)} disabled={ocupado}>Editar</button> : null}
+          {acciones.cancelar ? <button type="button" className="gan-repro-accion gan-repro-accion-peligro" onClick={() => setConfirmando(true)} disabled={ocupado}>Descartar</button> : null}
+        </div>
+      ) : null}
+      {confirmando ? (
+        <div className="gan-hato-actions">
+          <StatusMessage type="info">
+            {acciones.confirmarIncierto
+              ? 'Se quitará de este dispositivo, pero pudo haberse registrado en el servidor: revisa el historial al sincronizar.'
+              : 'El evento pendiente se eliminará de este dispositivo. No afecta al servidor.'}
+          </StatusMessage>
+          <button type="button" className="gan-submit" onClick={() => onCancelar(pendiente, acciones.confirmarIncierto)} disabled={ocupado}>Confirmar descarte</button>
+          <button type="button" className="gan-secondary-button" onClick={() => setConfirmando(false)} disabled={ocupado}>Conservar</button>
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
+export default function HatoReproduccionPanel({ animal, visible, online, repoOffline = null, syncNow = null, onCambio }) {
   const animalId = animal.animalId;
+  const auth = useGanaderiaAuthOptional();
+  const cuentaId = auth?.cuenta?.cuentaId ?? null;
   const permisos = useGanaderiaPermisos();
   const hoy = fechaHoyNegocio();
   const [carga, setCarga] = useState({ status: 'idle', sexo: null, estado: null, eventos: [], mensaje: null });
@@ -383,7 +452,13 @@ export default function HatoReproduccionPanel({ animal, visible, online, onCambi
   const [motivo, setMotivo] = useState('');
   const [confirmado, setConfirmado] = useState(false);
   const [enviando, setEnviando] = useState(false);
+  const [pendientes, setPendientes] = useState([]);
+  const [registroLocal, setRegistroLocal] = useState(false);
+  const [advertencia, setAdvertencia] = useState(null);
   const enviandoRef = useRef(false);
+  const idsPendientesRef = useRef(new Set());
+  const onCambioRef = useRef(onCambio);
+  onCambioRef.current = onCambio;
   const cargadoRef = useRef(null);
   const torosRef = useRef(false);
   const abridorRef = useRef(null);
@@ -401,22 +476,62 @@ export default function HatoReproduccionPanel({ animal, visible, online, onCambi
     } catch (error) {
       siguiente = estadoCarga({ ok: false, status: 0, error });
     }
+    if (siguiente.status === 'error') {
+      const local = await leerCopiaLocal(repoOffline, { animalId, sexo: animal.sexo, hoy }).catch(() => null);
+      if (local) {
+        setCarga(local);
+        return;
+      }
+    }
     // Sin conexión se conserva lo ya cargado en memoria.
     setCarga((actual) => (siguiente.status === 'error' && actual.eventos.length ? { ...actual, status: 'ok', mensaje: siguiente.mensaje } : siguiente));
-  }, [animalId]);
+  }, [animalId, animal.sexo, hoy, repoOffline]);
 
   useEffect(() => {
     if (visible && cargadoRef.current !== animalId) cargar();
   }, [visible, animalId, cargar]);
 
-  const tipoFormulario = modo?.accion === 'crear' || modo?.accion === 'corregir' ? form.tipoEvento : null;
+  // Al volver la conexión se sustituye la copia local por los datos del servidor.
   useEffect(() => {
-    if (torosRef.current || !necesitaToros(carga.eventos, tipoFormulario)) return;
+    if (visible && online && carga.origen === 'local') cargar();
+  }, [visible, online, carga.origen, cargar]);
+
+  const leerPendientes = useCallback(async () => {
+    if (!repoOffline) return;
+    let lista;
+    let meta;
+    try {
+      [lista, meta] = await Promise.all([repoOffline.listEventosReproductivosPendientes(animalId), repoOffline.getMeta()]);
+    } catch {
+      return;
+    }
+    const ids = idsPendientes(lista);
+    const cerrada = huboConfirmaciones(idsPendientesRef.current, ids);
+    idsPendientesRef.current = ids;
+    setPendientes(lista);
+    setRegistroLocal(Boolean(meta.reproduccionListaAt));
+    if (cerrada) {
+      cargar();
+      onCambioRef.current?.();
+    }
+  }, [repoOffline, animalId, cargar]);
+
+  useEffect(() => {
+    leerPendientes();
+    return repoOffline ? repoOffline.subscribe(() => { leerPendientes(); }) : undefined;
+  }, [repoOffline, leerPendientes]);
+
+  const tipoFormulario = ['crear', 'corregir', 'editar'].includes(modo?.accion) ? form.tipoEvento : null;
+  const eventosConToro = [...carga.eventos, ...pendientes.map(eventoDesdePendiente)];
+  const requiereToros = necesitaToros(eventosConToro, tipoFormulario);
+  useEffect(() => {
+    if (torosRef.current || !requiereToros) return;
     torosRef.current = true;
-    listAnimales({ sexo: 'MACHO', estado: 'TODOS', estadoOperativo: 'TODOS', limit: LIMITE_TOROS })
-      .then((result) => setToros(torosDesdeListado(result, formatIdentidad)))
-      .catch(() => { torosRef.current = false; });
-  }, [carga.eventos, tipoFormulario]);
+    const lectura = online || !repoOffline
+      ? listAnimales({ sexo: 'MACHO', estado: 'TODOS', estadoOperativo: 'TODOS', limit: LIMITE_TOROS }).then((result) => torosDesdeListado(result, formatIdentidad))
+      : torosLocales(repoOffline, formatIdentidad);
+    lectura.then(setToros).catch(() => { torosRef.current = false; });
+  }, [requiereToros, online, repoOffline]);
 
   const acciones = accionesReproduccion({
     animal,
@@ -424,7 +539,9 @@ export default function HatoReproduccionPanel({ animal, visible, online, onCambi
     puedeRegistrar: permisos.registrarReproduccion,
     puedeAdministrar: permisos.administrarReproduccion,
     online,
+    registroLocal: Boolean(repoOffline) && registroLocal,
   });
+  const registroEnOutbox = destinoRegistro({ online, pendientes }) === 'local';
 
   // Cerrar NO descarta el clientOperationId: tras un resultado incierto el
   // servidor pudo haber guardado la operación, y reabrir la misma intención
@@ -435,6 +552,7 @@ export default function HatoReproduccionPanel({ animal, visible, online, onCambi
     setErrores({});
     setMotivo('');
     setConfirmado(false);
+    setAdvertencia(null);
     requestAnimationFrame(() => abridorRef.current?.isConnected && abridorRef.current.focus());
   }
 
@@ -442,8 +560,18 @@ export default function HatoReproduccionPanel({ animal, visible, online, onCambi
     abridorRef.current = event.currentTarget;
     setMensaje(null);
     setErrores({});
+    setAdvertencia(null);
     setForm(formInicialEvento('', hoy));
     setModo({ accion: 'crear' });
+  }
+
+  function abrirEditarPendiente(pendiente, event) {
+    abridorRef.current = event?.currentTarget ?? null;
+    setMensaje(null);
+    setErrores({});
+    setAdvertencia(null);
+    setForm(formDesdeEvento(eventoDesdePendiente(pendiente)));
+    setModo({ accion: 'editar', pendiente });
   }
 
   function abrirCorregir(evento, event) {
@@ -498,11 +626,84 @@ export default function HatoReproduccionPanel({ animal, visible, online, onCambi
     if (resultado.recargar) cargar();
   }
 
+  // Trabajo sobre el outbox: un solo guardado a la vez, y el error siempre es seguro de mostrar.
+  async function enLocal(accion, fallback = MENSAJE_GUARDADO_LOCAL) {
+    if (enviandoRef.current) return;
+    enviandoRef.current = true;
+    setEnviando(true);
+    try {
+      await accion();
+    } catch (error) {
+      setMensaje({ type: 'error', text: mensajeDeExcepcion(error, fallback) });
+    } finally {
+      enviandoRef.current = false;
+      setEnviando(false);
+    }
+  }
+
+  function trasGuardarLocal(resultado) {
+    if (resultado.requiereConfirmacion) {
+      setAdvertencia(resultado.advertencia);
+      return false;
+    }
+    setAdvertencia(null);
+    setModo(null);
+    setMensaje({ type: 'info', text: resultado.sinCambios ? 'No había cambios que guardar.' : MENSAJE_EVENTO_PENDIENTE });
+    if (online && !resultado.sinCambios) syncNow?.();
+    return true;
+  }
+
+  function guardarLocal(confirmarAdvertencia = false) {
+    const clientOperationId = operaciones.current.idPara('crear', firmaOperacion('crear', { form }));
+    if (!clientOperationId) {
+      setMensaje({ type: 'error', text: MENSAJE_NAVEGADOR });
+      return;
+    }
+    enLocal(async () => {
+      const resultado = await repoOffline.registrarEventoReproductivoLocal({
+        animalId, body: buildCrearBody(form, clientOperationId), cuentaId, confirmarAdvertencia,
+      });
+      if (trasGuardarLocal(resultado)) operaciones.current.resolver('crear', { descartarOperacion: true });
+    });
+  }
+
+  function guardarEdicion(confirmarAdvertencia = false) {
+    enLocal(async () => {
+      trasGuardarLocal(await repoOffline.editarEventoReproductivoPendiente({
+        operationId: modo.pendiente.localOperationId, body: buildCrearBody(form), cuentaId, confirmarAdvertencia,
+      }));
+    });
+  }
+
+  function cancelarPendiente(pendiente, confirmarIncierto) {
+    setMensaje(null);
+    enLocal(() => repoOffline.cancelarEventoReproductivoPendiente(pendiente.localOperationId, { cuentaId, confirmarIncierto }), 'No fue posible descartar el evento.');
+  }
+
+  function reintentarPendiente(pendiente) {
+    setMensaje(null);
+    enLocal(async () => {
+      await repoOffline.reintentarEventoPendiente(pendiente.localOperationId, { cuentaId });
+      if (online) syncNow?.();
+    }, 'No fue posible reintentar el evento.');
+  }
+
+  function enviarEdicion(event) {
+    event.preventDefault();
+    const encontrados = validarEvento(form, { hoy });
+    setErrores(encontrados);
+    if (!Object.keys(encontrados).length) guardarEdicion();
+  }
+
   function enviarCrear(event) {
     event.preventDefault();
     const encontrados = validarEvento(form, { hoy });
     setErrores(encontrados);
     if (Object.keys(encontrados).length) return;
+    if (registroEnOutbox) {
+      guardarLocal();
+      return;
+    }
     ejecutar('crear', firmaOperacion('crear', { form }), (id) => registrarEventoReproductivo(animalId, buildCrearBody(form, id)));
   }
 
@@ -525,11 +726,11 @@ export default function HatoReproduccionPanel({ animal, visible, online, onCambi
     ejecutar('anular', firmaOperacion('anular', { eventoId, motivo }), (id) => anularEventoReproductivo(animalId, eventoId, buildAnularBody(motivo, id)));
   }
 
-  const formularioAbierto = modo?.accion === 'crear' || modo?.accion === 'corregir';
+  const formularioAbierto = ['crear', 'corregir', 'editar'].includes(modo?.accion);
   const accionAbierta = modo?.accion ?? null;
   // Al abrir el formulario (también desde una fila del historial) el foco va a su primer campo.
   useEffect(() => {
-    if (accionAbierta !== 'crear' && accionAbierta !== 'corregir') return;
+    if (!['crear', 'corregir', 'editar'].includes(accionAbierta)) return;
     const primero = document.getElementById(`repro-${accionAbierta}-tipoEvento`);
     primero?.focus();
     primero?.scrollIntoView?.({ block: 'center' });
@@ -552,11 +753,12 @@ export default function HatoReproduccionPanel({ animal, visible, online, onCambi
       {carga.status === 'ok' || carga.status === 'refrescando' ? (
         <>
           {carga.mensaje ? <StatusMessage type="error">{carga.mensaje}</StatusMessage> : null}
+          {carga.origen === 'local' ? <StatusMessage type="info">{TEXTO_COPIA_LOCAL}</StatusMessage> : null}
           <EstadoReproductivo estado={carga.estado} />
 
           {acciones.registrar && !formularioAbierto ? (
             <div className="gan-hato-actions gan-repro-acciones">
-              <button type="button" className="gan-submit" onClick={abrirCrear} disabled={!acciones.habilitado} aria-describedby={acciones.aviso ? 'repro-aviso-offline' : undefined}>
+              <button type="button" className="gan-submit" onClick={abrirCrear} disabled={!acciones.registrarHabilitado} aria-describedby={acciones.aviso ? 'repro-aviso-offline' : undefined}>
                 Registrar evento
               </button>
             </div>
@@ -565,7 +767,7 @@ export default function HatoReproduccionPanel({ animal, visible, online, onCambi
 
           {formularioAbierto ? (
             <FormularioEvento
-              titulo={modo.accion === 'crear' ? 'Nuevo evento reproductivo' : 'Corregir evento'}
+              titulo={{ crear: 'Nuevo evento reproductivo', corregir: 'Corregir evento', editar: 'Editar evento pendiente' }[modo.accion]}
               prefijo={`repro-${modo.accion}`}
               form={form}
               setForm={setForm}
@@ -576,15 +778,47 @@ export default function HatoReproduccionPanel({ animal, visible, online, onCambi
               motivo={motivo}
               setMotivo={modo.accion === 'corregir' ? setMotivo : null}
               enviando={enviando}
-              deshabilitado={!acciones.habilitado}
+              deshabilitado={modo.accion === 'corregir' ? !acciones.habilitado : false}
               aviso={acciones.aviso}
-              textoEnviar={modo.accion === 'crear' ? 'Registrar evento' : 'Guardar corrección'}
-              onEnviar={modo.accion === 'crear' ? enviarCrear : enviarCorregir}
+              textoEnviar={{
+                crear: registroEnOutbox ? 'Guardar para sincronizar' : 'Registrar evento',
+                corregir: 'Guardar corrección',
+                editar: 'Guardar cambios',
+              }[modo.accion]}
+              onEnviar={{ crear: enviarCrear, corregir: enviarCorregir, editar: enviarEdicion }[modo.accion]}
               onCancelar={cerrar}
             />
           ) : null}
+          {formularioAbierto && advertencia ? (
+            <div className="gan-hato-actions" role="alert">
+              <StatusMessage type="info">{advertencia.message} Según la copia de este dispositivo, que puede estar desactualizada. El servidor decidirá al sincronizar.</StatusMessage>
+              <button type="button" className="gan-secondary-button" onClick={() => (modo.accion === 'editar' ? guardarEdicion(true) : guardarLocal(true))} disabled={enviando}>Guardar de todos modos</button>
+            </div>
+          ) : null}
           {modo?.accion === 'corregir' ? (
             <p className="gan-hato-hint">La corrección no edita el evento: el original queda anulado en el historial y se registra uno nuevo.</p>
+          ) : null}
+
+          {pendientes.length ? (
+            <section className="gan-repro-pendientes" aria-labelledby="repro-pendientes-titulo">
+              <h3 id="repro-pendientes-titulo">Pendientes de sincronizar ({pendientes.length})</h3>
+              <p className="gan-hato-hint">{TEXTO_PENDIENTES_NO_CUENTAN}</p>
+              <ol className="gan-repro-lista">
+                {pendientes.map((pendiente) => (
+                  <EventoPendiente
+                    key={pendiente.localOperationId}
+                    pendiente={pendiente}
+                    toros={toros}
+                    cuentaId={cuentaId}
+                    puedeRegistrar={permisos.registrarReproduccion}
+                    ocupado={enviando || Boolean(modo)}
+                    onEditar={abrirEditarPendiente}
+                    onCancelar={cancelarPendiente}
+                    onReintentar={reintentarPendiente}
+                  />
+                ))}
+              </ol>
+            </section>
           ) : null}
 
           <section className="gan-repro-historial" aria-labelledby="repro-historial-titulo">

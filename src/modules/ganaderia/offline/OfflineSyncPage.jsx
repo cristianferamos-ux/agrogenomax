@@ -7,9 +7,13 @@ import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
 import { useGanaderiaOffline } from './GanaderiaOfflineProvider.jsx';
 import { formatUltimaSync } from './OfflineStatusBar.jsx';
-import { OUTBOX_ESTADOS } from './outbox.js';
+import { OUTBOX_ESTADOS, REPRODUCCION_EVENTO_CREAR } from './outbox.js';
 import { formatFecha, formatKg, formatMetodo } from '../hato/pesajesModel.js';
 import { mensajeBloqueoPesaje } from '../hato/pesajesOfflineModel.js';
+import { ETIQUETAS_TIPO_EVENTO, fechaHoraEvento } from '../hato/reproduccionModel.js';
+import { accionesEventoPendiente, estadoEventoPendiente } from '../hato/reproduccionOfflineModel.js';
+import { eventoPendienteDe } from './localRepo.js';
+import { useGanaderiaAuthOptional } from '../auth/GanaderiaAuthContext.jsx';
 import { MENSAJE_OFFLINE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
 import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
 import { mensajeDeExcepcion } from '../api/errorModel.js';
@@ -58,6 +62,72 @@ function ConflictoPesajeItem({ op, animal, repo, onDone }) {
         <div className="gan-hato-actions">
           <StatusMessage type="info">El pesaje pendiente se eliminará de este dispositivo. No afecta al servidor.</StatusMessage>
           <button type="button" className="gan-submit" onClick={descartar}>Confirmar descarte</button>
+        </div>
+      ) : null}
+      {error ? <StatusMessage type="error">{error}</StatusMessage> : null}
+    </li>
+  );
+}
+
+// FASE 4E.1: un evento reproductivo no sincronizado. El detalle y la edición viven en
+// la ficha; aquí se reintenta con el mismo id o se descarta. Otra cuenta solo lo ve.
+function EventoReproductivoItem({ op, animal, repo, online, syncNow, onDone }) {
+  const auth = useGanaderiaAuthOptional();
+  const permisos = useGanaderiaPermisos();
+  const cuentaId = auth?.cuenta?.cuentaId ?? null;
+  const [confirmar, setConfirmar] = useState(false);
+  const [error, setError] = useState('');
+  const pendiente = eventoPendienteDe(op);
+  const estado = estadoEventoPendiente(pendiente);
+  const acciones = accionesEventoPendiente(pendiente, { cuentaId, puedeRegistrar: permisos.registrarReproduccion });
+
+  async function ejecutar(accion, fallback) {
+    setError('');
+    try {
+      await accion();
+      onDone();
+    } catch (err) {
+      setError(mensajeDeExcepcion(err, fallback));
+    }
+  }
+
+  return (
+    <li className="gan-offline-conflicto">
+      <strong>{ETIQUETAS_TIPO_EVENTO[pendiente.tipoEvento] ?? 'Evento reproductivo'} de {animal ? animal.numeroVisual || animal.nombre || 'animal sin identificar' : `animal ${pendiente.animalId}`}</strong>
+      <span>{fechaHoraEvento(pendiente)} · {estado.etiqueta}</span>
+      <span>{estado.detalle}</span>
+      <Link to={`/ganaderia/animales/${pendiente.animalId}`}>Ver ficha del animal</Link>
+      {acciones.reintentar || acciones.cancelar ? (
+        <div className="gan-hato-actions">
+          {acciones.reintentar ? (
+            <button
+              type="button"
+              className="gan-secondary-button"
+              onClick={() => ejecutar(async () => {
+                await repo.reintentarEventoPendiente(op.operationId, { cuentaId });
+                if (online) syncNow();
+              }, 'No fue posible reintentar el evento.')}
+            >
+              Reintentar
+            </button>
+          ) : null}
+          {acciones.cancelar ? <button type="button" className="gan-secondary-button" onClick={() => setConfirmar(true)}>Descartar evento pendiente</button> : null}
+        </div>
+      ) : null}
+      {confirmar ? (
+        <div className="gan-hato-actions">
+          <StatusMessage type="info">
+            {acciones.confirmarIncierto
+              ? 'Se quitará de este dispositivo, pero pudo haberse registrado en el servidor: revisa el historial del animal.'
+              : 'El evento pendiente se eliminará de este dispositivo. No afecta al servidor.'}
+          </StatusMessage>
+          <button
+            type="button"
+            className="gan-submit"
+            onClick={() => ejecutar(() => repo.cancelarEventoReproductivoPendiente(op.operationId, { cuentaId, confirmarIncierto: acciones.confirmarIncierto }), 'No fue posible descartar el evento.')}
+          >
+            Confirmar descarte
+          </button>
         </div>
       ) : null}
       {error ? <StatusMessage type="error">{error}</StatusMessage> : null}
@@ -137,17 +207,22 @@ export default function OfflineSyncPage() {
   const [preparando, setPreparando] = useState(false);
   const [resultado, setResultado] = useState(null);
   const [bloqueadas, setBloqueadas] = useState([]);
+  const [esperandoCuenta, setEsperandoCuenta] = useState([]);
+  const [eventosEnCurso, setEventosEnCurso] = useState([]);
 
   const cargar = useCallback(async () => {
     if (!offline.repo) return;
-    const ops = (await offline.repo.listOutbox()).filter((op) => op.estado === OUTBOX_ESTADOS.CONFLICTO || op.estado === OUTBOX_ESTADOS.RECHAZADO);
-    const conAnimal = await Promise.all(ops.map(async (op) => ({
+    const outbox = await offline.repo.listOutbox();
+    const conAnimal = (ops) => Promise.all(ops.map(async (op) => ({
       op,
-      animal: op.tipoOperacion === 'PESAJE_CREAR'
+      animal: op.tipoOperacion === 'PESAJE_CREAR' || op.tipoOperacion === REPRODUCCION_EVENTO_CREAR
         ? await offline.repo.getAnimal(op.payload?.animalId)
         : await offline.repo.getAnimal(`local:${op.localUuid}`),
     })));
-    setBloqueadas(conAnimal);
+    setBloqueadas(await conAnimal(outbox.filter((op) => op.estado === OUTBOX_ESTADOS.CONFLICTO || op.estado === OUTBOX_ESTADOS.RECHAZADO)));
+    setEsperandoCuenta(await conAnimal(outbox.filter((op) => op.estado === OUTBOX_ESTADOS.BLOQUEADA_POR_IDENTIDAD)));
+    setEventosEnCurso(await conAnimal(outbox.filter((op) => op.tipoOperacion === REPRODUCCION_EVENTO_CREAR
+      && [OUTBOX_ESTADOS.PENDIENTE, OUTBOX_ESTADOS.SINCRONIZANDO, OUTBOX_ESTADOS.ERROR_REINTENTABLE].includes(op.estado))));
   }, [offline.repo]);
 
   useEffect(() => {
@@ -176,6 +251,14 @@ export default function OfflineSyncPage() {
   }
 
   const { stats } = offline;
+  const itemBloqueado = ({ op, animal }) => {
+    if (op.tipoOperacion === REPRODUCCION_EVENTO_CREAR) {
+      return <EventoReproductivoItem key={op.operationId} op={op} animal={animal} repo={offline.repo} online={offline.online} syncNow={offline.syncNow} onDone={cargar} />;
+    }
+    return op.tipoOperacion === 'PESAJE_CREAR'
+      ? <ConflictoPesajeItem key={op.operationId} op={op} animal={animal} repo={offline.repo} onDone={cargar} />
+      : <ConflictoItem key={op.operationId} op={op} animal={animal} repo={offline.repo} onDone={cargar} />;
+  };
   return (
     <div className="gan-panel gan-hato">
       <GanaderiaBackLink />
@@ -191,6 +274,7 @@ export default function OfflineSyncPage() {
         <div className="gan-ficha-row"><span>Animales en el dispositivo</span><strong>{stats?.animales ?? 0}</strong></div>
         <div className="gan-ficha-row"><span>Chapetas disponibles</span><strong>{stats?.chapetasDisponibles ?? 0}</strong></div>
         <div className="gan-ficha-row"><span>Operaciones pendientes</span><strong>{stats?.pendientes ?? 0}</strong></div>
+        <div className="gan-ficha-row"><span>Historial reproductivo</span><strong>{stats?.reproduccionListaAt ? 'Descargado' : 'Pendiente de descarga'}</strong></div>
       </div>
 
       <div className="gan-hato-actions">
@@ -218,10 +302,28 @@ export default function OfflineSyncPage() {
           <p className="gan-hato-hint">Los registros se conservan en este dispositivo hasta que decidas qué hacer.</p>
           <ul>
             {bloqueadas.map(({ op, animal }) => (
-              op.tipoOperacion === 'PESAJE_CREAR'
-                ? <ConflictoPesajeItem key={op.operationId} op={op} animal={animal} repo={offline.repo} onDone={cargar} />
-                : <ConflictoItem key={op.operationId} op={op} animal={animal} repo={offline.repo} onDone={cargar} />
+              itemBloqueado({ op, animal })
             ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {eventosEnCurso.length > 0 ? (
+        <section className="gan-offline-conflictos gan-offline-en-curso" aria-labelledby="gan-offline-en-curso-title">
+          <h3 id="gan-offline-en-curso-title">Eventos reproductivos por sincronizar ({eventosEnCurso.length})</h3>
+          <p className="gan-hato-hint">Aún no están confirmados: no cambian el estado reproductivo de la hembra.</p>
+          <ul>
+            {eventosEnCurso.map(({ op, animal }) => itemBloqueado({ op, animal }))}
+          </ul>
+        </section>
+      ) : null}
+
+      {esperandoCuenta.length > 0 ? (
+        <section className="gan-offline-conflictos gan-offline-en-curso" aria-labelledby="gan-offline-esperando-title">
+          <h3 id="gan-offline-esperando-title">Esperando a la cuenta que los registró ({esperandoCuenta.length})</h3>
+          <p className="gan-hato-hint">Se conservan en este dispositivo y solo se envían con su cuenta original. Nunca cambian de autor.</p>
+          <ul>
+            {esperandoCuenta.map(({ op, animal }) => itemBloqueado({ op, animal }))}
           </ul>
         </section>
       ) : null}

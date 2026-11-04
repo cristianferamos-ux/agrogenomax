@@ -11,18 +11,21 @@
 //      un barrido de respaldo cada 5 min mientras la app está visible.
 // El entorno (window/document/serviceWorker/timers) es inyectable: el
 // módulo se prueba sin navegador.
-import { OUTBOX_ESTADOS } from './outbox.js';
+import { OUTBOX_ESTADOS, operacionesEnTurno } from './outbox.js';
+import { handlerDe } from './operationHandlers.js';
 
 export const BACKGROUND_SYNC_TAG = 'agx-ganaderia-outbox';
 const DEBOUNCE_MS = 1_500;
 const BARRIDO_MS = 5 * 60_000;
 
+const enTurno = async (repo) => operacionesEnTurno(await repo.listOutbox(), { soportado: (op) => Boolean(handlerDe(op.tipoOperacion)) });
+
 async function hayEnviables(repo) {
-  return (await repo.listOutbox()).some((op) => op.estado === OUTBOX_ESTADOS.PENDIENTE);
+  return (await enTurno(repo)).some((op) => op.estado === OUTBOX_ESTADOS.PENDIENTE);
 }
 
 async function hayPendientes(repo) {
-  return (await repo.listOutbox()).some((op) => [OUTBOX_ESTADOS.PENDIENTE, OUTBOX_ESTADOS.ERROR_REINTENTABLE, OUTBOX_ESTADOS.SINCRONIZANDO].includes(op.estado));
+  return (await enTurno(repo)).length > 0;
 }
 
 export function startAutoSync({
@@ -66,7 +69,9 @@ export function startAutoSync({
     if (stopped) return null;
     const resultado = await engine.syncNow({ motivo });
     await programarReintento();
-    await registrarBackgroundSync();
+    // Con red el navegador dispara el sync al registrarlo, y el SW lo devuelve aquí:
+    // volver a registrar desde ese mismo disparo sería un ciclo sin fin.
+    if (motivo !== 'background-sync') await registrarBackgroundSync();
     return resultado;
   }
 

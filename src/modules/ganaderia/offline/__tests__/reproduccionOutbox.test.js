@@ -109,9 +109,10 @@ test('ANULAR y CORREGIR no existen offline en 4E.1', () => {
   assert.doesNotMatch(repo, /REPRODUCCION_EVENTO_(ANULAR|CORREGIR)/);
 });
 
-test('todavía sin interfaz: el panel no encola hasta su bloque', () => {
+test('el panel encola solo el registro: anular y corregir no tienen camino al outbox', () => {
   const panel = fs.readFileSync(new URL('../../hato/HatoReproduccionPanel.jsx', import.meta.url), 'utf8');
-  assert.doesNotMatch(panel, /registrarEventoReproductivoLocal/);
+  assert.match(panel, /registrarEventoReproductivoLocal/);
+  assert.doesNotMatch(panel, /REPRODUCCION_EVENTO_(ANULAR|CORREGIR)|anular\w*Local|corregir\w*Local/i);
 });
 
 // ---------------------------------------------------------------------------

@@ -64,6 +64,11 @@
   padding: 0.8rem;
 }
 
+/* FASE 4E.1: lo que aún puede sincronizarse solo no se pinta como un conflicto. */
+.gan-offline-en-curso { margin-top: 1rem; }
+.gan-offline-en-curso .gan-offline-conflicto { border-color: rgba(159, 211, 255, 0.35); }
+.gan-offline-en-curso .gan-offline-conflicto strong { color: #9fd3ff; }
+
 .gan-hato-badge-sync {
   font-size: 0.72rem;
   border-radius: 999px;

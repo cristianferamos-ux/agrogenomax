@@ -4,6 +4,7 @@
 // Worker. Nunca fabrica un animal_id de PostgreSQL: un animal creado sin
 // red vive como 'loc:<localUuid>' hasta que el servidor confirma su id.
 import {
+  CODIGOS_SIN_REINTENTO,
   OUTBOX_ESTADOS,
   REPRODUCCION_EVENTO_CREAR,
   claveOrdenAnimal,
@@ -87,6 +88,7 @@ export function eventoPendienteDe(op) {
     clientOperationId: op.clientOperationId,
     animalId: op.payload.animalId,
     ...op.payload.evento,
+    cuentaOrigenId: op.origen?.cuentaId ?? null,
     estado: op.estado,
     posibleEnServidor: Boolean(op.posibleEnServidor),
     ultimoError: op.ultimoError ?? null,
@@ -258,6 +260,7 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
         ultimaSyncOk: meta.ultimaSyncOk,
         ultimoError: meta.ultimoError,
         preparadoAt: meta.preparadoAt,
+        reproduccionListaAt: meta.reproduccionListaAt ?? null,
       };
     },
 
@@ -563,6 +566,27 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
           if (!descartable || !confirmarIncierto) throw errorVisible('EVENTO_ENVIO_INCIERTO', 'Este evento pudo haber llegado al servidor: se conserva hasta confirmarlo.');
         }
         return null;
+      });
+      notify();
+    },
+
+    /**
+     * Reintento explícito de un conflicto, rechazo o error reintentable: la misma
+     * operación, con el MISMO clientOperationId y su misma posición en la cadena. Si
+     * el envío anterior llegó al servidor, responderá yaExistia y no se duplica. No
+     * cambia posibleEnServidor ni los intentos. Solo la cuenta que la creó.
+     */
+    async reintentarEventoPendiente(operationId, { cuentaId } = {}) {
+      await storage.mutate('outbox', operationId, (actual) => {
+        if (!actual || actual.tipoOperacion !== REPRODUCCION_EVENTO_CREAR) throw errorVisible('EVENTO_PENDIENTE_NO_ENCONTRADO', 'No hay un evento pendiente con ese identificador.');
+        if (!identidadCoincide(actual, cuentaId)) throw errorVisible(OUTBOX_ESTADOS.BLOQUEADA_POR_IDENTIDAD, 'Este evento lo registró otra cuenta: solo esa cuenta puede reintentarlo.');
+        if (![OUTBOX_ESTADOS.CONFLICTO, OUTBOX_ESTADOS.RECHAZADO, OUTBOX_ESTADOS.ERROR_REINTENTABLE].includes(actual.estado)) {
+          throw errorVisible('EVENTO_NO_REINTENTABLE', 'Este evento no necesita un reintento manual.');
+        }
+        if (CODIGOS_SIN_REINTENTO.includes(actual.ultimoError?.codigo)) {
+          throw errorVisible('EVENTO_NO_REINTENTABLE', 'El servidor tiene este registro con otros datos: reintentar no lo resolverá.');
+        }
+        return { ...actual, estado: OUTBOX_ESTADOS.PENDIENTE, ultimoError: null, siguienteIntentoAt: null, updatedAt: now().toISOString() };
       });
       notify();
     },
