@@ -17,7 +17,7 @@ import {
 } from './browserOffline.js';
 import { activarOrganizacion, getOrCreateDeviceId, guardarPerfilOffline } from './offlineSession.js';
 import { startAutoSync } from './autoSync.js';
-import { RUN_RESULT, computeSyncIndicator } from './syncEngine.js';
+import { RUN_RESULT, calcularOnline, computeSyncIndicator } from './syncEngine.js';
 
 const GanaderiaOfflineContext = createContext(null);
 
@@ -134,7 +134,7 @@ export function GanaderiaOfflineProvider({ children }) {
 
   const reintentarApertura = useCallback(() => setIntentoApertura((n) => n + 1), []);
 
-  const online = navigatorOnline && !auth.offline && engineState.ultimoResultado !== RUN_RESULT.OFFLINE;
+  const online = calcularOnline({ navegadorOnline: navigatorOnline, sesionOffline: auth.offline, ultimoResultado: engineState.ultimoResultado, servidorAlcanzable: engineState.servidorAlcanzable });
 
   // Dispositivo ya preparado: al abrir Ganadería con red se refresca el
   // precache del build vigente (tras un despliegue, los archivos nuevos

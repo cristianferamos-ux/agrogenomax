@@ -847,7 +847,8 @@ test('leerIdentidadSesion: contrato de /auth/session', async () => {
   assert.deepEqual(await leerIdentidadSesion(con({ ok: true, status: 200, data: { authenticated: false } })), { estado: 'SIN_SESION' });
   assert.deepEqual(await leerIdentidadSesion(con({ ok: false, status: 401, data: {} })), { estado: 'SIN_SESION' });
   assert.deepEqual(await leerIdentidadSesion(con({ ok: false, status: 0, failure: 'NETWORK_ERROR' })), { estado: 'SIN_RED' });
-  assert.deepEqual(await leerIdentidadSesion(con({ ok: false, status: 500, data: {} })), { estado: 'NO_VERIFICABLE' });
+  assert.deepEqual(await leerIdentidadSesion(con({ ok: false, status: 500, data: {} })), { estado: 'NO_VERIFICABLE', reintentable: true });
+  assert.deepEqual(await leerIdentidadSesion(con({ ok: false, status: 400, data: {} })), { estado: 'NO_VERIFICABLE', reintentable: false });
   assert.deepEqual(await leerIdentidadSesion({ getJson: async () => { throw new TypeError('x'); } }), { estado: 'SIN_RED' });
 });
 

@@ -17,6 +17,7 @@ import { handlerDe } from './operationHandlers.js';
 export const BACKGROUND_SYNC_TAG = 'agx-ganaderia-outbox';
 const DEBOUNCE_MS = 1_500;
 const BARRIDO_MS = 5 * 60_000;
+const RECONEXION_MS = [2_000, 4_000, 8_000, 16_000, 30_000, 60_000];
 
 const enTurno = async (repo) => operacionesEnTurno(await repo.listOutbox(), { soportado: (op) => Boolean(handlerDe(op.tipoOperacion)) });
 
@@ -42,6 +43,7 @@ export function startAutoSync({
   let debounce = null;
   let retry = null;
   let barrido = null;
+  let intentosReconexion = 0;
   const removers = [];
 
   async function registrarBackgroundSync() {
@@ -55,11 +57,32 @@ export function startAutoSync({
     }
   }
 
+  // El evento 'online' solo dice que hay interfaz de red: el primer intento
+  // puede fallar y sin operaciones con backoff nadie volvería a comprobarlo.
+  // Temporizador único, creciente y solo con la app visible; el motor
+  // comparte el ciclo en curso, así que no añade envíos.
+  function esperaReconexion() {
+    if (!engine.reconexionPendiente?.() || doc?.visibilityState === 'hidden') {
+      intentosReconexion = 0;
+      return null;
+    }
+    const espera = RECONEXION_MS[Math.min(intentosReconexion, RECONEXION_MS.length - 1)];
+    intentosReconexion += 1;
+    return espera;
+  }
+
   async function programarReintento() {
+    if (stopped) return;
+    const proximo = await engine.proximoReintentoAt();
     if (stopped) return;
     if (retry) clearTimer(retry);
     retry = null;
-    const proximo = await engine.proximoReintentoAt();
+    const reconexion = esperaReconexion();
+    if (reconexion !== null) {
+      const backoff = proximo ? Math.max(1_000, new Date(proximo).getTime() - now().getTime()) : Infinity;
+      retry = setTimer(() => reactivarYDisparar('reconexion'), Math.min(reconexion, backoff));
+      return;
+    }
     if (!proximo) return;
     const espera = Math.max(1_000, new Date(proximo).getTime() - now().getTime());
     retry = setTimer(() => trigger('reintento'), espera);
@@ -70,8 +93,9 @@ export function startAutoSync({
     const resultado = await engine.syncNow({ motivo });
     await programarReintento();
     // Con red el navegador dispara el sync al registrarlo, y el SW lo devuelve aquí:
-    // volver a registrar desde ese mismo disparo sería un ciclo sin fin.
-    if (motivo !== 'background-sync') await registrarBackgroundSync();
+    // volver a registrar desde ese mismo disparo sería un ciclo sin fin. El
+    // sondeo de reconexión tampoco registra: cada intento sumaría otro ciclo.
+    if (motivo !== 'background-sync' && motivo !== 'reconexion') await registrarBackgroundSync();
     return resultado;
   }
 
@@ -84,13 +108,18 @@ export function startAutoSync({
   // FASE-14: al recuperar la red, lo que solo esperaba por un fallo de RED
   // sale ya (sin esperar su siguienteIntentoAt); un 408/429/5xx conserva su
   // backoff. reactivarFallosDeRed no hace nada si el motor está sin red.
-  async function reconectar(motivo) {
+  async function reactivarYDisparar(motivo) {
     try {
       await engine.reactivarFallosDeRed?.();
     } catch {
       // nunca bloquea el disparo
     }
     return trigger(motivo);
+  }
+
+  function reconectar(motivo) {
+    intentosReconexion = 0;
+    return reactivarYDisparar(motivo);
   }
 
   listen(win, 'online', () => reconectar('online'));

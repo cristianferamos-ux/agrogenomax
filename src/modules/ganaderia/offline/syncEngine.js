@@ -129,7 +129,7 @@ export async function leerIdentidadSesion(transport) {
     return { estado: 'OK', cuentaId: result.data.cuenta.cuentaId, organizacionId: result.data.organizacionActiva?.organizacionId ?? null };
   }
   if (isSessionFailure(result)) return { estado: 'SIN_SESION' };
-  return { estado: esFalloDeRed(result) ? 'SIN_RED' : 'NO_VERIFICABLE' };
+  return esFalloDeRed(result) ? { estado: 'SIN_RED' } : { estado: 'NO_VERIFICABLE', reintentable: isRetryable(result) };
 }
 
 const MOTIVO_IDENTIDAD = Object.freeze({
@@ -155,7 +155,28 @@ const sesionEsDe = (sesion, op) => sesion.cuentaId === op.origen.cuentaId && ses
 export function createSyncEngine({ repo, transport, isOnline = () => true, now = () => new Date(), random = Math.random, lock = null }) {
   let running = null;
   const listeners = new Set();
-  const state = { enCurso: false, ultimoResultado: null, sesionRequerida: false, redCaidaAt: null };
+  // Tres preguntas distintas:
+  //   ultimoResultado: cómo terminó el último ciclo;
+  //   servidorAlcanzable: si el servidor contestó HTTP, sea cual sea el código;
+  //   reconexionNecesaria: si conviene reintentar sin esperar un evento externo
+  //     (nunca completó un ciclo, sin red, o transitorio: 408/429/5xx). Un error
+  //     definitivo o una sesión vencida no se arreglan reintentando.
+  const state = { enCurso: false, ultimoResultado: null, sesionRequerida: false, redCaidaAt: null, servidorAlcanzable: false, reconexionNecesaria: true };
+  let errorTransitorio = false;
+  let ultimoContacto = null;
+
+  // Una excepción del transporte no pasa por aquí: siempre termina el ciclo en OFFLINE.
+  const observar = (llamada) => async (...args) => {
+    const respuesta = await llamada(...args);
+    ultimoContacto = Boolean(respuesta?.ok) || (respuesta?.status ?? 0) > 0;
+    return respuesta;
+  };
+  // Lo que decide el ciclo. El pull reproductivo queda fuera a propósito: tampoco
+  // cambia el resultado, así que un fallo suyo no puede desmentir un ciclo correcto.
+  const transporteCiclo = {
+    getJson: observar((pathname) => transport.getJson(pathname)),
+    postJson: observar((pathname, body) => transport.postJson(pathname, body)),
+  };
 
   const emit = () => listeners.forEach((listener) => {
     try {
@@ -232,11 +253,12 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
           detener(original);
           continue;
         }
-        const sesion = await leerIdentidadSesion(transport);
+        const sesion = await leerIdentidadSesion(transporteCiclo);
         // Sin red no hay nada que decidir: el ciclo termina y la operación sigue igual.
         if (sesion.estado === 'SIN_RED') return RUN_RESULT.OFFLINE;
         if (sesion.estado === 'SIN_SESION' || sesion.estado === 'NO_VERIFICABLE') {
           await bloquearPorIdentidad(original, MOTIVO_IDENTIDAD.SESION);
+          errorTransitorio = Boolean(sesion.reintentable);
           return sesion.estado === 'SIN_SESION' ? RUN_RESULT.SESION_REQUERIDA : RUN_RESULT.ERROR;
         }
         if (!sesionEsDe(sesion, original)) {
@@ -255,7 +277,7 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
       }
       let result;
       try {
-        result = await transport.postJson(request.path, request.body);
+        result = await transporteCiclo.postJson(request.path, request.body);
       } catch {
         result = { ok: false, status: 0, failure: 'NETWORK_ERROR', data: null };
       }
@@ -283,7 +305,7 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
       if (op.claveOrden && clase === 'RECHAZADO' && result?.status === 403) {
         // El rol se evalúa antes que la identidad: un 403 solo cuenta como rechazo
         // si la sesión sigue siendo la de origen. Si no, es de la cuenta que entró.
-        const sesion = await leerIdentidadSesion(transport);
+        const sesion = await leerIdentidadSesion(transporteCiclo);
         if (sesion.estado !== 'OK' || !sesionEsDe(sesion, op)) {
           await guardarOp(op, {
             estado: OUTBOX_ESTADOS.BLOQUEADA_POR_IDENTIDAD,
@@ -315,6 +337,7 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
           ultimoError: { ...error, tipo: 'http' },
           siguienteIntentoAt: new Date(now().getTime() + espera).toISOString(),
         });
+        errorTransitorio = true;
         return RUN_RESULT.ERROR;
       }
       await repo.marcarOperacionBloqueada({ ...op, ...incierto }, {
@@ -330,7 +353,7 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
     const meta = await repo.getMeta();
     const pedir = async (cursor) => {
       try {
-        return await transport.getJson(cursor ? `${PULL_PATH}?cursor=${encodeURIComponent(cursor)}` : PULL_PATH);
+        return await transporteCiclo.getJson(cursor ? `${PULL_PATH}?cursor=${encodeURIComponent(cursor)}` : PULL_PATH);
       } catch {
         return { ok: false, status: 0, failure: 'NETWORK_ERROR', data: null };
       }
@@ -344,6 +367,7 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
     const clase = classifyResult(result);
     if (clase === 'SESION') return RUN_RESULT.SESION_REQUERIDA;
     await repo.putMeta({ ultimaSyncOk: false, ultimoError: { codigo: result.data?.error ?? result.failure ?? 'ERROR', status: result.status ?? 0, at: now().toISOString() } });
+    errorTransitorio = clase === 'REINTENTABLE';
     return result.status === 0 ? RUN_RESULT.OFFLINE : RUN_RESULT.ERROR;
   }
 
@@ -385,11 +409,15 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
   async function run({ forzar = false, soloPush = false } = {}, { exclusivo = false } = {}) {
     if (!isOnline()) {
       state.ultimoResultado = RUN_RESULT.OFFLINE;
+      state.reconexionNecesaria = true;
+      state.servidorAlcanzable = false;
       emit();
       return RUN_RESULT.OFFLINE;
     }
     state.enCurso = true;
     emit();
+    errorTransitorio = false;
+    ultimoContacto = null;
     let resultado;
     try {
       resultado = await push({ forzar, exclusivo });
@@ -404,6 +432,10 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
     state.ultimoResultado = resultado;
     state.sesionRequerida = resultado === RUN_RESULT.SESION_REQUERIDA;
     state.redCaidaAt = resultado === RUN_RESULT.OFFLINE ? now().toISOString() : null;
+    state.reconexionNecesaria = resultado === RUN_RESULT.OFFLINE || errorTransitorio;
+    // Sin ninguna llamada en este ciclo (error local previo) no hay dato nuevo: se conserva.
+    if (resultado === RUN_RESULT.OFFLINE) state.servidorAlcanzable = false;
+    else if (ultimoContacto !== null) state.servidorAlcanzable = ultimoContacto;
     emit();
     return resultado;
   }
@@ -447,6 +479,12 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
       return () => listeners.delete(listener);
     },
     getState: () => ({ ...state }),
+    /**
+     * El navegador dice que hay red, pero este motor no lo ha confirmado: su
+     * último ciclo falló de forma transitoria o nunca completó uno porque cedió
+     * ante otro motor (los EN_CURSO no fijan resultado). Nada más lo va a revisar.
+     */
+    reconexionPendiente: () => isOnline() && state.reconexionNecesaria,
     /** Próximo instante en que conviene reintentar (backoff), o null. */
     async proximoReintentoAt() {
       // Solo lo que le toca salir: una retenida en su cadena con la fecha vencida reprogramaría cada segundo.
@@ -457,6 +495,19 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
       return fechas[0] ?? null;
     },
   };
+}
+
+/**
+ * Conectividad que ve la interfaz. OFFLINE significa sin red o servidor
+ * inalcanzable: cualquier respuesta HTTP la confirma, aunque sea un error, y
+ * ese error se muestra aparte. `sesionOffline` es la sesión reconstruida sin
+ * servidor: su revalidación es de un solo intento, así que no prueba nada por
+ * sí sola; sin respuesta del servidor se sigue tratando como sin conexión.
+ */
+export function calcularOnline({ navegadorOnline, sesionOffline, ultimoResultado, servidorAlcanzable = false }) {
+  if (!navegadorOnline) return false;
+  if (servidorAlcanzable) return true;
+  return ultimoResultado !== RUN_RESULT.OFFLINE && !sesionOffline;
 }
 
 /**
