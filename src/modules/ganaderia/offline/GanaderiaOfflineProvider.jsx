@@ -134,7 +134,7 @@ export function GanaderiaOfflineProvider({ children }) {
 
   const reintentarApertura = useCallback(() => setIntentoApertura((n) => n + 1), []);
 
-  const online = calcularOnline({ navegadorOnline: navigatorOnline, sesionOffline: auth.offline, ultimoResultado: engineState.ultimoResultado });
+  const online = calcularOnline({ navegadorOnline: navigatorOnline, sesionOffline: auth.offline, ultimoResultado: engineState.ultimoResultado, servidorAlcanzable: engineState.servidorAlcanzable });
 
   // Dispositivo ya preparado: al abrir Ganadería con red se refresca el
   // precache del build vigente (tras un despliegue, los archivos nuevos

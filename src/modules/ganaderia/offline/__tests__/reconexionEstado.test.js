@@ -94,7 +94,7 @@ function arrancar(e, { sw = null, doc = null, lock = null, sesionOffline = true 
   const win = new EventTarget();
   const engine = createSyncEngine({ repo: e.repo, transport: e.transport, isOnline: e.isOnline, now: e.now, random: () => 0.5, ...(lock ? { lock } : {}) });
   const auto = startAutoSync({ engine, repo: e.repo, win, doc, serviceWorker: sw, setTimer: t.setTimer, clearTimer: t.clearTimer, now: e.now });
-  const online = () => calcularOnline({ navegadorOnline: e.isOnline(), sesionOffline, ultimoResultado: engine.getState().ultimoResultado });
+  const online = () => calcularOnline({ navegadorOnline: e.isOnline(), sesionOffline, ultimoResultado: engine.getState().ultimoResultado, servidorAlcanzable: engine.getState().servidorAlcanzable });
   const barra = async () => {
     const s = engine.getState();
     const stats = await e.repo.contar();
@@ -403,37 +403,41 @@ test('16. el sondeo no adelanta ni duplica un backoff más próximo: gana la esp
 // ---------------------------------------------------------------------
 
 test('17. calcularOnline: tabla de verdad', () => {
+  // navegador, sesión reconstruida, último resultado, servidor alcanzable -> online
   const casos = [
-    [true, false, null, true],
-    [true, false, RUN_RESULT.OK, true],
-    [true, false, RUN_RESULT.ERROR, true],
-    [true, false, RUN_RESULT.EN_CURSO, true],
-    [true, false, RUN_RESULT.OFFLINE, false],
-    [false, false, RUN_RESULT.OK, false],
-    [false, true, RUN_RESULT.OK, false],
-    [true, true, null, false],
-    [true, true, RUN_RESULT.OFFLINE, false],
-    [true, true, RUN_RESULT.ERROR, false],
-    [true, true, RUN_RESULT.OK, true],
-    [true, true, RUN_RESULT.SESION_REQUERIDA, true],
+    [false, false, RUN_RESULT.OK, true, false],
+    [false, true, RUN_RESULT.OK, true, false],
+    [false, false, null, false, false],
+    [true, false, null, false, true],
+    [true, false, RUN_RESULT.ERROR, false, true],
+    [true, false, RUN_RESULT.EN_CURSO, false, true],
+    [true, false, RUN_RESULT.OFFLINE, false, false],
+    [true, true, null, false, false],
+    [true, true, RUN_RESULT.OFFLINE, false, false],
+    [true, true, RUN_RESULT.ERROR, false, false],
+    [true, true, RUN_RESULT.OK, false, false],
+    [true, true, RUN_RESULT.ERROR, true, true],
+    [true, true, RUN_RESULT.OK, true, true],
+    [true, true, RUN_RESULT.SESION_REQUERIDA, true, true],
+    [true, false, RUN_RESULT.ERROR, true, true],
   ];
-  for (const [navegadorOnline, sesionOffline, ultimoResultado, esperado] of casos) {
-    assert.equal(calcularOnline({ navegadorOnline, sesionOffline, ultimoResultado }), esperado, JSON.stringify({ navegadorOnline, sesionOffline, ultimoResultado }));
+  for (const [navegadorOnline, sesionOffline, ultimoResultado, servidorAlcanzable, esperado] of casos) {
+    assert.equal(calcularOnline({ navegadorOnline, sesionOffline, ultimoResultado, servidorAlcanzable }), esperado, JSON.stringify({ navegadorOnline, sesionOffline, ultimoResultado, servidorAlcanzable }));
   }
+  assert.equal(calcularOnline({ navegadorOnline: true, sesionOffline: true, ultimoResultado: RUN_RESULT.OK }), false, 'sin el dato no se confirma nada');
 });
 
 test('18. con la sesión vencida en el servidor se pide iniciar sesión, no OFFLINE', () => {
-  const online = calcularOnline({ navegadorOnline: true, sesionOffline: true, ultimoResultado: RUN_RESULT.SESION_REQUERIDA });
+  const online = calcularOnline({ navegadorOnline: true, sesionOffline: true, ultimoResultado: RUN_RESULT.SESION_REQUERIDA, servidorAlcanzable: true });
   assert.equal(computeSyncIndicator({ online, enCurso: false, ultimoResultado: RUN_RESULT.SESION_REQUERIDA }).etiqueta, 'ERROR DE SINCRONIZACIÓN — INICIA SESIÓN');
 });
 
 test('19. el proveedor usa calcularOnline y no reconstruye la regla', () => {
-  assert.match(PROVIDER, /const online = calcularOnline\(\{ navegadorOnline: navigatorOnline, sesionOffline: auth\.offline, ultimoResultado: engineState\.ultimoResultado \}\);/);
+  assert.match(PROVIDER, /const online = calcularOnline\(\{ navegadorOnline: navigatorOnline, sesionOffline: auth\.offline, ultimoResultado: engineState\.ultimoResultado, servidorAlcanzable: engineState\.servidorAlcanzable \}\);/);
   assert.equal(/!auth\.offline &&/.test(PROVIDER), false);
+  assert.equal(/ultimoResultado === RUN_RESULT\.ERROR/.test(PROVIDER), false);
 });
 
-// ---------------------------------------------------------------------
-// Bordes del temporizador
 // ---------------------------------------------------------------------
 
 function motorSimulado({ pendiente = true, proximo = null } = {}) {
@@ -568,9 +572,9 @@ test('25. caso A: 503 en pull, sesión offline y outbox vacío se recupera solo'
   const a = await reconectarCon(e);
   assert.equal((await e.repo.listOutbox()).length, 0);
   assert.equal(a.engine.getState().ultimoResultado, RUN_RESULT.ERROR);
-  // E. la interfaz sigue OFFLINE.
-  assert.equal(a.online(), false);
-  assert.equal(await a.barra(), 'OFFLINE');
+  // E. el servidor contestó: ONLINE + ERROR, nunca OFFLINE.
+  assert.equal(a.online(), true);
+  assert.equal(await a.barra(), 'ERROR');
   // F-G. el servidor vuelve a 200 y hay un reintento automático programado.
   e.red.falloGet = null;
   assert.deepEqual(a.t.esperas(), [2_000]);
@@ -660,7 +664,8 @@ for (const status of [408, 429, 503]) {
     assert.equal(e.intentosPost.length, 1);
     const [op] = await e.repo.listOutbox();
     assert.equal(op.estado, OUTBOX_ESTADOS.ERROR_REINTENTABLE);
-    assert.equal(a.online(), false);
+    assert.equal(a.online(), true);
+    assert.equal(await a.barra(), 'ERROR');
     assert.deepEqual(a.t.esperas(), [2_000]);
     e.red.falloPost = null;
     await a.t.disparar();
@@ -695,6 +700,7 @@ test('33. fallo transitorio al verificar la sesión: reintenta y envía una sola
   e.red.falloGet = (pathname) => (pathname === SESSION_PATH ? { status: 503 } : null);
   const a = await reconectarCon(e);
   assert.equal(a.engine.getState().ultimoResultado, RUN_RESULT.ERROR);
+  assert.equal(a.online(), true, 'la verificación recibió respuesta HTTP');
   assert.equal(e.intentosPost.length, 0);
   assert.deepEqual(a.t.esperas(), [2_000]);
   e.red.falloGet = null;
@@ -711,6 +717,7 @@ test('34. fallo definitivo al verificar la sesión: sin sondeo', async () => {
   e.red.falloGet = (pathname) => (pathname === SESSION_PATH ? { status: 400 } : null);
   const a = await reconectarCon(e);
   assert.equal(a.engine.getState().ultimoResultado, RUN_RESULT.ERROR);
+  assert.equal(a.online(), true, 'la verificación recibió respuesta HTTP');
   assert.equal(a.engine.reconexionPendiente(), false);
   assert.deepEqual(a.t.esperas(), []);
   a.auto.stop();
@@ -722,6 +729,7 @@ test('35. sesión 401 al verificarla: SESION_REQUERIDA y sin sondeo', async () =
   e.red.falloGet = (pathname) => (pathname === SESSION_PATH ? { status: 401 } : null);
   const a = await reconectarCon(e);
   assert.equal(a.engine.getState().ultimoResultado, RUN_RESULT.SESION_REQUERIDA);
+  assert.equal(a.online(), true, 'la verificación recibió respuesta HTTP');
   assert.deepEqual(a.t.esperas(), []);
   a.auto.stop();
 });
@@ -829,5 +837,251 @@ test('42. perder la red tras confirmarla reactiva la señal, aunque el siguiente
   assert.equal(a.engine.getState().reconexionNecesaria, true);
   e.red.navegador = true;
   assert.equal(a.engine.reconexionPendiente(), true);
+  a.auto.stop();
+});
+
+// ---------------------------------------------------------------------
+// OFFLINE es falta de red; una respuesta HTTP confirma la conectividad
+// ---------------------------------------------------------------------
+
+const etiqueta = async (e, a) => {
+  const s = a.engine.getState();
+  const stats = await e.repo.contar();
+  return computeSyncIndicator({ online: a.online(), enCurso: s.enCurso, pendientes: stats.pendientes ?? 0, conflictos: stats.conflictos ?? 0, ultimoResultado: s.ultimoResultado, ultimaSyncOk: stats.ultimaSyncOk ?? null }).etiqueta;
+};
+
+test('43. status 0 -> OFFLINE y sondeo, con o sin sesión reconstruida', async () => {
+  for (const sesionOffline of [true, false]) {
+    const e = escenario();
+    e.red.servidor = false;
+    const a = await reconectarCon(e, { sesionOffline });
+    assert.equal(a.engine.getState().servidorAlcanzable, false);
+    assert.equal(a.online(), false);
+    assert.equal(await a.barra(), 'OFFLINE');
+    assert.deepEqual(a.t.esperas(), [2_000]);
+    a.auto.stop();
+  }
+});
+
+for (const status of [408, 429, 500, 503]) {
+  test(`44. ${status} con respuesta HTTP -> ONLINE + ERROR y reintenta`, async () => {
+    const e = escenario();
+    e.red.falloGet = soloPull({ status });
+    const a = await reconectarCon(e);
+    assert.equal(a.engine.getState().servidorAlcanzable, true);
+    assert.equal(a.online(), true);
+    assert.equal(await etiqueta(e, a), 'ERROR DE SINCRONIZACIÓN');
+    assert.deepEqual(a.t.esperas(), [2_000]);
+    a.auto.stop();
+  });
+}
+
+for (const [nombre, respuesta] of [
+  ['400', { status: 400, data: { error: 'VALIDACION' } }],
+  ['403 de rol', { status: 403, data: { error: 'ROLE_FORBIDDEN' } }],
+  ['404', { status: 404, data: { error: 'NO_ENCONTRADO' } }],
+  ['409', { status: 409, data: { error: 'CONFLICTO' } }],
+]) {
+  test(`45. ${nombre} en pull -> ONLINE + ERROR, sin reintento y con sesión reconstruida`, async () => {
+    const e = escenario();
+    e.red.falloGet = soloPull(respuesta);
+    const a = await reconectarCon(e);
+    assert.equal(a.engine.getState().servidorAlcanzable, true);
+    assert.equal(a.engine.getState().reconexionNecesaria, false);
+    assert.equal(a.online(), true);
+    assert.equal(await etiqueta(e, a), 'ERROR DE SINCRONIZACIÓN');
+    assert.deepEqual(a.t.esperas(), []);
+    a.auto.stop();
+  });
+}
+
+test('46. 401 -> ONLINE + INICIA SESIÓN, nunca OFFLINE', async () => {
+  const e = escenario();
+  e.red.falloGet = soloPull({ status: 401 });
+  const a = await reconectarCon(e);
+  assert.equal(a.online(), true);
+  assert.equal(await etiqueta(e, a), 'ERROR DE SINCRONIZACIÓN — INICIA SESIÓN');
+  assert.deepEqual(a.t.esperas(), []);
+  a.auto.stop();
+});
+
+for (const status of [404, 409]) {
+  test(`47. ${status} de negocio en el POST -> ONLINE + CONFLICTO, sin reintento ni reenvío`, async () => {
+    const e = escenario();
+    await registrar(e.repo);
+    e.red.falloPost = () => ({ status, data: { error: 'NEGOCIO' } });
+    const a = await reconectarCon(e);
+    assert.equal(a.online(), true);
+    assert.equal(await etiqueta(e, a), 'CONFLICTO DE SINCRONIZACIÓN');
+    assert.equal(e.intentosPost.length, 1);
+    assert.deepEqual(a.t.esperas(), []);
+    a.auto.stop();
+  });
+}
+
+for (const [nombre, respuesta] of [
+  ['400', { status: 400, data: { error: 'VALIDACION' } }],
+  ['403 de rol', { status: 403, data: { error: 'ROLE_FORBIDDEN' } }],
+]) {
+  test(`48. ${nombre} en el POST -> ONLINE, rechazo sin reintento ni reenvío`, async () => {
+    const e = escenario();
+    await registrar(e.repo);
+    e.red.falloPost = () => respuesta;
+    const a = await reconectarCon(e);
+    assert.equal(a.online(), true);
+    assert.equal(await a.barra() === 'OFFLINE', false);
+    assert.equal((await e.repo.listOutbox())[0].estado, OUTBOX_ESTADOS.RECHAZADO);
+    assert.equal(e.intentosPost.length, 1);
+    assert.deepEqual(a.t.esperas(), []);
+    a.auto.stop();
+  });
+}
+
+test('49. 200 -> ONLINE y limpia el error', async () => {
+  const e = escenario();
+  e.red.falloGet = soloPull({ status: 400, data: { error: 'VALIDACION' } });
+  const a = await reconectarCon(e);
+  assert.equal(await etiqueta(e, a), 'ERROR DE SINCRONIZACIÓN');
+  e.red.falloGet = null;
+  a.win.dispatchEvent(new Event('online'));
+  await asentar();
+  assert.equal(a.online(), true);
+  assert.equal(await etiqueta(e, a), 'ONLINE — SINCRONIZADO');
+  assert.equal(a.engine.getState().reconexionNecesaria, false);
+  assert.deepEqual(a.t.esperas(), []);
+  a.auto.stop();
+});
+
+test('50. perder el servidor tras confirmarlo vuelve a OFFLINE y sondea', async () => {
+  const e = escenario();
+  const a = await reconectarCon(e);
+  assert.equal(a.online(), true);
+  e.red.servidor = false;
+  await a.auto.trigger('operacion');
+  await asentar();
+  assert.equal(a.engine.getState().servidorAlcanzable, false);
+  assert.equal(a.online(), false);
+  assert.deepEqual(a.t.esperas(), [2_000]);
+  a.auto.stop();
+});
+
+test('51. sesión con 200 y POST sin respuesta: manda el último contacto, OFFLINE', async () => {
+  const e = escenario();
+  await encolarReproduccion(e);
+  const original = e.transport.postJson;
+  e.transport.postJson = async () => { throw new TypeError('Failed to fetch'); };
+  const a = await reconectarCon(e);
+  assert.equal(a.engine.getState().ultimoResultado, RUN_RESULT.OFFLINE);
+  assert.equal(a.online(), false);
+  e.transport.postJson = original;
+  a.auto.stop();
+});
+
+test('52. sin red del navegador es OFFLINE aunque el servidor hubiera contestado', async () => {
+  const e = escenario();
+  const a = await reconectarCon(e);
+  assert.equal(a.engine.getState().servidorAlcanzable, true);
+  e.red.navegador = false;
+  assert.equal(a.online(), false);
+  await a.auto.trigger('operacion');
+  assert.equal(a.engine.getState().servidorAlcanzable, false);
+  a.auto.stop();
+});
+
+test('53. un fallo del pull reproductivo no desmiente un ciclo correcto', async () => {
+  const e = escenario();
+  const original = e.transport.getJson;
+  e.transport.getJson = async (pathname) => {
+    if (pathname.startsWith('/api/ganaderia/sync/reproduccion')) return { ok: false, status: 0, failure: 'NETWORK_ERROR', data: null };
+    return original(pathname);
+  };
+  const a = await reconectarCon(e);
+  assert.equal(a.engine.getState().ultimoResultado, RUN_RESULT.OK);
+  assert.equal(a.engine.getState().servidorAlcanzable, true);
+  assert.equal(a.online(), true);
+  a.auto.stop();
+});
+
+test('54. error local tras un 200 -> ONLINE + ERROR; antes de contactar no confirma nada', async () => {
+  const e = escenario();
+  e.repo.aplicarPull = async () => { throw new Error('dato local corrupto'); };
+  const a = await reconectarCon(e);
+  assert.equal(a.engine.getState().servidorAlcanzable, true);
+  assert.equal(a.online(), true);
+  assert.equal(await etiqueta(e, a), 'ERROR DE SINCRONIZACIÓN');
+  a.auto.stop();
+
+  const f = escenario();
+  f.repo.listOutbox = async () => { throw new Error('base local dañada'); };
+  const engine = createSyncEngine({ repo: f.repo, transport: f.transport, isOnline: f.isOnline, now: f.now });
+  assert.equal(await engine.syncNow(), RUN_RESULT.ERROR);
+  assert.equal(engine.getState().servidorAlcanzable, false);
+});
+
+test('55. un error local sin llamadas conserva la conectividad ya confirmada', async () => {
+  const e = escenario();
+  const engine = createSyncEngine({ repo: e.repo, transport: e.transport, isOnline: e.isOnline, now: e.now });
+  assert.equal(await engine.syncNow(), RUN_RESULT.OK);
+  e.repo.listOutbox = async () => { throw new Error('base local dañada'); };
+  assert.equal(await engine.syncNow(), RUN_RESULT.ERROR);
+  assert.equal(engine.getState().servidorAlcanzable, true);
+});
+
+test('56. respuesta del transporte con status 0: no cuenta como contacto', async () => {
+  const e = escenario();
+  e.red.falloGet = soloPull({ status: 0, failure: 'NETWORK_ERROR' });
+  const a = await reconectarCon(e);
+  assert.equal(a.engine.getState().servidorAlcanzable, false);
+  assert.equal(a.online(), false);
+  a.auto.stop();
+});
+
+test('57. multipestaña con 400: un solo POST, sin sondeo en la que confirmó', async () => {
+  const e = escenario();
+  e.red.navegador = false;
+  await registrar(e.repo);
+  const locks = locksSimulados();
+  const lock = () => createNavigatorLock(syncLockName(ORG), locks);
+  const A = arrancar(e, { lock: lock() });
+  const B = arrancar(e, { lock: lock() });
+  await Promise.all([A.auto.primera, B.auto.primera]);
+  e.red.navegador = true;
+  e.red.falloPost = () => ({ status: 400, data: { error: 'VALIDACION' } });
+  A.win.dispatchEvent(new Event('online'));
+  B.win.dispatchEvent(new Event('online'));
+  await asentar();
+  assert.equal(e.intentosPost.length, 1);
+  assert.equal(A.online(), true);
+  assert.deepEqual(A.t.esperas(), []);
+  await B.t.disparar();
+  assert.equal(B.online(), true);
+  assert.equal(e.intentosPost.length, 1);
+  assert.deepEqual(B.t.esperas(), []);
+  A.auto.stop();
+  B.auto.stop();
+});
+
+test('58. un error local no recupera el contacto de un ciclo anterior que terminó sin red', async () => {
+  const e = escenario();
+  await encolarReproduccion(e);
+  e.transport.postJson = async () => { throw new TypeError('Failed to fetch'); };
+  const engine = createSyncEngine({ repo: e.repo, transport: e.transport, isOnline: e.isOnline, now: e.now });
+  assert.equal(await engine.syncNow(), RUN_RESULT.OFFLINE);
+  assert.equal(engine.getState().servidorAlcanzable, false);
+  e.repo.listOutbox = async () => { throw new Error('base local dañada'); };
+  assert.equal(await engine.syncNow(), RUN_RESULT.ERROR);
+  assert.equal(engine.getState().servidorAlcanzable, false);
+});
+
+test('59. status 0 sin clasificar como red (ERROR, no OFFLINE): tampoco confirma la conectividad', async () => {
+  const e = escenario();
+  await registrar(e.repo);
+  e.red.falloPost = () => ({ status: 0, failure: 'RESPUESTA_INVALIDA' });
+  const a = await reconectarCon(e);
+  assert.equal(a.engine.getState().ultimoResultado, RUN_RESULT.ERROR);
+  assert.equal(a.engine.getState().servidorAlcanzable, false);
+  assert.equal(a.online(), false);
+  assert.equal(await a.barra(), 'OFFLINE');
+  assert.deepEqual(a.t.esperas(), [2_000]);
   a.auto.stop();
 });
