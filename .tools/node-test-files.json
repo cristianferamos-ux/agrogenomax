@@ -186,6 +186,7 @@
   "src/modules/ganaderia/offline/__tests__/reproduccionConciliacion.test.js",
   "server/routes/__tests__/ganaderiaSyncReproduccionAuth.test.js",
   "server/services/__tests__/reproduccionSyncIntegration.test.js",
+  "server/services/__tests__/reproduccionMotorIntegration.test.js",
   "src/modules/ganaderia/engine/__tests__/reproduccionCompartida.test.js",
   "src/modules/ganaderia/offline/__tests__/serviceWorker.test.js",
   "src/modules/ganaderia/offline/__tests__/serviceWorkerCatastroxRegression.test.js",
