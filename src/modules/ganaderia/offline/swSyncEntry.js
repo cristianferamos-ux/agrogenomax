@@ -12,7 +12,21 @@ import { createIndexedDbStorage, openIndexedDb } from './storage.js';
 import { createLocalRepo } from './localRepo.js';
 import { createSyncEngine } from './syncEngine.js';
 import { leerPerfilOffline } from './offlineSession.js';
-import { browserTransport, createNavigatorLock, syncLockName } from './browserOffline.js';
+import { browserTransport, createNavigatorLock, esBaseMasNueva, syncLockName } from './browserOffline.js';
+
+// FASE 4E.1: el SW no espera indefinidamente un upgrade que otra pestaña impide.
+const SW_ESPERA_BLOQUEO_MS = 10_000;
+
+async function abrirBaseOrganizacion(organizacionId) {
+  try {
+    return createIndexedDbStorage(await openIndexedDb(indexedDB, orgDbName(organizacionId), ORG_DB_VERSION, ORG_STORES, { esperaBloqueoMs: SW_ESPERA_BLOQUEO_MS }));
+  } catch (error) {
+    // Upgrade impedido o base más nueva que este bundle: no se toca nada y la
+    // sincronización queda para la página. Nunca se reintenta en bucle.
+    if (error?.code === 'IDB_BLOQUEADA' || esBaseMasNueva(error)) return null;
+    throw error;
+  }
+}
 
 export async function pushDesdeServiceWorker() {
   const device = createIndexedDbStorage(await openIndexedDb(indexedDB, DEVICE_DB_NAME, DEVICE_DB_VERSION, DEVICE_STORES));
@@ -20,7 +34,8 @@ export async function pushDesdeServiceWorker() {
     const perfil = await leerPerfilOffline(device);
     const dispositivo = await device.get('dispositivo', 'dispositivo');
     if (!perfil || !dispositivo?.deviceId) return 'SIN_PERFIL';
-    const storage = createIndexedDbStorage(await openIndexedDb(indexedDB, orgDbName(perfil.organizacionId), ORG_DB_VERSION, ORG_STORES));
+    const storage = await abrirBaseOrganizacion(perfil.organizacionId);
+    if (!storage) return 'BASE_NO_DISPONIBLE';
     try {
       const repo = createLocalRepo(storage, { organizacionId: perfil.organizacionId, deviceId: dispositivo.deviceId });
       // `self.navigator.onLine` solo descarta lo evidente: si miente, el

@@ -7,13 +7,22 @@ import { DEVICE_DB_NAME, DEVICE_DB_VERSION, DEVICE_STORES, ORG_DB_VERSION, ORG_S
 import { createIndexedDbStorage, deleteIndexedDb, openIndexedDb } from './storage.js';
 import { createLocalRepo } from './localRepo.js';
 import { createSyncEngine } from './syncEngine.js';
-import { OUTBOX_ESTADOS } from './outbox.js';
+import { contarOutboxNoSincronizado } from './outbox.js';
 import { RUN_RESULT } from './syncEngine.js';
 
 export const browserTransport = Object.freeze({
   postJson: (path, body) => postJsonWithCsrf(path, body),
   getJson: (path) => getJsonWithSession(path),
 });
+
+// FASE 4E.1: textos del upgrade de la base local (ninguno expone detalles internos).
+export const MENSAJE_ACTUALIZACION_BLOQUEADA = 'Cierra otras pestañas de AgroGenomaX para actualizar el modo offline.';
+export const MENSAJE_REQUIERE_RECARGA = 'El modo offline se actualizó. Recarga esta página para continuar.';
+
+/** La base local es más nueva que este código (p. ej. pestaña antigua o rollback): los datos siguen intactos. */
+export function esBaseMasNueva(error) {
+  return error?.name === 'VersionError';
+}
 
 export function indexedDbDisponible() {
   return typeof indexedDB !== 'undefined';
@@ -23,15 +32,16 @@ export async function openDeviceStorage() {
   return createIndexedDbStorage(await openIndexedDb(indexedDB, DEVICE_DB_NAME, DEVICE_DB_VERSION, DEVICE_STORES));
 }
 
-export async function openOrgStorage(organizacionId) {
-  return createIndexedDbStorage(await openIndexedDb(indexedDB, orgDbName(organizacionId), ORG_DB_VERSION, ORG_STORES));
+/** `apertura`: onBlocked / onVersionChange / esperaBloqueoMs de openIndexedDb. */
+export async function openOrgStorage(organizacionId, apertura) {
+  return createIndexedDbStorage(await openIndexedDb(indexedDB, orgDbName(organizacionId), ORG_DB_VERSION, ORG_STORES, apertura));
 }
 
 /** Pendientes de una organización (para decidir purga), sin dejar la base abierta. */
-export async function contarPendientesOrg(organizacionId) {
-  const storage = await openOrgStorage(organizacionId);
+export async function contarPendientesOrg(organizacionId, apertura) {
+  const storage = await openOrgStorage(organizacionId, apertura);
   try {
-    return (await storage.getAll('outbox')).filter((op) => op.estado !== OUTBOX_ESTADOS.SINCRONIZADO).length;
+    return contarOutboxNoSincronizado(await storage.getAll('outbox'));
   } finally {
     await storage.close();
   }
@@ -65,8 +75,8 @@ export function createNavigatorLock(nombre, locks = globalThis.navigator?.locks)
     : locks.request(nombre, { ifAvailable: true }, (adquirido) => (adquirido ? fn() : RUN_RESULT.EN_CURSO)));
 }
 
-export async function createBrowserOffline({ organizacionId, deviceId, isOnline = isNavigatorOnline }) {
-  const storage = await openOrgStorage(organizacionId);
+export async function createBrowserOffline({ organizacionId, deviceId, isOnline = isNavigatorOnline, apertura }) {
+  const storage = await openOrgStorage(organizacionId, apertura);
   const repo = createLocalRepo(storage, { organizacionId, deviceId });
   const lock = createNavigatorLock(syncLockName(organizacionId));
   const engine = createSyncEngine({ repo, transport: browserTransport, isOnline, lock });
