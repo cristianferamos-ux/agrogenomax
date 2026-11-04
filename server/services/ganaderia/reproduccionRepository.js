@@ -70,7 +70,7 @@ const COLUMNAS = Object.freeze({
 const CAMPOS_DETALLE = Object.keys(COLUMNAS).filter((c) => !['tipoEvento', 'fechaEvento', 'horaEvento', 'observaciones'].includes(c));
 
 // Fechas/horas como texto (sin conversión de zona horaria del driver).
-const EVENTO_COLUMNS = `
+export const EVENTO_COLUMNS = `
   e.evento_id::text as evento_id,
   e.animal_id::text as animal_id,
   e.tipo_evento,
@@ -120,7 +120,7 @@ export function serializeEventoReproductivo(row) {
 }
 
 // Vista pública: sin los campos planos de detalle (ya están en `detalle`).
-function publico(evento) {
+export function eventoPublico(evento) {
   const out = { ...evento };
   for (const campo of CAMPOS_DETALLE) delete out[campo];
   return out;
@@ -167,7 +167,7 @@ export async function obtenerReproduccionAnimal(organizacionId, animalId, { hoy 
     const animal = await fetchAnimalRepro(client, animalId);
     if (!animal) return null;
     const eventos = await listEventosReproductivosEnTx(client, animalId);
-    return { ...resumen(animal, eventos, hoy), orden: 'ASCENDENTE', eventos: eventos.map(publico) };
+    return { ...resumen(animal, eventos, hoy), orden: 'ASCENDENTE', eventos: eventos.map(eventoPublico) };
   });
 }
 
@@ -302,7 +302,7 @@ async function existentePorOperacion(client, organizacionId, clientOperationId) 
 async function respuesta(client, animal, eventoId, hoy, extra = {}) {
   const eventos = await listEventosReproductivosEnTx(client, animal.animal_id);
   const evento = eventos.find((e) => e.eventoId === String(eventoId));
-  return { evento: publico(evento), estado: resumen(animal, eventos, hoy).estado, ...extra };
+  return { evento: eventoPublico(evento), estado: resumen(animal, eventos, hoy).estado, ...extra };
 }
 
 /**
@@ -434,7 +434,7 @@ export async function corregirEventoReproductivoIdempotente(organizacionId, anim
       if (existing.animal_id !== String(animalId) || existing.intent_hash !== intentHash) throw errorReused();
       const animal = await fetchAnimalRepro(client, existing.animal_id);
       return respuesta(client, animal, existing.evento_id, hoy, {
-        eventoCorregido: publico(await fetchEvento(client, eventoId)),
+        eventoCorregido: eventoPublico(await fetchEvento(client, eventoId)),
         yaExistia: true,
       });
     }
@@ -447,7 +447,7 @@ export async function corregirEventoReproductivoIdempotente(organizacionId, anim
       clientOperationId, intentHash, actorCuentaId, corrigeEventoId: eventoId,
     });
     return respuesta(client, animal, nuevoId, hoy, {
-      eventoCorregido: publico(await fetchEvento(client, eventoId)),
+      eventoCorregido: eventoPublico(await fetchEvento(client, eventoId)),
       yaExistia: false,
     });
   });

@@ -20,6 +20,13 @@
 //   409 ANIMAL_ANULADO | ANIMAL_YA_SALIDO | ANIMAL_YA_MUERTO | SEXO_INCOMPATIBLE |
 //       FECHA_ANTERIOR_A_HISTORIAL | EVENTO_NO_PERMITIDO_POR_ESTADO | EVENTO_YA_ANULADO |
 //       CLIENT_OPERATION_ID_REUSED
+//
+// FASE 4E.1 -- POST /eventos admite `identidadEsperada` { cuentaId, organizacionId }
+// (opcional, la envía el outbox offline): la cuenta que creó la operación. Solo se
+// COMPARA con la sesión, que sigue siendo la única fuente del tenant y del actor;
+// nunca se usa para escribir. Si no coincide, 409 IDENTIDAD_NO_COINCIDE ANTES de la
+// búsqueda idempotente y de cualquier escritura (el rol sigue siendo el primer
+// middleware de la ruta). No entra en el intent_hash: es del envío, no de la intención.
 import { Router } from 'express';
 import { createRequireGanaderiaCsrf, createRequireGanaderiaSession } from '../security/ganaderiaSession.js';
 import { createRequireAdministracion, createRequireOperacion } from '../security/ganaderiaPermisos.js';
@@ -67,6 +74,29 @@ function withIds(fn, { evento = false } = {}) {
   };
 }
 
+const esTextoDeIdentidad = (valor) => typeof valor === 'string' && valor.length > 0 && valor.length <= 64;
+
+function requireIdentidadEsperada(req, res, next) {
+  if (!req.body || typeof req.body !== 'object' || !Object.hasOwn(req.body, 'identidadEsperada')) {
+    next();
+    return;
+  }
+  res.setHeader('Cache-Control', 'no-store');
+  const { identidadEsperada, ...cuerpo } = req.body;
+  const claves = identidadEsperada && typeof identidadEsperada === 'object' ? Object.keys(identidadEsperada) : [];
+  if (claves.length !== 2 || !esTextoDeIdentidad(identidadEsperada.cuentaId) || !esTextoDeIdentidad(identidadEsperada.organizacionId)) {
+    res.status(400).json({ error: 'INVALID_IDENTIDAD_ESPERADA' });
+    return;
+  }
+  const { cuentaId, organizacionId } = req.ganaderiaAuth;
+  if (identidadEsperada.cuentaId !== cuentaId || identidadEsperada.organizacionId !== organizacionId) {
+    res.status(409).json({ error: 'IDENTIDAD_NO_COINCIDE', message: 'La operación pertenece a otra cuenta u organización.' });
+    return;
+  }
+  req.body = cuerpo;
+  next();
+}
+
 export default function createGanaderiaAnimalReproduccionRouter({
   appEnv,
   csrfServerSecret,
@@ -104,7 +134,7 @@ export default function createGanaderiaAnimalReproduccionRouter({
     res.json({ ok: true, ...data });
   }));
 
-  router.post('/eventos', requireOperacion, withIds(async (req, res, { hoy, horaAhora }) => {
+  router.post('/eventos', requireOperacion, requireIdentidadEsperada, withIds(async (req, res, { hoy, horaAhora }) => {
     const value = validateCrearEventoReproductivoBody(req.body, { hoy, horaAhora });
     const { organizacionId, cuentaId } = req.ganaderiaAuth;
     const result = await repo.registrarEventoReproductivoIdempotente(organizacionId, req.params.animalId, value, {

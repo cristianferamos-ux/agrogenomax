@@ -102,6 +102,95 @@ async function call(method, path, body, { org = ORG_A, rol = 'owner', csrf = 'va
 
 const P = '/animales/7/reproduccion';
 
+describe('FASE 4E.1: identidadEsperada en POST /eventos', () => {
+  const PROPIA = Object.freeze({ cuentaId: 'cuenta-1', organizacionId: ORG_A });
+
+  test('coincide: registra como la sesión; el campo no llega a la validación ni al repositorio', async () => {
+    const res = await call('POST', `${P}/eventos`, { ...CELO, identidadEsperada: PROPIA });
+    assert.equal(res.status, 201);
+    assert.equal(llamadas.length, 1);
+    const [org, animalId, value, contexto] = llamadas[0].args;
+    assert.equal(org, ORG_A);
+    assert.equal(animalId, '7');
+    assert.equal('identidadEsperada' in value, false);
+    assert.equal(contexto.actorCuentaId, 'cuenta-1');
+  });
+
+  test('la autoría sale solo de la sesión: el cliente no puede declarar registrado_por', async () => {
+    for (const campo of ['registrado_por', 'registradoPor', 'actorCuentaId', 'cuentaId']) {
+      const res = await call('POST', `${P}/eventos`, { ...CELO, identidadEsperada: PROPIA, [campo]: 'cuenta-2' });
+      assert.equal(res.status, 400, campo);
+      assert.equal(res.json.error, 'FORBIDDEN_FIELDS', campo);
+    }
+    assert.equal(llamadas.length, 0);
+  });
+
+  test('misma operación con y sin el campo: valor idéntico (no altera el intent_hash)', async () => {
+    await call('POST', `${P}/eventos`, { ...CELO, identidadEsperada: PROPIA });
+    await call('POST', `${P}/eventos`, CELO);
+    assert.deepEqual(llamadas[0].args[2], llamadas[1].args[2]);
+  });
+
+  test('otra cuenta de la misma organización: 409 sin tocar el repositorio', async () => {
+    const res = await call('POST', `${P}/eventos`, { ...CELO, identidadEsperada: { cuentaId: 'cuenta-2', organizacionId: ORG_A } });
+    assert.equal(res.status, 409);
+    assert.equal(res.json.error, 'IDENTIDAD_NO_COINCIDE');
+    assert.equal(llamadas.length, 0);
+  });
+
+  test('otra organización: 409 sin tocar el repositorio', async () => {
+    const res = await call('POST', `${P}/eventos`, { ...CELO, identidadEsperada: { cuentaId: 'cuenta-1', organizacionId: ORG_B } });
+    assert.equal(res.status, 409);
+    assert.equal(llamadas.length, 0);
+  });
+
+  test('la respuesta no revela la identidad de la sesión', async () => {
+    const res = await call('POST', `${P}/eventos`, { ...CELO, identidadEsperada: { cuentaId: 'cuenta-2', organizacionId: ORG_A } });
+    assert.doesNotMatch(res.text, /cuenta-1|cuenta-2/);
+    assert.doesNotMatch(res.text, new RegExp(ORG_A));
+  });
+
+  test('el rol sigue siendo lo primero: un lector de otra cuenta recibe 403 y nada se escribe', async () => {
+    const res = await call('POST', `${P}/eventos`, { ...CELO, identidadEsperada: { cuentaId: 'cuenta-2', organizacionId: ORG_A } }, { rol: 'lector' });
+    assert.equal(res.status, 403);
+    assert.equal(res.json.error, 'ROLE_FORBIDDEN');
+    assert.equal(llamadas.length, 0);
+  });
+
+  test('con la identidad correcta el rol sigue aplicando', async () => {
+    const res = await call('POST', `${P}/eventos`, { ...CELO, identidadEsperada: PROPIA }, { rol: 'lector' });
+    assert.equal(res.status, 403);
+    assert.equal(res.json.error, 'ROLE_FORBIDDEN');
+    assert.equal(llamadas.length, 0);
+  });
+
+  test('sesión y CSRF siguen antes que la identidad', async () => {
+    assert.equal((await call('POST', `${P}/eventos`, { ...CELO, identidadEsperada: PROPIA }, { org: null })).status, 401);
+    assert.equal((await call('POST', `${P}/eventos`, { ...CELO, identidadEsperada: PROPIA }, { csrf: 'none' })).status, 403);
+    assert.equal(llamadas.length, 0);
+  });
+
+  test('forma inválida: 400 sin tocar el repositorio', async () => {
+    for (const identidadEsperada of [null, 'x', [], {}, { cuentaId: 'cuenta-1' }, { cuentaId: 1, organizacionId: ORG_A }, { ...PROPIA, extra: 1 }, { cuentaId: 'c'.repeat(65), organizacionId: ORG_A }]) {
+      const res = await call('POST', `${P}/eventos`, { ...CELO, identidadEsperada });
+      assert.equal(res.status, 400, JSON.stringify(identidadEsperada));
+      assert.equal(res.json.error, 'INVALID_IDENTIDAD_ESPERADA');
+    }
+    assert.equal(llamadas.length, 0);
+  });
+
+  test('sin el campo: el registro online no cambia', async () => {
+    assert.equal((await call('POST', `${P}/eventos`, CELO)).status, 201);
+    assert.equal(llamadas.length, 1);
+  });
+
+  test('anular no admite el campo (4E.1 no cubre anular ni corregir)', async () => {
+    const res = await call('POST', `${P}/eventos/3/anular`, { ...ANULAR, identidadEsperada: PROPIA });
+    assert.equal(res.status, 400);
+    assert.equal(llamadas.length, 0);
+  });
+});
+
 describe('FASE 4A: sesión, CSRF y RBAC', () => {
   test('sin sesión -> 401 en lecturas y escrituras, sin tocar el repositorio', async () => {
     for (const [m, p, b] of [['GET', P], ['GET', `${P}/estado`], ['POST', `${P}/eventos`, CELO], ['POST', `${P}/eventos/3/anular`, ANULAR]]) {

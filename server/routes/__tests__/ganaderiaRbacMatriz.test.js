@@ -151,7 +151,7 @@ const LECTURAS = [
   '/predios', P, `${P}/potreros`, POT, `${POT}/ficha-productiva`, `${POT}/capacidad-pastoreo`,
   `${POT}/contexto-agroclimatico`, `${POT}/recomendacion-pastoreo`, `${POT}/descanso-reentrada`,
   `${CIC}/actual`, `${CIC}/historial`, `${CIC}/estado-operativo`, '/catalogo-pasturas',
-  '/categorias-productivas', '/catalogo-razas', '/sync/pull',
+  '/categorias-productivas', '/catalogo-razas', '/sync/pull', '/sync/reproduccion',
 ];
 
 before(() => {
