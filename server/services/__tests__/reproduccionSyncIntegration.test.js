@@ -1,6 +1,6 @@
 // FASE 4E.1 -- pull reproductivo contra un Postgres/PostGIS REAL con agx_app (RLS
 // FORCE): evento nuevo, anulación posterior, corrección, keyset con instantes
-// iguales, solape, confirmación tardía, totales, aislamiento y trazabilidad.
+// iguales, solape, confirmación tardía, conciliación, aislamiento y trazabilidad.
 // Mismas variables que reproduccionIntegration; se auto-omite si faltan o si 0026
 // no está aplicada.
 delete process.env.AGX_BUSINESS_DATABASE_URL;
@@ -17,6 +17,10 @@ import {
   validateCrearEventoReproductivoBody,
 } from '../ganaderia/reproduccionValidation.js';
 import { resolveFechaHoyNegocio } from '../ganaderia/motorDescansoAuto/businessTimezone.js';
+import { ORG_STORES } from '../../../src/modules/ganaderia/offline/offlineSchema.js';
+import { createMemoryStorage } from '../../../src/modules/ganaderia/offline/storage.js';
+import { createLocalRepo } from '../../../src/modules/ganaderia/offline/localRepo.js';
+import { OUTBOX_ESTADOS, REPRODUCCION_EVENTO_CREAR, claveOrdenAnimal, newOperation } from '../../../src/modules/ganaderia/offline/outbox.js';
 
 let dbAvailable = false;
 let adminPool;
@@ -398,6 +402,120 @@ describe('pull reproductivo: Postgres real', { skip: !dbAvailable }, () => {
 
   test('cursor inválido: 400 antes de abrir la transacción', async () => {
     await assert.rejects(pull(crypto.randomUUID(), 'x'), { code: 'INVALID_CURSOR', status: 400 });
+  });
+
+  describe('conciliación de punta a punta: POST real, pull real, repositorio local real', () => {
+    const CUENTA_B = '00000000-0000-4000-8000-0000000000bb';
+
+    async function dispositivoCon(org, animalId, cuerpo, clientOperationId, cambios = {}) {
+      const repoLocal = createLocalRepo(createMemoryStorage(ORG_STORES), { organizacionId: org, deviceId: 'd' });
+      const operacion = {
+        ...newOperation({
+          tipoOperacion: REPRODUCCION_EVENTO_CREAR, entidad: 'reproduccion_evento', localUuid: op(), clientOperationId,
+          payload: { animalId: String(animalId), evento: cuerpo }, deviceId: 'd', now: new Date(), uuid: op,
+          claveOrden: claveOrdenAnimal(animalId), origen: { organizacionId: org, cuentaId: ACTOR },
+        }),
+        estado: OUTBOX_ESTADOS.ERROR_REINTENTABLE,
+        posibleEnServidor: true,
+        ...cambios,
+      };
+      await repoLocal.storage.put('outbox', operacion);
+      return { repoLocal, operacion };
+    }
+
+    /** POST que llegó al servidor; el cliente no vio la respuesta. */
+    const postPerdido = (org, animalId, clientOperationId, cuerpo) => registrar(org, animalId, { clientOperationId, ...cuerpo });
+    const paginaDe = async (org, cuentaId) => ({ organizacionId: org, cuentaId, ...(await pull(org)) });
+
+    for (const [nombre, cuerpoDe] of [
+      ['CELO_OBSERVADO', () => ({ tipoEvento: 'CELO_OBSERVADO', fechaEvento: HOY, intensidadCelo: 'ALTA', metodoDeteccion: 'VISUAL', observaciones: '  nota\r\nsegunda  ' })],
+      ['SERVICIO_MONTA', (toro) => ({ tipoEvento: 'SERVICIO_MONTA', fechaEvento: HOY, tipoServicio: 'LIBRE', toroAnimalId: toro, horaEvento: '00:01' })],
+      ['INSEMINACION_ARTIFICIAL', () => ({ tipoEvento: 'INSEMINACION_ARTIFICIAL', fechaEvento: HOY, semenCodigo: ' PAJ   1 ', tecnico: ' Ana  María ', toroExterno: ' Gyr X ' })],
+      ['IATF', () => ({ tipoEvento: 'IATF', fechaEvento: HOY, protocoloIatf: ' J-Synch  6 ', semenCodigo: '  ' })],
+      ['TRANSFERENCIA_EMBRION', () => ({ tipoEvento: 'TRANSFERENCIA_EMBRION', fechaEvento: HOY, embrionCodigo: ' E-1 ', embrionRaza: 'Gyr  lechero', embrionDonadora: ' D ', toroExterno: ' P ', embrionEstadio: ' 7 ', embrionCalidad: ' 1 ', embrionConservacion: 'FRESCO', tecnico: ' T ' })],
+      ['DIAGNOSTICO_PRENEZ', () => ({ tipoEvento: 'DIAGNOSTICO_PRENEZ', fechaEvento: HOY, diagnosticoResultado: 'PRENADA', diagnosticoMetodo: 'ECOGRAFIA', diasGestacion: 45, tecnico: ' T ' })],
+      ['ABORTO', () => ({ tipoEvento: 'ABORTO', fechaEvento: HOY, diasGestacion: 90, abortoCausa: '  Causa   rara ' })],
+      ['PARTO', () => ({ tipoEvento: 'PARTO', fechaEvento: HOY, partoTipo: 'CESAREA', numeroCrias: 2 })],
+    ]) {
+      test(`${nombre}: respuesta perdida + pull real con la misma cuenta confirma, sin falso conflicto`, async () => {
+        const org = crypto.randomUUID();
+        const animalId = await seedAnimal(org);
+        const toro = await seedAnimal(org, { sexo: 'MACHO' });
+        const cuerpo = cuerpoDe(toro);
+        const id = op();
+        await postPerdido(org, animalId, id, cuerpo);
+        const { repoLocal } = await dispositivoCon(org, animalId, cuerpo, id);
+        await repoLocal.aplicarPullReproduccion(await paginaDe(org, ACTOR));
+        assert.deepEqual(await repoLocal.listOutbox(), []);
+        assert.equal((await repoLocal.listEventosReproductivos(animalId)).length, 1);
+      });
+    }
+
+    test('otra cuenta de la misma organización: no confirma, aunque coincidan id e intención', async () => {
+      const org = crypto.randomUUID();
+      const animalId = await seedAnimal(org);
+      const cuerpo = { tipoEvento: 'CELO_OBSERVADO', fechaEvento: HOY };
+      const id = op();
+      await postPerdido(org, animalId, id, cuerpo);
+      const { repoLocal, operacion } = await dispositivoCon(org, animalId, cuerpo, id);
+      await repoLocal.aplicarPullReproduccion(await paginaDe(org, CUENTA_B));
+      assert.deepEqual(await repoLocal.listOutbox(), [operacion]);
+    });
+
+    test('intención distinta con el mismo id: conflicto seguro y la base no cambia', async () => {
+      const org = crypto.randomUUID();
+      const animalId = await seedAnimal(org);
+      const id = op();
+      await postPerdido(org, animalId, id, { tipoEvento: 'CELO_OBSERVADO', fechaEvento: HOY, intensidadCelo: 'ALTA' });
+      const { repoLocal } = await dispositivoCon(org, animalId, { tipoEvento: 'CELO_OBSERVADO', fechaEvento: HOY, intensidadCelo: 'BAJA' }, id);
+      await repoLocal.aplicarPullReproduccion(await paginaDe(org, ACTOR));
+      assert.equal((await repoLocal.listOutbox())[0].estado, OUTBOX_ESTADOS.CONFLICTO);
+      assert.equal((await pull(org)).eventos[0].detalle.intensidadCelo, 'ALTA');
+    });
+
+    test('dos eventos iguales del mismo animal: solo el id exacto cierra la operación', async () => {
+      const org = crypto.randomUUID();
+      const animalId = await seedAnimal(org);
+      const cuerpo = { tipoEvento: 'CELO_OBSERVADO', fechaEvento: HOY };
+      await postPerdido(org, animalId, op(), cuerpo);
+      const id = op();
+      const { repoLocal, operacion } = await dispositivoCon(org, animalId, cuerpo, id);
+      await repoLocal.aplicarPullReproduccion(await paginaDe(org, ACTOR));
+      assert.deepEqual(await repoLocal.listOutbox(), [operacion]);
+      await postPerdido(org, animalId, id, cuerpo);
+      await repoLocal.aplicarPullReproduccion(await paginaDe(org, ACTOR));
+      assert.deepEqual(await repoLocal.listOutbox(), []);
+      assert.equal((await repoLocal.listEventosReproductivos(animalId)).length, 2);
+    });
+
+    test('creado y anulado antes del pull: la creación se concilia y queda ANULADO', async () => {
+      const org = crypto.randomUUID();
+      const animalId = await seedAnimal(org);
+      const cuerpo = { tipoEvento: 'CELO_OBSERVADO', fechaEvento: HOY };
+      const id = op();
+      const { evento } = await postPerdido(org, animalId, id, cuerpo);
+      await anular(org, animalId, evento.eventoId);
+      const { repoLocal } = await dispositivoCon(org, animalId, cuerpo, id);
+      await repoLocal.aplicarPullReproduccion(await paginaDe(org, ACTOR));
+      assert.deepEqual(await repoLocal.listOutbox(), []);
+      const [guardado] = await repoLocal.listEventosReproductivos(animalId);
+      assert.equal(guardado.estadoRegistro, 'ANULADO');
+      assert.equal(guardado.anulacion.motivo, 'Error de digitación');
+    });
+
+    test('un evento de corrección con ese id no cierra el registro', async () => {
+      const org = crypto.randomUUID();
+      const animalId = await seedAnimal(org);
+      const { evento } = await registrar(org, animalId);
+      const id = op();
+      const cuerpo = { tipoEvento: 'CELO_OBSERVADO', fechaEvento: HOY };
+      await repro.corregirEventoReproductivoIdempotente(org, animalId, evento.eventoId,
+        validateCorregirEventoReproductivoBody({ clientOperationId: id, motivo: 'Corrige', evento: cuerpo }, OPTS),
+        { actorCuentaId: ACTOR, hoy: HOY });
+      const { repoLocal } = await dispositivoCon(org, animalId, cuerpo, id);
+      await repoLocal.aplicarPullReproduccion(await paginaDe(org, ACTOR));
+      assert.equal((await repoLocal.listOutbox())[0].estado, OUTBOX_ESTADOS.CONFLICTO);
+    });
   });
 
   test('el pull no modifica ninguna fila', async () => {

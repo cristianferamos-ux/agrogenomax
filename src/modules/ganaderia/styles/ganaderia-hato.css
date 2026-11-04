@@ -1086,6 +1086,10 @@
 .gan-repro-badge-posparto { color: #c792ea; }
 .gan-repro-badge-activo { color: #9cff1a; }
 .gan-repro-badge-anulado { color: #ff6b6b; }
+.gan-repro-badge-pendiente { color: #ffc44d; }
+.gan-repro-badge-bloqueado { color: #ff9f80; }
+.gan-repro-pendientes { margin-top: 1.25rem; }
+.gan-repro-evento-pendiente { border-style: dashed; }
 
 .gan-repro-acciones {
   margin: 0;

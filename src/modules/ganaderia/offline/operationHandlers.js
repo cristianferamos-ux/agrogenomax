@@ -17,6 +17,13 @@
 // Solo animales YA confirmados por el servidor (animalId numérico): un
 // pesaje de un animal creado sin red no se encola (localRepo lo rechaza) y,
 // por defensa, request() devuelve null y nunca se envía.
+//
+// FASE 4E.1 -- REPRODUCCION_EVENTO_CREAR: POST .../reproduccion/eventos con el
+// cuerpo del registro online (buildCrearBody), el clientOperationId de la
+// operación e identidadEsperada (`origen`): el servidor la compara con la sesión
+// y responde 409 IDENTIDAD_NO_COINCIDE si la cookie cambió justo antes del POST.
+// Un runtime que no conoce un tipo NO falla: handlerDe devuelve null y el motor
+// conserva la operación.
 
 const ANIMAL_ID_SERVIDOR = /^[1-9]\d{0,17}$/;
 
@@ -53,10 +60,21 @@ export const OPERATION_HANDLERS = Object.freeze({
       : null),
     onSuccess: (repo, op, data) => repo.confirmarPesajeCreado(op, data.pesaje ?? null),
   },
+  REPRODUCCION_EVENTO_CREAR: {
+    request: (op) => (esAnimalIdServidor(op.payload?.animalId)
+      ? { path: `/api/ganaderia/animales/${encodeURIComponent(op.payload.animalId)}/reproduccion/eventos`, body: { ...op.payload.evento, clientOperationId: op.clientOperationId, identidadEsperada: op.origen } }
+      : null),
+    onSuccess: (repo, op, data) => repo.confirmarEventoReproductivoCreado(op, data.evento ?? null),
+  },
 });
 
+/** Manejador del tipo, o null si este runtime no lo conoce (nunca lanza). */
+export function handlerDe(tipoOperacion) {
+  return Object.hasOwn(OPERATION_HANDLERS, tipoOperacion) ? OPERATION_HANDLERS[tipoOperacion] : null;
+}
+
 export function handlerFor(tipoOperacion) {
-  const handler = OPERATION_HANDLERS[tipoOperacion];
+  const handler = handlerDe(tipoOperacion);
   if (!handler) throw new Error(`OPERACION_SIN_MANEJADOR:${tipoOperacion}`);
   return handler;
 }

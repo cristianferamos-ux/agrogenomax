@@ -48,7 +48,8 @@ test('motor genérico: manejadores registrables (no exclusivo de QR)', () => {
   const handlers = code(OFFLINE_DIR, 'operationHandlers.js');
   assert.match(handlers, /ANIMAL_CREAR:/);
   assert.match(handlers, /ANIMAL_CREAR_CON_CHAPETA:/);
-  assert.match(code(OFFLINE_DIR, 'syncEngine.js'), /const handler = handlerFor\(original\.tipoOperacion\);/);
+  assert.match(code(OFFLINE_DIR, 'syncEngine.js'), /const handler = handlerDe\(original\.tipoOperacion\);/);
+  assert.doesNotMatch(code(OFFLINE_DIR, 'syncEngine.js'), /handlerFor\(/, 'un tipo desconocido nunca corta el ciclo');
 });
 
 test('el motor nunca hace "last write wins": 409/404/410 -> CONFLICTO conservando el registro local', () => {

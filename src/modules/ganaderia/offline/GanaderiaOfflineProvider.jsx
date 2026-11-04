@@ -10,6 +10,7 @@ import {
   borrarBaseOrg,
   contarPendientesOrg,
   createBrowserOffline,
+  esBaseMasNueva,
   indexedDbDisponible,
   isNavigatorOnline,
   openDeviceStorage,
@@ -54,6 +55,7 @@ export function GanaderiaOfflineProvider({ children }) {
   const [stats, setStats] = useState(null);
   const [engineState, setEngineState] = useState({ enCurso: false, ultimoResultado: null });
   const [navigatorOnline, setNavigatorOnline] = useState(isNavigatorOnline());
+  const [intentoApertura, setIntentoApertura] = useState(0);
   const authRef = useRef(auth);
   authRef.current = auth;
 
@@ -75,6 +77,20 @@ export function GanaderiaOfflineProvider({ children }) {
     }
     let cancelado = false;
     let cleanup = () => {};
+    // FASE 4E.1: otra pestaña puede impedir el upgrade (la apertura sigue
+    // pendiente y continúa sola al cerrarse) o pedir que esta cierre su conexión.
+    const apertura = {
+      onBlocked: () => {
+        if (!cancelado) setInstancia({ status: 'actualizacion_bloqueada', repo: null, engine: null });
+      },
+      onVersionChange: () => {
+        if (cancelado) return;
+        cleanup();
+        cleanup = () => {};
+        setInstancia({ status: 'requiere_recarga', repo: null, engine: null });
+      },
+    };
+    const contarPendientes = (id) => contarPendientesOrg(id, { onBlocked: apertura.onBlocked });
     (async () => {
       try {
         const device = await openDeviceStorage();
@@ -84,12 +100,12 @@ export function GanaderiaOfflineProvider({ children }) {
           if (!authRef.current.offline) {
             // Sesión validada online: perfil offline + aislamiento por organización.
             await guardarPerfilOffline(device, authRef.current);
-            await activarOrganizacion(device, organizacionId, { contarPendientes: contarPendientesOrg, borrarBase: borrarBaseOrg });
+            await activarOrganizacion(device, organizacionId, { contarPendientes, borrarBase: borrarBaseOrg });
           }
         } finally {
           await device.close();
         }
-        const { storage, repo, engine } = await createBrowserOffline({ organizacionId, deviceId });
+        const { storage, repo, engine } = await createBrowserOffline({ organizacionId, deviceId, apertura });
         if (cancelado) {
           await storage.close();
           return;
@@ -106,15 +122,17 @@ export function GanaderiaOfflineProvider({ children }) {
           storage.close();
         };
         setInstancia({ status: 'listo', repo, engine, deviceId });
-      } catch {
-        if (!cancelado) setInstancia({ status: 'error', repo: null, engine: null });
+      } catch (error) {
+        if (!cancelado) setInstancia({ status: esBaseMasNueva(error) ? 'requiere_recarga' : 'error', repo: null, engine: null });
       }
     })();
     return () => {
       cancelado = true;
       cleanup();
     };
-  }, [organizacionId]);
+  }, [organizacionId, intentoApertura]);
+
+  const reintentarApertura = useCallback(() => setIntentoApertura((n) => n + 1), []);
 
   const online = navigatorOnline && !auth.offline && engineState.ultimoResultado !== RUN_RESULT.OFFLINE;
 
@@ -185,8 +203,9 @@ export function GanaderiaOfflineProvider({ children }) {
       }),
       syncNow,
       preparar,
+      reintentarApertura,
     };
-  }, [instancia, stats, online, engineState, syncNow, preparar]);
+  }, [instancia, stats, online, engineState, syncNow, preparar, reintentarApertura]);
 
   return <GanaderiaOfflineContext.Provider value={value}>{children}</GanaderiaOfflineContext.Provider>;
 }

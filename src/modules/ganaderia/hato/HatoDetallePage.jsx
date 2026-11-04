@@ -375,6 +375,8 @@ export default function HatoDetallePage() {
                 animal={animal}
                 visible={pestana === 'reproduccion'}
                 online={offline.online}
+                repoOffline={offline.repo}
+                syncNow={offline.syncNow}
                 onCambio={marcarActividad}
               />
             </div>
