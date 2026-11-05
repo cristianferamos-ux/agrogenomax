@@ -56,6 +56,7 @@
   "server/services/__tests__/reproduccionMotorIntegration.test.js",
   "src/modules/ganaderia/engine/__tests__/reproduccionCompartida.test.js",
   "server/services/__tests__/reproduccionRutaIntegration.test.js",
+  "server/services/__tests__/reproduccionAdministracionIntegration.test.js",
   "server/routes/__tests__/ganaderiaPotreroRecomendacionPastoreoAuth.test.js",
   "server/routes/__tests__/ganaderiaPotreroRecomendacionPastoreoValidation.test.js",
   "server/services/ganaderia/motorPastoreoAuto/__tests__/recomendacionPastoreoFormulas.test.js",

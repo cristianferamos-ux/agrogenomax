@@ -299,6 +299,28 @@ async function existentePorOperacion(client, organizacionId, clientOperationId) 
   return result.rows[0] ?? null;
 }
 
+/**
+ * FASE 4E.2A -- un id por operación, también entre tipos. Las dos columnas tienen
+ * índices únicos separados y ninguno ve al otro, así que la reutilización de un id
+ * entre registro y anulación se comprueba aquí, bajo el bloqueo de operación (misma
+ * clave para los tres tipos): dos peticiones con el mismo id nunca se cruzan. Se llama
+ * DESPUÉS de resolver el reintento exacto, para que un reintento legítimo siempre
+ * responda yaExistia, incluso sobre filas anteriores a esta comprobación.
+ *
+ * La corrección usa el mismo id en sus dos filas (anulación del original y registro
+ * del corrector): su reintento lo resuelve existentePorOperacion por intent_hash y
+ * nunca llega aquí.
+ */
+async function assertOperacionSinAnulacion(client, organizacionId, clientOperationId) {
+  const result = await client.query(
+    `select 1 from agx.reproduccion_eventos
+      where organizacion_id = $1 and anulacion_client_operation_id = $2
+      limit 1`,
+    [organizacionId, clientOperationId],
+  );
+  if (result.rows.length > 0) throw errorReused();
+}
+
 async function respuesta(client, animal, eventoId, hoy, extra = {}) {
   const eventos = await listEventosReproductivosEnTx(client, animal.animal_id);
   const evento = eventos.find((e) => e.eventoId === String(eventoId));
@@ -330,6 +352,7 @@ export async function registrarEventoReproductivoIdempotente(organizacionId, ani
       const animal = await fetchAnimalRepro(client, existing.animal_id);
       return respuesta(client, animal, existing.evento_id, hoy, { yaExistia: true });
     }
+    await assertOperacionSinAnulacion(client, organizacionId, clientOperationId);
 
     const animal = await bloquearAnimal(client, organizacionId, animalId, { operativo: true });
     await validarEventoContraAnimal(client, animal, evento);
@@ -407,6 +430,8 @@ export async function anularEventoReproductivoIdempotente(organizacionId, animal
       const animal = await fetchAnimalRepro(client, existing.animal_id);
       return respuesta(client, animal, existing.evento_id, hoy, { yaExistia: true });
     }
+    // FASE 4E.2A: el id ya registró un evento (creación o corrección).
+    if (await existentePorOperacion(client, organizacionId, value.clientOperationId)) throw errorReused();
 
     const animal = await bloquearAnimal(client, organizacionId, animalId, { operativo: false });
     await bloquearEvento(client, animalId, eventoId);
@@ -438,6 +463,8 @@ export async function corregirEventoReproductivoIdempotente(organizacionId, anim
         yaExistia: true,
       });
     }
+    // FASE 4E.2A: el id ya anuló un evento en una operación independiente.
+    await assertOperacionSinAnulacion(client, organizacionId, clientOperationId);
 
     const animal = await bloquearAnimal(client, organizacionId, animalId, { operativo: false });
     await validarEventoContraAnimal(client, animal, evento);

@@ -184,9 +184,91 @@ describe('FASE 4E.1: identidadEsperada en POST /eventos', () => {
     assert.equal(llamadas.length, 1);
   });
 
-  test('anular no admite el campo (4E.1 no cubre anular ni corregir)', async () => {
-    const res = await call('POST', `${P}/eventos/3/anular`, { ...ANULAR, identidadEsperada: PROPIA });
+});
+
+describe('FASE 4E.2A: identidadEsperada en anular y corregir', () => {
+  const PROPIA = Object.freeze({ cuentaId: 'cuenta-1', organizacionId: ORG_A });
+  const CASOS = Object.freeze([
+    { accion: 'anular', repo: 'anular', cuerpo: ANULAR, exito: 200 },
+    { accion: 'corregir', repo: 'corregir', cuerpo: { motivo: 'Dato erróneo', clientOperationId: OP_ID, evento: { tipoEvento: 'CELO_OBSERVADO', fechaEvento: '2026-10-01' } }, exito: 201 },
+  ]);
+
+  for (const { accion, repo, cuerpo, exito } of CASOS) {
+    const ruta = `${P}/eventos/3/${accion}`;
+    describe(accion, () => {
+      test('cliente sin el campo: mismo estado, cuerpo y repositorio', async () => {
+        const res = await call('POST', ruta, cuerpo);
+        assert.equal(res.status, exito);
+        assert.equal(res.json.ok, true);
+        assert.deepEqual(llamadas.map((l) => l.nombre), [repo]);
+      });
+
+      test('coincide: la validación y el repositorio reciben exactamente lo mismo que sin el campo', async () => {
+        const conCampo = await call('POST', ruta, { ...cuerpo, identidadEsperada: PROPIA });
+        const sinCampo = await call('POST', ruta, cuerpo);
+        assert.equal(conCampo.status, exito);
+        assert.equal(conCampo.text, sinCampo.text);
+        assert.deepEqual(llamadas[0].args.slice(0, 3), llamadas[1].args.slice(0, 3));
+        const [org, animalId, eventoId, value, contexto] = llamadas[0].args;
+        assert.deepEqual([org, animalId, eventoId], [ORG_A, '7', '3']);
+        assert.equal('identidadEsperada' in value, false);
+        assert.equal(contexto.actorCuentaId, 'cuenta-1');
+      });
+
+      for (const [nombre, identidadEsperada] of [
+        ['otra cuenta de la misma organización', { cuentaId: 'cuenta-2', organizacionId: ORG_A }],
+        ['otra organización', { cuentaId: 'cuenta-1', organizacionId: ORG_B }],
+      ]) {
+        test(`${nombre}: 409 sin tocar el repositorio ni revelar la sesión`, async () => {
+          const res = await call('POST', ruta, { ...cuerpo, identidadEsperada });
+          assert.equal(res.status, 409);
+          assert.equal(res.json.error, 'IDENTIDAD_NO_COINCIDE');
+          assert.equal(res.cache, 'no-store');
+          assert.equal(llamadas.length, 0);
+          assert.doesNotMatch(res.text, /cuenta-1|cuenta-2/);
+          assert.doesNotMatch(res.text, new RegExp(`${ORG_A}|${ORG_B}`));
+        });
+      }
+
+      test('el rol va antes que la identidad: un operador recibe 403, coincida o no', async () => {
+        for (const identidadEsperada of [PROPIA, { cuentaId: 'cuenta-2', organizacionId: ORG_A }]) {
+          const res = await call('POST', ruta, { ...cuerpo, identidadEsperada }, { rol: 'operador' });
+          assert.equal(res.status, 403);
+          assert.equal(res.json.error, 'ROLE_FORBIDDEN');
+        }
+        assert.equal(llamadas.length, 0);
+      });
+
+      test('sesión y CSRF siguen antes que la identidad', async () => {
+        assert.equal((await call('POST', ruta, { ...cuerpo, identidadEsperada: PROPIA }, { org: null })).status, 401);
+        assert.equal((await call('POST', ruta, { ...cuerpo, identidadEsperada: PROPIA }, { csrf: 'none' })).status, 403);
+        assert.equal(llamadas.length, 0);
+      });
+
+      test('forma inválida: 400 sin tocar el repositorio', async () => {
+        for (const identidadEsperada of [null, 'x', [], {}, { cuentaId: 'cuenta-1' }, { cuentaId: 1, organizacionId: ORG_A }, { ...PROPIA, extra: 1 }]) {
+          const res = await call('POST', ruta, { ...cuerpo, identidadEsperada });
+          assert.equal(res.status, 400, JSON.stringify(identidadEsperada));
+          assert.equal(res.json.error, 'INVALID_IDENTIDAD_ESPERADA');
+        }
+        assert.equal(llamadas.length, 0);
+      });
+
+      test('el cliente no puede declarar la autoría ni el tenant', async () => {
+        for (const campo of ['anulado_por', 'anuladoPor', 'actorCuentaId', 'cuentaId', 'organizacionId']) {
+          const res = await call('POST', ruta, { ...cuerpo, identidadEsperada: PROPIA, [campo]: 'cuenta-2' });
+          assert.equal(res.status, 400, campo);
+          assert.equal(res.json.error, 'FORBIDDEN_FIELDS', campo);
+        }
+        assert.equal(llamadas.length, 0);
+      });
+    });
+  }
+
+  test('corregir: identidadEsperada dentro de `evento` no es el campo: FORBIDDEN_FIELDS', async () => {
+    const res = await call('POST', `${P}/eventos/3/corregir`, { ...CASOS[1].cuerpo, evento: { ...CASOS[1].cuerpo.evento, identidadEsperada: PROPIA } });
     assert.equal(res.status, 400);
+    assert.equal(res.json.error, 'FORBIDDEN_FIELDS');
     assert.equal(llamadas.length, 0);
   });
 });
