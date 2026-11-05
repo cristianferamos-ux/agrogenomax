@@ -42,6 +42,12 @@ export function cuerpoPesaje(payload) {
   };
 }
 
+function rutaEventoAdministrado(op, accion) {
+  const { animalId, eventoId } = op.payload ?? {};
+  if (!esAnimalIdServidor(animalId) || !esAnimalIdServidor(eventoId)) return null;
+  return `/api/ganaderia/animales/${encodeURIComponent(animalId)}/reproduccion/eventos/${encodeURIComponent(eventoId)}/${accion}`;
+}
+
 export const OPERATION_HANDLERS = Object.freeze({
   ANIMAL_CREAR: {
     request: (op) => ({ path: '/api/ganaderia/animales', body: op.payload.animal }),
@@ -65,6 +71,20 @@ export const OPERATION_HANDLERS = Object.freeze({
       ? { path: `/api/ganaderia/animales/${encodeURIComponent(op.payload.animalId)}/reproduccion/eventos`, body: { ...op.payload.evento, clientOperationId: op.clientOperationId, identidadEsperada: op.origen } }
       : null),
     onSuccess: (repo, op, data) => repo.confirmarEventoReproductivoCreado(op, data.evento ?? null),
+  },
+  // FASE 4E.2B: solo salen con animal y evento reales del servidor; identidadEsperada
+  // la compara el servidor con la sesión (409 IDENTIDAD_NO_COINCIDE sin escribir).
+  REPRODUCCION_EVENTO_ANULAR: {
+    request: (op) => (rutaEventoAdministrado(op, 'anular')
+      ? { path: rutaEventoAdministrado(op, 'anular'), body: { motivo: op.payload.motivo, clientOperationId: op.clientOperationId, identidadEsperada: op.origen } }
+      : null),
+    onSuccess: (repo, op, data) => repo.confirmarAnulacionReproductiva(op, data.evento ?? null),
+  },
+  REPRODUCCION_EVENTO_CORREGIR: {
+    request: (op) => (rutaEventoAdministrado(op, 'corregir')
+      ? { path: rutaEventoAdministrado(op, 'corregir'), body: { motivo: op.payload.motivo, clientOperationId: op.clientOperationId, evento: op.payload.evento, identidadEsperada: op.origen } }
+      : null),
+    onSuccess: (repo, op, data) => repo.confirmarCorreccionReproductiva(op, data.evento ?? null, data.eventoCorregido ?? null),
   },
 });
 

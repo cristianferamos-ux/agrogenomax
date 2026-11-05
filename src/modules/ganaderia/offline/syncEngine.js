@@ -41,6 +41,10 @@
 //     estaba, porque no se puede enviar nada). La autoridad es el servidor: el
 //     POST lleva identidadEsperada y, si la cookie cambió tras la verificación,
 //     responde 409 IDENTIDAD_NO_COINCIDE sin escribir nada.
+// FASE 4E.2B -- REPRODUCCION_EVENTO_ANULAR y _CORREGIR entran en la misma cadena del
+// animal y con esta misma clasificación: 409 EVENTO_YA_ANULADO, 404 EVENTO_NOT_FOUND y
+// 409 CLIENT_OPERATION_ID_REUSED -> CONFLICTO; 400 -> RECHAZADO; 403 ROLE_FORBIDDEN ->
+// RECHAZADO conservando posibleEnServidor; nada de eso es un fallo de red.
 // Tipo desconocido (bundle antiguo): la operación se conserva, se marca
 // `runtimeNoSoporta` y nunca se descarta. Las operaciones sin claveOrden
 // conservan su comportamiento anterior.

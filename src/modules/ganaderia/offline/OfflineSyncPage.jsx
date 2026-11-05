@@ -7,11 +7,11 @@ import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
 import { useGanaderiaOffline } from './GanaderiaOfflineProvider.jsx';
 import { formatUltimaSync } from './OfflineStatusBar.jsx';
-import { OUTBOX_ESTADOS, REPRODUCCION_EVENTO_CREAR } from './outbox.js';
+import { OUTBOX_ESTADOS, esOperacionReproductiva } from './outbox.js';
 import { formatFecha, formatKg, formatMetodo } from '../hato/pesajesModel.js';
 import { mensajeBloqueoPesaje } from '../hato/pesajesOfflineModel.js';
 import { ETIQUETAS_TIPO_EVENTO, fechaHoraEvento } from '../hato/reproduccionModel.js';
-import { accionesEventoPendiente, estadoEventoPendiente } from '../hato/reproduccionOfflineModel.js';
+import { accionesEventoPendiente, estadoEventoPendiente, tituloOperacionPendiente } from '../hato/reproduccionOfflineModel.js';
 import { eventoPendienteDe } from './localRepo.js';
 import { useGanaderiaAuthOptional } from '../auth/GanaderiaAuthContext.jsx';
 import { MENSAJE_OFFLINE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
@@ -79,7 +79,9 @@ function EventoReproductivoItem({ op, animal, repo, online, syncNow, onDone }) {
   const [error, setError] = useState('');
   const pendiente = eventoPendienteDe(op);
   const estado = estadoEventoPendiente(pendiente);
-  const acciones = accionesEventoPendiente(pendiente, { cuentaId, puedeRegistrar: permisos.registrarReproduccion });
+  // La edición vive en la ficha, también la de una corrección.
+  const acciones = accionesEventoPendiente(pendiente, { cuentaId, puedeRegistrar: permisos.registrarReproduccion, puedeAdministrar: permisos.administrarReproduccion });
+  const titulo = tituloOperacionPendiente(pendiente) ?? ETIQUETAS_TIPO_EVENTO[pendiente.tipoEvento] ?? 'Evento reproductivo';
 
   async function ejecutar(accion, fallback) {
     setError('');
@@ -93,8 +95,8 @@ function EventoReproductivoItem({ op, animal, repo, online, syncNow, onDone }) {
 
   return (
     <li className="gan-offline-conflicto">
-      <strong>{ETIQUETAS_TIPO_EVENTO[pendiente.tipoEvento] ?? 'Evento reproductivo'} de {animal ? animal.numeroVisual || animal.nombre || 'animal sin identificar' : `animal ${pendiente.animalId}`}</strong>
-      <span>{fechaHoraEvento(pendiente)} · {estado.etiqueta}</span>
+      <strong>{titulo} de {animal ? animal.numeroVisual || animal.nombre || 'animal sin identificar' : `animal ${pendiente.animalId}`}</strong>
+      <span>{pendiente.fechaEvento ? `${fechaHoraEvento(pendiente)} · ` : ''}{estado.etiqueta}</span>
       <span>{estado.detalle}</span>
       <Link to={`/ganaderia/animales/${pendiente.animalId}`}>Ver ficha del animal</Link>
       {acciones.reintentar || acciones.cancelar ? (
@@ -215,13 +217,13 @@ export default function OfflineSyncPage() {
     const outbox = await offline.repo.listOutbox();
     const conAnimal = (ops) => Promise.all(ops.map(async (op) => ({
       op,
-      animal: op.tipoOperacion === 'PESAJE_CREAR' || op.tipoOperacion === REPRODUCCION_EVENTO_CREAR
+      animal: op.tipoOperacion === 'PESAJE_CREAR' || esOperacionReproductiva(op.tipoOperacion)
         ? await offline.repo.getAnimal(op.payload?.animalId)
         : await offline.repo.getAnimal(`local:${op.localUuid}`),
     })));
     setBloqueadas(await conAnimal(outbox.filter((op) => op.estado === OUTBOX_ESTADOS.CONFLICTO || op.estado === OUTBOX_ESTADOS.RECHAZADO)));
     setEsperandoCuenta(await conAnimal(outbox.filter((op) => op.estado === OUTBOX_ESTADOS.BLOQUEADA_POR_IDENTIDAD)));
-    setEventosEnCurso(await conAnimal(outbox.filter((op) => op.tipoOperacion === REPRODUCCION_EVENTO_CREAR
+    setEventosEnCurso(await conAnimal(outbox.filter((op) => esOperacionReproductiva(op.tipoOperacion)
       && [OUTBOX_ESTADOS.PENDIENTE, OUTBOX_ESTADOS.SINCRONIZANDO, OUTBOX_ESTADOS.ERROR_REINTENTABLE].includes(op.estado))));
   }, [offline.repo]);
 
@@ -252,7 +254,7 @@ export default function OfflineSyncPage() {
 
   const { stats } = offline;
   const itemBloqueado = ({ op, animal }) => {
-    if (op.tipoOperacion === REPRODUCCION_EVENTO_CREAR) {
+    if (esOperacionReproductiva(op.tipoOperacion)) {
       return <EventoReproductivoItem key={op.operationId} op={op} animal={animal} repo={offline.repo} online={offline.online} syncNow={offline.syncNow} onDone={cargar} />;
     }
     return op.tipoOperacion === 'PESAJE_CREAR'

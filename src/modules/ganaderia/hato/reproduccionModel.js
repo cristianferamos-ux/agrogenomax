@@ -299,15 +299,16 @@ export function crearOperacionesReproduccion(generarId) {
 // ---------------------------------------------------------------------------
 
 export const MENSAJE_REPRODUCCION_OFFLINE = 'Sin conexión. Registrar, anular o corregir eventos reproductivos requiere conexión.';
-export const MENSAJE_REGISTRO_SIN_CONEXION = 'Sin conexión: el evento se guardará en este dispositivo y se enviará al recuperar la señal. Anular o corregir requiere conexión.';
+export const MENSAJE_REGISTRO_SIN_CONEXION = 'Sin conexión: los cambios se guardarán en este dispositivo y se enviarán al recuperar la señal.';
 
 /**
  * Acciones visibles en la pestaña:
  *   registrar  operación (owner/admin/operador) + hembra ACTIVA EN_HATO
  *   administrar  owner/admin (anular / corregir) + registro ACTIVO
- *   habilitado  con conexión: anular y corregir nunca van al outbox (Fase 4E.2)
- *   registrarHabilitado  con conexión, o sin ella si el dispositivo ya descargó
- *                el historial reproductivo (registroLocal)
+ *   habilitado  con conexión
+ *   registrarHabilitado, administrarHabilitado  con conexión, o sin ella si el
+ *                dispositivo ya descargó el historial reproductivo (registroLocal):
+ *                anular y corregir van al outbox (FASE 4E.2B)
  */
 export function accionesReproduccion({ animal, sexo, puedeRegistrar, puedeAdministrar, online, registroLocal = false }) {
   const hembra = (sexo ?? animal?.sexo) === 'HEMBRA';
@@ -320,6 +321,7 @@ export function accionesReproduccion({ animal, sexo, puedeRegistrar, puedeAdmini
     administrar: Boolean(puedeAdministrar && hembra && activo),
     habilitado: Boolean(online),
     registrarHabilitado: Boolean(online || registroLocal),
+    administrarHabilitado: Boolean(online || registroLocal),
     aviso,
   };
 }
@@ -478,6 +480,7 @@ export const MENSAJES_ERROR_REPRODUCCION = Object.freeze({
   EVENTO_NO_PERMITIDO_POR_ESTADO: 'Este evento no es compatible con el estado reproductivo actual de la hembra.',
   EVENTO_YA_ANULADO: 'Este evento ya fue anulado o corregido.',
   EVENTO_NOT_FOUND: 'Este evento ya no está disponible. Actualiza el historial.',
+  IDENTIDAD_NO_COINCIDE: 'La sesión cambió en este dispositivo: esta operación no se envió. Recarga la página.',
   CLIENT_OPERATION_ID_REUSED: 'Esta operación ya se había usado con otros datos. Revisa el historial y vuelve a intentarlo.',
   INVALID_TORO: 'El toro indicado no es válido: debe ser un macho activo del hato.',
   INVALID_FECHA: 'Revisa la fecha: no puede ser futura ni anterior al nacimiento del animal.',

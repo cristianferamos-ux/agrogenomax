@@ -54,23 +54,29 @@ const acciones = (p, cuentaId = A, puedeRegistrar = true) => accionesEventoPendi
 // Disponibilidad
 // ---------------------------------------------------------------------------
 
-test('sin conexión con el historial descargado: registrar sí; anular y corregir no', () => {
+test('sin conexión con el historial descargado: registrar, anular y corregir van a la cola', () => {
   const a = accionesReproduccion({ animal: HEMBRA, puedeRegistrar: true, puedeAdministrar: true, online: false, registroLocal: true });
   assert.equal(a.registrarHabilitado, true);
+  assert.equal(a.administrarHabilitado, true);
   assert.equal(a.habilitado, false);
   assert.equal(a.aviso, MENSAJE_REGISTRO_SIN_CONEXION);
-  assert.match(MENSAJE_REGISTRO_SIN_CONEXION, /Anular o corregir requiere conexión/);
+  assert.doesNotMatch(MENSAJE_REGISTRO_SIN_CONEXION, /requiere conexión/);
 });
 
 test('sin conexión y sin historial descargado: nada, con su aviso', () => {
   const a = accionesReproduccion({ animal: HEMBRA, puedeRegistrar: true, puedeAdministrar: true, online: false, registroLocal: false });
   assert.equal(a.registrarHabilitado, false);
+  assert.equal(a.administrarHabilitado, false);
   assert.equal(a.aviso, MENSAJE_REPRODUCCION_OFFLINE);
 });
 
-test('la copia local no da permisos: el lector tampoco registra sin conexión', () => {
+test('la copia local no da permisos: el lector tampoco registra ni administra sin conexión', () => {
   const a = accionesReproduccion({ animal: HEMBRA, puedeRegistrar: false, puedeAdministrar: false, online: false, registroLocal: true });
   assert.equal(a.registrar, false);
+  assert.equal(a.administrar, false);
+  const o = accionesReproduccion({ animal: HEMBRA, puedeRegistrar: true, puedeAdministrar: false, online: false, registroLocal: true });
+  assert.equal(o.registrar, true);
+  assert.equal(o.administrar, false, 'operador: registra pero no administra');
 });
 
 test('destino: online sin pendientes va al servidor; sin red o con pendientes, a la cola', () => {
@@ -137,9 +143,13 @@ test('sin permiso actual no se ofrece reintentar', () => {
 test('cada estado se explica con texto, y lo incierto se avisa', () => {
   assert.equal(estadoEventoPendiente(pendiente(E.PENDIENTE)).etiqueta, 'Pendiente');
   assert.equal(estadoEventoPendiente(pendiente(E.SINCRONIZANDO)).etiqueta, 'Sincronizando');
-  assert.equal(estadoEventoPendiente(pendiente(E.BLOQUEADA_POR_IDENTIDAD)).etiqueta, 'Esperando su cuenta');
-  assert.equal(estadoEventoPendiente(pendiente(E.CONFLICTO)).etiqueta, 'No sincronizado');
+  assert.equal(estadoEventoPendiente(pendiente(E.BLOQUEADA_POR_IDENTIDAD)).etiqueta, 'Sesión requerida');
+  assert.equal(estadoEventoPendiente(pendiente(E.CONFLICTO)).etiqueta, 'Conflicto');
+  assert.equal(estadoEventoPendiente(pendiente(E.RECHAZADO)).etiqueta, 'Rechazado');
   assert.equal(estadoEventoPendiente(pendiente(E.RECHAZADO)).clase, 'bloqueado');
+  assert.equal(estadoEventoPendiente(pendiente(E.ERROR_REINTENTABLE, { ultimoError: { codigo: 'HTTP', status: 503, tipo: 'http' } })).etiqueta, 'Error temporal');
+  assert.equal(estadoEventoPendiente(pendiente(E.ERROR_REINTENTABLE, { ultimoError: { codigo: 'NETWORK_ERROR', status: 0, tipo: 'red' } })).etiqueta, 'Pendiente');
+  assert.equal(estadoEventoPendiente(pendiente(E.PENDIENTE, { ultimoError: { codigo: 'SESSION_EXPIRED', status: 401 } })).etiqueta, 'Sesión requerida');
   assert.match(estadoEventoPendiente(pendiente(E.ERROR_REINTENTABLE, { posibleEnServidor: true })).detalle, /Pudo haber llegado/);
 });
 
@@ -279,12 +289,42 @@ test('panel: la cuenta sale de la sesión y el registro va a la cola según el d
   assert.match(panel, /registroLocal: Boolean\(repoOffline\) && registroLocal/);
 });
 
-test('panel: anular y corregir siguen exigiendo conexión y no pasan por el repositorio local', () => {
-  assert.match(panel, /deshabilitado=\{modo\.accion === 'corregir' \? !acciones\.habilitado : false\}/);
-  assert.match(panel, /async function ejecutar\(accion, firma, enviar\) \{\s*if \(enviandoRef\.current \|\| !online\) return;/);
-  assert.match(panel, /ejecutar\('anular'/);
-  assert.match(panel, /ejecutar\('corregir'/);
-  assert.match(panel, /deshabilitado=\{!acciones\.habilitado\}\s*aviso=\{acciones\.aviso\}\s*onCancelar=\{cerrar\}/);
+test('panel 4E.2B: anular y corregir online solo sin cadena; con ella o sin red, a la cola', () => {
+  assert.match(panel, /deshabilitado=\{modo\.accion === 'corregir' \? !acciones\.administrarHabilitado : false\}/);
+  assert.match(panel, /deshabilitado=\{!acciones\.administrarHabilitado\}/);
+  assert.match(panel, /if \(await debeEncolarAdministrativa\(\)\) \{\s*encolarAdministrativa\(accion, firma\);\s*return;\s*\}\s*ejecutar\(accion, firma, enviar,/);
+  assert.match(panel, /enviarAdministrativa\('anular'/);
+  assert.match(panel, /enviarAdministrativa\('corregir'/);
+  assert.match(panel, /repoOffline\.cadenaReproductiva\(animalId\)/, 'la cadena se relee: otra pestaña pudo encolar');
+});
+
+test('panel 4E.2B: identidadEsperada sale de la sesión real, y el rol viaja al repositorio', () => {
+  assert.equal((panel.match(/identidadEsperadaDe\(auth\)/g) ?? []).length, 2);
+  assert.match(panel, /rol: permisos\.rol/);
+});
+
+test('panel 4E.2B: la advertencia usa el texto exacto y exige un clic de confirmación', () => {
+  assert.match(panel, /advertencia\?\.code === 'CORRECCION_DIFERIDA'/);
+  assert.match(panel, /<StatusMessage type="info">\{ADVERTENCIA_CORRECCION_DIFERIDA\}<\/StatusMessage>/);
+  assert.match(panel, /onClick=\{confirmarCorreccionDiferida\}/);
+  assert.match(panel, /encolarAdministrativa\('corregir', firmaOperacion\('corregir', \{ eventoId, form, motivo \}\), true\)/);
+});
+
+test('panel 4E.2B: un evento con operación pendiente no admite otra, y se señala', () => {
+  assert.match(panel, /operacionPendiente=\{operacionAdministrativaDe\(pendientes, evento\.eventoId\)\}/);
+  assert.equal((panel.match(/disabled=\{!habilitado \|\| ocupado \|\| bloqueadoPorOperacion\}/g) ?? []).length, 2);
+});
+
+test('panel 4E.2B: un fallo sin resultado definitivo se persiste con el mismo id', () => {
+  assert.match(panel, /ejecutar\(accion, firma, enviar, \(id, respuesta\) => conservarAdministrativa\(accion, id, respuesta\)\)/);
+  assert.match(panel, /persistenciaTrasFallo\(respuesta\)/);
+});
+
+test('panel 4E.2B: encolar nunca fuerza el envío; un fallo HTTP respeta su backoff', () => {
+  const cuerpo = (desde, hasta) => panel.slice(panel.indexOf(desde), panel.indexOf(hasta));
+  assert.doesNotMatch(cuerpo('function encolarAdministrativa(', 'async function conservarAdministrativa('), /syncNow/);
+  assert.doesNotMatch(cuerpo('function enviarEdicionCorreccion(', 'function confirmarAnular('), /syncNow/);
+  assert.match(panel, /if \(persistenciaTrasFallo\(respuesta\)\?\.fallo\?\.tipo !== 'http'\) syncNow\?\.\(\);/);
 });
 
 test('panel: los pendientes van en su sección y no entran en el estado ni en el historial confirmado', () => {
@@ -315,8 +355,8 @@ test('ficha: entrega al panel el repositorio y la sincronización', () => {
 });
 
 test('sincronización: distingue eventos reproductivos y no los trata como un animal local', () => {
-  assert.match(pagina, /op\.tipoOperacion === REPRODUCCION_EVENTO_CREAR\) \{\s*return <EventoReproductivoItem/);
-  assert.match(pagina, /op\.tipoOperacion === 'PESAJE_CREAR' \|\| op\.tipoOperacion === REPRODUCCION_EVENTO_CREAR\s*\? await offline\.repo\.getAnimal\(op\.payload\?\.animalId\)/);
+  assert.match(pagina, /esOperacionReproductiva\(op\.tipoOperacion\)\) \{\s*return <EventoReproductivoItem/);
+  assert.match(pagina, /op\.tipoOperacion === 'PESAJE_CREAR' \|\| esOperacionReproductiva\(op\.tipoOperacion\)\s*\? await offline\.repo\.getAnimal\(op\.payload\?\.animalId\)/);
 });
 
 test('sincronización: lista aparte lo que espera a su cuenta y no lo cuenta como conflicto', () => {
@@ -326,7 +366,7 @@ test('sincronización: lista aparte lo que espera a su cuenta y no lo cuenta com
 });
 
 test('sincronización: lista también lo pendiente, lo que se envía y lo reintentable, sin pintarlo como conflicto', () => {
-  assert.match(pagina, /op\.tipoOperacion === REPRODUCCION_EVENTO_CREAR\s*&& \[OUTBOX_ESTADOS\.PENDIENTE, OUTBOX_ESTADOS\.SINCRONIZANDO, OUTBOX_ESTADOS\.ERROR_REINTENTABLE\]\.includes\(op\.estado\)/);
+  assert.match(pagina, /esOperacionReproductiva\(op\.tipoOperacion\)\s*&& \[OUTBOX_ESTADOS\.PENDIENTE, OUTBOX_ESTADOS\.SINCRONIZANDO, OUTBOX_ESTADOS\.ERROR_REINTENTABLE\]\.includes\(op\.estado\)/);
   assert.match(pagina, /Eventos reproductivos por sincronizar/);
   assert.match(pagina, /gan-offline-conflictos gan-offline-en-curso/);
 });

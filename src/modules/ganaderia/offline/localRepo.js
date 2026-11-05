@@ -5,17 +5,27 @@
 // red vive como 'loc:<localUuid>' hasta que el servidor confirma su id.
 import {
   CODIGOS_SIN_REINTENTO,
+  ADVERTENCIA_CORRECCION_DIFERIDA,
   OUTBOX_ESTADOS,
+  REPRODUCCION_EVENTO_ANULAR,
+  REPRODUCCION_EVENTO_CORREGIR,
   REPRODUCCION_EVENTO_CREAR,
+  backoffMs,
+  claveOperacionAdministrativa,
   claveOrdenAnimal,
+  esOperacionAdministrativa,
+  esOperacionReproductiva,
   firmaIntencion,
   SINCRONIZANDO_LEASE_MS,
   identidadCoincide,
   instanteEnCadena,
   newOperation,
+  normalizarMotivo,
   ordenarOutbox,
   origenVerificable,
 } from './outbox.js';
+import { CONCILIACION, conciliarAnular, conciliarCorregir } from './reproduccionConciliacionAdmin.js';
+import { MENSAJE_OFFLINE_ROLE_FORBIDDEN, puedeEncolar } from '../auth/ganaderiaPermisos.js';
 import { normalizeCodigoChapeta, isQrToken } from '../hato/qrToken.js';
 import { errorConMensajeSeguro } from '../api/errorModel.js';
 import { compararEventos, evaluarRegistroLocal, intencionCoincide, primerBloqueoEnCadena } from '../engine/reproduccion.js';
@@ -88,6 +98,9 @@ export function eventoPendienteDe(op) {
     clientOperationId: op.clientOperationId,
     animalId: op.payload.animalId,
     ...op.payload.evento,
+    ...(esOperacionAdministrativa(op.tipoOperacion)
+      ? { tipoOperacion: op.tipoOperacion, eventoObjetivoId: op.payload.eventoId, motivo: op.payload.motivo }
+      : {}),
     cuentaOrigenId: op.origen?.cuentaId ?? null,
     estado: op.estado,
     posibleEnServidor: Boolean(op.posibleEnServidor),
@@ -114,11 +127,22 @@ function resultadoIncierto(op, ahora) {
 }
 
 // Un pendiente cuyo evento ya está confirmado (espera a su cuenta para cerrarse) no
-// se cuenta dos veces al evaluar un registro.
+// se cuenta dos veces al evaluar un registro. FASE 4E.2B: la cadena del animal incluye
+// ANULAR y CORREGIR para el orden, pero aquí se reconstruyen eventos de CREACIÓN: una
+// operación administrativa no es un evento nuevo que evaluar.
 const eventosCausales = (ops, confirmados) => {
   const confirmadas = new Set(confirmados.map((evento) => evento.clientOperationId));
-  return ops.filter((op) => ESTADOS_CAUSALES.includes(op.estado) && !confirmadas.has(op.clientOperationId)).map((op) => op.payload.evento);
+  return ops
+    .filter((op) => op.tipoOperacion === REPRODUCCION_EVENTO_CREAR && ESTADOS_CAUSALES.includes(op.estado) && !confirmadas.has(op.clientOperationId))
+    .map((op) => op.payload.evento);
 };
+
+const MENSAJE_CONCILIACION_DISTINTA = 'El servidor tiene este registro con datos distintos. Revísalo antes de continuar.';
+
+/** Intención de una operación administrativa, sin depender del orden de los campos. */
+const firmaAdministrativa = ({ tipoOperacion, payload }) => JSON.stringify([
+  tipoOperacion, payload.animalId, payload.eventoId, payload.motivo, payload.evento ? firmaIntencion(payload.evento) : null,
+]);
 
 /**
  * @param {object} storage  adaptador (storage.js)
@@ -452,9 +476,9 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
       if ('organizacionId' in body || 'organizacion_id' in body) throw localError('CAMPO_NO_PERMITIDO', 'La organización la resuelve el servidor.');
       const { clientOperationId, ...evento } = body;
 
-      const previa = (await storage.getAll('outbox')).find((op) => op.tipoOperacion === REPRODUCCION_EVENTO_CREAR && op.clientOperationId === clientOperationId);
+      const previa = (await storage.getAll('outbox')).find((op) => esOperacionReproductiva(op.tipoOperacion) && op.clientOperationId === clientOperationId);
       if (previa) {
-        if (previa.payload.animalId !== String(animalId) || firmaIntencion(previa.payload.evento) !== firmaIntencion(evento)) {
+        if (previa.tipoOperacion !== REPRODUCCION_EVENTO_CREAR || previa.payload.animalId !== String(animalId) || firmaIntencion(previa.payload.evento) !== firmaIntencion(evento)) {
           throw errorVisible('CLIENT_OPERATION_ID_REUSED', 'Esta operación ya se registró con datos distintos.');
         }
         return { operationId: previa.operationId, pendiente: eventoPendienteDe(previa), yaEncolado: true };
@@ -551,6 +575,130 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
     },
 
     /**
+     * FASE 4E.2B: encola una anulación o corrección de un evento YA confirmado. El rol
+     * se comprueba aquí solo como UX: la autoridad es el servidor. `origen` es la
+     * cuenta de la sesión y nunca se reasigna.
+     *
+     * Una sola operación administrativa por evento: la clave del outbox lo garantiza
+     * de forma atómica, también entre pestañas. Mismo clientOperationId con la misma
+     * intención es idempotente; con otra, CLIENT_OPERATION_ID_REUSED.
+     *
+     * Dos caminos:
+     *   diferida (sin red o con cadena pendiente): CORREGIR devuelve
+     *     { requiereConfirmacion, advertencia } hasta que el usuario confirme.
+     *   tras un intento online sin resultado: `fallo` { codigo, status, tipo } y
+     *     posibleEnServidor conservan el MISMO id y la incertidumbre del envío.
+     */
+    async encolarOperacionAdministrativa({
+      tipoOperacion, animalId, eventoId, motivo, evento = null, clientOperationId, cuentaId, rol,
+      confirmarAdvertencia = false, posibleEnServidor = false, fallo = null,
+    }) {
+      if (!esOperacionAdministrativa(tipoOperacion)) throw localError('OPERACION_DESCONOCIDA', 'Operación administrativa desconocida.');
+      if (!puedeEncolar(rol, tipoOperacion)) throw errorVisible('ROLE_FORBIDDEN', MENSAJE_OFFLINE_ROLE_FORBIDDEN);
+      if (!esIdServidor(animalId) || !esIdServidor(eventoId)) {
+        throw errorVisible('REPRODUCCION_REQUIERE_EVENTO_CONFIRMADO', 'Solo se puede anular o corregir un evento ya confirmado por el servidor.');
+      }
+      if (!cuentaId) throw localError('OPERACION_SIN_CUENTA', 'Falta la cuenta de la sesión.');
+      if (!clientOperationId) throw localError('OPERACION_SIN_ID', 'Falta clientOperationId.');
+      const esCorreccion = tipoOperacion === REPRODUCCION_EVENTO_CORREGIR;
+      if (esCorreccion && (!evento || typeof evento !== 'object' || 'organizacionId' in evento || 'organizacion_id' in evento)) {
+        throw localError('CAMPO_NO_PERMITIDO', 'La corrección no es válida.');
+      }
+      const motivoNormal = normalizarMotivo(motivo);
+      if (!motivoNormal) throw errorVisible('INVALID_MOTIVO', 'Indica el motivo.');
+
+      const payload = { animalId: String(animalId), eventoId: String(eventoId), motivo: motivoNormal, ...(esCorreccion ? { evento } : {}) };
+      const firma = firmaAdministrativa({ tipoOperacion, payload });
+      const reutilizada = (await storage.getAll('outbox')).find((op) => esOperacionReproductiva(op.tipoOperacion) && op.clientOperationId === clientOperationId);
+      if (reutilizada) {
+        if (reutilizada.tipoOperacion !== tipoOperacion || firmaAdministrativa(reutilizada) !== firma) {
+          throw errorVisible('CLIENT_OPERATION_ID_REUSED', 'Esta operación ya se registró con datos distintos.');
+        }
+        return { operationId: reutilizada.operationId, pendiente: eventoPendienteDe(reutilizada), yaEncolado: true };
+      }
+
+      const conocido = await storage.get('reproduccion_eventos', payload.eventoId);
+      // Tras un envío incierto se conserva siempre: es lo que permite reconciliarlo.
+      if (conocido?.estadoRegistro === 'ANULADO' && !posibleEnServidor) {
+        throw errorVisible('EVENTO_YA_ANULADO', 'Este evento ya fue anulado o corregido.');
+      }
+      if (esCorreccion && !fallo && !posibleEnServidor && !confirmarAdvertencia) {
+        return { requiereConfirmacion: true, advertencia: { code: 'CORRECCION_DIFERIDA', message: ADVERTENCIA_CORRECCION_DIFERIDA } };
+      }
+
+      const cadena = await repo.cadenaReproductiva(animalId);
+      const instante = instanteEnCadena(cadena, now());
+      const operationId = claveOperacionAdministrativa(payload.eventoId);
+      const nueva = {
+        ...newOperation({
+          tipoOperacion,
+          entidad: 'reproduccion_evento',
+          localUuid: uuid(),
+          clientOperationId,
+          payload,
+          deviceId,
+          now: instante,
+          uuid: () => operationId,
+          claveOrden: claveOrdenAnimal(animalId),
+          origen: { organizacionId, cuentaId },
+        }),
+        posibleEnServidor: Boolean(posibleEnServidor),
+        ...(fallo ? {
+          estado: OUTBOX_ESTADOS.ERROR_REINTENTABLE,
+          intentos: 1,
+          ultimoError: { codigo: fallo.codigo, mensaje: null, status: fallo.status ?? 0, tipo: fallo.tipo },
+          siguienteIntentoAt: fallo.tipo === 'red' ? null : new Date(now().getTime() + backoffMs(1)).toISOString(),
+        } : {}),
+      };
+      await storage.mutate('outbox', operationId, (actual) => {
+        if (actual) throw errorVisible('OPERACION_ADMINISTRATIVA_PENDIENTE', 'Este evento ya tiene una anulación o corrección pendiente en este dispositivo.');
+        return nueva;
+      });
+      notify();
+      return { operationId, pendiente: eventoPendienteDe(nueva), yaEncolado: false };
+    },
+
+    /**
+     * Edita una corrección que no llegó a enviarse con resultado incierto: misma
+     * operación y misma posición FIFO; con datos distintos, clientOperationId NUEVO.
+     * Con posibleEnServidor no se puede: el servidor pudo guardarla con esta intención.
+     * Un conflicto tampoco: el servidor ya decidió sobre el evento y editar no lo cambia.
+     */
+    async editarCorreccionPendiente({ operationId, motivo, evento, cuentaId, rol }) {
+      if (!puedeEncolar(rol, REPRODUCCION_EVENTO_CORREGIR)) throw errorVisible('ROLE_FORBIDDEN', MENSAJE_OFFLINE_ROLE_FORBIDDEN);
+      const motivoNormal = normalizarMotivo(motivo);
+      if (!motivoNormal) throw errorVisible('INVALID_MOTIVO', 'Indica el motivo.');
+      if (!evento || typeof evento !== 'object' || 'organizacionId' in evento || 'organizacion_id' in evento) throw localError('CAMPO_NO_PERMITIDO', 'La corrección no es válida.');
+      const clientOperationId = uuid();
+      let sinCambios = false;
+      const editada = await storage.mutate('outbox', operationId, (actual) => {
+        if (!actual || actual.tipoOperacion !== REPRODUCCION_EVENTO_CORREGIR) throw errorVisible('EVENTO_PENDIENTE_NO_ENCONTRADO', 'No hay una corrección pendiente con ese identificador.');
+        if (!identidadCoincide(actual, cuentaId)) throw errorVisible(OUTBOX_ESTADOS.BLOQUEADA_POR_IDENTIDAD, 'Esta corrección la registró otra cuenta: solo esa cuenta puede modificarla.');
+        if (actual.estado === OUTBOX_ESTADOS.SINCRONIZANDO) throw errorVisible('EVENTO_PENDIENTE_EN_CURSO', 'Esta corrección se está enviando: espera a que termine.');
+        if (actual.posibleEnServidor) throw errorVisible('EVENTO_ENVIO_INCIERTO', 'Esta corrección pudo haber llegado al servidor: se conserva hasta confirmarla y no se puede modificar.');
+        if (actual.estado === OUTBOX_ESTADOS.CONFLICTO) throw errorVisible('EVENTO_EN_CONFLICTO', 'El servidor ya decidió sobre este evento: revisa el historial y descarta la corrección.');
+        const payload = { ...actual.payload, motivo: motivoNormal, evento };
+        if (firmaAdministrativa({ tipoOperacion: actual.tipoOperacion, payload }) === firmaAdministrativa(actual)) {
+          sinCambios = true;
+          return undefined;
+        }
+        return {
+          ...actual,
+          clientOperationId,
+          payload,
+          estado: OUTBOX_ESTADOS.PENDIENTE,
+          intentos: 0,
+          ultimoError: null,
+          siguienteIntentoAt: null,
+          runtimeNoSoporta: null,
+          updatedAt: now().toISOString(),
+        };
+      });
+      if (!sinCambios) notify();
+      return { operationId, pendiente: eventoPendienteDe(editada), sinCambios };
+    },
+
+    /**
      * Cancela un evento pendiente solo en este dispositivo: no llama al backend.
      * Si pudo llegar al servidor se conserva para reconciliarlo; únicamente un
      * conflicto o rechazo se descarta, con confirmarIncierto (el usuario sabe que
@@ -558,7 +706,7 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
      */
     async cancelarEventoReproductivoPendiente(operationId, { cuentaId, confirmarIncierto = false } = {}) {
       await storage.mutate('outbox', operationId, (actual) => {
-        if (!actual || actual.tipoOperacion !== REPRODUCCION_EVENTO_CREAR) throw errorVisible('EVENTO_PENDIENTE_NO_ENCONTRADO', 'No hay un evento pendiente con ese identificador.');
+        if (!actual || !esOperacionReproductiva(actual.tipoOperacion)) throw errorVisible('EVENTO_PENDIENTE_NO_ENCONTRADO', 'No hay un evento pendiente con ese identificador.');
         if (!identidadCoincide(actual, cuentaId)) throw errorVisible(OUTBOX_ESTADOS.BLOQUEADA_POR_IDENTIDAD, 'Este evento lo registró otra cuenta: solo esa cuenta puede cancelarlo.');
         if (actual.estado === OUTBOX_ESTADOS.SINCRONIZANDO) throw errorVisible('EVENTO_PENDIENTE_EN_CURSO', 'Este evento se está enviando: espera a que termine.');
         if (actual.posibleEnServidor) {
@@ -578,7 +726,7 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
      */
     async reintentarEventoPendiente(operationId, { cuentaId } = {}) {
       await storage.mutate('outbox', operationId, (actual) => {
-        if (!actual || actual.tipoOperacion !== REPRODUCCION_EVENTO_CREAR) throw errorVisible('EVENTO_PENDIENTE_NO_ENCONTRADO', 'No hay un evento pendiente con ese identificador.');
+        if (!actual || !esOperacionReproductiva(actual.tipoOperacion)) throw errorVisible('EVENTO_PENDIENTE_NO_ENCONTRADO', 'No hay un evento pendiente con ese identificador.');
         if (!identidadCoincide(actual, cuentaId)) throw errorVisible(OUTBOX_ESTADOS.BLOQUEADA_POR_IDENTIDAD, 'Este evento lo registró otra cuenta: solo esa cuenta puede reintentarlo.');
         if (![OUTBOX_ESTADOS.CONFLICTO, OUTBOX_ESTADOS.RECHAZADO, OUTBOX_ESTADOS.ERROR_REINTENTABLE].includes(actual.estado)) {
           throw errorVisible('EVENTO_NO_REINTENTABLE', 'Este evento no necesita un reintento manual.');
@@ -620,6 +768,36 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
       const operaciones = [{ op: 'delete', store: 'outbox', key: op.operationId }];
       if (evento?.eventoId) {
         operaciones.push({ op: 'put', store: 'reproduccion_eventos', value: { ...evento, ...evento.detalle, clientOperationId: op.clientOperationId } });
+      }
+      await storage.batch(operaciones);
+      notify();
+    },
+
+    /**
+     * FASE 4E.2B: el servidor confirmó la anulación (200, nueva o yaExistia). La
+     * respuesta es la vista pública: se fusiona con la copia local para no perder el
+     * clientOperationId del evento y se deja la evidencia de qué operación lo anuló.
+     */
+    async confirmarAnulacionReproductiva(op, evento) {
+      const operaciones = [{ op: 'delete', store: 'outbox', key: op.operationId }];
+      if (evento?.eventoId) {
+        const existente = await storage.get('reproduccion_eventos', evento.eventoId);
+        operaciones.push({ op: 'put', store: 'reproduccion_eventos', value: { ...existente, ...evento, ...evento.detalle, anulacionClientOperationId: op.clientOperationId } });
+      }
+      await storage.batch(operaciones);
+      notify();
+    },
+
+    /** FASE 4E.2B: la corrección es una transacción: corrector y original entran juntos. */
+    async confirmarCorreccionReproductiva(op, corrector, original) {
+      const operaciones = [{ op: 'delete', store: 'outbox', key: op.operationId }];
+      if (corrector?.eventoId) {
+        const existente = await storage.get('reproduccion_eventos', corrector.eventoId);
+        operaciones.push({ op: 'put', store: 'reproduccion_eventos', value: { ...existente, ...corrector, ...corrector.detalle, clientOperationId: op.clientOperationId } });
+      }
+      if (original?.eventoId) {
+        const existente = await storage.get('reproduccion_eventos', original.eventoId);
+        operaciones.push({ op: 'put', store: 'reproduccion_eventos', value: { ...existente, ...original, ...original.detalle, anulacionClientOperationId: op.clientOperationId } });
       }
       await storage.batch(operaciones);
       notify();
@@ -790,6 +968,10 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
      * su cuenta la reenvía y el servidor responde yaExistia. Misma cuenta e intención
      * distinta: CONFLICTO, sin sobrescribir lo local. Un evento ya ANULADO también
      * cierra su creación, porque la creación ocurrió.
+     *
+     * FASE 4E.2B: ANULAR y CORREGIR se concilian con las mismas condiciones de identidad
+     * y con evidencia exacta (reproduccionConciliacionAdmin.js), sobre la página recibida
+     * aplicada a la copia local: corrector y original pueden llegar en páginas distintas.
      */
     async aplicarPullReproduccion(pagina) {
       if (pagina?.organizacionId !== organizacionId) throw localError('ORGANIZACION_DISTINTA', 'Los datos recibidos son de otra organización.');
@@ -798,13 +980,16 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
       }
       const operaciones = [];
       const ahora = now();
-      const porOperacion = new Map((await storage.getAll('outbox'))
-        .filter((op) => op.tipoOperacion === REPRODUCCION_EVENTO_CREAR
+      const conciliables = (await storage.getAll('outbox'))
+        .filter((op) => esOperacionReproductiva(op.tipoOperacion)
           && resultadoIncierto(op, ahora.getTime())
           && origenVerificable(op)
           && op.origen.organizacionId === organizacionId
-          && identidadCoincide(op, pagina.cuentaId))
+          && identidadCoincide(op, pagina.cuentaId));
+      const porOperacion = new Map(conciliables
+        .filter((op) => op.tipoOperacion === REPRODUCCION_EVENTO_CREAR)
         .map((op) => [op.clientOperationId, op]));
+      const administrativas = conciliables.filter((op) => esOperacionAdministrativa(op.tipoOperacion));
       for (const evento of pagina.eventos) {
         if (!evento?.eventoId || !evento.animalId) throw localError('PULL_REPRODUCCION_INVALIDO', 'Respuesta de sincronización no válida.');
         const existente = await storage.get('reproduccion_eventos', evento.eventoId);
@@ -820,7 +1005,7 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
               value: {
                 ...operacion,
                 estado: OUTBOX_ESTADOS.CONFLICTO,
-                ultimoError: { codigo: 'CONCILIACION_INTENCION_DISTINTA', mensaje: 'El servidor tiene este registro con datos distintos. Revísalo antes de continuar.', status: 0 },
+                ultimoError: { codigo: 'CONCILIACION_INTENCION_DISTINTA', mensaje: MENSAJE_CONCILIACION_DISTINTA, status: 0 },
                 siguienteIntentoAt: null,
                 updatedAt: ahora.toISOString(),
               },
@@ -830,6 +1015,32 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
         if (existente?.estadoRegistro === 'ANULADO' && evento.estadoRegistro !== 'ANULADO') continue;
         operaciones.push({ op: 'put', store: 'reproduccion_eventos', value: { ...evento, ...evento.detalle } });
       }
+      let administrativasCerradas = false;
+      for (const op of administrativas) {
+        const conocidos = new Map((await storage.getAllByIndex('reproduccion_eventos', 'animalId', op.payload.animalId)).map((evento) => [evento.eventoId, evento]));
+        for (const evento of pagina.eventos) {
+          const existente = conocidos.get(evento.eventoId);
+          if (existente?.estadoRegistro === 'ANULADO' && evento.estadoRegistro !== 'ANULADO') continue;
+          conocidos.set(evento.eventoId, { ...evento, ...evento.detalle });
+        }
+        const conciliar = op.tipoOperacion === REPRODUCCION_EVENTO_ANULAR ? conciliarAnular : conciliarCorregir;
+        const veredicto = conciliar(op, [...conocidos.values()]);
+        if (veredicto === CONCILIACION.SIN_EVIDENCIA) continue;
+        administrativasCerradas = true;
+        operaciones.push(veredicto === CONCILIACION.CONFIRMADA
+          ? { op: 'delete', store: 'outbox', key: op.operationId }
+          : {
+            op: 'put',
+            store: 'outbox',
+            value: {
+              ...op,
+              estado: OUTBOX_ESTADOS.CONFLICTO,
+              ultimoError: { codigo: 'CONCILIACION_INTENCION_DISTINTA', mensaje: MENSAJE_CONCILIACION_DISTINTA, status: 0 },
+              siguienteIntentoAt: null,
+              updatedAt: ahora.toISOString(),
+            },
+          });
+      }
       const meta = await getMeta();
       operaciones.push({
         op: 'put',
@@ -837,7 +1048,7 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
         value: { ...meta, reproduccionCursor: pagina.cursor, reproduccionUltimoError: null, ...(pagina.hayMas ? {} : { reproduccionSyncAt: now().toISOString() }) },
       });
       await storage.batch(operaciones);
-      if (pagina.eventos.length > 0) notify();
+      if (pagina.eventos.length > 0 || administrativasCerradas) notify();
       if (pagina.hayMas) return { hayMas: true, desfase: false };
 
       const locales = await storage.getAll('reproduccion_eventos');

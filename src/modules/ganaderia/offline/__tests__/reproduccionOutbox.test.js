@@ -102,17 +102,20 @@ test('permisos: operador puede encolar; lector no', () => {
   assert.equal(puedeEncolar('lector', REPRODUCCION_EVENTO_CREAR), false);
 });
 
-test('ANULAR y CORREGIR no existen offline en 4E.1', () => {
-  assert.equal(puedeEncolar('owner', 'REPRODUCCION_EVENTO_ANULAR'), false);
-  assert.equal(puedeEncolar('owner', 'REPRODUCCION_EVENTO_CORREGIR'), false);
-  const repo = fs.readFileSync(new URL('../localRepo.js', import.meta.url), 'utf8');
-  assert.doesNotMatch(repo, /REPRODUCCION_EVENTO_(ANULAR|CORREGIR)/);
+test('FASE 4E.2B: ANULAR y CORREGIR solo los encolan owner y admin', () => {
+  for (const tipo of ['REPRODUCCION_EVENTO_ANULAR', 'REPRODUCCION_EVENTO_CORREGIR']) {
+    assert.equal(puedeEncolar('owner', tipo), true, tipo);
+    assert.equal(puedeEncolar('admin', tipo), true, tipo);
+    assert.equal(puedeEncolar('operador', tipo), false, tipo);
+    assert.equal(puedeEncolar('lector', tipo), false, tipo);
+    assert.equal(puedeEncolar(null, tipo), false, tipo);
+  }
 });
 
-test('el panel encola solo el registro: anular y corregir no tienen camino al outbox', () => {
+test('el panel encola registro y administración por caminos distintos', () => {
   const panel = fs.readFileSync(new URL('../../hato/HatoReproduccionPanel.jsx', import.meta.url), 'utf8');
   assert.match(panel, /registrarEventoReproductivoLocal/);
-  assert.doesNotMatch(panel, /REPRODUCCION_EVENTO_(ANULAR|CORREGIR)|anular\w*Local|corregir\w*Local/i);
+  assert.match(panel, /encolarOperacionAdministrativa/);
 });
 
 // ---------------------------------------------------------------------------

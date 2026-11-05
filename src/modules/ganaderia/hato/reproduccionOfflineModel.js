@@ -4,10 +4,22 @@
 // PDF hasta que el servidor lo confirma. Estos permisos son solo UX: el repositorio
 // y el servidor vuelven a comprobar cuenta, estado y rol.
 import { derivarEstadoReproductivo } from '../engine/reproduccion.js';
-import { CODIGOS_SIN_REINTENTO, OUTBOX_ESTADOS } from '../offline/outbox.js';
+import {
+  ADVERTENCIA_CORRECCION_DIFERIDA,
+  CODIGOS_SIN_REINTENTO,
+  OUTBOX_ESTADOS,
+  REPRODUCCION_EVENTO_ANULAR,
+  REPRODUCCION_EVENTO_CORREGIR,
+  esErrorDeRed,
+  esOperacionAdministrativa,
+} from '../offline/outbox.js';
 import { MENSAJES_ERROR_REPRODUCCION, ordenarHistorial, torosDesdeListado } from './reproduccionModel.js';
 
+export { ADVERTENCIA_CORRECCION_DIFERIDA };
 export const MENSAJE_EVENTO_PENDIENTE = 'Evento guardado en este dispositivo. Está pendiente de sincronización y aún no cuenta para el estado reproductivo.';
+export const MENSAJE_ANULACION_PENDIENTE = 'Anulación guardada en este dispositivo. Está pendiente de sincronización y el evento sigue contando hasta que el servidor la confirme.';
+export const MENSAJE_CORRECCION_PENDIENTE = `Corrección guardada en este dispositivo. ${ADVERTENCIA_CORRECCION_DIFERIDA}`;
+export const MENSAJE_ADMIN_NO_CONFIRMADA = 'No se recibió confirmación del servidor. La operación se conservó en este dispositivo y se reintentará con el mismo identificador.';
 export const MENSAJE_GUARDADO_LOCAL = 'No se pudo guardar el evento en este dispositivo. Intenta nuevamente.';
 export const TEXTO_COPIA_LOCAL = 'Copia guardada en este dispositivo: puede no incluir los últimos cambios del servidor.';
 export const TEXTO_PENDIENTES_NO_CUENTAN = 'Aún no están confirmados: no cambian el estado reproductivo ni la fecha probable de parto.';
@@ -21,8 +33,10 @@ const BLOQUEOS_IDENTIDAD = Object.freeze({
 const BLOQUEOS_SERVIDOR = Object.freeze({
   CONCILIACION_INTENCION_DISTINTA: 'El servidor tiene este registro con datos distintos. Revísalo en la ficha antes de descartarlo.',
   CLIENT_OPERATION_ID_REUSED: 'Este registro ya existe en el servidor con otros datos.',
-  ROLE_FORBIDDEN: 'Tu rol actual no permite registrar eventos reproductivos.',
+  ROLE_FORBIDDEN: 'Tu rol actual no permite esta operación reproductiva.',
 });
+
+const SESION_EXPIRADA = new Set(['SESSION_EXPIRED', 'CSRF_REJECTED']);
 
 /** Motivo de un evento que no se sincronizó (nunca el `message` del servidor). */
 export function mensajeBloqueoReproduccion(codigo) {
@@ -32,39 +46,91 @@ export function mensajeBloqueoReproduccion(codigo) {
     ?? 'El servidor no aceptó este evento.';
 }
 
-/** Presentación del estado de un evento pendiente (texto, no solo color). */
+/**
+ * Presentación del estado de un pendiente (texto, no solo color). Un HTTP 400, 403,
+ * 404, 409 o 5xx nunca se presenta como falta de conexión: el servidor contestó.
+ */
 export function estadoEventoPendiente(pendiente) {
   const incierto = pendiente?.posibleEnServidor ? ' Pudo haber llegado al servidor: se confirmará al sincronizar.' : '';
   switch (pendiente?.estado) {
     case OUTBOX_ESTADOS.SINCRONIZANDO:
       return { etiqueta: 'Sincronizando', detalle: 'Enviando al servidor...', clase: 'pendiente' };
     case OUTBOX_ESTADOS.ERROR_REINTENTABLE:
-      return { etiqueta: 'Pendiente', detalle: `Aún no se pudo enviar; se reintentará automáticamente.${incierto}`, clase: 'pendiente' };
+      if (esErrorDeRed({ ultimoError: pendiente.ultimoError ?? { status: 0 } })) {
+        return { etiqueta: 'Pendiente', detalle: `Se enviará automáticamente al recuperar la conexión.${incierto}`, clase: 'pendiente' };
+      }
+      return { etiqueta: 'Error temporal', detalle: `El servidor no pudo procesarlo; se reintentará automáticamente.${incierto}`, clase: 'pendiente' };
     case OUTBOX_ESTADOS.BLOQUEADA_POR_IDENTIDAD:
-      return { etiqueta: 'Esperando su cuenta', detalle: `${mensajeBloqueoReproduccion(pendiente.ultimoError?.codigo ?? 'IDENTIDAD_NO_COINCIDE')}${incierto}`, clase: 'bloqueado' };
+      return { etiqueta: 'Sesión requerida', detalle: `${mensajeBloqueoReproduccion(pendiente.ultimoError?.codigo ?? 'IDENTIDAD_NO_COINCIDE')}${incierto}`, clase: 'bloqueado' };
     case OUTBOX_ESTADOS.CONFLICTO:
+      return { etiqueta: 'Conflicto', detalle: `${mensajeBloqueoReproduccion(pendiente.ultimoError?.codigo)}${incierto}`, clase: 'bloqueado' };
     case OUTBOX_ESTADOS.RECHAZADO:
-      return { etiqueta: 'No sincronizado', detalle: `${mensajeBloqueoReproduccion(pendiente.ultimoError?.codigo)}${incierto}`, clase: 'bloqueado' };
+      return { etiqueta: 'Rechazado', detalle: `${mensajeBloqueoReproduccion(pendiente.ultimoError?.codigo)}${incierto}`, clase: 'bloqueado' };
     default:
+      if (SESION_EXPIRADA.has(pendiente?.ultimoError?.codigo) || pendiente?.ultimoError?.status === 401) {
+        return { etiqueta: 'Sesión requerida', detalle: `Inicia sesión para enviarlo.${incierto}`, clase: 'bloqueado' };
+      }
       return { etiqueta: 'Pendiente', detalle: `Se enviará automáticamente al recuperar la conexión.${incierto}`, clase: 'pendiente' };
   }
 }
 
+/** Título de una operación administrativa en la lista de pendientes; null si es un registro. */
+export function tituloOperacionPendiente(pendiente) {
+  if (pendiente?.tipoOperacion === REPRODUCCION_EVENTO_ANULAR) return 'Anulación de evento';
+  if (pendiente?.tipoOperacion === REPRODUCCION_EVENTO_CORREGIR) return 'Corrección de evento';
+  return null;
+}
+
+/** La operación administrativa pendiente de un evento confirmado, si la hay (solo puede haber una). */
+export function operacionAdministrativaDe(pendientes, eventoId) {
+  return pendientes.find((p) => esOperacionAdministrativa(p.tipoOperacion) && p.eventoObjetivoId === eventoId) ?? null;
+}
+
 /**
- * Qué puede hacer esta cuenta con un evento pendiente. Otra cuenta no puede hacer
- * nada: la operación espera a la que la creó. Con posibleEnServidor no se puede
- * cambiar la intención (un id nuevo duplicaría el evento); solo un conflicto o
- * rechazo se descarta, confirmando que pudo haberse registrado.
+ * Identidad esperada de la sesión real: la compara el servidor. Sin cuenta u
+ * organización se omite (no hay nada que afirmar) y decide la cookie.
  */
-export function accionesEventoPendiente(pendiente, { cuentaId, puedeRegistrar }) {
+export function identidadEsperadaDe(auth) {
+  const cuentaId = auth?.cuenta?.cuentaId;
+  const organizacionId = auth?.organizacionActiva?.organizacionId;
+  return cuentaId && organizacionId ? { cuentaId, organizacionId } : null;
+}
+
+/**
+ * Intento online de anular o corregir sin resultado definitivo: qué debe persistirse
+ * con el MISMO clientOperationId. null si el servidor ya decidió (400, 403, 404, 409)
+ * o la sesión venció (reintentar a mano tras volver a entrar es seguro: el id se conserva).
+ */
+export function persistenciaTrasFallo(result) {
+  if (result?.failure === 'REQUEST_NOT_SENT' || result?.data?.error === 'CSRF_UNAVAILABLE') return { posibleEnServidor: false, fallo: null };
+  if (result?.failure === 'SESSION_EXPIRED' || result?.failure === 'CSRF_REJECTED' || result?.status === 401) return null;
+  const status = result?.status ?? 0;
+  const codigo = result?.data?.error ?? result?.failure ?? 'ERROR';
+  if (!result || status === 0) return { posibleEnServidor: true, fallo: { codigo, status: 0, tipo: 'red' } };
+  if (status === 408 || status === 429 || status >= 500) return { posibleEnServidor: true, fallo: { codigo, status, tipo: 'http' } };
+  return null;
+}
+
+/**
+ * Qué puede hacer esta cuenta con un pendiente. Otra cuenta no puede hacer nada: la
+ * operación espera a la que la creó. Con posibleEnServidor no se puede cambiar la
+ * intención (un id nuevo duplicaría el evento); solo un conflicto o rechazo se
+ * descarta, confirmando que pudo haberse registrado. Una anulación no se edita; una
+ * corrección solo con permiso de administración y si el servidor no decidió ya.
+ */
+export function accionesEventoPendiente(pendiente, { cuentaId, puedeRegistrar, puedeAdministrar = false }) {
   const ninguna = { editar: false, cancelar: false, reintentar: false, confirmarIncierto: false };
   if (!cuentaId || pendiente?.cuentaOrigenId !== cuentaId || pendiente.estado === OUTBOX_ESTADOS.SINCRONIZANDO) return ninguna;
   const incierto = Boolean(pendiente.posibleEnServidor);
   const bloqueada = pendiente.estado === OUTBOX_ESTADOS.CONFLICTO || pendiente.estado === OUTBOX_ESTADOS.RECHAZADO;
+  const administrativa = esOperacionAdministrativa(pendiente.tipoOperacion);
+  const editable = administrativa
+    ? pendiente.tipoOperacion === REPRODUCCION_EVENTO_CORREGIR && Boolean(puedeAdministrar) && pendiente.estado !== OUTBOX_ESTADOS.CONFLICTO
+    : true;
   return {
-    editar: !incierto,
+    editar: !incierto && editable,
     cancelar: !incierto || bloqueada,
-    reintentar: Boolean(puedeRegistrar)
+    reintentar: Boolean(administrativa ? puedeAdministrar : puedeRegistrar)
       && (bloqueada || pendiente.estado === OUTBOX_ESTADOS.ERROR_REINTENTABLE)
       && !CODIGOS_SIN_REINTENTO.includes(pendiente.ultimoError?.codigo),
     confirmarIncierto: incierto && bloqueada,
@@ -72,8 +138,8 @@ export function accionesEventoPendiente(pendiente, { cuentaId, puedeRegistrar })
 }
 
 /**
- * Registrar online con eventos pendientes del animal adelantaría a la cadena FIFO
- * y dejaría esos pendientes con fecha anterior al historial: también se encola.
+ * Registrar, anular o corregir online con operaciones pendientes del animal adelantaría
+ * a la cadena FIFO y dejaría esos pendientes con fecha anterior al historial: se encola.
  */
 export function destinoRegistro({ online, pendientes = [] }) {
   return online && pendientes.length === 0 ? 'servidor' : 'local';
