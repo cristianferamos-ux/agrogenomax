@@ -232,6 +232,7 @@
   "src/modules/ganaderia/hato/__tests__/reproduccionUi.test.js",
   "src/modules/ganaderia/hato/__tests__/reproduccionPanelOffline.test.js",
   "src/modules/ganaderia/hato/__tests__/fichaTabsResponsive.test.js",
+  "src/modules/ganaderia/hato/__tests__/fichaCargaOffline.test.js",
   "src/modules/ganaderia/reproduccion/__tests__/tableroUi.test.js",
   "server/routes/__tests__/ganaderiaRbacMatriz.test.js",
   "src/modules/ganaderia/auth/__tests__/ganaderiaPermisos.test.js",

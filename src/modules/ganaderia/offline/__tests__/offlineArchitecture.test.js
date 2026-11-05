@@ -96,7 +96,7 @@ test('sincronización automática: el botón manual es solo respaldo', () => {
 test('páginas del piloto local-first: lista, ficha, registro, catálogos y resolución QR', () => {
   const hato = (name) => code(GANADERIA_DIR, 'hato', name);
   assert.match(hato('HatoListaPage.jsx'), /const animales = await local\.listAnimales\(filtros\);/);
-  assert.match(hato('HatoDetallePage.jsx'), /const animalLocal = await local\.getAnimal\(animalId\)/);
+  assert.match(hato('fichaCargaModel.js'), /const animalLocal = await local\.getAnimal\(routeId\)/);
   assert.match(hato('HatoDetallePage.jsx'), /const accionesDisponibles = !esLocal && offline\.online;/);
   assert.match(hato('HatoRegistroPage.jsx'), /const \{ localUuid \} = await local\.registrarAnimalLocal\(\{ body, chapetaCodigo: chapeta \}\);/);
   assert.match(hato('HatoRegistroPage.jsx'), /navigate\(`\/ganaderia\/animales\/local:\$\{localUuid\}`, \{ replace: true \}\);/);
