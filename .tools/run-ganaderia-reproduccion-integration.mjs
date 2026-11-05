@@ -17,10 +17,12 @@ try {
     'server/services/__tests__/reproduccionSyncIntegration.test.js',
     'server/services/__tests__/reproduccionRutaIntegration.test.js',
     'server/services/__tests__/reproduccionMotorIntegration.test.js',
+    'server/services/__tests__/reproduccionAdministracionIntegration.test.js',
   ], { requiredPasses: {
     'server/services/__tests__/reproduccionSyncIntegration.test.js': 33,
     'server/services/__tests__/reproduccionRutaIntegration.test.js': 10,
     'server/services/__tests__/reproduccionMotorIntegration.test.js': 8,
+    'server/services/__tests__/reproduccionAdministracionIntegration.test.js': 33,
     'server/services/__tests__/reproduccionIntegration.test.js': 36,
     'server/services/__tests__/reproduccionTableroIntegration.test.js': 14,
     'server/services/__tests__/reproduccionAnaliticaIntegration.test.js': 16,

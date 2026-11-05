@@ -29,6 +29,10 @@
 //
 // Sin índice nuevo: medido hasta 200.000 eventos por organización (ver el informe
 // de la fase); el índice ensayado no mejoró el caso incremental con RLS.
+//
+// FASE 4E.2A: anulacionClientOperationId (null si no está anulado) es la evidencia
+// exacta de QUÉ operación anuló la fila. Solo viaja aquí, igual que clientOperationId:
+// es para que el motor concilie, no se muestra al usuario ni está en el GET público.
 import { withOrganizacionTransaction } from '../../db/agxBusinessPool.js';
 import { EVENTO_COLUMNS, eventoPublico, serializeEventoReproductivo } from './reproduccionRepository.js';
 
@@ -97,6 +101,7 @@ export async function leerPaginaEnTx(client, { cursor: crudo, limite = REPRO_SYN
      )
      select ${EVENTO_COLUMNS},
             e.client_operation_id::text as client_operation_id,
+            e.anulacion_client_operation_id::text as anulacion_client_operation_id,
             to_char(p.marca at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as marca
        from pagina p
        join agx.reproduccion_eventos e on e.evento_id = p.evento_id
@@ -108,7 +113,11 @@ export async function leerPaginaEnTx(client, { cursor: crudo, limite = REPRO_SYN
   const filas = hayMas ? rows.slice(0, limite) : rows;
   const ultima = filas[filas.length - 1];
   return {
-    eventos: filas.map((fila) => ({ ...eventoPublico(serializeEventoReproductivo(fila)), clientOperationId: fila.client_operation_id })),
+    eventos: filas.map((fila) => ({
+      ...eventoPublico(serializeEventoReproductivo(fila)),
+      clientOperationId: fila.client_operation_id,
+      anulacionClientOperationId: fila.anulacion_client_operation_id ?? null,
+    })),
     hayMas,
     completo,
     cursor: hayMas

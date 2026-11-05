@@ -27,6 +27,9 @@
 // nunca se usa para escribir. Si no coincide, 409 IDENTIDAD_NO_COINCIDE ANTES de la
 // búsqueda idempotente y de cualquier escritura (el rol sigue siendo el primer
 // middleware de la ruta). No entra en el intent_hash: es del envío, no de la intención.
+//
+// FASE 4E.2A -- anular y corregir admiten el mismo campo, con el mismo orden
+// (rol -> identidad -> ids -> validación). Un cliente que no lo envía no cambia.
 import { Router } from 'express';
 import { createRequireGanaderiaCsrf, createRequireGanaderiaSession } from '../security/ganaderiaSession.js';
 import { createRequireAdministracion, createRequireOperacion } from '../security/ganaderiaPermisos.js';
@@ -143,7 +146,7 @@ export default function createGanaderiaAnimalReproduccionRouter({
     res.status(result.yaExistia ? 200 : 201).json({ ok: true, ...result });
   }));
 
-  router.post('/eventos/:eventoId/anular', requireAdministracion, withIds(async (req, res, { hoy }) => {
+  router.post('/eventos/:eventoId/anular', requireAdministracion, requireIdentidadEsperada, withIds(async (req, res, { hoy }) => {
     const value = validateAnularEventoReproductivoBody(req.body);
     const { organizacionId, cuentaId } = req.ganaderiaAuth;
     const result = await repo.anularEventoReproductivoIdempotente(organizacionId, req.params.animalId, req.params.eventoId, value, {
@@ -153,7 +156,7 @@ export default function createGanaderiaAnimalReproduccionRouter({
     res.status(200).json({ ok: true, ...result });
   }, { evento: true }));
 
-  router.post('/eventos/:eventoId/corregir', requireAdministracion, withIds(async (req, res, { hoy, horaAhora }) => {
+  router.post('/eventos/:eventoId/corregir', requireAdministracion, requireIdentidadEsperada, withIds(async (req, res, { hoy, horaAhora }) => {
     const value = validateCorregirEventoReproductivoBody(req.body, { hoy, horaAhora });
     const { organizacionId, cuentaId } = req.ganaderiaAuth;
     const result = await repo.corregirEventoReproductivoIdempotente(organizacionId, req.params.animalId, req.params.eventoId, value, {
