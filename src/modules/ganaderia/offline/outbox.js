@@ -43,12 +43,36 @@ export const OUTBOX_ESTADOS = Object.freeze({
 });
 
 export const REPRODUCCION_EVENTO_CREAR = 'REPRODUCCION_EVENTO_CREAR';
+// FASE 4E.2B -- operaciones administrativas sobre un evento YA confirmado:
+//   ANULAR    payload { animalId, eventoId, motivo }
+//   CORREGIR  payload { animalId, eventoId, motivo, evento }
+// Comparten la cadena del animal con CREAR, pero no crean un evento pendiente: nunca
+// entran en la reconstrucción causal de eventos.
+export const REPRODUCCION_EVENTO_ANULAR = 'REPRODUCCION_EVENTO_ANULAR';
+export const REPRODUCCION_EVENTO_CORREGIR = 'REPRODUCCION_EVENTO_CORREGIR';
+
+export const esOperacionAdministrativa = (tipo) => tipo === REPRODUCCION_EVENTO_ANULAR || tipo === REPRODUCCION_EVENTO_CORREGIR;
+export const esOperacionReproductiva = (tipo) => tipo === REPRODUCCION_EVENTO_CREAR || esOperacionAdministrativa(tipo);
+
+/**
+ * Clave en el outbox de la operación administrativa de un evento: como es la misma
+ * para ANULAR y CORREGIR, el store garantiza una sola por evento también entre
+ * pestañas (mutate es atómico). Nunca viaja al servidor.
+ */
+export const claveOperacionAdministrativa = (eventoId) => `repro-admin:${eventoId}`;
+
+/** Misma normalización que aplica el servidor al motivo antes de guardarlo. */
+export function normalizarMotivo(motivo) {
+  return typeof motivo === 'string' ? motivo.replace(/\r\n?/g, '\n').trim() : '';
+}
+
+export const ADVERTENCIA_CORRECCION_DIFERIDA = 'La corrección quedará pendiente y puede aplicarse más adelante cuando se restablezca la conexión. El estado reproductivo visible puede cambiar al sincronizar.';
 
 export const ESTADOS_ENVIABLES = Object.freeze([OUTBOX_ESTADOS.PENDIENTE, OUTBOX_ESTADOS.ERROR_REINTENTABLE]);
 export const ESTADOS_BLOQUEADOS = Object.freeze([OUTBOX_ESTADOS.CONFLICTO, OUTBOX_ESTADOS.RECHAZADO]);
 
-/** Reenviar el mismo id solo repetiría estos errores: el servidor ya tiene otros datos con él. */
-export const CODIGOS_SIN_REINTENTO = Object.freeze(['CONCILIACION_INTENCION_DISTINTA', 'CLIENT_OPERATION_ID_REUSED']);
+/** Reenviar el mismo id solo repetiría estos errores: el servidor ya decidió sobre este dato. */
+export const CODIGOS_SIN_REINTENTO = Object.freeze(['CONCILIACION_INTENCION_DISTINTA', 'CLIENT_OPERATION_ID_REUSED', 'EVENTO_YA_ANULADO', 'EVENTO_NOT_FOUND']);
 
 /** Sin lock exclusivo, una operación SINCRONIZANDO más reciente puede estar enviándose en otro motor. */
 export const SINCRONIZANDO_LEASE_MS = 2 * 60_000;
@@ -154,8 +178,25 @@ export function operacionesEnTurno(operaciones, { soportado = () => true } = {})
   return turno;
 }
 
+/**
+ * El servidor pidió esperar (408/429/5xx) y la espera sigue vigente. Ninguna acción
+ * manual la adelanta: una ráfaga contra un servidor que acaba de responder así solo
+ * lo empeora. Un fallo de RED no entra aquí: no hubo respuesta que respetar.
+ */
+export function enBackoffHttp(op, now) {
+  return op?.estado === OUTBOX_ESTADOS.ERROR_REINTENTABLE
+    && !esErrorDeRed(op)
+    && Boolean(op.siguienteIntentoAt)
+    && op.siguienteIntentoAt > now.toISOString();
+}
+
+/**
+ * `forzar` ("Sincronizar ahora", preparar) espera su turno y adelanta lo que solo
+ * esperaba sin motivo del servidor, pero nunca un backoff HTTP vigente.
+ */
 export function estaLista(op, now, { forzar = false } = {}) {
   if (!ESTADOS_ENVIABLES.includes(op.estado)) return false;
+  if (enBackoffHttp(op, now)) return false;
   if (forzar || !op.siguienteIntentoAt) return true;
   return op.siguienteIntentoAt <= now.toISOString();
 }

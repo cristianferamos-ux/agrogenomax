@@ -313,6 +313,11 @@ describe('motor offline contra rutas y Postgres reales', { skip: !dbAvailable },
     assert.deepEqual(await filas(animalId), []);
     d.estado.alEnviar = null;
     await d.motor.syncNow({ forzar: true });
+    assert.equal(d.estado.posts.length, 1, 'ni un ciclo forzado adelanta el backoff de un 503');
+    assert.deepEqual(await filas(animalId), []);
+    // Vence el backoff: sale exactamente lo pendiente, en orden.
+    await d.repo.putOperacion({ ...(await d.repo.getOperacion(primera.operationId)), siguienteIntentoAt: new Date(Date.now() - 1).toISOString() });
+    await d.motor.syncNow();
     assert.deepEqual((await filas(animalId)).map((f) => f.fecha), ['2026-01-05', '2026-01-06'], 'en orden causal');
     assert.equal((await d.repo.getOperacion(primera.operationId)), undefined);
     assert.equal((await d.repo.getOperacion(segunda.operationId)), undefined);

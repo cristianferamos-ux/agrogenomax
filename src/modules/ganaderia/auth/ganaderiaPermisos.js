@@ -85,6 +85,8 @@ export const CAPACIDAD_OPERACION_OFFLINE = Object.freeze({
   ANIMAL_CREAR_CON_CHAPETA: 'crearAnimal',
   PESAJE_CREAR: 'registrarPesaje',
   REPRODUCCION_EVENTO_CREAR: 'registrarReproduccion',
+  REPRODUCCION_EVENTO_ANULAR: 'administrarReproduccion',
+  REPRODUCCION_EVENTO_CORREGIR: 'administrarReproduccion',
 });
 
 /** ¿Puede este rol encolar `tipoOperacion` sin red? Desconocida -> false. */

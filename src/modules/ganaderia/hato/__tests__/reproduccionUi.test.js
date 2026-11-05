@@ -529,7 +529,7 @@ test('incierto 7 — doble clic: un solo POST (bloqueo) y, si llegara a repetirs
   assert.equal(ops.idPara('crear', firma), ops.idPara('crear', firma));
   assert.equal(s.posts.length, 0);
   // El panel bloquea el segundo envío mientras el primero está en curso.
-  assert.match(panel, /async function ejecutar\(accion, firma, enviar\) \{\n\s+if \(enviandoRef\.current \|\| !online\) return;/);
+  assert.match(panel, /async function ejecutar\(accion, firma, enviar, conservar = null\) \{\n\s+if \(enviandoRef\.current \|\| !online\) return;/);
   assert.match(panel, /enviandoRef\.current = true;\n\s+setEnviando\(true\);/);
 });
 
@@ -604,7 +604,7 @@ test('corrección: formulario precargado con el original; usa /corregir y no edi
     toroAnimalId: '44', semenCodigo: 'PJ-1', tecnico: 'Ana', observaciones: 'Celo de la mañana',
   });
   assert.equal(formDesdeEvento({ tipoEvento: 'PARTO', fechaEvento: '2026-01-01', detalle: { partoTipo: 'NORMAL', numeroCrias: 3 } }).numeroCrias, '3');
-  assert.match(panel, /corregirEventoReproductivo\(animalId, eventoId, buildCorregirBody\(form, motivo, id\)\)/);
+  assert.match(panel, /corregirEventoReproductivo\(animalId, eventoId, \{ \.\.\.buildCorregirBody\(form, motivo, id\), \.\.\.\(identidadEsperada \? \{ identidadEsperada \} : \{\}\) \}\)/);
   assert.match(panel, /formDesdeEvento\(evento\)/);
   // Tras el éxito se recarga el historial (original ANULADO + nuevo ACTIVO).
   assert.equal(resultadoOperacion('corregir', { ok: true, status: 201, data: { evento: CORRECTOR, yaExistia: false } }).recargar, true);
@@ -615,7 +615,7 @@ test('anulación: motivo + confirmación explícita; el evento queda visible com
   assert.match(panel, /type="checkbox"/);
   assert.match(panel, /Confirmo que quiero anular este evento\./);
   assert.match(panel, /if \(errMotivo \|\| !confirmado\) return;/);
-  assert.match(panel, /anularEventoReproductivo\(animalId, eventoId, buildAnularBody\(motivo, id\)\)/);
+  assert.match(panel, /anularEventoReproductivo\(animalId, eventoId, \{ \.\.\.buildAnularBody\(motivo, id\), \.\.\.\(identidadEsperada \? \{ identidadEsperada \} : \{\}\) \}\)/);
   assert.match(panel, /queda en el historial marcado como anulado/);
   const r = resultadoOperacion('anular', { ok: true, status: 200, data: { evento: ORIGINAL, yaExistia: false } });
   assert.equal(r.exito, true);

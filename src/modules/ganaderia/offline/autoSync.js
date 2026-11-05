@@ -134,7 +134,11 @@ export function startAutoSync({
     if (stopped || debounce) return;
     debounce = setTimer(async () => {
       debounce = null;
-      if (!engine.getState().enCurso && (await hayEnviables(repo))) trigger('operacion');
+      if (engine.getState().enCurso) return;
+      if (await hayEnviables(repo)) trigger('operacion');
+      // FASE 4E.2B: una operación que entra ya en backoff (intento online sin resultado)
+      // no es enviable todavía, pero su reintento debe quedar programado.
+      else if (!retry) await programarReintento();
     }, DEBOUNCE_MS);
   });
 
