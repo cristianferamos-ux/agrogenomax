@@ -183,14 +183,24 @@ test('backoff de un ciclo anterior: la siguiente de la cadena NO se adelanta; ot
   assert.deepEqual(enviados(srv, '7'), [a.clientOperationId, b.clientOperationId]);
 });
 
-test('"Sincronizar ahora" salta la espera sin romper el orden', async () => {
+test('"Sincronizar ahora" adelanta la espera de un fallo de RED sin romper el orden', async () => {
   const d = dispositivo();
   const srv = servidor();
   const futuro = new Date(d.clock.now().getTime() + 60_000).toISOString();
-  const a = await encolar(d, '7', 'CELO_OBSERVADO', '2026-10-01', { estado: OUTBOX_ESTADOS.ERROR_REINTENTABLE, siguienteIntentoAt: futuro });
+  const a = await encolar(d, '7', 'CELO_OBSERVADO', '2026-10-01', { estado: OUTBOX_ESTADOS.ERROR_REINTENTABLE, siguienteIntentoAt: futuro, ultimoError: { codigo: 'NETWORK_ERROR', status: 0, tipo: 'red' } });
   const b = await encolar(d, '7', 'IATF', '2026-10-02');
   await motor(d, srv).syncNow({ forzar: true });
   assert.deepEqual(enviados(srv), [a.clientOperationId, b.clientOperationId]);
+});
+
+test('"Sincronizar ahora" no adelanta un backoff HTTP vigente: ni la cabeza ni su cadena salen', async () => {
+  const d = dispositivo();
+  const srv = servidor();
+  const futuro = new Date(d.clock.now().getTime() + 60_000).toISOString();
+  await encolar(d, '7', 'CELO_OBSERVADO', '2026-10-01', { estado: OUTBOX_ESTADOS.ERROR_REINTENTABLE, siguienteIntentoAt: futuro, ultimoError: { codigo: 'X', status: 503, tipo: 'http' } });
+  await encolar(d, '7', 'IATF', '2026-10-02');
+  await motor(d, srv).syncNow({ forzar: true });
+  assert.deepEqual(enviados(srv), []);
 });
 
 test('5xx: conserva la operación, mismo id al reintentar y posibleEnServidor=true', async () => {

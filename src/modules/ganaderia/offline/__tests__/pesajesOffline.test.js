@@ -235,6 +235,10 @@ test('9. 5xx -> reintento con backoff (no definitivo)', async () => {
   assert.equal(op.ultimoError.tipo, 'http');
   assert.ok(op.siguienteIntentoAt > d.clock.now().toISOString());
   srv.falla = null;
+  // Ni un ciclo forzado adelanta el backoff de un 5xx: sale al vencer.
+  assert.equal(await engine.syncNow({ forzar: true }), RUN_RESULT.OK);
+  assert.equal(srv.pesajes.length, 0);
+  d.clock.avanzar(11 * 60_000);
   assert.equal(await engine.syncNow({ forzar: true }), RUN_RESULT.OK);
   assert.equal(srv.pesajes.length, 1);
 });

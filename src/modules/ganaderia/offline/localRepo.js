@@ -13,6 +13,7 @@ import {
   backoffMs,
   claveOperacionAdministrativa,
   claveOrdenAnimal,
+  enBackoffHttp,
   esOperacionAdministrativa,
   esOperacionReproductiva,
   firmaIntencion,
@@ -733,6 +734,9 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
         }
         if (CODIGOS_SIN_REINTENTO.includes(actual.ultimoError?.codigo)) {
           throw errorVisible('EVENTO_NO_REINTENTABLE', 'El servidor tiene este registro con otros datos: reintentar no lo resolverá.');
+        }
+        if (enBackoffHttp(actual, now())) {
+          throw errorVisible('EVENTO_EN_BACKOFF', 'El servidor pidió esperar: se reintentará automáticamente.');
         }
         return { ...actual, estado: OUTBOX_ESTADOS.PENDIENTE, ultimoError: null, siguienteIntentoAt: null, updatedAt: now().toISOString() };
       });

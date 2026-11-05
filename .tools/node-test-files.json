@@ -188,6 +188,7 @@
   "src/modules/ganaderia/offline/__tests__/reconexionEstado.test.js",
   "src/modules/ganaderia/offline/__tests__/reproduccionOutbox.test.js",
   "src/modules/ganaderia/offline/__tests__/reproduccionFifo.test.js",
+  "src/modules/ganaderia/offline/__tests__/reproduccionAdmin.test.js",
   "src/modules/ganaderia/offline/__tests__/reproduccionPull.test.js",
   "src/modules/ganaderia/offline/__tests__/syncSinBucle.test.js",
   "src/modules/ganaderia/offline/__tests__/reproduccionConciliacion.test.js",

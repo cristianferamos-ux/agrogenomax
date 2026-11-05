@@ -13,7 +13,8 @@
 //   red / no enviada (status 0)       -> ERROR_REINTENTABLE tipo 'red': NO suma intento ni
 //                                        backoff exponencial; reintento fijo corto y, al volver
 //                                        la red (online / visible), inmediato
-//   408 / 429 / 5xx                   -> ERROR_REINTENTABLE tipo 'http' con backoff; corta el PUSH
+//   408 / 429 / 5xx                   -> ERROR_REINTENTABLE tipo 'http' con backoff; corta el PUSH.
+//                                        Ni un ciclo forzado adelanta ese backoff (estaLista)
 //   sesión expirada / CSRF            -> vuelve a PENDIENTE; el ciclo se detiene (requiere login)
 //   409 / 404 / 410                   -> CONFLICTO (dato incompatible: se conserva todo)
 //   otros 4xx (400 validación)        -> RECHAZADO (requiere corrección del usuario)

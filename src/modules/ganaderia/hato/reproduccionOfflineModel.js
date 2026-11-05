@@ -130,8 +130,9 @@ export function accionesEventoPendiente(pendiente, { cuentaId, puedeRegistrar, p
   return {
     editar: !incierto && editable,
     cancelar: !incierto || bloqueada,
+    // Un 408/429/5xx se reintenta solo al vencer su backoff: sin botón para adelantarlo.
     reintentar: Boolean(administrativa ? puedeAdministrar : puedeRegistrar)
-      && (bloqueada || pendiente.estado === OUTBOX_ESTADOS.ERROR_REINTENTABLE)
+      && (bloqueada || (pendiente.estado === OUTBOX_ESTADOS.ERROR_REINTENTABLE && (!pendiente.ultimoError || esErrorDeRed(pendiente))))
       && !CODIGOS_SIN_REINTENTO.includes(pendiente.ultimoError?.codigo),
     confirmarIncierto: incierto && bloqueada,
   };

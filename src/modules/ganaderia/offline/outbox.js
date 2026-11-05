@@ -178,8 +178,25 @@ export function operacionesEnTurno(operaciones, { soportado = () => true } = {})
   return turno;
 }
 
+/**
+ * El servidor pidió esperar (408/429/5xx) y la espera sigue vigente. Ninguna acción
+ * manual la adelanta: una ráfaga contra un servidor que acaba de responder así solo
+ * lo empeora. Un fallo de RED no entra aquí: no hubo respuesta que respetar.
+ */
+export function enBackoffHttp(op, now) {
+  return op?.estado === OUTBOX_ESTADOS.ERROR_REINTENTABLE
+    && !esErrorDeRed(op)
+    && Boolean(op.siguienteIntentoAt)
+    && op.siguienteIntentoAt > now.toISOString();
+}
+
+/**
+ * `forzar` ("Sincronizar ahora", preparar) espera su turno y adelanta lo que solo
+ * esperaba sin motivo del servidor, pero nunca un backoff HTTP vigente.
+ */
 export function estaLista(op, now, { forzar = false } = {}) {
   if (!ESTADOS_ENVIABLES.includes(op.estado)) return false;
+  if (enBackoffHttp(op, now)) return false;
   if (forzar || !op.siguienteIntentoAt) return true;
   return op.siguienteIntentoAt <= now.toISOString();
 }

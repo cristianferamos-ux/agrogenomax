@@ -221,7 +221,7 @@ test('toros de la copia local: solo machos, activos seleccionables', async () =>
 for (const estado of [E.CONFLICTO, E.RECHAZADO, E.ERROR_REINTENTABLE]) {
   test(`reintentar ${estado}: mismo id, misma posición, misma incertidumbre e intentos`, async () => {
     const repo = repoNuevo();
-    const op = await operacion(repo, { estado, posibleEnServidor: true, intentos: 3, ultimoError: { codigo: 'X', status: 500 }, siguienteIntentoAt: '2026-10-21T00:00:00.000Z' });
+    const op = await operacion(repo, { estado, posibleEnServidor: true, intentos: 3, ultimoError: { codigo: 'X', status: estado === E.ERROR_REINTENTABLE ? 0 : 500 }, siguienteIntentoAt: '2026-10-21T00:00:00.000Z' });
     await repo.reintentarEventoPendiente(op.operationId, { cuentaId: A });
     const [r] = await repo.listOutbox();
     assert.equal(r.estado, E.PENDIENTE);

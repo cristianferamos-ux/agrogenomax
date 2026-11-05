@@ -1005,6 +1005,148 @@ test('intento online 503: persistida en backoff; una corrección no pide otra ad
   assert.equal(srv.posts.length, 0, 'respeta el backoff');
 });
 
+// ---------------------------------------------------------------------------
+// "Sincronizar ahora" (syncNow forzado) frente al backoff HTTP
+// ---------------------------------------------------------------------------
+
+const VENCER = 11 * 60_000; // mayor que cualquier backoff de estas pruebas
+
+for (const status of [408, 429, 500, 503]) {
+  for (const [nombre, datos] of Object.entries(ENCOLAR)) {
+    test(`forzado ${status} ${nombre}: 0 POST antes de vencer; exactamente 1 después, con el mismo id`, async () => {
+      const { srv, repo, engine, reloj: r } = await montar();
+      await repo.encolarOperacionAdministrativa(datos());
+      srv.falla = () => ({ status, data: { error: 'TEMPORAL' } });
+      assert.equal(await engine.syncNow(), RUN_RESULT.ERROR);
+      const op = await unica(repo);
+      assert.equal(op.estado, E.ERROR_REINTENTABLE);
+      assert.ok(op.siguienteIntentoAt > r.now().toISOString(), 'proximoIntento futuro');
+      srv.falla = null;
+      for (let i = 0; i < 3; i += 1) await engine.syncNow({ forzar: true });
+      assert.equal(srv.posts.length, 1, 'ningún POST antes de vencer');
+      assert.deepEqual(await unica(repo), op, 'la operación no se toca');
+      r.avanzar(VENCER);
+      await engine.syncNow({ forzar: true });
+      assert.equal(srv.posts.length, 2, 'exactamente un POST al vencer');
+      assert.equal(srv.posts[1].body.clientOperationId, op.clientOperationId);
+      assert.deepEqual(await repo.listOutbox(), []);
+    });
+  }
+}
+
+test('forzado: ninguna ráfaga aunque el servidor siga respondiendo 429 al vencer', async () => {
+  const { srv, repo, engine, reloj: r } = await montar();
+  await repo.encolarOperacionAdministrativa(datosAnular());
+  srv.falla = () => ({ status: 429, data: { error: 'RATE_LIMITED' } });
+  await engine.syncNow();
+  for (let i = 0; i < 5; i += 1) await engine.syncNow({ forzar: true });
+  assert.equal(srv.posts.length, 1);
+  r.avanzar(VENCER);
+  for (let i = 0; i < 5; i += 1) await engine.syncNow({ forzar: true });
+  assert.equal(srv.posts.length, 2, 'cada vencimiento permite un solo envío');
+  assert.equal((await unica(repo)).intentos, 2);
+});
+
+test('forzado: también respeta el backoff de una operación antigua sin `tipo` (por status)', async () => {
+  const { srv, repo, engine, reloj: r } = await montar();
+  await repo.encolarOperacionAdministrativa(datosAnular());
+  const op = await unica(repo);
+  await repo.putOperacion({ ...op, estado: E.ERROR_REINTENTABLE, ultimoError: { codigo: 'X', status: 503 }, siguienteIntentoAt: new Date(r.now().getTime() + 60_000).toISOString() });
+  await engine.syncNow({ forzar: true });
+  assert.equal(srv.posts.length, 0);
+});
+
+test('forzado: un fallo de RED sí se adelanta (no hubo respuesta que respetar)', async () => {
+  const { srv, repo, engine } = await montar();
+  await repo.encolarOperacionAdministrativa(datosAnular());
+  srv.falla = () => 'red';
+  await engine.syncNow();
+  assert.equal((await unica(repo)).ultimoError.tipo, 'red');
+  srv.falla = null;
+  await engine.syncNow({ forzar: true });
+  assert.equal(srv.posts.length, 2);
+  assert.deepEqual(await repo.listOutbox(), []);
+});
+
+test('forzado: una PENDIENTE nunca enviada de otro animal sale ya; la cabeza en backoff y su cadena esperan', async () => {
+  const { srv, repo, engine } = await montar();
+  await repo.encolarOperacionAdministrativa(datosAnular());
+  await repo.encolarOperacionAdministrativa(datosCorregir({ eventoId: '2' }));
+  srv.falla = () => ({ status: 503, data: { error: 'X' } });
+  await engine.syncNow();
+  srv.falla = null;
+  await repo.encolarOperacionAdministrativa(datosAnular({ animalId: '8', eventoId: '3', clientOperationId: ID(503) }));
+  await engine.syncNow({ forzar: true });
+  assert.deepEqual(sufijos(srv), ['7/reproduccion/eventos/1/anular', '8/reproduccion/eventos/3/anular']);
+  assert.equal((await repo.cadenaReproductiva('7')).length, 2);
+});
+
+test('forzado: tampoco lo adelanta para CREATE, PESAJE ni ANIMAL', async () => {
+  const { srv, repo, engine, reloj: r, storage } = await montar();
+  await repo.registrarEventoReproductivoLocal({ animalId: '7', body: crearCuerpo(ID(1)), cuentaId: CUENTA_A });
+  await repo.registrarPesajeLocal({ animalId: '8', body: { fecha: '2026-10-01', pesoKg: 400, metodo: 'BASCULA', clientOperationId: ID(2) } });
+  await repo.registrarAnimalLocal({ body: { clientOperationId: ID(3), sexo: 'HEMBRA' } });
+  const vence = new Date(r.now().getTime() + 60_000).toISOString();
+  for (const op of await repo.listOutbox()) {
+    await storage.put('outbox', { ...op, estado: E.ERROR_REINTENTABLE, ultimoError: { codigo: 'X', status: 503, tipo: 'http' }, siguienteIntentoAt: vence });
+  }
+  await engine.syncNow({ forzar: true });
+  assert.equal(srv.posts.length, 0);
+});
+
+test('forzado: cuando el ciclo concilia, el pull corre aunque la operación esté en backoff', async () => {
+  const { srv, repo, engine } = await montar();
+  await repo.encolarOperacionAdministrativa(datosAnular());
+  let cortar = true;
+  srv.falla = () => {
+    if (!cortar) return { status: 503, data: { error: 'X' } };
+    cortar = false;
+    return 'red-tras-guardar';
+  };
+  await engine.syncNow();
+  await engine.syncNow({ forzar: true });
+  assert.equal((await unica(repo)).ultimoError.tipo, 'http');
+  const posts = srv.posts.length;
+  await engine.syncNow({ forzar: true });
+  assert.equal(srv.posts.length, posts, 'sin POST');
+  assert.deepEqual(await repo.listOutbox(), [], 'el pull exacto la cierra');
+});
+
+test('reintento manual: en backoff HTTP vigente se rechaza y nada cambia; vencido, sí', async () => {
+  const { srv, repo, engine, reloj: r } = await montar();
+  const { operationId } = await repo.encolarOperacionAdministrativa(datosAnular());
+  srv.falla = () => ({ status: 429, data: { error: 'X' } });
+  await engine.syncNow();
+  const antes = await unica(repo);
+  await assert.rejects(repo.reintentarEventoPendiente(operationId, { cuentaId: CUENTA_A }), { code: 'EVENTO_EN_BACKOFF' });
+  assert.deepEqual(await unica(repo), antes);
+  r.avanzar(VENCER);
+  await repo.reintentarEventoPendiente(operationId, { cuentaId: CUENTA_A });
+  assert.equal((await unica(repo)).estado, E.PENDIENTE);
+});
+
+test('reactivación expresa: un RECHAZADO que el usuario reintenta sale de inmediato', async () => {
+  const { srv, repo, engine } = await montar();
+  const { operationId } = await repo.encolarOperacionAdministrativa(datosAnular());
+  srv.falla = () => ({ status: 403, data: { error: 'ROLE_FORBIDDEN' } });
+  await engine.syncNow();
+  srv.falla = null;
+  await repo.reintentarEventoPendiente(operationId, { cuentaId: CUENTA_A });
+  await engine.syncNow({ forzar: true });
+  assert.equal(srv.posts.length, 2);
+  assert.deepEqual(await repo.listOutbox(), []);
+});
+
+test('acciones: un 408/429/5xx no ofrece Reintentar; un fallo de red o un rechazo, sí', () => {
+  const http = { ultimoError: { codigo: 'X', status: 503, tipo: 'http' } };
+  for (const tipo of [ANULAR, CORREGIR, CREAR]) {
+    assert.equal(acciones(vista(tipo, E.ERROR_REINTENTABLE, http)).reintentar, false, tipo);
+    assert.equal(acciones(vista(tipo, E.ERROR_REINTENTABLE, { ultimoError: { codigo: 'X', status: 429 } })).reintentar, false, `${tipo} sin tipo`);
+    assert.equal(acciones(vista(tipo, E.ERROR_REINTENTABLE, { ultimoError: { codigo: 'N', status: 0, tipo: 'red' } })).reintentar, true, tipo);
+    assert.equal(acciones(vista(tipo, E.RECHAZADO, { ultimoError: { codigo: 'R', status: 403 } })).reintentar, true, tipo);
+  }
+});
+
 test('autoSync: una operación que entra en backoff programa su reintento sin adelantarlo', async () => {
   const { srv, repo, engine, reloj: r } = await montar();
   const temporizadores = [];
