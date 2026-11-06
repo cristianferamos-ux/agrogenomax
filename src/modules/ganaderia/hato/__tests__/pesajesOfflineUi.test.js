@@ -138,7 +138,9 @@ test('el formulario aparece sin conexión aunque el historial del servidor no ca
 });
 
 test('la ficha pasa el repositorio offline al panel', () => {
-  assert.match(detalle, /repoOffline=\{offline\.repo\}/);
+  // PR #117 C1: solo el repositorio de la organización activa.
+  assert.match(detalle, /const repoOrg = repoDeOrganizacion\(offline\.repo, organizacionId\);/);
+  assert.match(detalle, /repoOffline=\{repoOrg\}/);
 });
 
 test('conflictos de pesajes en /ganaderia/sincronizacion: descartar explícito, sin reintento automático', () => {

@@ -2,11 +2,14 @@
 //
 // La página monta antes de que el proveedor offline abra IndexedDB, así que una
 // primera carga puede pedir al servidor sin copia local a la vista, y una segunda
-// (ya con repositorio) poner la copia. Dos reglas evitan que el resultado de la
-// primera degrade la ficha:
+// (ya con repositorio) poner la copia. Reglas:
 //   1. Solo la carga más reciente toca el estado (crearControlCargas).
-//   2. Un fallo remoto nunca retira una ficha vigente del mismo animal: queda como
-//      aviso sobre ella (avisoRemoto). Sin ficha, el error se muestra igual que antes.
+//   2. Un fallo remoto nunca retira una ficha vigente: queda como aviso sobre ella
+//      (avisoRemoto). Sin ficha vigente, el error se muestra igual que antes.
+//   3. Una ficha es vigente solo para el MISMO animal y la MISMA organización
+//      activa: la de otra organización nunca se conserva ni se muestra.
+//   4. Con una edición abierta no se refresca la entidad base por debajo del
+//      formulario: el refresco se aplaza hasta cerrarla (crearGuardEdicion).
 import { mensajeDeExcepcion, mensajeError } from '../api/errorModel.js';
 
 export const MENSAJE_CARGA_ANIMAL = 'No fue posible cargar el animal.';
@@ -30,27 +33,48 @@ export function crearControlCargas() {
   };
 }
 
-function esFichaDe(animal, routeId) {
+function esAnimalDeRuta(animal, routeId) {
   if (!animal) return false;
   const id = String(routeId);
   return id.startsWith('local:') ? animal.localUuid === id.slice(6) : String(animal.animalId) === id;
 }
 
-/** Al cambiar de ruta se retira la ficha anterior; un refresco del mismo animal la conserva. */
-function estadoAlIniciar(actual, routeId) {
-  if (!actual.animal || esFichaDe(actual.animal, routeId)) return actual;
+/** La ficha del estado es de este animal Y de la organización activa. */
+export function esFichaDe(actual, routeId, organizacionId) {
+  return Boolean(actual?.animal) && actual.organizacionId === organizacionId && esAnimalDeRuta(actual.animal, routeId);
+}
+
+/** Lo que la página puede pintar: una ficha ajena (otro animal u organización) nunca. */
+export function vistaFicha(actual, routeId, organizacionId) {
+  if (!actual?.animal || esFichaDe(actual, routeId, organizacionId)) return actual;
+  return ESTADO_INICIAL_FICHA;
+}
+
+/** Repositorio local solo si pertenece a la organización activa (IndexedDB por organización). */
+export function repoDeOrganizacion(repo, organizacionId) {
+  return repo && organizacionId && repo.organizacionId === organizacionId ? repo : null;
+}
+
+/** Ficha confirmada por el servidor para la organización activa (cargas y guardados). */
+export function estadoDeServidor(animal, organizacionId) {
+  return { status: 'ok', animal, origen: 'servidor', organizacionId };
+}
+
+/** Al cambiar de animal u organización se retira la ficha; un refresco de la misma la conserva. */
+function estadoAlIniciar(actual, routeId, organizacionId) {
+  if (!actual.animal || esFichaDe(actual, routeId, organizacionId)) return actual;
   return ESTADO_INICIAL_FICHA;
 }
 
 /** Mientras se resuelve la petición se conserva el aviso anterior (sin parpadeo). */
-function estadoConCopiaLocal(actual, animal, routeId) {
-  const siguiente = { status: 'ok', animal, origen: 'local' };
-  return actual.avisoRemoto && esFichaDe(actual.animal, routeId) ? { ...siguiente, avisoRemoto: AVISO_COPIA_LOCAL } : siguiente;
+function estadoConCopiaLocal(actual, animal, routeId, organizacionId) {
+  const siguiente = { status: 'ok', animal, origen: 'local', organizacionId };
+  return actual.avisoRemoto && esFichaDe(actual, routeId, organizacionId) ? { ...siguiente, avisoRemoto: AVISO_COPIA_LOCAL } : siguiente;
 }
 
-/** Invariante #116: con ficha vigente del animal, el fallo remoto solo deja un aviso. */
-function estadoTrasFalloRemoto(actual, routeId, estadoSinFicha) {
-  if (!esFichaDe(actual.animal, routeId)) return estadoSinFicha;
+/** Invariante #116: con ficha vigente (animal y organización), el fallo remoto solo deja un aviso. */
+function estadoTrasFalloRemoto(actual, routeId, organizacionId, estadoSinFicha) {
+  if (!esFichaDe(actual, routeId, organizacionId)) return estadoSinFicha;
   return {
     ...actual,
     status: 'ok',
@@ -66,17 +90,18 @@ function estadoDeRespuestaFallida(respuestaApi) {
 }
 
 /**
- * Una ejecución de la carga de la ficha. Copia local primero (si hay repositorio) y
- * luego el servidor. `setState` admite objeto o función, como el de React.
+ * Una ejecución de la carga de la ficha. Copia local primero (si hay repositorio de
+ * la organización activa) y luego el servidor. `setState` admite objeto o función.
  */
-export async function cargarFicha({ routeId, esLocal, local, obtenerRemoto, silencioso = false, control, setState, setChapetaLocal }) {
+export async function cargarFicha({ routeId, organizacionId = null, esLocal, local, obtenerRemoto, silencioso = false, control, setState, setChapetaLocal }) {
   const carga = control.iniciar();
   const vigente = () => control.vigente(carga);
-  setState((actual) => estadoAlIniciar(actual, routeId));
+  const repo = repoDeOrganizacion(local, organizacionId);
+  setState((actual) => estadoAlIniciar(actual, routeId, organizacionId));
 
   let localEncontrado = false;
-  if (local) {
-    const animalLocal = await local.getAnimal(routeId).catch(() => null);
+  if (repo) {
+    const animalLocal = await repo.getAnimal(routeId).catch(() => null);
     if (!vigente()) return;
     if (animalLocal?.redirectTo) {
       setState({ status: 'redirect', animal: null, to: animalLocal.redirectTo });
@@ -84,8 +109,8 @@ export async function cargarFicha({ routeId, esLocal, local, obtenerRemoto, sile
     }
     if (animalLocal) {
       localEncontrado = true;
-      setState((actual) => estadoConCopiaLocal(actual, animalLocal, routeId));
-      const chapeta = await local.getChapetaDeAnimal(animalLocal).catch(() => null);
+      setState((actual) => estadoConCopiaLocal(actual, animalLocal, routeId, organizacionId));
+      const chapeta = await repo.getChapetaDeAnimal(animalLocal).catch(() => null);
       if (!vigente()) return;
       setChapetaLocal(chapeta);
     }
@@ -101,18 +126,57 @@ export async function cargarFicha({ routeId, esLocal, local, obtenerRemoto, sile
     respuestaApi = await obtenerRemoto(routeId);
   } catch (err) {
     if (!vigente()) return;
-    setState((actual) => estadoTrasFalloRemoto(actual, routeId, { status: 'error', animal: null, mensaje: mensajeDeExcepcion(err, MENSAJE_CARGA_ANIMAL) }));
+    setState((actual) => estadoTrasFalloRemoto(actual, routeId, organizacionId, { status: 'error', animal: null, mensaje: mensajeDeExcepcion(err, MENSAJE_CARGA_ANIMAL) }));
     return;
   }
   if (!vigente()) return;
   if (respuestaApi.ok && respuestaApi.data?.animal) {
-    setState({ status: 'ok', animal: respuestaApi.data.animal, origen: 'servidor' });
+    setState(estadoDeServidor(respuestaApi.data.animal, organizacionId));
     return;
   }
-  setState((actual) => estadoTrasFalloRemoto(actual, routeId, estadoDeRespuestaFallida(respuestaApi)));
+  setState((actual) => estadoTrasFalloRemoto(actual, routeId, organizacionId, estadoDeRespuestaFallida(respuestaApi)));
 }
 
-/** Solo en la transición sin conexión -> con conexión, y sin pisar una edición abierta. */
-export function debeRefrescarAlReconectar({ onlineAntes, online, esLocal, modo }) {
-  return online && !onlineAntes && !esLocal && modo === 'ver';
+/** Solo en la transición sin conexión -> con conexión (el guard de edición decide si se aplica). */
+export function debeRefrescarAlReconectar({ onlineAntes, online, esLocal }) {
+  return online && !onlineAntes && !esLocal;
+}
+
+/** "Actualizar" solo con la ficha en lectura: nunca con una corrección o anulación abierta. */
+export function puedeActualizarManual(modo) {
+  return modo === 'ver';
+}
+
+/**
+ * C2: con una edición abierta, ningún refresco toca la entidad base. solicitar()
+ * dice si se aplica ya; si no, queda pendiente y cerrar() indica que toca refrescar.
+ * El conflicto ANIMAL_MODIFICADO cierra la edición antes de recargar.
+ */
+export function crearGuardEdicion() {
+  let editando = false;
+  let pendiente = false;
+  return {
+    editando: () => editando,
+    abrir: () => {
+      editando = true;
+      // Lo que estuviera en curso al abrir no se aplica: se vuelve a pedir al cerrar.
+      pendiente = true;
+    },
+    solicitar: () => {
+      if (!editando) return true;
+      pendiente = true;
+      return false;
+    },
+    cerrar: () => {
+      editando = false;
+      const refrescar = pendiente;
+      pendiente = false;
+      return refrescar;
+    },
+    /** Cambio de animal u organización: la edición abierta deja de tener sentido. */
+    descartar: () => {
+      editando = false;
+      pendiente = false;
+    },
+  };
 }

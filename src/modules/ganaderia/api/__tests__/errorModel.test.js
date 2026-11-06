@@ -287,7 +287,7 @@ test('pantallas: detalle y lista de animales muestran el mensaje del modelo; 404
   const carga = read('hato/fichaCargaModel.js');
   assert.match(carga, /if \(status === 404\) return \{ status: 'not_found', animal: null \};/);
   assert.match(carga, /mensajeError\(respuestaApi, null, \{ fallback: MENSAJE_CARGA_ANIMAL \}\)/);
-  assert.match(detalle, /\{state\.mensaje \?\? MENSAJE_CARGA_ANIMAL\}/);
+  assert.match(detalle, /\{vista\.mensaje \?\? MENSAJE_CARGA_ANIMAL\}/);
   assert.match(detalle, /setError\(mensajeError\(respuestaApi, messageForError\)\)/);
   const lista = read('hato/HatoListaPage.jsx');
   assert.match(lista, /mensajeDeExcepcion\(err, MENSAJE_CARGA_LISTA\)/);
