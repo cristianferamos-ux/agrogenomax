@@ -351,7 +351,7 @@ test('panel: una consulta de toros sin red usa la copia local', () => {
 
 test('ficha: entrega al panel el repositorio y la sincronización', () => {
   const ficha = leer('../HatoDetallePage.jsx');
-  assert.match(ficha, /<HatoReproduccionPanel[\s\S]*?repoOffline=\{offline\.repo\}[\s\S]*?syncNow=\{offline\.syncNow\}/);
+  assert.match(ficha, /<HatoReproduccionPanel[\s\S]*?repoOffline=\{repoOrg\}[\s\S]*?syncNow=\{offline\.syncNow\}/);
 });
 
 test('sincronización: distingue eventos reproductivos y no los trata como un animal local', () => {

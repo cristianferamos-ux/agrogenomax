@@ -30,7 +30,7 @@
 // FASE 4B: pestaña "Reproducción" (HatoReproduccionPanel, backend 4A). Como
 // Actividad, se monta al abrirla y queda montada; cada evento registrado,
 // anulado o corregido marca la Actividad para recargarla.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom';
 import GanaderiaBackLink from '../components/GanaderiaBackLink.jsx';
 import { FormField, StatusMessage } from '../components/FormField.jsx';
@@ -42,6 +42,19 @@ import HatoReproduccionPanel from './HatoReproduccionPanel.jsx';
 import HatoCierreAnimal from './HatoCierreAnimal.jsx';
 import { ETIQUETAS_ESTADO_REGISTRO, ETIQUETAS_SITUACION, bloqueSituacion, situacionDe } from './cierreModel.js';
 import { useGanaderiaPermisos } from '../auth/useGanaderiaPermisos.js';
+import { useGanaderiaAuthOptional } from '../auth/GanaderiaAuthContext.jsx';
+import {
+  ESTADO_INICIAL_FICHA,
+  MENSAJE_CARGA_ANIMAL,
+  cargarFicha,
+  crearControlCargas,
+  crearGuardEdicion,
+  debeRefrescarAlReconectar,
+  estadoDeServidor,
+  puedeActualizarManual,
+  repoDeOrganizacion,
+  vistaFicha,
+} from './fichaCargaModel.js';
 import { anularAnimal, corregirAnimal, getAnimal } from './hatoApi.js';
 import {
   GENERIC_ERROR_MESSAGE,
@@ -61,9 +74,7 @@ import {
 import useHatoCatalogos from './useHatoCatalogos.js';
 import { useGanaderiaOffline } from '../offline/GanaderiaOfflineProvider.jsx';
 import '../styles/ganaderia-hato.css';
-import { mensajeDeExcepcion, mensajeError } from '../api/errorModel.js';
-
-const MENSAJE_CARGA_ANIMAL = 'No fue posible cargar el animal.';
+import { mensajeError } from '../api/errorModel.js';
 
 function Row({ label, children }) {
   return (
@@ -153,13 +164,27 @@ export default function HatoDetallePage() {
   // FASE 3A: capacidades desde la matriz central (auth/ganaderiaPermisos.js).
   const permisos = useGanaderiaPermisos();
   const rol = permisos.rol;
-  const local = offline.preparado && offline.repo ? offline.repo : null;
+  // C1: la ficha y la copia local quedan ligadas a la organización activa. Cada
+  // organización tiene su propia base IndexedDB; un repositorio de otra (p. ej. en
+  // plena transición del proveedor) no se lee.
+  const organizacionId = useGanaderiaAuthOptional()?.organizacionActiva?.organizacionId ?? null;
+  const repoOrg = repoDeOrganizacion(offline.repo, organizacionId);
+  const local = offline.preparado ? repoOrg : null;
+  const claveFicha = `${organizacionId}:${animalId}`;
   const [chapetaLocal, setChapetaLocal] = useState(null);
   const [tieneQrActiva, setTieneQrActiva] = useState(false);
   const catalogos = useHatoCatalogos({ conPredios: false });
-  const [state, setState] = useState({ status: 'loading', animal: null });
+  const [state, setState] = useState(ESTADO_INICIAL_FICHA);
+  const cargasRef = useRef(null);
+  if (!cargasRef.current) cargasRef.current = crearControlCargas();
+  const cargas = cargasRef.current;
   const [modo, setModo] = useState('ver');
+  const guardRef = useRef(null);
+  if (!guardRef.current) guardRef.current = crearGuardEdicion();
+  const guard = guardRef.current;
   const [form, setForm] = useState(null);
+  // C2: versión con la que se abrió la corrección (token de concurrencia optimista).
+  const [versionCorreccion, setVersionCorreccion] = useState(null);
   const [motivo, setMotivo] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -177,45 +202,60 @@ export default function HatoDetallePage() {
 
   // silencioso (FASE 1B): refresca la ficha sin pasar por "cargando" (tras
   // registrar un pesaje, para no desmontar la pestaña ni su mensaje).
+  // Issue #116: la decisión de estado vive en fichaCargaModel.js. Solo la carga más
+  // reciente toca el estado y un fallo remoto no retira una copia ya visible.
+  // C2: con una corrección/anulación abierta ninguna carga toca la entidad base;
+  // se aplaza hasta cerrarla.
   const load = useCallback(async ({ silencioso = false } = {}) => {
-    if (!idValido) return;
-    let localEncontrado = false;
-    if (local) {
-      const animalLocal = await local.getAnimal(animalId).catch(() => null);
-      if (animalLocal?.redirectTo) {
-        setState({ status: 'redirect', animal: null, to: animalLocal.redirectTo });
-        return;
-      }
-      if (animalLocal) {
-        localEncontrado = true;
-        setState({ status: 'ok', animal: animalLocal, origen: 'local' });
-        setChapetaLocal(await local.getChapetaDeAnimal(animalLocal).catch(() => null));
-      }
-    }
-    if (esLocal) {
-      if (!localEncontrado) setState({ status: 'not_found', animal: null });
-      return;
-    }
-    if (!localEncontrado && !silencioso) setState((current) => ({ ...current, status: 'loading' }));
-    try {
-      const respuestaApi = await getAnimal(animalId);
-      const { ok, status, data } = respuestaApi;
-      if (ok && data?.animal) setState({ status: 'ok', animal: data.animal, origen: 'servidor' });
-      else if (!localEncontrado) {
-        // FASE 3C: 404 tenant-safe sin cambios; 5xx con código de seguimiento.
-        setState(status === 404
-          ? { status: 'not_found', animal: null }
-          : { status: 'error', animal: null, mensaje: ok ? MENSAJE_CARGA_ANIMAL : mensajeError(respuestaApi, null, { fallback: MENSAJE_CARGA_ANIMAL }) });
-      }
-    } catch (err) {
-      // Sin red: se mantiene la copia local si existe.
-      if (!localEncontrado) setState({ status: 'error', animal: null, mensaje: mensajeDeExcepcion(err, MENSAJE_CARGA_ANIMAL) });
-    }
-  }, [animalId, idValido, esLocal, local]);
+    if (!idValido || !guard.solicitar()) return;
+    const clave = `${organizacionId}:${animalId}`;
+    await cargarFicha({
+      routeId: animalId,
+      organizacionId,
+      esLocal,
+      local,
+      obtenerRemoto: getAnimal,
+      silencioso,
+      control: cargas,
+      setState,
+      setChapetaLocal: (valor) => setChapetaLocal({ clave, valor }),
+    });
+  }, [animalId, organizacionId, idValido, esLocal, local, cargas, guard]);
+
+  const abrirEdicion = useCallback((siguiente) => {
+    guard.abrir();
+    cargas.invalidar();
+    setModo(siguiente);
+  }, [guard, cargas]);
+  const cerrarEdicion = useCallback(({ refrescar = true } = {}) => {
+    const pendiente = guard.cerrar();
+    setModo('ver');
+    if (refrescar && pendiente) load({ silencioso: true });
+  }, [guard, load]);
+
+  // Cambio de animal u organización con una edición abierta: se descarta (el
+  // formulario era de otra ficha). Va antes del efecto de carga.
+  const claveAnteriorRef = useRef(claveFicha);
+  useEffect(() => {
+    if (claveAnteriorRef.current === claveFicha) return;
+    claveAnteriorRef.current = claveFicha;
+    guard.descartar();
+    setModo('ver');
+    setForm(null);
+  }, [claveFicha, guard]);
 
   useEffect(() => {
     load();
-  }, [load]);
+    return () => cargas.invalidar();
+  }, [load, cargas]);
+
+  // Al volver la conexión, los datos del servidor sustituyen a la copia.
+  const onlineAntesRef = useRef(offline.online);
+  useEffect(() => {
+    const refrescar = debeRefrescarAlReconectar({ onlineAntes: onlineAntesRef.current, online: offline.online, esLocal });
+    onlineAntesRef.current = offline.online;
+    if (refrescar) load({ silencioso: true });
+  }, [offline.online, esLocal, load]);
 
   // Copia local: refleja la sincronización (p. ej. local -> animal_id).
   useEffect(() => (local && esLocal ? local.subscribe(load) : undefined), [local, esLocal, load]);
@@ -223,19 +263,24 @@ export default function HatoDetallePage() {
   if (!idValido) return <Navigate to="/ganaderia/animales" replace />;
   if (state.status === 'redirect') return <Navigate to={`/ganaderia/animales/${state.to}`} replace />;
 
+  // C1: nunca se pinta una ficha de otro animal u organización (ni un solo render).
+  const vista = vistaFicha(state, animalId, organizacionId);
+  const chapetaVisible = chapetaLocal?.clave === claveFicha ? chapetaLocal.valor : null;
+
   // Corregir, anular y gestionar la chapeta exigen conexión y un animal ya
   // confirmado por el servidor.
   const accionesDisponibles = !esLocal && offline.online;
 
-  const { animal } = state;
+  const { animal } = vista;
   const situacion = animal ? situacionDe(animal) : 'EN_HATO';
   const enHato = situacion === 'EN_HATO';
 
   function abrirCorreccion() {
     setForm(formFromAnimal(animal));
+    setVersionCorreccion(animal.fechaActualizacion);
     setError('');
     setAviso('');
-    setModo('corregir');
+    abrirEdicion('corregir');
   }
 
   function update(field, value) {
@@ -264,19 +309,20 @@ export default function HatoDetallePage() {
     setSaving(true);
     setError('');
     try {
-      const respuestaApi = await corregirAnimal(animal.animalId, buildCorreccionBody(form, animal.fechaActualizacion));
+      const respuestaApi = await corregirAnimal(animal.animalId, buildCorreccionBody(form, versionCorreccion));
       const { ok, data } = respuestaApi;
       if (ok && data?.animal) {
-        setState({ status: 'ok', animal: data.animal });
-        setModo('ver');
+        cargas.invalidar();
+        setState(estadoDeServidor(data.animal, organizacionId));
+        cerrarEdicion({ refrescar: false });
         setAviso(data.sinCambios ? 'No había cambios para guardar.' : 'Datos corregidos.');
         if (!data.sinCambios) marcarActividad();
         return;
       }
       if (data?.error === 'ANIMAL_MODIFICADO') {
         setError(mensajeError(respuestaApi, messageForError));
+        cerrarEdicion({ refrescar: false });
         await load();
-        setModo('ver');
         return;
       }
       setError(mensajeError(respuestaApi, messageForError));
@@ -300,8 +346,9 @@ export default function HatoDetallePage() {
       const respuestaApi = await anularAnimal(animal.animalId, motivo.trim());
       const { ok, data } = respuestaApi;
       if (ok && data?.animal) {
-        setState({ status: 'ok', animal: data.animal });
-        setModo('ver');
+        cargas.invalidar();
+        setState(estadoDeServidor(data.animal, organizacionId));
+        cerrarEdicion({ refrescar: false });
         setAviso(data.yaAnulado ? 'Este registro ya estaba anulado.' : 'Registro anulado.');
         if (!data.yaAnulado) marcarActividad();
         return;
@@ -318,16 +365,16 @@ export default function HatoDetallePage() {
     <div className="gan-panel gan-hato">
       <GanaderiaBackLink to="/ganaderia/animales">Volver a mis animales</GanaderiaBackLink>
 
-      {state.status === 'loading' ? <StatusMessage>Cargando animal...</StatusMessage> : null}
-      {state.status === 'not_found' ? <StatusMessage type="error">Este animal no está disponible.</StatusMessage> : null}
-      {state.status === 'error' ? (
+      {vista.status === 'loading' ? <StatusMessage>Cargando animal...</StatusMessage> : null}
+      {vista.status === 'not_found' ? <StatusMessage type="error">Este animal no está disponible.</StatusMessage> : null}
+      {vista.status === 'error' ? (
         <div className="gan-hato-actions">
-          <StatusMessage type="error">{state.mensaje ?? MENSAJE_CARGA_ANIMAL}</StatusMessage>
+          <StatusMessage type="error">{vista.mensaje ?? MENSAJE_CARGA_ANIMAL}</StatusMessage>
           <button type="button" className="gan-secondary-button" onClick={load}>Reintentar</button>
         </div>
       ) : null}
 
-      {state.status === 'ok' && animal ? (
+      {vista.status === 'ok' && animal ? (
         <>
           <div className="gan-section-heading">
             <span className="gan-eyebrow">Animal</span>
@@ -341,6 +388,16 @@ export default function HatoDetallePage() {
             <StatusMessage type="error">Registro anulado. Motivo: {animal.estadoMotivo}</StatusMessage>
           ) : null}
           {aviso ? <StatusMessage type="success">{aviso}</StatusMessage> : null}
+          {vista.avisoRemoto ? (
+            <div className="gan-hato-actions">
+              <StatusMessage type="info">{vista.avisoRemoto}</StatusMessage>
+              {puedeActualizarManual(modo) ? (
+                <button type="button" className="gan-secondary-button" onClick={() => load({ silencioso: true })}>Actualizar</button>
+              ) : (
+                <p className="gan-hato-hint">La ficha se actualizará al cerrar la edición.</p>
+              )}
+            </div>
+          ) : null}
           {animal.estadoSync === 'PENDIENTE' ? (
             <StatusMessage type="info">Registrado en este dispositivo. Se enviará automáticamente al recuperar la conexión.</StatusMessage>
           ) : null}
@@ -356,11 +413,12 @@ export default function HatoDetallePage() {
           {modo === 'ver' && !esLocal && pestana === 'pesajes' ? (
             <div role="tabpanel" id="ficha-panel-pesajes" aria-labelledby="ficha-tab-pesajes" tabIndex={0}>
               <HatoPesajesPanel
+                key={claveFicha}
                 animalId={animal.animalId}
                 animalActivo={animal.estado === 'ACTIVO'}
                 estadoOperativo={situacion}
                 online={offline.online}
-                repoOffline={offline.repo}
+                repoOffline={repoOrg}
                 onPesajeRegistrado={() => {
                   load({ silencioso: true });
                   marcarActividad();
@@ -372,10 +430,11 @@ export default function HatoDetallePage() {
           {modo === 'ver' && !esLocal && reproduccionAbierta ? (
             <div role="tabpanel" id="ficha-panel-reproduccion" aria-labelledby="ficha-tab-reproduccion" tabIndex={0} hidden={pestana !== 'reproduccion'}>
               <HatoReproduccionPanel
+                key={claveFicha}
                 animal={animal}
                 visible={pestana === 'reproduccion'}
                 online={offline.online}
-                repoOffline={offline.repo}
+                repoOffline={repoOrg}
                 syncNow={offline.syncNow}
                 onCambio={marcarActividad}
               />
@@ -384,7 +443,7 @@ export default function HatoDetallePage() {
 
           {modo === 'ver' && !esLocal && actividadAbierta ? (
             <div role="tabpanel" id="ficha-panel-actividad" aria-labelledby="ficha-tab-actividad" tabIndex={0} hidden={pestana !== 'actividad'}>
-              <HatoActividadPanel animalId={animal.animalId} visible={pestana === 'actividad'} version={actividadVersion} repoOffline={offline.repo} />
+              <HatoActividadPanel key={claveFicha} animalId={animal.animalId} visible={pestana === 'actividad'} version={actividadVersion} repoOffline={repoOrg} />
             </div>
           ) : null}
 
@@ -439,7 +498,7 @@ export default function HatoDetallePage() {
                         setMotivo('');
                         setError('');
                         setAviso('');
-                        setModo('anular');
+                        abrirEdicion('anular');
                       }}
                     >
                       Anular registro
@@ -449,6 +508,7 @@ export default function HatoDetallePage() {
               ) : null}
               {accionesDisponibles ? (
                 <HatoQrPanel
+                  key={claveFicha}
                   animalId={animal.animalId}
                   animalActivo={animal.estado === 'ACTIVO' && enHato}
                   estadoOperativo={situacion}
@@ -459,8 +519,8 @@ export default function HatoDetallePage() {
                 <section className="gan-hato-qr">
                   <h3>Chapeta QR</h3>
                   <p className="gan-hato-hint">
-                    {chapetaLocal
-                      ? `${chapetaLocal.codigoVisible}${chapetaLocal.reservaLocalUuid ? ' (asociación pendiente de sincronizar)' : ''}`
+                    {chapetaVisible
+                      ? `${chapetaVisible.codigoVisible}${chapetaVisible.reservaLocalUuid ? ' (asociación pendiente de sincronizar)' : ''}`
                       : animal.chapetaCodigo
                         ? `${animal.chapetaCodigo} (asociación pendiente de sincronizar)`
                         : 'Sin chapeta asociada en este dispositivo.'}
@@ -484,7 +544,7 @@ export default function HatoDetallePage() {
               {error ? <StatusMessage type="error">{error}</StatusMessage> : null}
               <div className="gan-hato-actions">
                 <button type="submit" className="gan-submit" disabled={saving}>{saving ? 'Guardando...' : 'Guardar corrección'}</button>
-                <button type="button" className="gan-secondary-button" onClick={() => setModo('ver')} disabled={saving}>Cancelar</button>
+                <button type="button" className="gan-secondary-button" onClick={() => cerrarEdicion()} disabled={saving}>Cancelar</button>
               </div>
             </form>
           ) : null}
@@ -501,7 +561,7 @@ export default function HatoDetallePage() {
               {error ? <StatusMessage type="error">{error}</StatusMessage> : null}
               <div className="gan-hato-actions">
                 <button type="submit" className="gan-submit" disabled={saving}>{saving ? 'Anulando...' : 'Confirmar anulación'}</button>
-                <button type="button" className="gan-secondary-button" onClick={() => setModo('ver')} disabled={saving}>Cancelar</button>
+                <button type="button" className="gan-secondary-button" onClick={() => cerrarEdicion()} disabled={saving}>Cancelar</button>
               </div>
             </form>
           ) : null}
