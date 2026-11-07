@@ -11,7 +11,8 @@ import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
-import { main as migrate } from '../agx-migrate.mjs';
+import { main as migrate, defaultExecPsql } from '../agx-migrate.mjs';
+import { sanitizedPgEnv } from '../agx-migrate-lib.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const BUSINESS = process.env.AGX_MIG_BUSINESS_ADMIN_URL;
@@ -56,10 +57,9 @@ function sandbox() {
   return root;
 }
 
-async function run(args, url, root) {
-  const env = { ...process.env, ...secrets, AGX_MIG_URL: url };
-  const logs = [];
-  await migrate([...args, '--url-env', 'AGX_MIG_URL', ...(root ? ['--root', root] : [])], { env, log: (l) => logs.push(l) });
+async function run(args, url, root, { extraEnv = {}, execPsql, logs = [] } = {}) {
+  const env = { ...process.env, ...secrets, ...extraEnv, AGX_MIG_URL: url };
+  await migrate([...args, '--url-env', 'AGX_MIG_URL', ...(root ? ['--root', root] : [])], { env, log: (l) => logs.push(l), ...(execPsql ? { execPsql } : {}) });
   return logs;
 }
 
@@ -70,11 +70,11 @@ async function rejectsWith(promise, code) {
   });
 }
 
-function psqlFile(url, file) {
+function psqlFile(url, file, extra = []) {
   const u = new URL(url);
-  return spawnSync(process.env.PSQL_BIN || 'psql', ['-X', '-q', '-v', 'ON_ERROR_STOP=1', '-f', file], {
+  return spawnSync(process.env.PSQL_BIN || 'psql', ['-X', '-q', '-v', 'ON_ERROR_STOP=1', ...extra, '-f', file], {
     encoding: 'utf8',
-    env: { ...process.env, PGHOST: u.hostname, PGPORT: u.port, PGUSER: u.username, PGPASSWORD: decodeURIComponent(u.password), PGDATABASE: u.pathname.slice(1), PGCLIENTENCODING: 'UTF8' },
+    env: sanitizedPgEnv(process.env, { PGHOST: u.hostname, PGPORT: u.port, PGUSER: u.username, PGPASSWORD: decodeURIComponent(u.password), PGDATABASE: u.pathname.slice(1), PGCLIENTENCODING: 'UTF8' }),
   });
 }
 
@@ -225,8 +225,17 @@ describe('runner de migraciones AGX (integración real)', { skip }, () => {
     const fake = path.join(root, 'no-es-dump.bin');
     fs.writeFileSync(fake, 'hola');
     await rejectsWith(run(['rollback', '--target', 'business', '--version', '26', '--allow-historical-destructive-rollback', '26', '--backup-evidence', fake], url, root), 'AGX_MIGRATE_BACKUP_EVIDENCE');
+    // 5 bytes PGDMP ya no bastan (12): la evidencia es un pg_dump -Fc real, legible por pg_restore --list.
+    const fakeDump = path.join(root, 'falso.dump');
+    fs.writeFileSync(fakeDump, 'PGDMP');
+    await rejectsWith(run(['rollback', '--target', 'business', '--version', '26', '--allow-historical-destructive-rollback', '26', '--backup-evidence', fakeDump], url, root), 'AGX_MIGRATE_BACKUP_EVIDENCE');
     const evidence = path.join(root, 'evidencia.dump');
-    fs.writeFileSync(evidence, Buffer.from('PGDMP\u0001\u000f'));
+    const u = new URL(url);
+    const dump = spawnSync(process.env.PG_DUMP_BIN || 'pg_dump', ['-Fc', '-f', evidence], {
+      encoding: 'utf8',
+      env: sanitizedPgEnv(process.env, { PGHOST: u.hostname, PGPORT: u.port, PGUSER: u.username, PGPASSWORD: decodeURIComponent(u.password), PGDATABASE: u.pathname.slice(1) }),
+    });
+    assert.equal(dump.status, 0, dump.stderr);
     // No es el tope: el servidor lo rechaza.
     await rejectsWith(run(['rollback', '--target', 'business', '--version', '25', '--allow-historical-destructive-rollback', '25', '--backup-evidence', evidence], url, root), 'AGX_MIGRATE_ROLLBACK_NOT_TOP');
     // El ledger nunca se revierte con el runner.
@@ -236,7 +245,8 @@ describe('runner de migraciones AGX (integración real)', { skip }, () => {
     await assert.rejects(admin(url, "update agx_meta.schema_migrations set kind = 'aplicada' where version = 1"), /append-only/);
     await assert.rejects(admin(url, 'truncate agx_meta.schema_migration_eventos'), /append-only/);
     // Con la opción extraordinaria, evidencia y tabla vacía, el histórico 0026 sí corre.
-    await run(['rollback', '--target', 'business', '--version', '26', '--allow-historical-destructive-rollback', '26', '--backup-evidence', evidence], url, root);
+    const rbLogs = await run(['rollback', '--target', 'business', '--version', '26', '--allow-historical-destructive-rollback', '26', '--backup-evidence', evidence], url, root);
+    assert.ok(rbLogs.some((l) => /backup-evidence sha256=[0-9a-f]{64} bytes=\d+ entradas_toc=\d+/.test(l)), rbLogs.join('\n'));
     assert.equal((await admin(url, "select to_regclass('agx.reproduccion_eventos') as r")).rows[0].r, null);
     assert.equal((await ledger(url)).length, 27);
   });
@@ -288,7 +298,7 @@ describe('10. baseline Auth reconstruye la estructura de producción desde cero'
     const u = new URL(url);
     const res = spawnSync(process.env.PSQL_BIN || 'psql', ['-X', '-q', '-v', 'ON_ERROR_STOP=1', '-f', path.join(ROOT, 'db/verify/schema_fingerprint.sql')], {
       encoding: 'utf8',
-      env: { ...process.env, PGHOST: u.hostname, PGPORT: u.port, PGUSER: u.username, PGPASSWORD: decodeURIComponent(u.password), PGDATABASE: u.pathname.slice(1) },
+      env: sanitizedPgEnv(process.env, { PGHOST: u.hostname, PGPORT: u.port, PGUSER: u.username, PGPASSWORD: decodeURIComponent(u.password), PGDATABASE: u.pathname.slice(1) }),
     });
     assert.equal(res.status, 0, res.stderr);
     const got = res.stdout.replace(/\r/g, '').trim().split('\n');
@@ -300,5 +310,145 @@ describe('10. baseline Auth reconstruye la estructura de producción desde cero'
     // Sobre una base Auth existente, el baseline aborta (nunca se aplica en producción).
     await rejectsWith(run(['up', '--target', 'auth', '--var', 'agx_auth_password=AGX_MIG_AUTH_PW'], url), 'AGX_MIGRATE_NO_LEDGER');
     await rejectsWith(run(['up', '--target', 'auth', '--fresh', '--var', 'agx_auth_password=AGX_MIG_AUTH_PW'], url), 'AGX_MIGRATE_NOT_FRESH');
+  });
+});
+
+// ---------------------------------------------------------------------
+// Guards del runner (hardening/migration-runner-guards), base propia.
+// ---------------------------------------------------------------------
+describe('guards del runner (integración real)', { skip }, () => {
+  let root;
+  let url;
+  const tmpFiles = [];
+
+  before(async () => {
+    root = sandbox();
+    url = dbUrl(BUSINESS, await createDb(BUSINESS, 'agx_guard'));
+    await run(['up', '--target', 'business', '--fresh', ...BUSINESS_VARS], url, root);
+  });
+
+  after(() => {
+    if (root) fs.rmSync(root, { recursive: true, force: true });
+    for (const f of tmpFiles) fs.rmSync(f, { recursive: true, force: true });
+  });
+
+  test('A (2/3): bundle --fresh 0000..0026 PASS sobre base vacía; FAIL sobre base existente o con ledger', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agx-mig-fresh-'));
+    tmpFiles.push(dir);
+    const out = path.join(dir, 'fresh26.sql');
+    await migrate(['bundle', '--target', 'business', '--fresh', '--to', '26', '--out', out], { log: () => {} });
+    const empty = dbUrl(BUSINESS, await createDb(BUSINESS, 'agx_fresh'));
+    const vars = ['-v', `agx_app_password=${secrets.AGX_MIG_APP_PW}`, '-v', `agx_qr_admin_password=${secrets.AGX_MIG_QR_PW}`];
+    let res = psqlFile(empty, out, vars);
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /AGX_MIGRATE_COMMITTED xid=/);
+    const r = (await admin(empty, "select to_regnamespace('agx') is not null as agx, to_regnamespace('agx_meta') is null as sin_ledger, to_regclass('agx.reproduccion_eventos') is not null as t26")).rows[0];
+    assert.deepEqual(r, { agx: true, sin_ledger: true, t26: true });
+    // Mismo bundle sobre la base ya construida (sin ledger) y sobre una base con ledger: NOT_FRESH, nada cambia.
+    res = psqlFile(empty, out, vars);
+    assert.notEqual(res.status, 0);
+    assert.match(res.stderr, /AGX_MIGRATE_NOT_FRESH/);
+    res = psqlFile(url, out, vars);
+    assert.match(res.stderr, /AGX_MIGRATE_NOT_FRESH/);
+    assert.equal((await ledger(url)).length, 28);
+    // El runner tampoco admite --fresh sobre una base existente.
+    await rejectsWith(run(['up', '--target', 'business', '--fresh', ...BUSINESS_VARS], empty, root), 'AGX_MIGRATE_NOT_FRESH');
+  });
+
+  test('B (4/5/6): migraciones con \\set ON_ERROR_STOP 0, AUTOCOMMIT o \\gexec se rechazan antes de tocar la base', async () => {
+    for (const [i, body] of [
+      ['a', '\\set ON_ERROR_STOP 0\ncreate table agx.it_guard_a (id integer);\n'],
+      ['b', '\\set AUTOCOMMIT off\ncreate table agx.it_guard_b (id integer);\n'],
+      ['c', "select 'create table agx.it_guard_c (id integer)' \\gexec\n"],
+    ]) {
+      const f = path.join(MIG_DIR(root), `0028_it_guard_${i}.sql`);
+      fs.writeFileSync(f, body);
+      try {
+        await rejectsWith(run(['up', '--target', 'business'], url, root), 'AGX_MIGRATE_META_COMMAND');
+        assert.equal((await admin(url, `select to_regclass('agx.it_guard_${i}') as r`)).rows[0].r, null);
+      } finally {
+        fs.rmSync(f, { force: true });
+      }
+    }
+    assert.equal((await ledger(url)).length, 28);
+  });
+
+  test('C (7): psql termina con rc=0 pero la transacción no hizo COMMIT -> el runner FALLA', async () => {
+    const f = path.join(MIG_DIR(root), '0028_it_post.sql');
+    fs.writeFileSync(f, 'create table agx.it_post (id integer);\n');
+    // psql "manipulado": convierte el COMMIT en ROLLBACK y quita el post-check del bundle.
+    const execPsql = (env, args) => {
+      const file = args[args.indexOf('-f') + 1];
+      const sql = fs.readFileSync(file, 'utf8')
+        .replace(/-- <agx-migrate-commit>[\s\S]*?-- <\/agx-migrate-commit>/, 'rollback;')
+        .replace(/-- <agx-migrate-post-check>[\s\S]*?-- <\/agx-migrate-post-check>/, '');
+      fs.writeFileSync(file, sql);
+      const res = defaultExecPsql(env, args);
+      assert.equal(res.status, 0, res.stderr);
+      return res;
+    };
+    try {
+      await rejectsWith(run(['up', '--target', 'business'], url, root, { execPsql }), 'AGX_MIGRATE_POST_VERIFY');
+      assert.equal((await admin(url, "select to_regclass('agx.it_post') as r")).rows[0].r, null);
+      assert.equal((await ledger(url)).length, 28);
+    } finally {
+      fs.rmSync(f, { force: true });
+    }
+  });
+
+  test('D (8/9): PGHOSTADDR/PGSERVICE/PGOPTIONS heredadas no cambian el destino ni la sesión', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agx-mig-svc-'));
+    tmpFiles.push(dir);
+    const serviceFile = path.join(dir, 'pg_service.conf');
+    fs.writeFileSync(serviceFile, '[agx_trampa]\nhost=203.0.113.9\nport=1\ndbname=no_existe\nuser=nadie\n');
+    const hostile = {
+      PGHOSTADDR: '203.0.113.9', PGSERVICE: 'agx_trampa', PGSERVICEFILE: serviceFile, PGPORT: '1',
+      PGDATABASE: 'no_existe', PGOPTIONS: '-c default_transaction_read_only=on', PGSSLMODE: 'require',
+    };
+    const f = path.join(MIG_DIR(root), '0028_it_env.sql');
+    fs.writeFileSync(f, 'create table agx.it_env (id integer);\n');
+    fs.writeFileSync(path.join(MIG_DIR(root), '0028_it_env_rollback.sql'), 'drop table if exists agx.it_env;\n');
+    try {
+      const logs = await run(['up', '--target', 'business'], url, root, { extraEnv: hostile });
+      assert.ok(logs.some((l) => /OK 0028_it_env\.sql/.test(l)), logs.join('\n'));
+      assert.ok((await admin(url, "select to_regclass('agx.it_env') as r")).rows[0].r);
+      assert.equal((await ledger(url)).length, 29);
+      await run(['rollback', '--target', 'business', '--version', '28', '--confirm-rollback', '28'], url, root, { extraEnv: hostile });
+      assert.equal((await ledger(url)).length, 28);
+    } finally {
+      fs.rmSync(f, { force: true });
+      fs.rmSync(path.join(MIG_DIR(root), '0028_it_env_rollback.sql'), { force: true });
+    }
+  });
+
+  test('(11): la contraseña no aparece en stdout/stderr/mensajes ni en argv de psql', async () => {
+    const secret = secrets.AGX_MIG_APP_PW;
+    const f = path.join(MIG_DIR(root), '0028_it_secret.sql');
+    // Error que en psql incluiría el valor: invalid input syntax for type integer: "<secreto>".
+    fs.writeFileSync(f, "select :'agx_app_password'::integer;\n");
+    const seen = [];
+    const execPsql = (env, args) => {
+      seen.push(...args);
+      const res = defaultExecPsql(env, args);
+      seen.push(res.stdout || '');
+      return res;
+    };
+    try {
+      const logs = [];
+      let error;
+      try {
+        await run(['up', '--target', 'business', '--var', 'agx_app_password=AGX_MIG_APP_PW'], url, root, { execPsql, logs });
+      } catch (e) { error = e; }
+      assert.equal(error?.code, 'AGX_MIGRATE_SQL_ERROR');
+      assert.ok(!error.message.includes(secret), 'el mensaje de error contiene la contraseña');
+      assert.match(error.message, /\*\*\*/);
+      assert.ok(!logs.join('\n').includes(secret));
+      assert.ok(!seen.join('\n').includes(secret), 'la contraseña viajó en argv o stdout de psql');
+      const adminPw = decodeURIComponent(new URL(url).password);
+      assert.ok(!seen.join('\n').includes(adminPw) && !error.message.includes(adminPw));
+      assert.equal((await ledger(url)).length, 28);
+    } finally {
+      fs.rmSync(f, { force: true });
+    }
   });
 });

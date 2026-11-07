@@ -99,14 +99,37 @@ cambio). La URL va siempre en una variable de entorno (`--url-env`), y solo se a
 
 - `status --target business|auth`: archivos, checksums y variables psql requeridas.
 - `plan` / `up --target business --url-env VAR [--to N] [--version N] [--var nombre=ENV]`.
-- `up --fresh`: construye una base vacía desde 0000 (DR, pruebas, staging nuevo).
+- `up --fresh [--to N]`: construye una base vacía desde 0000 en UNA transacción (DR, pruebas, staging nuevo).
 - `bundle --target business --version N --out f.sql`: script psql autocontenido para producción.
+  **Solo N ≥ 27** (el ledger y posteriores). Una versión anterior al ledger (o cualquiera de Auth, que no
+  tiene ledger) se rechaza (`AGX_MIGRATE_HISTORICAL_BUNDLE_BLOCKED`): no hay forma de reaplicar historia
+  suelta sobre una base existente.
+- `bundle --target business --fresh [--to N] --out f.sql`: construcción desde cero 0000..N en una
+  transacción. El propio bundle aborta (`AGX_MIGRATE_NOT_FRESH`) si la base ya tiene `agx` o `agx_meta`.
 
 Cada bundle es UNA transacción (`begin` … `commit`) con advisory lock, y comprueba **en el servidor**,
 antes de ejecutar la migración: ledger presente, versión no registrada, todas las previas registradas
 con el mismo archivo y checksum, y ninguna posterior. El registro se inserta en la misma transacción:
-si algo falla, no queda nada aplicado ni registrado. Se rechazan archivos con BEGIN/COMMIT/SAVEPOINT
-propios o con `\connect`, `\i`, `\!`, `\o` o `\g`.
+si algo falla, no queda nada aplicado ni registrado.
+
+Metacomandos psql: **whitelist** (`\set`/`\unset` de variables en minúsculas, `\if`/`\elif`/`\else`/`\endif`,
+`\echo`, `\warn`, `\gset` simple). Se rechaza todo lo demás, en cualquier posición de la línea: `\connect`,
+`\i`, `\ir`, `\include*`, `\!`, `\o`, `\g`, `\gx`, `\gexec`, `\copy`, `\getenv`, `\setenv`, `\pset`,
+comillas invertidas, y cualquier `\set`/`\unset` de variables especiales (`ON_ERROR_STOP`, `AUTOCOMMIT`,
+`ON_ERROR_ROLLBACK`...). Única forma admitida: `\set ON_ERROR_STOP on` (lo refuerza). Excepción histórica:
+`\gexec` de `0023_qr_inventario_chapetas.sql`, fijada por su checksum exacto.
+
+Verificación posterior: tras un psql con exit 0, el runner relee el ledger (versión, archivo, checksum y
+`kind` esperados) y comprueba con `pg_xact_status` que la transacción del bundle hizo COMMIT. Si algo
+falta o difiere: `AGX_MIGRATE_POST_VERIFY`. El bundle repite la verificación del ledger en el servidor
+justo después del COMMIT e imprime `AGX_MIGRATE_COMMITTED xid=N`.
+
+Conexión: el entorno de psql se construye **sin ninguna variable `PG*` heredada** (`PGHOST`, `PGHOSTADDR`,
+`PGSERVICE`, `PGSERVICEFILE`, `PGSSLMODE`, `PGOPTIONS`, `PGPASSFILE`...). Todo sale de la URL. Único
+parámetro de URL admitido: `sslmode`; cualquier otro (`host`, `hostaddr`, `options`, `service`...) se
+rechaza (`AGX_MIGRATE_URL_PARAM`). `--allow-remote-host` se compara con el host que realmente se usa. Las
+variables `--var` (contraseñas) viajan por el entorno del proceso psql (`\getenv`), nunca en argv, y
+cualquier valor secreto se sustituye por `***` en los mensajes.
 
 ### Producción (Business), secuencia por migración nueva
 
@@ -115,7 +138,10 @@ propios o con `\connect`, `\i`, `\!`, `\o` o `\g`.
    y anotar su SHA-256.
 3. Subir el bundle al contenedor (bloques base64 de unos 3000 caracteres) y verificar el SHA-256.
 4. `psql -U postgres -d agx_business -X -v ON_ERROR_STOP=1 [-v var=...] -f /tmp/bundle_N.sql`
-5. Verificar `select * from agx_meta.schema_migrations order by version desc limit 3`.
+   (sin `PG*` heredadas en la sesión del contenedor). Exige exit 0 **y** la línea `AGX_MIGRATE_COMMITTED xid=N`.
+5. Verificar `select pg_xact_status('N'::xid8)` = `committed` y
+   `select * from agx_meta.schema_migrations order by version desc limit 3` (versión, archivo, checksum
+   y `kind` esperados).
 6. Recién entonces mergear el código que depende de la migración (Railway despliega `main` automáticamente).
 
 ### Bootstrap del ledger (0027) — una sola vez por base
@@ -134,10 +160,23 @@ fecha de certificación. La existencia de un archivo nunca se registra como evid
 - **Rollback de una migración posterior al ledger:** `rollback --target business --version N --confirm-rollback N`.
   Solo la última versión aplicada. Antes del SQL se comprueba que las tablas y columnas que el rollback
   borra estén vacías; si no, aborta. La baja del ledger queda auditada en `agx_meta.schema_migration_eventos`.
-- **Rollback histórico (0001–0026):** bloqueado por defecto. Solo con
-  `--allow-historical-destructive-rollback N` (la versión exacta) y `--backup-evidence <dump PGDMP local>`,
-  además de las mismas precondiciones de datos vacíos verificadas en el servidor. Antes de considerarlo:
-  revertir el código, tener un backup DR completo verificado y la autorización del sprint.
+- **Rollback histórico (0001–0026): recuperación extraordinaria, NO un workflow normal.** Bloqueado por
+  defecto. Solo con `--allow-historical-destructive-rollback N` (la versión exacta) y
+  `--backup-evidence <dump>`: archivo de al menos 16 KiB, cabecera `PGDMP`, legible completo por
+  `pg_restore --list` con entradas TOC; su SHA-256 queda en el log y en la cabecera del bundle. Además se
+  verifican en el servidor las precondiciones de datos vacíos (solo `DROP TABLE`/`DROP COLUMN`; el DML de un
+  rollback, como el `delete` de eventos QR en 0023, no se precondiciona). Antes de considerarlo: revertir
+  el código, tener un backup DR completo verificado y la autorización del sprint.
+- **⚠️ Después de un rollback histórico el ledger queda en una secuencia NO reaplicable automáticamente.**
+  Ejemplo: revertir 0026 deja `0000–0025` + `0027`. El runner rechaza reaplicar 0026 (`AGX_MIGRATE_GAP` /
+  `AGX_MIGRATE_OUT_OF_ORDER`) y también cualquier migración posterior. **No continuar migrando.** Procedimiento
+  obligatorio antes de seguir, con autorización explícita:
+  1. Congelar despliegues que dependan del esquema (Railway despliega `main` automáticamente).
+  2. Decidir entre (a) restaurar el backup DR previo al rollback (RESTORE + VERIFY), o (b) corregir hacia
+     adelante con una migración NUEVA que reconstruya lo revertido, acordada en el sprint.
+  3. Si se elige (b), el ledger se reconcilia **solo** con una migración/procedimiento revisado y aprobado;
+     nunca editando `agx_meta` a mano (los triggers lo impiden y debe seguir así).
+  4. Verificar huella y `status`/`plan` antes de reanudar migraciones normales.
 - **El ledger no se revierte con el runner.** Retirarlo (solo en una base desechable o con autorización):
   `drop schema agx_meta cascade;` como superusuario. No hay otra manera, a propósito.
 - **Pérdida total de una base:** RESTORE desde el último backup completo y VERIFY. Si no hay backup,
