@@ -6,6 +6,7 @@
 // del bundle, en la misma transacción que la migración, para que el
 // resultado sea seguro aunque el bundle se ejecute en otra máquina (p. ej.
 // `railway ssh` + psql en el contenedor de producción).
+import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -33,7 +34,27 @@ export const TARGETS = {
 };
 
 const FILE_RE = /^(\d{4})_([a-z0-9_]+)\.sql$/;
-const ALLOWED_META = new Set(['set', 'unset', 'if', 'elif', 'else', 'endif', 'echo', 'gset', 'gexec', 'pset', 'qecho', 'warn']);
+// Whitelist explícita de metacomandos psql dentro de una migración. Todo lo
+// demás (\connect, \i, \ir, \include*, \!, \o, \g, \gx, \gexec, \copy,
+// \getenv, \setenv, \pset, \\, ...) se rechaza. Reglas adicionales por
+// metacomando en assertMetaCommand().
+const ALLOWED_META = new Set(['set', 'unset', 'if', 'elif', 'else', 'endif', 'echo', 'warn', 'gset']);
+// Excepciones históricas fijadas por archivo + checksum exacto (contenido LF):
+// migraciones ya aplicadas en producción que no se pueden reescribir. Si el
+// archivo cambia, la excepción deja de valer.
+const HISTORICAL_META_EXEMPTIONS = {
+  // GRANT CONNECT ON DATABASE <base actual>: el nombre de la base no se conoce de antemano.
+  '0023_qr_inventario_chapetas.sql': {
+    checksum: 'a1c630e8ee7c31194e79d9e613b35a18d1a8ef9404325c73d83d8a5a321bf861',
+    meta: ['gexec'],
+  },
+};
+// Único \set de variable especial admitido: reafirmar ON_ERROR_STOP (no desactivarlo).
+const ON_ERROR_STOP_ON = /^(on|1|true)$/i;
+// Parámetros de URL que el runner implementa; cualquier otro se rechaza.
+export const SSL_MODES = new Set(['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full']);
+// Tamaño mínimo de un dump aceptable como evidencia de backup.
+export const MIN_BACKUP_EVIDENCE_BYTES = 16 * 1024;
 
 export function fail(code, message) {
   return Object.assign(new Error(`${code}: ${message}`), { code });
@@ -120,23 +141,69 @@ export function psqlVariables(sql) {
  * romperían la atomicidad del bundle (cambiar de conexión, incluir otros
  * archivos, salir).
  */
-export function assertBundleSafe(sql, filename) {
+export function assertBundleSafe(sql, filename, checksum = null) {
   const scan = stripSqlForScan(sql);
   const tx = /(^|;)\s*(begin|start\s+transaction|commit|end|rollback|abort|savepoint|release|prepare\s+transaction)\b[^;]*;/i;
   if (tx.test(scan)) {
     throw fail('AGX_MIGRATE_TX_CONTROL', `${filename} contiene control de transacción de nivel superior; el runner gestiona BEGIN/COMMIT.`);
   }
-  for (const m of scan.matchAll(/(^|\n)\s*\\([A-Za-z!]+)/g)) {
-    if (!ALLOWED_META.has(m[2])) {
-      throw fail('AGX_MIGRATE_META_COMMAND', `${filename} usa el metacomando psql \\${m[2]}, no permitido dentro de un bundle.`);
+  const exemption = HISTORICAL_META_EXEMPTIONS[filename];
+  const exempt = new Set(exemption && checksum === exemption.checksum ? exemption.meta : []);
+  // psql interpreta una barra invertida fuera de cadenas/cuerpos como metacomando
+  // en cualquier posición de la línea: se examinan TODAS.
+  for (const m of scan.matchAll(/\\([A-Za-z]+|.)([^\n]*)/g)) {
+    assertMetaCommand(m[1], m[2], { filename, exempt, before: scan.slice(0, m.index) });
+  }
+}
+
+const meta = (filename, cmd, why) => fail('AGX_MIGRATE_META_COMMAND', `${filename} usa \\${cmd}: ${why}`);
+
+function assertMetaCommand(cmd, rest, { filename, exempt, before }) {
+  if (!ALLOWED_META.has(cmd) && !exempt.has(cmd)) throw meta(filename, cmd, 'metacomando psql no permitido dentro de una migración');
+  // psql ejecuta comandos de shell entre comillas invertidas en los argumentos.
+  if (rest.includes('`')) throw meta(filename, cmd, 'comillas invertidas (ejecución de shell) no permitidas');
+  const args = rest.trim().split(/\s+/).filter(Boolean);
+  if (cmd === 'set' || cmd === 'unset') {
+    const name = args[0] ?? '';
+    if (/^[a-z_][a-z0-9_]*$/.test(name)) return;
+    // Las variables especiales de psql van en mayúsculas (ON_ERROR_STOP,
+    // ON_ERROR_ROLLBACK, AUTOCOMMIT, SINGLESTEP...): alteran el control del runner.
+    if (cmd === 'set' && name === 'ON_ERROR_STOP' && args.length === 2 && ON_ERROR_STOP_ON.test(args[1])) return;
+    throw meta(filename, `${cmd} ${name}`, 'solo se admiten variables en minúsculas (y \\set ON_ERROR_STOP on)');
+  }
+  if (cmd === 'gset') {
+    // Sin prefijo, \gset crea variables con el nombre de cada columna: un
+    // alias entre comillas ("ON_ERROR_ROLLBACK") o un * podrían fijar una
+    // variable especial. Se exige alias simple (en minúsculas por el parser).
+    if (args.length && !/^[a-z_][a-z0-9_]*$/.test(args[0])) throw meta(filename, cmd, 'prefijo no válido');
+    const stmt = before.slice(before.lastIndexOf(';') + 1);
+    if (!args.length && (stmt.includes('"') || /\*/.test(stmt.replace(/count\s*\(\s*\*\s*\)/gi, '')))) {
+      throw meta(filename, cmd, 'consulta con identificadores entre comillas o * no permitida');
     }
   }
-  // \gset/\gexec van al final de una línea de consulta: validar también esos.
-  for (const m of scan.matchAll(/\\(g[a-z]*)\b/g)) {
-    if (!ALLOWED_META.has(m[1])) {
-      throw fail('AGX_MIGRATE_META_COMMAND', `${filename} usa el metacomando psql \\${m[1]}, no permitido.`);
-    }
+}
+
+/**
+ * Entorno para psql/pg_* sin NINGUNA variable libpq heredada (PGHOST,
+ * PGHOSTADDR, PGSERVICE, PGSERVICEFILE, PGSSLMODE, PGOPTIONS, PGPASSFILE...):
+ * el destino solo puede venir de lo que fija el runner.
+ */
+export function sanitizedPgEnv(base = process.env, pg = {}) {
+  const out = {};
+  for (const [k, v] of Object.entries(base)) {
+    if (/^PG/i.test(k) || /^PSQL/i.test(k)) continue;
+    out[k] = v;
   }
+  return { ...out, ...pg };
+}
+
+/** Sustituye valores secretos por *** en cualquier texto que se vaya a mostrar. */
+export function redact(text, secrets) {
+  let out = String(text ?? '');
+  for (const s of secrets) {
+    if (s && String(s).length >= 4) out = out.split(String(s)).join('***');
+  }
+  return out;
 }
 
 function readMigration(dir, filename) {
@@ -171,9 +238,9 @@ export function listMigrations(dir) {
   }
   return versions.map((version) => {
     const up = readMigration(dir, ups.get(version));
-    assertBundleSafe(up.content, up.filename);
+    assertBundleSafe(up.content, up.filename, up.checksum);
     const rollback = downs.has(version) ? readMigration(dir, downs.get(version)) : null;
-    if (rollback) assertBundleSafe(rollback.content, rollback.filename);
+    if (rollback) assertBundleSafe(rollback.content, rollback.filename, rollback.checksum);
     return { version, ...up, variables: psqlVariables(up.content), rollback };
   });
 }
@@ -218,16 +285,64 @@ function assertEntry(entry) {
   }
 }
 
-function header({ target, kind, migration }) {
+function header({ target, kind, migration, extra = [] }) {
   return [
     `-- AGX_MIGRATE bundle (${RUNNER_VERSION}) -- generado, no editar.`,
     `-- target=${target} tipo=${kind} archivo=${migration.filename} sha256=${migration.checksum}`,
+    ...extra.map((l) => `-- ${l}`),
     '\\set ON_ERROR_STOP 1',
     '\\set AUTOCOMMIT on',
+    '\\unset ON_ERROR_ROLLBACK',
     'begin;',
     `select pg_advisory_xact_lock(${LEDGER_LOCK_KEY}) as agx_migrate_lock \\gset`,
+    // xid de la transacción: el runner verifica después con pg_xact_status que hizo COMMIT.
+    'select pg_current_xact_id()::text as agx_migrate_xid \\gset',
     '',
   ].join('\n');
+}
+
+/** Reafirma el control del runner tras el contenido de la migración. */
+const REASSERT = '\\set ON_ERROR_STOP 1\n\\unset ON_ERROR_ROLLBACK\n';
+
+/**
+ * Cierre: COMMIT y, ya fuera de la transacción, verificación en servidor
+ * del ledger esperado (si aplica) y marca con el xid para el runner.
+ */
+function trailer(expectation) {
+  const parts = ['-- <agx-migrate-commit>', REASSERT, 'commit;', '-- </agx-migrate-commit>'];
+  if (expectation) parts.push(postCommitCheck(expectation));
+  parts.push("\\echo 'AGX_MIGRATE_COMMITTED xid=' :agx_migrate_xid", '');
+  return parts.join('\n');
+}
+
+/**
+ * expectation: { present: [{version, filename, checksum, kind}], absent: [version] }.
+ * Mismo criterio en el bundle (servidor) y en el runner (cliente, post-psql).
+ */
+function postCommitCheck({ present = [], absent = [] }) {
+  present.forEach(assertEntry);
+  const json = JSON.stringify(present.map((e) => ({ version: e.version, filename: e.filename, checksum: e.checksum, kind: e.kind })));
+  return `-- <agx-migrate-post-check>
+do $agx_migrate_post$
+declare
+  expected jsonb := $agx_expected$${json}$agx_expected$::jsonb;
+  n integer;
+begin
+  select count(*) into n
+    from jsonb_array_elements(expected) e
+   where not exists (
+     select 1 from agx_meta.schema_migrations l
+      where l.version = (e->>'version')::integer and l.filename = e->>'filename'
+        and l.checksum_sha256 = e->>'checksum' and l.kind = e->>'kind');
+  if n > 0 then
+    raise exception 'AGX_MIGRATE_POST_VERIFY: tras COMMIT faltan o difieren % filas esperadas del ledger', n;
+  end if;
+  if exists (select 1 from agx_meta.schema_migrations where version = any (array[${absent.map(Number).join(', ')}]::integer[])) then
+    raise exception 'AGX_MIGRATE_POST_VERIFY: tras COMMIT el ledger aún contiene versiones revertidas';
+  end if;
+end
+$agx_migrate_post$;
+-- </agx-migrate-post-check>`;
 }
 
 function expectedLedgerCheck(expected, targetVersion) {
@@ -326,18 +441,20 @@ $agx_migrate_fp$;
  * - kind 'bootstrap': crea el ledger certificando la huella del esquema.
  * - kind 'ledger': migración normal posterior al ledger.
  */
-export function buildUpBundle({ target, migration, kind, expected = [], fingerprint = null }) {
-  const parts = [header({ target, kind, migration })];
-  if (kind === 'plain') {
-    parts.push(`do $agx_migrate_check$
-begin
-  if to_regnamespace('agx_meta') is not null then
-    raise exception 'AGX_MIGRATE_LEDGER_PRESENT: esta base ya tiene ledger; use el modo normal';
-  end if;
-end
-$agx_migrate_check$;
-`);
-  } else if (kind === 'bootstrap') {
+/**
+ * Filas que deben existir en el ledger tras aplicar `migration` con `kind`
+ * (vacío para 'plain': sin ledger solo se puede verificar el COMMIT por xid).
+ */
+export function ledgerExpectation({ migration, kind, expected = [] }) {
+  const self = { version: migration.version, filename: migration.filename, checksum: migration.checksum, kind: 'aplicada' };
+  if (kind === 'bootstrap') return { present: [...expected.map((e) => ({ ...e, kind: 'baseline_certificada' })), self], absent: [] };
+  if (kind === 'ledger') return { present: [self], absent: [] };
+  return null;
+}
+
+function migrationBody({ migration, kind, expected = [], fingerprint = null }) {
+  const parts = [];
+  if (kind === 'bootstrap') {
     if (!fingerprint) throw fail('AGX_MIGRATE_FP_REQUIRED', 'el bootstrap del ledger exige huella de referencia');
     parts.push(`do $agx_migrate_check$
 begin
@@ -350,18 +467,78 @@ $agx_migrate_check$;
     parts.push(fingerprintCheck(fingerprint));
   } else if (kind === 'ledger') {
     parts.push(expectedLedgerCheck(expected, migration.version));
-  } else {
+  } else if (kind !== 'plain') {
     throw fail('AGX_MIGRATE_BAD_KIND', kind);
   }
   parts.push(`-- >>> ${migration.filename}\n${migration.content.replace(/\n*$/, '\n')}-- <<< ${migration.filename}\n`);
+  parts.push(REASSERT);
+  const self = [{ version: migration.version, filename: migration.filename, checksum: migration.checksum }];
   if (kind === 'bootstrap') {
     parts.push(ledgerInsert(expected, 'baseline_certificada'));
-    parts.push(ledgerInsert([{ version: migration.version, filename: migration.filename, checksum: migration.checksum }], 'aplicada'));
+    parts.push(ledgerInsert(self, 'aplicada'));
   } else if (kind === 'ledger') {
-    parts.push(ledgerInsert([{ version: migration.version, filename: migration.filename, checksum: migration.checksum }], 'aplicada'));
+    parts.push(ledgerInsert(self, 'aplicada'));
   }
-  parts.push('commit;\n');
   return parts.join('\n');
+}
+
+/**
+ * Bundle UP de UNA migración con ledger.
+ * - kind 'bootstrap': crea el ledger certificando la huella del esquema.
+ * - kind 'ledger': migración normal posterior al ledger.
+ * Las migraciones anteriores al ledger (o de un target sin ledger) no tienen
+ * bundle individual: solo se construyen con buildFreshBundle, sobre una base vacía.
+ */
+export function buildUpBundle({ target, migration, kind, expected = [], fingerprint = null }) {
+  if (kind !== 'bootstrap' && kind !== 'ledger') {
+    throw fail('AGX_MIGRATE_HISTORICAL_BUNDLE_BLOCKED', `${migration.filename}: las migraciones anteriores al ledger solo se construyen con --fresh sobre una base vacía`);
+  }
+  return [
+    header({ target, kind, migration }),
+    migrationBody({ migration, kind, expected, fingerprint }),
+    trailer(ledgerExpectation({ migration, kind, expected })),
+  ].join('\n');
+}
+
+/** Clasifica cada versión según el target: antes del ledger, el propio ledger, o posterior. */
+export function kindFor(config, version) {
+  if (config.ledgerVersion === null || version < config.ledgerVersion) return 'plain';
+  return version === config.ledgerVersion ? 'bootstrap' : 'ledger';
+}
+
+/**
+ * Bundle de construcción desde cero (0000..to) en UNA transacción. Aborta en
+ * servidor si la base ya tiene esquema agx o ledger: nunca reaplica historia
+ * sobre una base existente.
+ */
+export function buildFreshBundle({ target, config, migrations, to, fingerprint = null }) {
+  const chosen = migrations.filter((m) => m.version <= to);
+  if (!chosen.length || chosen[chosen.length - 1].version !== to) throw fail('AGX_MIGRATE_ARGS', `--to fuera de rango: ${to}`);
+  const last = chosen[chosen.length - 1];
+  const parts = [header({ target, kind: 'fresh', migration: last, extra: [`construcción desde cero 0000..${pad(to)}`] })];
+  parts.push(`do $agx_migrate_check$
+begin
+  if to_regnamespace('agx') is not null or to_regnamespace('agx_meta') is not null then
+    raise exception 'AGX_MIGRATE_NOT_FRESH: --fresh exige una base sin esquema agx ni ledger';
+  end if;
+end
+$agx_migrate_check$;
+`);
+  const present = [];
+  for (const m of chosen) {
+    const kind = kindFor(config, m.version);
+    const expected = ledgerEntries(migrations, m.version);
+    parts.push(migrationBody({ migration: m, kind, expected, fingerprint: kind === 'bootstrap' ? fingerprint : null }));
+    const exp = ledgerExpectation({ migration: m, kind, expected });
+    if (exp) {
+      for (const row of exp.present) {
+        const i = present.findIndex((p) => p.version === row.version);
+        if (i === -1) present.push(row);
+      }
+    }
+  }
+  parts.push(trailer(present.length ? { present, absent: [] } : null));
+  return { sql: parts.join('\n'), expectation: present.length ? { present, absent: [] } : null };
 }
 
 /**
@@ -424,10 +601,11 @@ $agx_migrate_pre$;
  * propio ledger), con su checksum UP intacto. Las precondiciones de datos
  * se comprueban en la misma transacción.
  */
-export function buildRollbackBundle({ target, migration, ledgerVersion, historical }) {
+export function buildRollbackBundle({ target, migration, ledgerVersion, historical, evidence = null }) {
   if (!migration.rollback) throw fail('AGX_MIGRATE_NO_ROLLBACK', `${migration.filename} no tiene archivo de rollback`);
   const v = migration.version;
-  const parts = [header({ target, kind: historical ? 'rollback-historico' : 'rollback', migration: migration.rollback })];
+  const extra = evidence ? [`backup-evidence sha256=${evidence.sha256} bytes=${evidence.size} toc=${evidence.entries}`] : [];
+  const parts = [header({ target, kind: historical ? 'rollback-historico' : 'rollback', migration: migration.rollback, extra })];
   parts.push(`do $agx_migrate_check$
 declare
   top integer;
@@ -450,10 +628,38 @@ $agx_migrate_check$;
 `);
   parts.push(rollbackPreconditions(destructiveTargets(migration.rollback.content)));
   parts.push(`-- >>> ${migration.rollback.filename}\n${migration.rollback.content.replace(/\n*$/, '\n')}-- <<< ${migration.rollback.filename}\n`);
+  parts.push(REASSERT);
   parts.push(`select set_config('agx_meta.revertir_version', '${v}', true) as agx_migrate_revert \\gset\n`);
   parts.push(`delete from agx_meta.schema_migrations where version = ${v};\n`);
-  parts.push('commit;\n');
+  parts.push(trailer({ present: [], absent: [v] }));
   return parts.join('\n');
+}
+
+/** Expectativa post-rollback para el runner. */
+export function rollbackExpectation(version) {
+  return { present: [], absent: [version] };
+}
+
+/**
+ * Inspección de un dump usado como evidencia de backup: tamaño mínimo,
+ * cabecera PGDMP, legible completo por `pg_restore --list` con entradas TOC,
+ * y SHA-256 para dejar constancia.
+ */
+export function inspectBackupEvidence(file, { pgRestore = process.env.PG_RESTORE_BIN || 'pg_restore', env = sanitizedPgEnv() } = {}) {
+  let stat;
+  try { stat = fs.statSync(file); } catch { throw fail('AGX_MIGRATE_BACKUP_EVIDENCE', `no se puede leer ${file}`); }
+  if (!stat.isFile()) throw fail('AGX_MIGRATE_BACKUP_EVIDENCE', `${file} no es un archivo`);
+  if (stat.size < MIN_BACKUP_EVIDENCE_BYTES) {
+    throw fail('AGX_MIGRATE_BACKUP_EVIDENCE', `${file} tiene ${stat.size} bytes; mínimo ${MIN_BACKUP_EVIDENCE_BYTES}`);
+  }
+  const buf = fs.readFileSync(file);
+  if (buf.subarray(0, 5).toString('latin1') !== 'PGDMP') throw fail('AGX_MIGRATE_BACKUP_EVIDENCE', `${file} no es un dump pg_dump en formato custom`);
+  const res = spawnSync(pgRestore, ['--list', file], { encoding: 'utf8', env, maxBuffer: 64 * 1024 * 1024 });
+  if (res.error) throw fail('AGX_MIGRATE_BACKUP_EVIDENCE', `no se pudo ejecutar pg_restore (${res.error.code})`);
+  if (res.status !== 0) throw fail('AGX_MIGRATE_BACKUP_EVIDENCE', `pg_restore --list no puede leer ${file}`);
+  const entries = res.stdout.split('\n').filter((l) => /^\d+;/.test(l)).length;
+  if (entries === 0) throw fail('AGX_MIGRATE_BACKUP_EVIDENCE', `${file} no contiene entradas TOC`);
+  return { sha256: crypto.createHash('sha256').update(buf).digest('hex'), size: stat.size, entries };
 }
 
 /**
@@ -461,7 +667,7 @@ $agx_migrate_check$;
  * con la opción extraordinaria que repite la versión exacta y evidencia de
  * backup local en formato pg_dump custom.
  */
-export function assertRollbackAllowed({ config, version, options, readFileHead = (p) => fs.readFileSync(p).subarray(0, 5) }) {
+export function assertRollbackAllowed({ config, version, options, inspectEvidence = inspectBackupEvidence }) {
   if (config.ledgerVersion === null) throw fail('AGX_MIGRATE_NO_LEDGER', 'este target no tiene ledger; los rollbacks no se ejecutan con el runner');
   if (version === config.ledgerVersion) throw fail('AGX_MIGRATE_LEDGER_ROLLBACK_FORBIDDEN', 'el ledger no se revierte con el runner (ver runbook)');
   if (version === 0) throw fail('AGX_MIGRATE_ROLLBACK_FORBIDDEN', '0000 (roles) no tiene rollback');
@@ -473,11 +679,10 @@ export function assertRollbackAllowed({ config, version, options, readFileHead =
     }
     const evidence = options['backup-evidence'];
     if (!evidence) throw fail('AGX_MIGRATE_HISTORICAL_ROLLBACK_BLOCKED', 'falta --backup-evidence <ruta a dump pg_dump -Fc verificado>');
-    let head;
-    try { head = readFileHead(evidence); } catch { throw fail('AGX_MIGRATE_BACKUP_EVIDENCE', `no se puede leer ${evidence}`); }
-    if (Buffer.from(head).toString('latin1') !== 'PGDMP') throw fail('AGX_MIGRATE_BACKUP_EVIDENCE', `${evidence} no es un dump pg_dump en formato custom`);
-  } else if (String(options['confirm-rollback'] ?? '') !== String(version)) {
+    return { historical, evidence: inspectEvidence(evidence) };
+  }
+  if (String(options['confirm-rollback'] ?? '') !== String(version)) {
     throw fail('AGX_MIGRATE_ROLLBACK_NOT_CONFIRMED', `requiere --confirm-rollback ${version}`);
   }
-  return { historical };
+  return { historical, evidence: null };
 }

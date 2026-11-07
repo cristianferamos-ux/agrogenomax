@@ -16,7 +16,7 @@ try {
   auth = await startCluster('auth', 'mig-auth');
   process.env.AGX_MIG_BUSINESS_ADMIN_URL = business.adminUrl();
   process.env.AGX_MIG_AUTH_ADMIN_URL = auth.adminUrl();
-  process.exitCode = await runTestFiles([FILE], { requiredPasses: { [FILE]: 11 } });
+  process.exitCode = await runTestFiles([FILE], { requiredPasses: { [FILE]: 16 } });
 } catch (error) {
   console.error(error.message);
   process.exitCode = 1;

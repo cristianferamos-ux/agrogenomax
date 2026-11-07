@@ -1,31 +1,34 @@
 #!/usr/bin/env node
-// HARDENING PRE-SANIDAD (PR A) -- runner de migraciones AGX.
+// HARDENING PRE-SANIDAD (PR A) + guards -- runner de migraciones AGX.
 //
 // Uso (ver docs/runbooks/agx-db-dr-migraciones.md):
 //   node .tools/agx-migrate.mjs status   --target business|auth
 //   node .tools/agx-migrate.mjs plan     --target business --url-env VAR
-//   node .tools/agx-migrate.mjs up       --target business --url-env VAR [--to N] [--fresh] [--var nombre=ENV_VAR]...
-//   node .tools/agx-migrate.mjs bundle   --target business --version N --out archivo.sql
+//   node .tools/agx-migrate.mjs up       --target business --url-env VAR [--to N] [--var nombre=ENV_VAR]...
+//   node .tools/agx-migrate.mjs up       --target business --url-env VAR --fresh [--to N] [--var ...]
+//   node .tools/agx-migrate.mjs bundle   --target business --version N --out archivo.sql      (N >= ledger)
+//   node .tools/agx-migrate.mjs bundle   --target business --fresh [--to N] --out archivo.sql (base vacía)
 //   node .tools/agx-migrate.mjs rollback --target business --url-env VAR --version N [opciones de rollback]
 //   node .tools/agx-migrate.mjs bundle-rollback --target business --version N --out archivo.sql [opciones]
 //
 // La URL nunca va en la línea de comandos: --url-env nombra la variable de
 // entorno que la contiene. Solo hosts loopback salvo --allow-remote-host
-// <host> exacto. Producción (sin TCP público) se migra con `bundle` +
-// ejecución del bundle por psql dentro del contenedor.
+// <host> exacto. El entorno de psql se construye sin variables PG* heredadas.
+// Producción (sin TCP público) se migra con `bundle` + psql en el contenedor.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  TARGETS, RUNNER_VERSION, fail, pad, listMigrations, ledgerEntries, planFromLedger,
-  buildUpBundle, buildRollbackBundle, assertRollbackAllowed, extractFingerprintQuery,
-  certificationMd5, certificationLines,
+  TARGETS, RUNNER_VERSION, SSL_MODES, fail, pad, listMigrations, ledgerEntries, planFromLedger,
+  buildUpBundle, buildFreshBundle, buildRollbackBundle, assertRollbackAllowed, extractFingerprintQuery,
+  certificationMd5, certificationLines, kindFor, ledgerExpectation, rollbackExpectation, sanitizedPgEnv, redact,
 } from './agx-migrate-lib.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
-const LOOPBACK = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+const LOOPBACK = new Set(['localhost', '127.0.0.1', '::1']);
+const VAR_ENV_PREFIX = 'AGX_MIGRATE_VAR_';
 
 export function parseArgs(argv) {
   const [command, ...rest] = argv;
@@ -58,27 +61,54 @@ export function resolveTarget(options) {
   };
 }
 
-function connectionEnv(options, env = process.env) {
+const normalizeHost = (h) => String(h ?? '').trim().toLowerCase().replace(/^\[|\]$/g, '');
+
+/**
+ * Entorno de conexión derivado SOLO de la URL aprobada: sin PG* heredadas,
+ * host comparado tal como se usará (PGHOST), parámetros de URL no
+ * soportados rechazados (solo `sslmode`).
+ */
+export function connectionEnv(options, env = process.env) {
   const name = options['url-env'];
   if (!name) throw fail('AGX_MIGRATE_ARGS', 'falta --url-env <VARIABLE> con la URL de conexión');
   const raw = env[name];
   if (!raw) throw fail('AGX_MIGRATE_ARGS', `la variable ${name} está vacía`);
   let url;
-  try { url = new URL(raw); } catch { throw fail('AGX_MIGRATE_ARGS', `${name} no es una URL válida`); }
-  if (!['postgres:', 'postgresql:'].includes(url.protocol)) throw fail('AGX_MIGRATE_ARGS', `${name} no es una URL PostgreSQL`);
-  if (!LOOPBACK.has(url.hostname) && options['allow-remote-host'] !== url.hostname) {
-    throw fail('AGX_MIGRATE_REMOTE_BLOCKED', `host no loopback; requiere --allow-remote-host ${url.hostname}`);
+  try { url = new URL(raw); } catch { throw fail('AGX_MIGRATE_URL', `${name} no es una URL válida`); }
+  if (!['postgres:', 'postgresql:'].includes(url.protocol)) throw fail('AGX_MIGRATE_URL', `${name} no es una URL PostgreSQL`);
+  if (url.hash) throw fail('AGX_MIGRATE_URL', `${name}: fragmento (#) no soportado`);
+  const params = [...url.searchParams.keys()];
+  const unsupported = [...new Set(params.filter((k) => k !== 'sslmode'))];
+  if (unsupported.length) throw fail('AGX_MIGRATE_URL_PARAM', `${name}: parámetros de URL no soportados por el runner: ${unsupported.join(', ')}`);
+  const sslmodes = url.searchParams.getAll('sslmode');
+  if (sslmodes.length > 1 || (sslmodes.length && !SSL_MODES.has(sslmodes[0]))) {
+    throw fail('AGX_MIGRATE_URL_PARAM', `${name}: sslmode no válido`);
   }
-  return {
-    ...env,
-    PGHOST: url.hostname.replace(/^\[|\]$/g, ''),
+  const host = normalizeHost(url.hostname);
+  if (!host || /[,%/\\@\s]/.test(host)) throw fail('AGX_MIGRATE_URL', `${name}: host no válido (uno solo, sin socket ni lista)`);
+  if (url.port && !/^\d+$/.test(url.port)) throw fail('AGX_MIGRATE_URL', `${name}: puerto no válido`);
+  const allowed = options['allow-remote-host'] === undefined ? null : normalizeHost(options['allow-remote-host']);
+  if (!LOOPBACK.has(host) && allowed !== host) {
+    throw fail('AGX_MIGRATE_REMOTE_BLOCKED', `host no loopback; requiere --allow-remote-host ${host}`);
+  }
+  const user = decodeURIComponent(url.username);
+  const database = decodeURIComponent(url.pathname.replace(/^\//, ''));
+  if (!user) throw fail('AGX_MIGRATE_URL', `${name}: falta el usuario`);
+  if (!database || database.includes('/')) throw fail('AGX_MIGRATE_URL', `${name}: falta la base de datos`);
+  const pgVars = {
+    PGHOST: host,
     PGPORT: url.port || '5432',
-    PGUSER: decodeURIComponent(url.username),
-    PGPASSWORD: decodeURIComponent(url.password),
-    PGDATABASE: decodeURIComponent(url.pathname.replace(/^\//, '')),
+    PGUSER: user,
+    PGDATABASE: database,
     PGCLIENTENCODING: 'UTF8',
     PGAPPNAME: RUNNER_VERSION,
+    PGCONNECT_TIMEOUT: '15',
+    // Sin contraseña en la URL no se recurre a ~/.pgpass.
+    PGPASSFILE: path.join(os.tmpdir(), 'agx-migrate-sin-pgpass'),
   };
+  if (url.password) pgVars.PGPASSWORD = decodeURIComponent(url.password);
+  if (sslmodes.length) pgVars.PGSSLMODE = sslmodes[0];
+  return sanitizedPgEnv(env, pgVars);
 }
 
 function psqlVars(options, env = process.env) {
@@ -92,50 +122,84 @@ function psqlVars(options, env = process.env) {
   return out;
 }
 
-function psql(env, args, input) {
+export function defaultExecPsql(env, args) {
   const bin = process.env.PSQL_BIN || 'psql';
-  const res = spawnSync(bin, ['-X', '-q', '-v', 'ON_ERROR_STOP=1', ...args], { env, input, encoding: 'utf8' });
+  const res = spawnSync(bin, ['-X', '-q', '-v', 'ON_ERROR_STOP=1', ...args], { env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   if (res.error) throw fail('AGX_MIGRATE_PSQL', `no se pudo ejecutar psql (${res.error.code})`);
   return res;
 }
 
+const secretsOf = (env, vars = {}) => [env.PGPASSWORD, ...Object.values(vars)];
+
 function query(env, sql) {
-  const res = psql(env, ['-At', '-c', sql]);
-  if (res.status !== 0) throw fail('AGX_MIGRATE_PSQL', (res.stderr || '').trim().split('\n')[0]);
+  const res = defaultExecPsql(env, ['-At', '-c', sql]);
+  if (res.status !== 0) throw fail('AGX_MIGRATE_PSQL', redact((res.stderr || '').trim().split('\n')[0], secretsOf(env)));
   return res.stdout.replace(/\r/g, '').trim();
+}
+
+function readLedger(env) {
+  const json = query(env, "select coalesce(json_agg(json_build_object('version', version, 'filename', filename, 'checksum', checksum_sha256, 'kind', kind) order by version), '[]') from agx_meta.schema_migrations");
+  return JSON.parse(json);
 }
 
 export function readDbState(env) {
   const flags = query(env, "select (to_regnamespace('agx') is not null)::text || '|' || (to_regclass('agx_meta.schema_migrations') is not null)::text");
   const [hasAgx, hasLedger] = flags.split('|').map((v) => v === 'true');
-  let ledger = null;
-  if (hasLedger) {
-    const json = query(env, "select coalesce(json_agg(json_build_object('version', version, 'filename', filename, 'checksum', checksum_sha256, 'kind', kind) order by version), '[]') from agx_meta.schema_migrations");
-    ledger = JSON.parse(json);
-  }
-  return { hasAgx, hasLedger, ledger };
+  return { hasAgx, hasLedger, ledger: hasLedger ? readLedger(env) : null };
 }
 
-function runBundle(env, sql, vars, label, log) {
-  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agx-migrate-')), 'bundle.sql');
-  fs.writeFileSync(file, sql, 'utf8');
+/** Comprobación cliente tras psql: mismo criterio que el post-check del bundle. */
+export function verifyLedgerExpectation(ledger, expectation) {
+  const byVersion = new Map((ledger ?? []).map((r) => [r.version, r]));
+  const bad = [];
+  for (const e of expectation.present) {
+    const r = byVersion.get(e.version);
+    if (!r) bad.push(`${pad(e.version)} ausente`);
+    else if (r.filename !== e.filename || r.checksum !== e.checksum || r.kind !== e.kind) bad.push(`${pad(e.version)} difiere (${r.filename}/${r.kind})`);
+  }
+  for (const v of expectation.absent) if (byVersion.has(v)) bad.push(`${pad(v)} sigue registrada`);
+  if (bad.length) throw fail('AGX_MIGRATE_POST_VERIFY', `el ledger no refleja la ejecución: ${bad.slice(0, 5).join('; ')}`);
+}
+
+function runBundle({ env, sql, vars, label, log, expectation, execPsql }) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agx-migrate-'));
+  const file = path.join(dir, 'bundle.sql');
+  // Las variables (contraseñas) viajan por el entorno del proceso psql y
+  // \getenv, nunca en argv ni en el archivo.
+  const childEnv = { ...env };
+  const getenv = [];
+  for (const [k, v] of Object.entries(vars)) {
+    childEnv[`${VAR_ENV_PREFIX}${k}`] = v;
+    getenv.push(`\\getenv ${k} ${VAR_ENV_PREFIX}${k}`);
+  }
+  fs.writeFileSync(file, `${getenv.join('\n')}${getenv.length ? '\n' : ''}${sql}`, 'utf8');
+  const secrets = secretsOf(env, vars);
   try {
-    const args = ['-f', file];
-    for (const [k, v] of Object.entries(vars)) args.push('-v', `${k}=${v}`);
-    const res = psql(env, args);
+    const res = execPsql(childEnv, ['-f', file]);
     if (res.status !== 0) {
       const err = (res.stderr || '').replace(/\r/g, '').split('\n').find((l) => /ERROR|FATAL/.test(l)) || `psql salió con ${res.status}`;
       const code = /AGX_MIGRATE_[A-Z_]+/.exec(err)?.[0] ?? 'AGX_MIGRATE_SQL_ERROR';
       const detail = err.replace(/^.*?(ERROR|FATAL):\s*/, '').replace(/^AGX_MIGRATE_[A-Z_]+:\s*/, '');
-      throw fail(code, `${label}: ${detail} (transacción revertida, ledger sin cambios)`);
+      throw fail(code, redact(`${label}: ${detail} (transacción revertida, ledger sin cambios)`, secrets));
     }
+    // psql pudo terminar con 0 aunque la transacción no hiciera COMMIT:
+    // se verifica el ledger y el estado real del xid.
+    if (expectation) {
+      const state = readDbState(env);
+      verifyLedgerExpectation(state.ledger, expectation);
+    }
+    const xid = /AGX_MIGRATE_COMMITTED xid=\s*(\d+)/.exec(res.stdout || '')?.[1];
+    if (!xid) throw fail('AGX_MIGRATE_POST_VERIFY', `${label}: psql no emitió la marca de COMMIT`);
+    const status = query(env, `select pg_xact_status('${xid}'::xid8)`);
+    if (status !== 'committed') throw fail('AGX_MIGRATE_POST_VERIFY', `${label}: la transacción ${xid} terminó ${status || 'sin estado'}, no committed`);
     log(`OK ${label}`);
   } finally {
-    fs.rmSync(path.dirname(file), { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 }
 
 function fingerprintSpec(target) {
+  if (!target.baselineFingerprint) return null;
   const reference = fs.readFileSync(target.baselineFingerprint, 'utf8');
   return {
     query: extractFingerprintQuery(fs.readFileSync(target.fingerprintSql, 'utf8')),
@@ -145,25 +209,45 @@ function fingerprintSpec(target) {
   };
 }
 
+/** Bundle de UNA migración con ledger (bootstrap o normal). Las anteriores al ledger: solo --fresh. */
 export function bundleFor(target, migrations, version) {
   const migration = migrations.find((m) => m.version === version);
   if (!migration) throw fail('AGX_MIGRATE_ARGS', `no existe la migración ${pad(version)}`);
-  if (target.ledgerVersion === null || version < target.ledgerVersion) {
-    return { migration, kind: 'plain', sql: buildUpBundle({ target: target.name, migration, kind: 'plain' }) };
+  const kind = kindFor(target, version);
+  if (kind === 'plain') {
+    throw fail('AGX_MIGRATE_HISTORICAL_BUNDLE_BLOCKED', `${migration.filename} es anterior al ledger: solo se construye con --fresh sobre una base vacía`);
   }
   const expected = ledgerEntries(migrations, version);
-  if (version === target.ledgerVersion) {
-    return { migration, kind: 'bootstrap', sql: buildUpBundle({ target: target.name, migration, kind: 'bootstrap', expected, fingerprint: fingerprintSpec(target) }) };
+  const sql = buildUpBundle({ target: target.name, migration, kind, expected, fingerprint: kind === 'bootstrap' ? fingerprintSpec(target) : null });
+  return { migration, kind, sql, expectation: ledgerExpectation({ migration, kind, expected }) };
+}
+
+export function freshBundleFor(target, migrations, options) {
+  if (options.version !== undefined) throw fail('AGX_MIGRATE_ARGS', '--fresh construye 0000..N: use --to N, no --version');
+  const to = options.to === undefined ? migrations.length - 1 : Number(options.to);
+  if (!Number.isInteger(to) || to < 0 || to >= migrations.length) throw fail('AGX_MIGRATE_ARGS', `--to fuera de rango: ${options.to}`);
+  const needsFp = target.ledgerVersion !== null && to >= target.ledgerVersion;
+  const built = buildFreshBundle({ target: target.name, config: target, migrations, to, fingerprint: needsFp ? fingerprintSpec(target) : null });
+  return { ...built, to, chosen: migrations.filter((m) => m.version <= to) };
+}
+
+function requireVars(list, vars) {
+  for (const migration of list) {
+    const missing = migration.variables.filter((v) => !(v in vars));
+    if (missing.length) throw fail('AGX_MIGRATE_ARGS', `${migration.filename} requiere --var ${missing.map((v) => `${v}=ENV`).join(' --var ')}`);
   }
-  return { migration, kind: 'ledger', sql: buildUpBundle({ target: target.name, migration, kind: 'ledger', expected }) };
 }
 
-function requireVars(migration, vars) {
-  const missing = migration.variables.filter((v) => !(v in vars));
-  if (missing.length) throw fail('AGX_MIGRATE_ARGS', `${migration.filename} requiere --var ${missing.map((v) => `${v}=ENV`).join(' --var ')}`);
+function rollbackPlan(target, migrations, options, log) {
+  const version = Number(options.version);
+  const migration = migrations.find((m) => m.version === version);
+  if (!migration) throw fail('AGX_MIGRATE_ARGS', `no existe ${pad(version)}`);
+  const { historical, evidence } = assertRollbackAllowed({ config: target, version, options });
+  if (evidence) log(`backup-evidence sha256=${evidence.sha256} bytes=${evidence.size} entradas_toc=${evidence.entries}`);
+  return { version, migration, historical, sql: buildRollbackBundle({ target: target.name, migration, ledgerVersion: target.ledgerVersion, historical, evidence }) };
 }
 
-export async function main(argv, { env = process.env, log = console.log } = {}) {
+export async function main(argv, { env = process.env, log = console.log, execPsql = defaultExecPsql } = {}) {
   const { command, options } = parseArgs(argv);
   const target = resolveTarget(options);
   const migrations = listMigrations(target.dir);
@@ -174,16 +258,16 @@ export async function main(argv, { env = process.env, log = console.log } = {}) 
   }
 
   if (command === 'bundle' || command === 'bundle-rollback') {
-    const version = Number(options.version);
-    if (!Number.isInteger(version) || !options.out) throw fail('AGX_MIGRATE_ARGS', 'requiere --version N y --out archivo');
+    if (!options.out) throw fail('AGX_MIGRATE_ARGS', 'requiere --out archivo');
     let sql;
-    if (command === 'bundle') {
+    if (command === 'bundle' && options.fresh) {
+      sql = freshBundleFor(target, migrations, options).sql;
+    } else if (command === 'bundle') {
+      const version = Number(options.version);
+      if (!Number.isInteger(version)) throw fail('AGX_MIGRATE_ARGS', 'requiere --version N');
       sql = bundleFor(target, migrations, version).sql;
     } else {
-      const migration = migrations.find((m) => m.version === version);
-      if (!migration) throw fail('AGX_MIGRATE_ARGS', `no existe ${pad(version)}`);
-      const { historical } = assertRollbackAllowed({ config: target, version, options });
-      sql = buildRollbackBundle({ target: target.name, migration, ledgerVersion: target.ledgerVersion, historical });
+      sql = rollbackPlan(target, migrations, options, log).sql;
     }
     fs.writeFileSync(options.out, sql, 'utf8');
     log(`bundle escrito: ${options.out}`);
@@ -195,13 +279,21 @@ export async function main(argv, { env = process.env, log = console.log } = {}) 
   const state = readDbState(conn);
 
   if (command === 'plan' || command === 'up') {
+    if (options.fresh) {
+      if (state.hasAgx || state.hasLedger) throw fail('AGX_MIGRATE_NOT_FRESH', '--fresh exige una base sin esquema agx ni ledger');
+      const fresh = freshBundleFor(target, migrations, options);
+      if (command === 'plan') {
+        log(fresh.chosen.map((m) => `PENDIENTE ${m.filename}`).join('\n'));
+        return 0;
+      }
+      requireVars(fresh.chosen, vars);
+      runBundle({ env: conn, sql: fresh.sql, vars, label: `fresh 0000..${pad(fresh.to)}`, log, expectation: fresh.expectation, execPsql });
+      return 0;
+    }
     const to = options.to === undefined ? migrations.length - 1 : Number(options.to);
     if (!Number.isInteger(to) || to < 0 || to >= migrations.length) throw fail('AGX_MIGRATE_ARGS', `--to fuera de rango: ${options.to}`);
     let pending;
-    if (options.fresh) {
-      if (state.hasAgx || state.hasLedger) throw fail('AGX_MIGRATE_NOT_FRESH', '--fresh exige una base sin esquema agx ni ledger');
-      pending = migrations;
-    } else if (state.hasLedger) {
+    if (state.hasLedger) {
       pending = planFromLedger(migrations, state.ledger);
     } else if (target.ledgerVersion !== null && state.hasAgx) {
       // Base existente sin ledger: lo único posible es certificar y crear el ledger.
@@ -221,24 +313,23 @@ export async function main(argv, { env = process.env, log = console.log } = {}) 
       if (!pending.length || pending[0].version !== v) throw fail('AGX_MIGRATE_OUT_OF_ORDER', `la siguiente migración aplicable es ${pending[0] ? pad(pending[0].version) : 'ninguna'}, no ${pad(v)}`);
       pending = [pending[0]];
     }
-    for (const m of pending) requireVars(m, vars);
+    requireVars(pending, vars);
     for (const m of pending) {
-      const { sql, kind } = bundleFor(target, migrations, m.version);
-      runBundle(conn, sql, vars, `${m.filename} (${kind})`, log);
+      const { sql, kind, expectation } = bundleFor(target, migrations, m.version);
+      runBundle({ env: conn, sql, vars, label: `${m.filename} (${kind})`, log, expectation, execPsql });
     }
     if (!pending.length) log('sin migraciones pendientes');
     return 0;
   }
 
   if (command === 'rollback') {
-    const version = Number(options.version);
-    const migration = migrations.find((m) => m.version === version);
-    if (!migration) throw fail('AGX_MIGRATE_ARGS', `no existe ${pad(version)}`);
-    const { historical } = assertRollbackAllowed({ config: target, version, options });
+    const plan = rollbackPlan(target, migrations, options, log);
     if (!state.hasLedger) throw fail('AGX_MIGRATE_NO_LEDGER', 'sin ledger no se ejecutan rollbacks');
     planFromLedger(migrations, state.ledger);
-    const sql = buildRollbackBundle({ target: target.name, migration, ledgerVersion: target.ledgerVersion, historical });
-    runBundle(conn, sql, vars, `${migration.rollback.filename}${historical ? ' (histórico)' : ''}`, log);
+    runBundle({
+      env: conn, sql: plan.sql, vars, label: `${plan.migration.rollback.filename}${plan.historical ? ' (histórico)' : ''}`,
+      log, expectation: rollbackExpectation(plan.version), execPsql,
+    });
     return 0;
   }
 

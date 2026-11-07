@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { startCluster, stopCluster } from './agx-docker-pg.mjs';
 import { main as migrate } from './agx-migrate.mjs';
+import { sanitizedPgEnv } from './agx-migrate-lib.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const DB = 'agx_dr_test';
@@ -62,7 +63,7 @@ function fingerprint(cluster, schemas, password = cluster.password, user = 'post
   const res = spawnSync(process.env.PSQL_BIN || 'psql', ['-X', '-q', '-v', 'ON_ERROR_STOP=1', '-v', `schemas=${schemas}`,
     '-f', path.join(ROOT, 'db/verify/schema_fingerprint.sql')], {
     encoding: 'utf8',
-    env: { ...process.env, PGHOST: '127.0.0.1', PGPORT: cluster.port, PGUSER: user, PGPASSWORD: password, PGDATABASE: DB, PGCLIENTENCODING: 'UTF8' },
+    env: sanitizedPgEnv(process.env, { PGHOST: '127.0.0.1', PGPORT: cluster.port, PGUSER: user, PGPASSWORD: password, PGDATABASE: DB, PGCLIENTENCODING: 'UTF8' }),
   });
   if (res.status !== 0) throw new Error(`huella falló: ${(res.stderr || '').trim().split('\n')[0]}`);
   return res.stdout.replace(/\r/g, '').split('\n').filter(Boolean);
