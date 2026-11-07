@@ -1,0 +1,176 @@
+column|agx.auth_rate_limits.attempt_count|integer|notnull=true|default=1|identity=-|generated=-|acl=-
+column|agx.auth_rate_limits.dimension|text|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.auth_rate_limits.key_fingerprint|text|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.auth_rate_limits.rate_limit_id|uuid|notnull=true|default=gen_random_uuid()|identity=-|generated=-|acl=-
+column|agx.auth_rate_limits.updated_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.auth_rate_limits.window_started_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.credenciales_reset_tokens.creado_por_cuenta_id|uuid|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.credenciales_reset_tokens.cuenta_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.credenciales_reset_tokens.fecha_creacion|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.credenciales_reset_tokens.fecha_expiracion|timestamp with time zone|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.credenciales_reset_tokens.fecha_uso|timestamp with time zone|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.credenciales_reset_tokens.proposito|text|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.credenciales_reset_tokens.token_hash|text|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.credenciales_reset_tokens.token_id|uuid|notnull=true|default=gen_random_uuid()|identity=-|generated=-|acl=-
+column|agx.cuentas.cuenta_id|uuid|notnull=true|default=gen_random_uuid()|identity=-|generated=-|acl=-
+column|agx.cuentas.email_normalizado|text|notnull=false|default=lower(TRIM(BOTH FROM email))|identity=-|generated=s|acl=-
+column|agx.cuentas.email|text|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.cuentas.estado|text|notnull=true|default='activa'::text|identity=-|generated=-|acl=-
+column|agx.cuentas.fecha_actualizacion|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.cuentas.fecha_creacion|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.cuentas.nombre|text|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.cuentas.password_changed_at|timestamp with time zone|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.cuentas.password_hash|text|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.eventos_seguridad_auth.creado_en|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.eventos_seguridad_auth.cuenta_id|uuid|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.eventos_seguridad_auth.email_fingerprint|text|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.eventos_seguridad_auth.evento_id|uuid|notnull=true|default=gen_random_uuid()|identity=-|generated=-|acl=-
+column|agx.eventos_seguridad_auth.ip_fingerprint|text|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.eventos_seguridad_auth.motivo|text|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.eventos_seguridad_auth.tipo|text|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.membresias.cuenta_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.membresias.estado|text|notnull=true|default='activa'::text|identity=-|generated=-|acl=-
+column|agx.membresias.fecha_actualizacion|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.membresias.fecha_creacion|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.membresias.membresia_id|uuid|notnull=true|default=gen_random_uuid()|identity=-|generated=-|acl=-
+column|agx.membresias.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.membresias.rol|text|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.organizaciones.estado|text|notnull=true|default='activa'::text|identity=-|generated=-|acl=-
+column|agx.organizaciones.fecha_actualizacion|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.organizaciones.fecha_creacion|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.organizaciones.identificador_fiscal|text|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.organizaciones.nombre|text|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.organizaciones.organizacion_id|uuid|notnull=true|default=gen_random_uuid()|identity=-|generated=-|acl=-
+column|agx.sesiones.cuenta_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.sesiones.fecha_creacion|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.sesiones.fecha_expiracion|timestamp with time zone|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.sesiones.fecha_revocacion|timestamp with time zone|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.sesiones.organizacion_id|uuid|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.sesiones.sesion_id|uuid|notnull=true|default=gen_random_uuid()|identity=-|generated=-|acl=-
+column|agx.sesiones.token_hash|text|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.sesiones.ultima_actividad|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.staff_crh.cuenta_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.staff_crh.estado|text|notnull=true|default='activo'::text|identity=-|generated=-|acl=-
+column|agx.staff_crh.fecha_creacion|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.staff_crh.rol_interno|text|notnull=true|default=-|identity=-|generated=-|acl=-
+constraint|agx.auth_rate_limits|auth_rate_limits_attempt_count_check|c|validated=true|CHECK ((attempt_count > 0))
+constraint|agx.auth_rate_limits|auth_rate_limits_attempt_count_not_null|n|validated=true|NOT NULL attempt_count
+constraint|agx.auth_rate_limits|auth_rate_limits_dimension_check|c|validated=true|CHECK ((dimension = ANY (ARRAY['email'::text, 'ip'::text])))
+constraint|agx.auth_rate_limits|auth_rate_limits_dimension_fingerprint_key|u|validated=true|UNIQUE (dimension, key_fingerprint)
+constraint|agx.auth_rate_limits|auth_rate_limits_dimension_not_null|n|validated=true|NOT NULL dimension
+constraint|agx.auth_rate_limits|auth_rate_limits_key_fingerprint_check|c|validated=true|CHECK ((key_fingerprint ~ '^[0-9a-f]{64}$'::text))
+constraint|agx.auth_rate_limits|auth_rate_limits_key_fingerprint_not_null|n|validated=true|NOT NULL key_fingerprint
+constraint|agx.auth_rate_limits|auth_rate_limits_pkey|p|validated=true|PRIMARY KEY (rate_limit_id)
+constraint|agx.auth_rate_limits|auth_rate_limits_rate_limit_id_not_null|n|validated=true|NOT NULL rate_limit_id
+constraint|agx.auth_rate_limits|auth_rate_limits_updated_at_not_null|n|validated=true|NOT NULL updated_at
+constraint|agx.auth_rate_limits|auth_rate_limits_window_started_at_not_null|n|validated=true|NOT NULL window_started_at
+constraint|agx.credenciales_reset_tokens|credenciales_reset_tokens_creado_por_cuenta_id_fkey|f|validated=true|FOREIGN KEY (creado_por_cuenta_id) REFERENCES agx.cuentas(cuenta_id)
+constraint|agx.credenciales_reset_tokens|credenciales_reset_tokens_cuenta_id_fkey|f|validated=true|FOREIGN KEY (cuenta_id) REFERENCES agx.cuentas(cuenta_id)
+constraint|agx.credenciales_reset_tokens|credenciales_reset_tokens_cuenta_id_not_null|n|validated=true|NOT NULL cuenta_id
+constraint|agx.credenciales_reset_tokens|credenciales_reset_tokens_expiracion_check|c|validated=true|CHECK ((fecha_expiracion > fecha_creacion))
+constraint|agx.credenciales_reset_tokens|credenciales_reset_tokens_fecha_creacion_not_null|n|validated=true|NOT NULL fecha_creacion
+constraint|agx.credenciales_reset_tokens|credenciales_reset_tokens_fecha_expiracion_not_null|n|validated=true|NOT NULL fecha_expiracion
+constraint|agx.credenciales_reset_tokens|credenciales_reset_tokens_pkey|p|validated=true|PRIMARY KEY (token_id)
+constraint|agx.credenciales_reset_tokens|credenciales_reset_tokens_proposito_check|c|validated=true|CHECK ((proposito = ANY (ARRAY['establecer_inicial'::text, 'reset'::text])))
+constraint|agx.credenciales_reset_tokens|credenciales_reset_tokens_proposito_not_null|n|validated=true|NOT NULL proposito
+constraint|agx.credenciales_reset_tokens|credenciales_reset_tokens_token_hash_key|u|validated=true|UNIQUE (token_hash)
+constraint|agx.credenciales_reset_tokens|credenciales_reset_tokens_token_hash_not_null|n|validated=true|NOT NULL token_hash
+constraint|agx.credenciales_reset_tokens|credenciales_reset_tokens_token_id_not_null|n|validated=true|NOT NULL token_id
+constraint|agx.cuentas|cuentas_cuenta_id_not_null|n|validated=true|NOT NULL cuenta_id
+constraint|agx.cuentas|cuentas_email_normalizado_key|u|validated=true|UNIQUE (email_normalizado)
+constraint|agx.cuentas|cuentas_email_not_null|n|validated=true|NOT NULL email
+constraint|agx.cuentas|cuentas_estado_check|c|validated=true|CHECK ((estado = ANY (ARRAY['activa'::text, 'inactiva'::text])))
+constraint|agx.cuentas|cuentas_estado_not_null|n|validated=true|NOT NULL estado
+constraint|agx.cuentas|cuentas_fecha_actualizacion_not_null|n|validated=true|NOT NULL fecha_actualizacion
+constraint|agx.cuentas|cuentas_fecha_creacion_not_null|n|validated=true|NOT NULL fecha_creacion
+constraint|agx.cuentas|cuentas_pkey|p|validated=true|PRIMARY KEY (cuenta_id)
+constraint|agx.eventos_seguridad_auth|eventos_seguridad_auth_creado_en_not_null|n|validated=true|NOT NULL creado_en
+constraint|agx.eventos_seguridad_auth|eventos_seguridad_auth_cuenta_id_fkey|f|validated=true|FOREIGN KEY (cuenta_id) REFERENCES agx.cuentas(cuenta_id)
+constraint|agx.eventos_seguridad_auth|eventos_seguridad_auth_email_fingerprint_check|c|validated=true|CHECK ((email_fingerprint ~ '^[0-9a-f]{64}$'::text))
+constraint|agx.eventos_seguridad_auth|eventos_seguridad_auth_email_fingerprint_not_null|n|validated=true|NOT NULL email_fingerprint
+constraint|agx.eventos_seguridad_auth|eventos_seguridad_auth_evento_id_not_null|n|validated=true|NOT NULL evento_id
+constraint|agx.eventos_seguridad_auth|eventos_seguridad_auth_ip_fingerprint_check|c|validated=true|CHECK (((ip_fingerprint IS NULL) OR (ip_fingerprint ~ '^[0-9a-f]{64}$'::text)))
+constraint|agx.eventos_seguridad_auth|eventos_seguridad_auth_pkey|p|validated=true|PRIMARY KEY (evento_id)
+constraint|agx.eventos_seguridad_auth|eventos_seguridad_auth_tipo_check|c|validated=true|CHECK ((tipo = ANY (ARRAY['LOGIN_SUCCESS'::text, 'LOGIN_FAILURE'::text, 'LOGOUT'::text, 'PASSWORD_SET_INITIAL'::text, 'PASSWORD_CHANGED'::text, 'PASSWORD_RESET_REQUEST'::text, 'PASSWORD_RESET_SUCCESS'::text, 'ACCOUNT_THROTTLED'::text])))
+constraint|agx.eventos_seguridad_auth|eventos_seguridad_auth_tipo_not_null|n|validated=true|NOT NULL tipo
+constraint|agx.membresias|membresias_cuenta_id_fkey|f|validated=true|FOREIGN KEY (cuenta_id) REFERENCES agx.cuentas(cuenta_id)
+constraint|agx.membresias|membresias_cuenta_id_not_null|n|validated=true|NOT NULL cuenta_id
+constraint|agx.membresias|membresias_cuenta_organizacion_key|u|validated=true|UNIQUE (cuenta_id, organizacion_id)
+constraint|agx.membresias|membresias_estado_check|c|validated=true|CHECK ((estado = ANY (ARRAY['activa'::text, 'revocada'::text])))
+constraint|agx.membresias|membresias_estado_not_null|n|validated=true|NOT NULL estado
+constraint|agx.membresias|membresias_fecha_actualizacion_not_null|n|validated=true|NOT NULL fecha_actualizacion
+constraint|agx.membresias|membresias_fecha_creacion_not_null|n|validated=true|NOT NULL fecha_creacion
+constraint|agx.membresias|membresias_membresia_id_not_null|n|validated=true|NOT NULL membresia_id
+constraint|agx.membresias|membresias_organizacion_id_fkey|f|validated=true|FOREIGN KEY (organizacion_id) REFERENCES agx.organizaciones(organizacion_id)
+constraint|agx.membresias|membresias_organizacion_id_not_null|n|validated=true|NOT NULL organizacion_id
+constraint|agx.membresias|membresias_pkey|p|validated=true|PRIMARY KEY (membresia_id)
+constraint|agx.membresias|membresias_rol_check|c|validated=true|CHECK ((rol = ANY (ARRAY['owner'::text, 'admin'::text, 'operador'::text, 'lector'::text])))
+constraint|agx.membresias|membresias_rol_not_null|n|validated=true|NOT NULL rol
+constraint|agx.organizaciones|organizaciones_estado_check|c|validated=true|CHECK ((estado = ANY (ARRAY['activa'::text, 'suspendida'::text])))
+constraint|agx.organizaciones|organizaciones_estado_not_null|n|validated=true|NOT NULL estado
+constraint|agx.organizaciones|organizaciones_fecha_actualizacion_not_null|n|validated=true|NOT NULL fecha_actualizacion
+constraint|agx.organizaciones|organizaciones_fecha_creacion_not_null|n|validated=true|NOT NULL fecha_creacion
+constraint|agx.organizaciones|organizaciones_nombre_not_null|n|validated=true|NOT NULL nombre
+constraint|agx.organizaciones|organizaciones_organizacion_id_not_null|n|validated=true|NOT NULL organizacion_id
+constraint|agx.organizaciones|organizaciones_pkey|p|validated=true|PRIMARY KEY (organizacion_id)
+constraint|agx.sesiones|sesiones_cuenta_id_fkey|f|validated=true|FOREIGN KEY (cuenta_id) REFERENCES agx.cuentas(cuenta_id)
+constraint|agx.sesiones|sesiones_cuenta_id_not_null|n|validated=true|NOT NULL cuenta_id
+constraint|agx.sesiones|sesiones_fecha_creacion_not_null|n|validated=true|NOT NULL fecha_creacion
+constraint|agx.sesiones|sesiones_fecha_expiracion_check|c|validated=true|CHECK ((fecha_expiracion > fecha_creacion))
+constraint|agx.sesiones|sesiones_fecha_expiracion_not_null|n|validated=true|NOT NULL fecha_expiracion
+constraint|agx.sesiones|sesiones_organizacion_id_fkey|f|validated=true|FOREIGN KEY (organizacion_id) REFERENCES agx.organizaciones(organizacion_id)
+constraint|agx.sesiones|sesiones_organizacion_requiere_membresia|f|validated=true|FOREIGN KEY (cuenta_id, organizacion_id) REFERENCES agx.membresias(cuenta_id, organizacion_id)
+constraint|agx.sesiones|sesiones_pkey|p|validated=true|PRIMARY KEY (sesion_id)
+constraint|agx.sesiones|sesiones_sesion_id_not_null|n|validated=true|NOT NULL sesion_id
+constraint|agx.sesiones|sesiones_token_hash_key|u|validated=true|UNIQUE (token_hash)
+constraint|agx.sesiones|sesiones_token_hash_not_null|n|validated=true|NOT NULL token_hash
+constraint|agx.sesiones|sesiones_ultima_actividad_not_null|n|validated=true|NOT NULL ultima_actividad
+constraint|agx.staff_crh|staff_crh_cuenta_id_fkey|f|validated=true|FOREIGN KEY (cuenta_id) REFERENCES agx.cuentas(cuenta_id)
+constraint|agx.staff_crh|staff_crh_cuenta_id_not_null|n|validated=true|NOT NULL cuenta_id
+constraint|agx.staff_crh|staff_crh_estado_check|c|validated=true|CHECK ((estado = ANY (ARRAY['activo'::text, 'inactivo'::text])))
+constraint|agx.staff_crh|staff_crh_estado_not_null|n|validated=true|NOT NULL estado
+constraint|agx.staff_crh|staff_crh_fecha_creacion_not_null|n|validated=true|NOT NULL fecha_creacion
+constraint|agx.staff_crh|staff_crh_pkey|p|validated=true|PRIMARY KEY (cuenta_id)
+constraint|agx.staff_crh|staff_crh_rol_interno_check|c|validated=true|CHECK ((rol_interno = ANY (ARRAY['soporte'::text, 'operaciones'::text, 'administrador_plataforma'::text])))
+constraint|agx.staff_crh|staff_crh_rol_interno_not_null|n|validated=true|NOT NULL rol_interno
+database_acl|-
+extension|plpgsql|1.0|pg_catalog
+function|agx.fn_resolver_autorizacion_sesion(p_token_hash text)|owner=agx_owner|secdef=false|config=search_path=pg_catalog, agx|acl=agx_auth=X/agx_owner,agx_owner=X/agx_owner,=X/agx_owner|src_md5=c4937accba025be923aa6c0b1a64452a
+function|agx.fn_revocar_sesiones_por_membresia()|owner=agx_owner|secdef=false|config=search_path=pg_catalog, agx|acl=-|src_md5=04b26765e7c09e2e6f572d5c7cbc6298
+function|agx.fn_revocar_sesiones_por_organizacion_suspendida()|owner=agx_owner|secdef=false|config=search_path=pg_catalog, agx|acl=-|src_md5=f4fd9a8c41f51d1fa5fd011694bcad3f
+function|agx.fn_sesiones_valida_membresia_activa()|owner=agx_owner|secdef=false|config=search_path=pg_catalog, agx|acl=-|src_md5=427e29378d6fae442c9af9ace4d1cf9c
+index|agx.auth_rate_limits_dimension_fingerprint_key|CREATE UNIQUE INDEX auth_rate_limits_dimension_fingerprint_key ON agx.auth_rate_limits USING btree (dimension, key_fingerprint)
+index|agx.auth_rate_limits_pkey|CREATE UNIQUE INDEX auth_rate_limits_pkey ON agx.auth_rate_limits USING btree (rate_limit_id)
+index|agx.credenciales_reset_tokens_pkey|CREATE UNIQUE INDEX credenciales_reset_tokens_pkey ON agx.credenciales_reset_tokens USING btree (token_id)
+index|agx.credenciales_reset_tokens_token_hash_key|CREATE UNIQUE INDEX credenciales_reset_tokens_token_hash_key ON agx.credenciales_reset_tokens USING btree (token_hash)
+index|agx.cuentas_email_normalizado_key|CREATE UNIQUE INDEX cuentas_email_normalizado_key ON agx.cuentas USING btree (email_normalizado)
+index|agx.cuentas_pkey|CREATE UNIQUE INDEX cuentas_pkey ON agx.cuentas USING btree (cuenta_id)
+index|agx.eventos_seguridad_auth_pkey|CREATE UNIQUE INDEX eventos_seguridad_auth_pkey ON agx.eventos_seguridad_auth USING btree (evento_id)
+index|agx.idx_credenciales_reset_tokens_cuenta|CREATE INDEX idx_credenciales_reset_tokens_cuenta ON agx.credenciales_reset_tokens USING btree (cuenta_id)
+index|agx.idx_eventos_seguridad_auth_creado_en|CREATE INDEX idx_eventos_seguridad_auth_creado_en ON agx.eventos_seguridad_auth USING btree (creado_en)
+index|agx.idx_eventos_seguridad_auth_cuenta|CREATE INDEX idx_eventos_seguridad_auth_cuenta ON agx.eventos_seguridad_auth USING btree (cuenta_id) WHERE (cuenta_id IS NOT NULL)
+index|agx.idx_eventos_seguridad_auth_email_fingerprint|CREATE INDEX idx_eventos_seguridad_auth_email_fingerprint ON agx.eventos_seguridad_auth USING btree (email_fingerprint)
+index|agx.idx_membresias_cuenta_activa|CREATE INDEX idx_membresias_cuenta_activa ON agx.membresias USING btree (cuenta_id) WHERE (estado = 'activa'::text)
+index|agx.idx_membresias_organizacion_activa|CREATE INDEX idx_membresias_organizacion_activa ON agx.membresias USING btree (organizacion_id) WHERE (estado = 'activa'::text)
+index|agx.idx_sesiones_cuenta_activa|CREATE INDEX idx_sesiones_cuenta_activa ON agx.sesiones USING btree (cuenta_id) WHERE (fecha_revocacion IS NULL)
+index|agx.idx_sesiones_organizacion_activa|CREATE INDEX idx_sesiones_organizacion_activa ON agx.sesiones USING btree (organizacion_id) WHERE (fecha_revocacion IS NULL)
+index|agx.membresias_cuenta_organizacion_key|CREATE UNIQUE INDEX membresias_cuenta_organizacion_key ON agx.membresias USING btree (cuenta_id, organizacion_id)
+index|agx.membresias_pkey|CREATE UNIQUE INDEX membresias_pkey ON agx.membresias USING btree (membresia_id)
+index|agx.organizaciones_pkey|CREATE UNIQUE INDEX organizaciones_pkey ON agx.organizaciones USING btree (organizacion_id)
+index|agx.sesiones_pkey|CREATE UNIQUE INDEX sesiones_pkey ON agx.sesiones USING btree (sesion_id)
+index|agx.sesiones_token_hash_key|CREATE UNIQUE INDEX sesiones_token_hash_key ON agx.sesiones USING btree (token_hash)
+index|agx.staff_crh_pkey|CREATE UNIQUE INDEX staff_crh_pkey ON agx.staff_crh USING btree (cuenta_id)
+relation|agx.auth_rate_limits|kind=r|owner=agx_owner|rls=false|force=false|acl=agx_auth=arwd/agx_owner,agx_owner=arwdDxtm/agx_owner
+relation|agx.credenciales_reset_tokens|kind=r|owner=agx_owner|rls=false|force=false|acl=agx_auth=arw/agx_owner,agx_owner=arwdDxtm/agx_owner
+relation|agx.cuentas|kind=r|owner=agx_owner|rls=false|force=false|acl=agx_auth=arw/agx_owner,agx_owner=arwdDxtm/agx_owner
+relation|agx.eventos_seguridad_auth|kind=r|owner=agx_owner|rls=false|force=false|acl=agx_auth=ar/agx_owner,agx_owner=arwdDxtm/agx_owner
+relation|agx.membresias|kind=r|owner=agx_owner|rls=false|force=false|acl=agx_auth=ar/agx_owner,agx_owner=arwdDxtm/agx_owner
+relation|agx.organizaciones|kind=r|owner=agx_owner|rls=false|force=false|acl=agx_auth=ar/agx_owner,agx_owner=arwdDxtm/agx_owner
+relation|agx.sesiones|kind=r|owner=agx_owner|rls=false|force=false|acl=agx_auth=arw/agx_owner,agx_owner=arwdDxtm/agx_owner
+relation|agx.staff_crh|kind=r|owner=agx_owner|rls=false|force=false|acl=agx_auth=r/agx_owner,agx_owner=arwdDxtm/agx_owner
+role|agx_auth|super=false|inherit=true|createrole=false|createdb=false|login=true|replication=false|bypassrls=false
+role|agx_owner|super=false|inherit=true|createrole=false|createdb=false|login=false|replication=false|bypassrls=false
+schema|agx|owner=agx_owner|acl={agx_owner=UC/agx_owner,agx_auth=U/agx_owner}
+trigger|agx.membresias|trg_membresias_revoca_sesiones|enabled=O|CREATE TRIGGER trg_membresias_revoca_sesiones AFTER UPDATE ON agx.membresias FOR EACH ROW EXECUTE FUNCTION agx.fn_revocar_sesiones_por_membresia()
+trigger|agx.organizaciones|trg_organizaciones_revoca_sesiones|enabled=O|CREATE TRIGGER trg_organizaciones_revoca_sesiones AFTER UPDATE ON agx.organizaciones FOR EACH ROW EXECUTE FUNCTION agx.fn_revocar_sesiones_por_organizacion_suspendida()
+trigger|agx.sesiones|trg_sesiones_valida_membresia_activa|enabled=O|CREATE TRIGGER trg_sesiones_valida_membresia_activa BEFORE INSERT OR UPDATE ON agx.sesiones FOR EACH ROW EXECUTE FUNCTION agx.fn_sesiones_valida_membresia_activa()

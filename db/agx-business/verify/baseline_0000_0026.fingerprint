@@ -1,0 +1,1064 @@
+column|agx.animal_eventos.actor_cuenta_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.animal_eventos.animal_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.animal_eventos.evento_id|bigint|notnull=true|default=nextval('agx.animal_eventos_evento_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.animal_eventos.metadata_json|jsonb|notnull=true|default='{}'::jsonb|identity=-|generated=-|acl=-
+column|agx.animal_eventos.ocurrido_en|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.animal_eventos.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.animal_eventos.tipo_evento|character varying(30)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.animal_pesajes.actor_cuenta_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.animal_pesajes.animal_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.animal_pesajes.client_operation_id|uuid|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.animal_pesajes.created_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.animal_pesajes.fecha|date|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.animal_pesajes.metodo|character varying(12)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.animal_pesajes.observaciones|text|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.animal_pesajes.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.animal_pesajes.origen|character varying(20)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.animal_pesajes.pesaje_id|bigint|notnull=true|default=nextval('agx.animal_pesajes_pesaje_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.animal_pesajes.peso_kg|numeric|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.animales.animal_id|bigint|notnull=true|default=nextval('agx.animales_animal_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.animales.categoria_productiva_id|bigint|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.cierre_at|timestamp with time zone|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.cierre_causa|character varying(20)|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.cierre_client_operation_id|uuid|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.cierre_fecha|date|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.cierre_observaciones|text|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.cierre_por|uuid|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.client_operation_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.animales.created_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.animales.creation_intent_hash|character varying(80)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.animales.cruce_descripcion|character varying(200)|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.edad_aproximada_meses|integer|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.edad_referencia_fecha|date|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.estado_at|timestamp with time zone|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.estado_motivo|text|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.estado_operativo|character varying(12)|notnull=true|default='EN_HATO'::character varying|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.estado_por|uuid|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.estado|character varying(12)|notnull=true|default='ACTIVO'::character varying|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.fecha_ingreso|date|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.fecha_nacimiento|date|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.nacimiento_tipo|character varying(12)|notnull=true|default='DESCONOCIDA'::character varying|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.nombre|character varying(120)|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.numero_visual|character varying(40)|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.observaciones|text|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.animales.origen_tipo|character varying(20)|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.predio_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.animales.procedencia|character varying(200)|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.raza_otro_nombre|character varying(120)|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.raza_principal_id|bigint|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.raza_tipo|character varying(12)|notnull=true|default='DESCONOCIDA'::character varying|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.sexo|character varying(10)|notnull=true|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.animales.updated_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=agx_app=w/agx_owner,agx_qr_admin=w/agx_owner
+column|agx.catalogo_categorias_productivas.activo|boolean|notnull=true|default=true|identity=-|generated=-|acl=-
+column|agx.catalogo_categorias_productivas.categoria_id|bigint|notnull=true|default=nextval('agx.catalogo_categorias_productivas_categoria_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.catalogo_categorias_productivas.codigo|character varying(60)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.catalogo_categorias_productivas.consumo_ms_pct_pv_max|numeric|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.catalogo_categorias_productivas.consumo_ms_pct_pv_min|numeric|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.catalogo_categorias_productivas.consumo_ms_pct_pv_tipico|numeric|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.catalogo_categorias_productivas.created_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.catalogo_categorias_productivas.descripcion|text|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.catalogo_categorias_productivas.grupo_productivo|character varying(20)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.catalogo_categorias_productivas.metadata_tecnica|jsonb|notnull=true|default='{}'::jsonb|identity=-|generated=-|acl=-
+column|agx.catalogo_categorias_productivas.nombre|character varying(160)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.catalogo_categorias_productivas.organizacion_id|uuid|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.catalogo_categorias_productivas.peso_max_referencia_kg|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.catalogo_categorias_productivas.peso_min_referencia_kg|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.catalogo_categorias_productivas.requiere_estado_fisiologico|boolean|notnull=true|default=false|identity=-|generated=-|acl=-
+column|agx.catalogo_categorias_productivas.requiere_produccion_leche|boolean|notnull=true|default=false|identity=-|generated=-|acl=-
+column|agx.catalogo_categorias_productivas.requiere_ternero_al_pie|boolean|notnull=true|default=false|identity=-|generated=-|acl=-
+column|agx.catalogo_pasturas.activo|boolean|notnull=true|default=true|identity=-|generated=-|acl=-
+column|agx.catalogo_pasturas.alcance|character varying(20)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.catalogo_pasturas.created_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.catalogo_pasturas.cultivar|character varying(120)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.catalogo_pasturas.especie|character varying(120)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.catalogo_pasturas.genero|character varying(120)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.catalogo_pasturas.nombre_cientifico|character varying(200)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.catalogo_pasturas.nombre_comun|character varying(160)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.catalogo_pasturas.organizacion_id|uuid|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.catalogo_pasturas.pastura_id|bigint|notnull=true|default=nextval('agx.catalogo_pasturas_pastura_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.catalogo_pasturas.tipo|character varying(20)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.catalogo_pasturas.updated_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.catalogo_razas.activo|boolean|notnull=true|default=true|identity=-|generated=-|acl=-
+column|agx.catalogo_razas.codigo|character varying(60)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.catalogo_razas.created_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.catalogo_razas.nombre|character varying(120)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.catalogo_razas.organizacion_id|uuid|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.catalogo_razas.raza_id|bigint|notnull=true|default=nextval('agx.catalogo_razas_raza_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.catalogo_razas.tipo_productivo|character varying(20)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_archivo_eventos.actor_cuenta_id|uuid|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_archivo_eventos.evento_id|bigint|notnull=true|default=nextval('agx.potrero_archivo_eventos_evento_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.potrero_archivo_eventos.motivo|text|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_archivo_eventos.ocurrido_en|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.potrero_archivo_eventos.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_archivo_eventos.potrero_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_archivo_eventos.tipo_evento|character varying(20)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_calculos_pastoreo.calculo_id|bigint|notnull=true|default=nextval('agx.potrero_calculos_pastoreo_calculo_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.potrero_calculos_pastoreo.capacidad_animales_periodo|integer|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_calculos_pastoreo.consumo_pct_peso_vivo|numeric|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_calculos_pastoreo.created_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.potrero_calculos_pastoreo.demanda_diaria_lote_kg_ms|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_calculos_pastoreo.dias_ocupacion_estimados|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_calculos_pastoreo.ficha_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_calculos_pastoreo.materia_seca_total_kg|numeric|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_calculos_pastoreo.materia_seca_utilizable_kg|numeric|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_calculos_pastoreo.modo|character varying(20)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_calculos_pastoreo.numero_animales|integer|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_calculos_pastoreo.observaciones|text|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_calculos_pastoreo.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_calculos_pastoreo.periodo_objetivo_dias|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_calculos_pastoreo.peso_vivo_promedio_kg|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_calculos_pastoreo.porcentaje_materia_seca|numeric|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_calculos_pastoreo.porcentaje_utilizacion|numeric|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_calculos_pastoreo.potrero_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_calculos_pastoreo.predio_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_eventos.actor_cuenta_id|uuid|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_eventos.ciclo_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_eventos.evento_id|bigint|notnull=true|default=nextval('agx.potrero_ciclo_eventos_evento_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_eventos.ocurrido_en|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_eventos.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_eventos.payload_json|jsonb|notnull=true|default='{}'::jsonb|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_eventos.potrero_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_eventos.tipo_evento|character varying(50)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_invalidaciones.actor_cuenta_id|uuid|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_invalidaciones.ciclo_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_invalidaciones.invalidacion_id|bigint|notnull=true|default=nextval('agx.potrero_ciclo_lote_real_invalidaciones_invalidacion_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_invalidaciones.motivo|text|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_invalidaciones.ocurrido_en|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_invalidaciones.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_invalidaciones.potrero_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_invalidaciones.snapshot_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_versiones.actor_cuenta_id|uuid|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_versiones.categoria_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_versiones.ciclo_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_versiones.created_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_versiones.dias_en_leche|integer|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_versiones.ficha_id_base_real|bigint|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_versiones.grasa_leche_pct|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_versiones.ingreso_real_at|timestamp with time zone|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_versiones.numero_animales|integer|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_versiones.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_versiones.peso_promedio_kg|numeric|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_versiones.potrero_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_versiones.predio_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_versiones.produccion_leche_l_dia|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_versiones.salida_real_at|timestamp with time zone|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_versiones.snapshot_id|bigint|notnull=true|default=nextval('agx.potrero_ciclo_lote_real_versiones_snapshot_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_versiones.ternero_al_pie|boolean|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_lote_real_versiones.version|integer|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residual_real_invalidaciones.actor_cuenta_id|uuid|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residual_real_invalidaciones.ciclo_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residual_real_invalidaciones.invalidacion_id|bigint|notnull=true|default=nextval('agx.potrero_ciclo_residual_real_invalidaciones_invalidacion_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residual_real_invalidaciones.motivo|text|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residual_real_invalidaciones.ocurrido_en|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residual_real_invalidaciones.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residual_real_invalidaciones.potrero_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residual_real_invalidaciones.residual_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residuales_reales_versiones.actor_cuenta_id|uuid|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residuales_reales_versiones.aforo_promedio_g_m2|numeric|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residuales_reales_versiones.biomasa_fresca_total_kg|numeric|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residuales_reales_versiones.ciclo_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residuales_reales_versiones.created_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residuales_reales_versiones.descanso_estimado_origen_id|bigint|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residuales_reales_versiones.error_absoluto_kg|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residuales_reales_versiones.error_porcentual|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residuales_reales_versiones.horas_desde_salida|numeric|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residuales_reales_versiones.materia_seca_fuente|character varying(30)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residuales_reales_versiones.materia_seca_pct_aplicado|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residuales_reales_versiones.materia_seca_pct_medida|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residuales_reales_versiones.medicion_real_at|timestamp with time zone|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residuales_reales_versiones.numero_muestras|integer|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residuales_reales_versiones.observacion|text|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residuales_reales_versiones.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residuales_reales_versiones.potrero_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residuales_reales_versiones.predio_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residuales_reales_versiones.remanente_estimado_kg_ms_congelado|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residuales_reales_versiones.remanente_medido_kg_ms|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residuales_reales_versiones.residual_id|bigint|notnull=true|default=nextval('agx.potrero_ciclo_residuales_reales_versiones_residual_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residuales_reales_versiones.snapshot_lote_real_id|bigint|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclo_residuales_reales_versiones.version|integer|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclos_pastoreo.categoria_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.potrero_ciclos_pastoreo.ciclo_id|bigint|notnull=true|default=nextval('agx.potrero_ciclos_pastoreo_ciclo_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.potrero_ciclos_pastoreo.contexto_id|bigint|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclos_pastoreo.created_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.potrero_ciclos_pastoreo.estado|character varying(20)|notnull=true|default='EN_CURSO'::character varying|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.potrero_ciclos_pastoreo.fecha_ingreso_real|date|notnull=true|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.potrero_ciclos_pastoreo.fecha_salida_real|date|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.potrero_ciclos_pastoreo.ingreso_real_at|timestamp with time zone|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.potrero_ciclos_pastoreo.motivo_anulacion|text|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.potrero_ciclos_pastoreo.motivo_cancelacion|text|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.potrero_ciclos_pastoreo.numero_animales_real|integer|notnull=true|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.potrero_ciclos_pastoreo.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclos_pastoreo.peso_promedio_real_kg|numeric|notnull=true|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.potrero_ciclos_pastoreo.potrero_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclos_pastoreo.predio_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclos_pastoreo.recomendacion_descanso_plan_id|bigint|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclos_pastoreo.recomendacion_pastoreo_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ciclos_pastoreo.salida_real_at|timestamp with time zone|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.potrero_climatologias_agroclimaticas.climatologia_id|bigint|notnull=true|default=nextval('agx.potrero_climatologias_agroclimaticas_climatologia_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.potrero_climatologias_agroclimaticas.created_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.potrero_climatologias_agroclimaticas.dataset|character varying(40)|notnull=true|default='ERA5_ERA5LAND'::character varying|identity=-|generated=-|acl=-
+column|agx.potrero_climatologias_agroclimaticas.fuentes_json|jsonb|notnull=true|default='[]'::jsonb|identity=-|generated=-|acl=-
+column|agx.potrero_climatologias_agroclimaticas.method_version|character varying(40)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_climatologias_agroclimaticas.monthly_statistics_json|jsonb|notnull=true|default='{}'::jsonb|identity=-|generated=-|acl=-
+column|agx.potrero_climatologias_agroclimaticas.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_climatologias_agroclimaticas.period_end_year|integer|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_climatologias_agroclimaticas.period_start_year|integer|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_climatologias_agroclimaticas.potrero_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_climatologias_agroclimaticas.predio_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_climatologias_agroclimaticas.provider|character varying(40)|notnull=true|default='OPEN_METEO'::character varying|identity=-|generated=-|acl=-
+column|agx.potrero_climatologias_agroclimaticas.soil_period_end_year|integer|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_climatologias_agroclimaticas.soil_period_start_year|integer|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_contextos_agroclimaticos.calidad|character varying(40)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_contextos_agroclimaticos.contexto_id|bigint|notnull=true|default=nextval('agx.potrero_contextos_agroclimaticos_contexto_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.potrero_contextos_agroclimaticos.created_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.potrero_contextos_agroclimaticos.fecha_referencia|date|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_contextos_agroclimaticos.fuente_principal|character varying(40)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_contextos_agroclimaticos.fuentes_json|jsonb|notnull=true|default='[]'::jsonb|identity=-|generated=-|acl=-
+column|agx.potrero_contextos_agroclimaticos.humedad_relativa_media_pct|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_contextos_agroclimaticos.humedad_suelo_subsuperficial|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_contextos_agroclimaticos.humedad_suelo_superficial|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_contextos_agroclimaticos.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_contextos_agroclimaticos.potrero_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_contextos_agroclimaticos.precipitacion_15d_mm|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_contextos_agroclimaticos.precipitacion_24h_mm|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_contextos_agroclimaticos.precipitacion_30d_mm|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_contextos_agroclimaticos.precipitacion_7d_mm|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_contextos_agroclimaticos.predio_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_contextos_agroclimaticos.radiacion_solar|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_contextos_agroclimaticos.source_observed_until|timestamp with time zone|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_contextos_agroclimaticos.temperatura_max_c|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_contextos_agroclimaticos.temperatura_media_c|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_contextos_agroclimaticos.temperatura_min_c|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_contextos_agroclimaticos.viento_medio_ms|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_descanso_invalidaciones.actor_cuenta_id|uuid|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_descanso_invalidaciones.ciclo_pastoreo_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_descanso_invalidaciones.descanso_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_descanso_invalidaciones.invalidacion_id|bigint|notnull=true|default=nextval('agx.potrero_descanso_invalidaciones_invalidacion_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.potrero_descanso_invalidaciones.motivo|text|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_descanso_invalidaciones.ocurrido_en|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.potrero_descanso_invalidaciones.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_descanso_invalidaciones.potrero_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_evaluaciones_reingreso.actor_cuenta_id|uuid|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_evaluaciones_reingreso.ciclo_origen_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_evaluaciones_reingreso.created_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.potrero_evaluaciones_reingreso.criterios_json|jsonb|notnull=true|default='{}'::jsonb|identity=-|generated=-|acl=-
+column|agx.potrero_evaluaciones_reingreso.descanso_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_evaluaciones_reingreso.evaluacion_id|bigint|notnull=true|default=nextval('agx.potrero_evaluaciones_reingreso_evaluacion_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.potrero_evaluaciones_reingreso.ficha_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_evaluaciones_reingreso.observacion|text|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_evaluaciones_reingreso.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_evaluaciones_reingreso.potrero_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_evaluaciones_reingreso.resultado|character varying(10)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ficha_pasturas.created_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.potrero_ficha_pasturas.ficha_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ficha_pasturas.ficha_pastura_id|bigint|notnull=true|default=nextval('agx.potrero_ficha_pasturas_ficha_pastura_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.potrero_ficha_pasturas.orden|smallint|notnull=true|default=0|identity=-|generated=-|acl=-
+column|agx.potrero_ficha_pasturas.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ficha_pasturas.pastura_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_ficha_pasturas.porcentaje_estimado|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_fichas_productivas.aforo_promedio_g_m2|numeric|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_fichas_productivas.biomasa_total_kg|numeric|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_fichas_productivas.created_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.potrero_fichas_productivas.fecha_aforo|date|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_fichas_productivas.ficha_id|bigint|notnull=true|default=nextval('agx.potrero_fichas_productivas_ficha_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.potrero_fichas_productivas.nombre_personalizado|character varying(160)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_fichas_productivas.nombre_principal|character varying(160)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_fichas_productivas.numero_muestras|integer|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_fichas_productivas.observaciones|text|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_fichas_productivas.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_fichas_productivas.porcentaje_materia_seca|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_fichas_productivas.potrero_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_fichas_productivas.tipo_cobertura|character varying(20)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_fichas_productivas.updated_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.agroclimate_status|character varying(30)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.applied_rules_json|jsonb|notnull=true|default='[]'::jsonb|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.ciclo_pastoreo_id|bigint|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.condiciones_reentrada_json|jsonb|notnull=true|default='[]'::jsonb|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.contexto_id|bigint|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.created_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.descanso_id|bigint|notnull=true|default=nextval('agx.potrero_recomendaciones_descanso_descanso_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.dias_descanso_max|integer|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.dias_descanso_min|integer|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.dias_descanso_recomendado|integer|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.fecha_inicio_pastoreo|date|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.fecha_reingreso_max|date|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.fecha_reingreso_min|date|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.fecha_reingreso_recomendada|date|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.fecha_salida_estimada|date|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.ficha_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.fuente_remanente|character varying(10)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.lote_real_version_id|bigint|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.motor_version|character varying(40)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.nivel_confianza|character varying(10)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.parametros_fuente_json|jsonb|notnull=true|default='{}'::jsonb|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.potrero_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.predio_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.previous_descanso_id|bigint|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.recomendacion_pastoreo_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.residual_real_version_id|bigint|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_descanso.version|integer|notnull=true|default=1|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.categoria_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.consumo_pct_pv_aplicado|numeric|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.contexto_id|bigint|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.created_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.demanda_diaria_lote_kg_ms|numeric|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.dias_en_leche|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.dias_ocupacion_estimados|numeric|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.dias_permanencia_recomendada|smallint|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.fecha_ingreso_prevista|date|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.ficha_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.grasa_leche_pct|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.materia_seca_pct_aplicada|numeric|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.materia_seca_total_kg|numeric|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.materia_seca_utilizable_kg|numeric|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.modo_calculo|character varying(20)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.motivo_duracion|character varying(30)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.motor_version|character varying(40)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.nivel_confianza|character varying(10)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.numero_animales|integer|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.occupation_policy_version|character varying(40)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.parametros_fuente_json|jsonb|notnull=true|default='{}'::jsonb|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.peso_promedio_kg|numeric|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.potrero_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.predio_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.produccion_leche_l_dia|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.recomendacion_id|bigint|notnull=true|default=nextval('agx.potrero_recomendaciones_pastoreo_recomendacion_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.ternero_al_pie|boolean|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potrero_recomendaciones_pastoreo.utilizacion_pct_aplicada|numeric|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potreros.archivado_at|timestamp with time zone|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potreros.archivado_por|uuid|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potreros.area_ha|numeric|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potreros.capacidad_animales|integer|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potreros.created_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.potreros.estado|character varying(20)|notnull=true|default='ACTIVO'::character varying|identity=-|generated=-|acl=-
+column|agx.potreros.geometry|geometry(Polygon,4326)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potreros.metodo_delimitacion|character varying(20)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potreros.motivo_archivado|text|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potreros.nombre|character varying(120)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potreros.observaciones|text|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.potreros.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potreros.potrero_id|bigint|notnull=true|default=nextval('agx.potreros_potrero_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.potreros.predio_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.potreros.updated_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.predio_archivo_eventos.actor_cuenta_id|uuid|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predio_archivo_eventos.evento_id|bigint|notnull=true|default=nextval('agx.predio_archivo_eventos_evento_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.predio_archivo_eventos.motivo|text|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predio_archivo_eventos.ocurrido_en|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.predio_archivo_eventos.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.predio_archivo_eventos.predio_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.predio_archivo_eventos.tipo_evento|character varying(20)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.predio_snapshots_catastrales.area_ha|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predio_snapshots_catastrales.area_m2|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predio_snapshots_catastrales.atributos_json|jsonb|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predio_snapshots_catastrales.codigo_anterior|character varying(20)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predio_snapshots_catastrales.codigo_predial|character varying(30)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predio_snapshots_catastrales.departamento|character varying(120)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predio_snapshots_catastrales.fecha_consulta|timestamp with time zone|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.predio_snapshots_catastrales.fecha_creacion|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.predio_snapshots_catastrales.fuente|character varying(60)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.predio_snapshots_catastrales.geometry|geometry(MultiPolygon,4326)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predio_snapshots_catastrales.municipio|character varying(120)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predio_snapshots_catastrales.nombre_predio_catastral|character varying(200)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predio_snapshots_catastrales.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.predio_snapshots_catastrales.predio_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.predio_snapshots_catastrales.sector|character varying(60)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predio_snapshots_catastrales.snapshot_id|uuid|notnull=true|default=gen_random_uuid()|identity=-|generated=-|acl=-
+column|agx.predio_snapshots_catastrales.vereda|character varying(120)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predio_snapshots_catastrales.version_fuente|character varying(60)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predios.archivado_at|timestamp with time zone|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predios.archivado_por|uuid|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predios.area_total_ha|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predios.client_operation_id|uuid|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predios.codigo_predial|character varying(30)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predios.departamento|character varying(120)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predios.estado|character varying(20)|notnull=true|default='ACTIVO'::character varying|identity=-|generated=-|acl=-
+column|agx.predios.fecha_actualizacion|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.predios.fecha_creacion|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.predios.geometry|geometry(MultiPolygon,4326)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predios.latitud|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predios.longitud|numeric|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predios.motivo_archivado|text|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predios.municipio|character varying(120)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predios.nombre_predio|character varying(200)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.predios.observaciones|text|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predios.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.predios.predio_id|bigint|notnull=true|default=nextval('agx.predios_predio_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.predios.propietario|character varying(200)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.predios.vereda|character varying(120)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.qr_asignaciones.asignacion_id|bigint|notnull=true|default=nextval('agx.qr_asignaciones_asignacion_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.qr_asignaciones.asignado_por|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.qr_asignaciones.cantidad|integer|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.qr_asignaciones.client_operation_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.qr_asignaciones.created_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.qr_asignaciones.lote_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.qr_asignaciones.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.qr_asignaciones.referencia|character varying(200)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.qr_chapeta_eventos.actor_cuenta_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.qr_chapeta_eventos.evento_id|bigint|notnull=true|default=nextval('agx.qr_chapeta_eventos_evento_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.qr_chapeta_eventos.metadata_json|jsonb|notnull=true|default='{}'::jsonb|identity=-|generated=-|acl=-
+column|agx.qr_chapeta_eventos.ocurrido_en|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.qr_chapeta_eventos.organizacion_id|uuid|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.qr_chapeta_eventos.qr_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.qr_chapeta_eventos.tipo_evento|character varying(40)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.qr_chapeta_tokens.clave_version|smallint|notnull=true|default=1|identity=-|generated=-|acl=-
+column|agx.qr_chapeta_tokens.created_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.qr_chapeta_tokens.qr_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.qr_chapeta_tokens.token_cifrado|bytea|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.qr_chapetas.animal_id|bigint|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner,agx_qr_admin=w/agx_owner
+column|agx.qr_chapetas.asignacion_id|bigint|notnull=false|default=-|identity=-|generated=-|acl=agx_qr_admin=w/agx_owner
+column|agx.qr_chapetas.asignado_animal_at|timestamp with time zone|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner,agx_qr_admin=w/agx_owner
+column|agx.qr_chapetas.asignado_organizacion_at|timestamp with time zone|notnull=false|default=-|identity=-|generated=-|acl=agx_qr_admin=w/agx_owner
+column|agx.qr_chapetas.codigo_visible|character varying(20)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.qr_chapetas.created_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.qr_chapetas.estado|character varying(30)|notnull=true|default='EN_INVENTARIO'::character varying|identity=-|generated=-|acl=agx_app=w/agx_owner,agx_qr_admin=w/agx_owner
+column|agx.qr_chapetas.lote_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.qr_chapetas.motivo|text|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner,agx_qr_admin=w/agx_owner
+column|agx.qr_chapetas.organizacion_id|uuid|notnull=false|default=-|identity=-|generated=-|acl=agx_qr_admin=w/agx_owner
+column|agx.qr_chapetas.qr_id|bigint|notnull=true|default=nextval('agx.qr_chapetas_qr_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.qr_chapetas.reemplazado_por|bigint|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner,agx_qr_admin=w/agx_owner
+column|agx.qr_chapetas.revocado_at|timestamp with time zone|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner,agx_qr_admin=w/agx_owner
+column|agx.qr_chapetas.revocado_por|uuid|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner,agx_qr_admin=w/agx_owner
+column|agx.qr_chapetas.tipo|character varying(20)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.qr_chapetas.token_hash|character(64)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.qr_chapetas.updated_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=agx_app=w/agx_owner,agx_qr_admin=w/agx_owner
+column|agx.qr_lote_eventos.actor_cuenta_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.qr_lote_eventos.evento_id|bigint|notnull=true|default=nextval('agx.qr_lote_eventos_evento_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.qr_lote_eventos.lote_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.qr_lote_eventos.metadata_json|jsonb|notnull=true|default='{}'::jsonb|identity=-|generated=-|acl=-
+column|agx.qr_lote_eventos.ocurrido_en|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.qr_lote_eventos.tipo_evento|character varying(40)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.qr_lotes.cantidad|integer|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.qr_lotes.client_operation_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.qr_lotes.codigo_lote|character varying(32)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.qr_lotes.creado_por|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.qr_lotes.created_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.qr_lotes.estado|character varying(20)|notnull=true|default='GENERADO'::character varying|identity=-|generated=-|acl=agx_qr_admin=w/agx_owner
+column|agx.qr_lotes.lote_id|bigint|notnull=true|default=nextval('agx.qr_lotes_lote_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.qr_lotes.observaciones|text|notnull=false|default=-|identity=-|generated=-|acl=agx_qr_admin=w/agx_owner
+column|agx.qr_lotes.proveedor|character varying(160)|notnull=false|default=-|identity=-|generated=-|acl=agx_qr_admin=w/agx_owner
+column|agx.qr_lotes.tipo|character varying(20)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.qr_lotes.updated_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=agx_qr_admin=w/agx_owner
+column|agx.qr_lotes.url_base|character varying(200)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.aborto_causa|character varying(200)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.animal_id|bigint|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.anulacion_client_operation_id|uuid|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.reproduccion_eventos.anulado_at|timestamp with time zone|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.reproduccion_eventos.anulado_por|uuid|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.reproduccion_eventos.client_operation_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.corrige_evento_id|bigint|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.diagnostico_metodo|character varying(12)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.diagnostico_resultado|character varying(10)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.dias_gestacion|smallint|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.embrion_calidad|character varying(40)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.embrion_codigo|character varying(80)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.embrion_conservacion|character varying(10)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.embrion_donadora|character varying(120)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.embrion_estadio|character varying(40)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.embrion_raza|character varying(120)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.estado_registro|character varying(10)|notnull=true|default='ACTIVO'::character varying|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.reproduccion_eventos.evento_id|bigint|notnull=true|default=nextval('agx.reproduccion_eventos_evento_id_seq'::regclass)|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.fecha_evento|date|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.hora_evento|time(0) without time zone|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.intensidad_celo|character varying(10)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.intent_hash|character varying(80)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.metodo_deteccion|character varying(20)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.motivo_anulacion|text|notnull=false|default=-|identity=-|generated=-|acl=agx_app=w/agx_owner
+column|agx.reproduccion_eventos.numero_crias|smallint|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.observaciones|text|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.organizacion_id|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.parto_tipo|character varying(10)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.protocolo_iatf|character varying(120)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.registrado_at|timestamp with time zone|notnull=true|default=now()|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.registrado_por|uuid|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.semen_codigo|character varying(80)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.tecnico|character varying(120)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.tipo_evento|character varying(30)|notnull=true|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.tipo_servicio|character varying(12)|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.toro_animal_id|bigint|notnull=false|default=-|identity=-|generated=-|acl=-
+column|agx.reproduccion_eventos.toro_externo|character varying(120)|notnull=false|default=-|identity=-|generated=-|acl=-
+constraint|agx.animal_eventos|animal_eventos_animal_organizacion_fkey|f|validated=true|FOREIGN KEY (animal_id, organizacion_id) REFERENCES agx.animales(animal_id, organizacion_id)
+constraint|agx.animal_eventos|animal_eventos_metadata_check|c|validated=true|CHECK ((jsonb_typeof(metadata_json) = 'object'::text))
+constraint|agx.animal_eventos|animal_eventos_pkey|p|validated=true|PRIMARY KEY (evento_id)
+constraint|agx.animal_eventos|animal_eventos_tipo_check|c|validated=true|CHECK (((tipo_evento)::text = ANY ((ARRAY['REGISTRADO'::character varying, 'DATOS_CORREGIDOS'::character varying, 'ANULADO'::character varying, 'QR_ASOCIADO'::character varying, 'QR_REVOCADO'::character varying, 'QR_REEMPLAZADO'::character varying, 'SALIDO'::character varying, 'MUERTO'::character varying])::text[])))
+constraint|agx.animal_pesajes|animal_pesajes_animal_organizacion_fkey|f|validated=true|FOREIGN KEY (animal_id, organizacion_id) REFERENCES agx.animales(animal_id, organizacion_id)
+constraint|agx.animal_pesajes|animal_pesajes_fecha_min_check|c|validated=true|CHECK ((fecha >= '1990-01-01'::date))
+constraint|agx.animal_pesajes|animal_pesajes_manual_client_operation_check|c|validated=true|CHECK ((((origen)::text <> 'MANUAL'::text) OR (client_operation_id IS NOT NULL)))
+constraint|agx.animal_pesajes|animal_pesajes_metodo_check|c|validated=true|CHECK (((metodo)::text = ANY ((ARRAY['BASCULA'::character varying, 'ESTIMADO'::character varying])::text[])))
+constraint|agx.animal_pesajes|animal_pesajes_observaciones_check|c|validated=true|CHECK (((observaciones IS NULL) OR ((btrim(observaciones) <> ''::text) AND (char_length(observaciones) <= 500))))
+constraint|agx.animal_pesajes|animal_pesajes_origen_check|c|validated=true|CHECK (((origen)::text = ANY ((ARRAY['REGISTRO_INICIAL'::character varying, 'MANUAL'::character varying])::text[])))
+constraint|agx.animal_pesajes|animal_pesajes_peso_check|c|validated=true|CHECK (((peso_kg > (0)::numeric) AND (peso_kg <= (2000)::numeric) AND (peso_kg = round(peso_kg, 1))))
+constraint|agx.animal_pesajes|animal_pesajes_pkey|p|validated=true|PRIMARY KEY (pesaje_id)
+constraint|agx.animales|animales_categoria_productiva_fkey|f|validated=true|FOREIGN KEY (categoria_productiva_id) REFERENCES agx.catalogo_categorias_productivas(categoria_id)
+constraint|agx.animales|animales_cierre_consistency_check|c|validated=true|CHECK (((((estado_operativo)::text = 'EN_HATO'::text) AND (cierre_fecha IS NULL) AND (cierre_causa IS NULL) AND (cierre_observaciones IS NULL) AND (cierre_at IS NULL) AND (cierre_por IS NULL) AND (cierre_client_operation_id IS NULL)) OR (((estado_operativo)::text = 'SALIDO'::text) AND (cierre_fecha IS NOT NULL) AND (cierre_at IS NOT NULL) AND (cierre_por IS NOT NULL) AND (cierre_client_operation_id IS NOT NULL) AND ((cierre_causa)::text = ANY ((ARRAY['VENTA'::character varying, 'TRASLADO'::character varying, 'DONACION'::character varying, 'INTERCAMBIO'::character varying, 'DEVOLUCION'::character varying, 'OTRA'::character varying])::text[]))) OR (((estado_operativo)::text = 'MUERTO'::text) AND (cierre_fecha IS NOT NULL) AND (cierre_at IS NOT NULL) AND (cierre_por IS NOT NULL) AND (cierre_client_operation_id IS NOT NULL) AND ((cierre_causa)::text = ANY ((ARRAY['MUERTE_NATURAL'::character varying, 'ENFERMEDAD'::character varying, 'ACCIDENTE'::character varying, 'SACRIFICIO'::character varying, 'DEPREDACION'::character varying, 'DESCONOCIDA'::character varying, 'OTRA'::character varying])::text[])))))
+constraint|agx.animales|animales_cierre_fecha_min_check|c|validated=true|CHECK (((cierre_fecha IS NULL) OR (cierre_fecha >= '1990-01-01'::date)))
+constraint|agx.animales|animales_cierre_fecha_orden_check|c|validated=true|CHECK (((cierre_fecha IS NULL) OR (((fecha_nacimiento IS NULL) OR (cierre_fecha >= fecha_nacimiento)) AND ((fecha_ingreso IS NULL) OR (cierre_fecha >= fecha_ingreso)))))
+constraint|agx.animales|animales_cierre_observaciones_check|c|validated=true|CHECK (((cierre_observaciones IS NULL) OR ((btrim(cierre_observaciones) <> ''::text) AND (char_length(cierre_observaciones) <= 500))))
+constraint|agx.animales|animales_creation_intent_hash_check|c|validated=true|CHECK (((creation_intent_hash)::text ~ '^v1:[0-9a-f]{64}$'::text))
+constraint|agx.animales|animales_cruce_descripcion_formato_check|c|validated=true|CHECK (((cruce_descripcion IS NULL) OR (((cruce_descripcion)::text <> ''::text) AND ((cruce_descripcion)::text = btrim(regexp_replace((cruce_descripcion)::text, '\s+'::text, ' '::text, 'g'::text))))))
+constraint|agx.animales|animales_edad_aproximada_check|c|validated=true|CHECK (((edad_aproximada_meses IS NULL) OR ((edad_aproximada_meses >= 0) AND (edad_aproximada_meses <= 300))))
+constraint|agx.animales|animales_estado_check|c|validated=true|CHECK (((estado)::text = ANY ((ARRAY['ACTIVO'::character varying, 'ANULADO'::character varying])::text[])))
+constraint|agx.animales|animales_estado_consistency_check|c|validated=true|CHECK (((((estado)::text = 'ACTIVO'::text) AND (estado_at IS NULL) AND (estado_por IS NULL) AND (estado_motivo IS NULL)) OR (((estado)::text = 'ANULADO'::text) AND (estado_at IS NOT NULL) AND (estado_por IS NOT NULL) AND (estado_motivo IS NOT NULL) AND (btrim(estado_motivo) <> ''::text))))
+constraint|agx.animales|animales_estado_operativo_check|c|validated=true|CHECK (((estado_operativo)::text = ANY ((ARRAY['EN_HATO'::character varying, 'SALIDO'::character varying, 'MUERTO'::character varying])::text[])))
+constraint|agx.animales|animales_fecha_ingreso_min_check|c|validated=true|CHECK (((fecha_ingreso IS NULL) OR (fecha_ingreso >= '1990-01-01'::date)))
+constraint|agx.animales|animales_fecha_nacimiento_min_check|c|validated=true|CHECK (((fecha_nacimiento IS NULL) OR (fecha_nacimiento >= '1990-01-01'::date)))
+constraint|agx.animales|animales_fechas_orden_check|c|validated=true|CHECK (((fecha_ingreso IS NULL) OR (fecha_nacimiento IS NULL) OR (fecha_ingreso >= fecha_nacimiento)))
+constraint|agx.animales|animales_id_organizacion_unique|u|validated=true|UNIQUE (animal_id, organizacion_id)
+constraint|agx.animales|animales_identidad_check|c|validated=true|CHECK (((numero_visual IS NOT NULL) OR (nombre IS NOT NULL)))
+constraint|agx.animales|animales_nacimiento_consistency_check|c|validated=true|CHECK (((((nacimiento_tipo)::text = 'EXACTA'::text) AND (fecha_nacimiento IS NOT NULL) AND (edad_aproximada_meses IS NULL) AND (edad_referencia_fecha IS NULL)) OR (((nacimiento_tipo)::text = 'APROXIMADA'::text) AND (fecha_nacimiento IS NULL) AND (edad_aproximada_meses IS NOT NULL) AND (edad_referencia_fecha IS NOT NULL)) OR (((nacimiento_tipo)::text = 'DESCONOCIDA'::text) AND (fecha_nacimiento IS NULL) AND (edad_aproximada_meses IS NULL) AND (edad_referencia_fecha IS NULL))))
+constraint|agx.animales|animales_nacimiento_tipo_check|c|validated=true|CHECK (((nacimiento_tipo)::text = ANY ((ARRAY['EXACTA'::character varying, 'APROXIMADA'::character varying, 'DESCONOCIDA'::character varying])::text[])))
+constraint|agx.animales|animales_nombre_formato_check|c|validated=true|CHECK (((nombre IS NULL) OR (((nombre)::text <> ''::text) AND ((nombre)::text = btrim(regexp_replace((nombre)::text, '\s+'::text, ' '::text, 'g'::text))))))
+constraint|agx.animales|animales_numero_visual_formato_check|c|validated=true|CHECK (((numero_visual IS NULL) OR (((numero_visual)::text <> ''::text) AND ((numero_visual)::text = btrim(regexp_replace((numero_visual)::text, '\s+'::text, ' '::text, 'g'::text))))))
+constraint|agx.animales|animales_observaciones_check|c|validated=true|CHECK (((observaciones IS NULL) OR ((btrim(observaciones) <> ''::text) AND (char_length(observaciones) <= 2000))))
+constraint|agx.animales|animales_org_client_operation_key|u|validated=true|UNIQUE (organizacion_id, client_operation_id)
+constraint|agx.animales|animales_origen_consistency_check|c|validated=true|CHECK ((((origen_tipo)::text IS DISTINCT FROM 'NACIDO_EN_PREDIO'::text) OR ((procedencia IS NULL) AND (fecha_ingreso IS NULL))))
+constraint|agx.animales|animales_origen_tipo_check|c|validated=true|CHECK (((origen_tipo IS NULL) OR ((origen_tipo)::text = ANY ((ARRAY['NACIDO_EN_PREDIO'::character varying, 'COMPRADO'::character varying, 'RECIBIDO'::character varying, 'OTRO'::character varying])::text[]))))
+constraint|agx.animales|animales_pkey|p|validated=true|PRIMARY KEY (animal_id)
+constraint|agx.animales|animales_predio_organizacion_fkey|f|validated=true|FOREIGN KEY (predio_id, organizacion_id) REFERENCES agx.predios(predio_id, organizacion_id)
+constraint|agx.animales|animales_procedencia_check|c|validated=true|CHECK (((procedencia IS NULL) OR ((origen_tipo IS NOT NULL) AND ((procedencia)::text <> ''::text) AND ((procedencia)::text = btrim(regexp_replace((procedencia)::text, '\s+'::text, ' '::text, 'g'::text))))))
+constraint|agx.animales|animales_raza_consistency_check|c|validated=true|CHECK (((((raza_tipo)::text = 'PURA'::text) AND (num_nonnulls(raza_principal_id, raza_otro_nombre) = 1) AND (cruce_descripcion IS NULL)) OR (((raza_tipo)::text = 'CRUCE'::text) AND (raza_otro_nombre IS NULL) AND ((raza_principal_id IS NOT NULL) OR (cruce_descripcion IS NOT NULL))) OR (((raza_tipo)::text = 'DESCONOCIDA'::text) AND (raza_principal_id IS NULL) AND (raza_otro_nombre IS NULL) AND (cruce_descripcion IS NULL))))
+constraint|agx.animales|animales_raza_otro_nombre_formato_check|c|validated=true|CHECK (((raza_otro_nombre IS NULL) OR (((raza_otro_nombre)::text <> ''::text) AND ((raza_otro_nombre)::text = btrim(regexp_replace((raza_otro_nombre)::text, '\s+'::text, ' '::text, 'g'::text))))))
+constraint|agx.animales|animales_raza_principal_fkey|f|validated=true|FOREIGN KEY (raza_principal_id) REFERENCES agx.catalogo_razas(raza_id)
+constraint|agx.animales|animales_raza_tipo_check|c|validated=true|CHECK (((raza_tipo)::text = ANY ((ARRAY['PURA'::character varying, 'CRUCE'::character varying, 'DESCONOCIDA'::character varying])::text[])))
+constraint|agx.animales|animales_sexo_check|c|validated=true|CHECK (((sexo)::text = ANY ((ARRAY['MACHO'::character varying, 'HEMBRA'::character varying])::text[])))
+constraint|agx.catalogo_categorias_productivas|catalogo_categorias_consumo_max_check|c|validated=true|CHECK (((consumo_ms_pct_pv_max > (0)::numeric) AND (consumo_ms_pct_pv_max <= (10)::numeric)))
+constraint|agx.catalogo_categorias_productivas|catalogo_categorias_consumo_min_check|c|validated=true|CHECK (((consumo_ms_pct_pv_min > (0)::numeric) AND (consumo_ms_pct_pv_min <= (10)::numeric)))
+constraint|agx.catalogo_categorias_productivas|catalogo_categorias_consumo_tipico_check|c|validated=true|CHECK (((consumo_ms_pct_pv_tipico >= consumo_ms_pct_pv_min) AND (consumo_ms_pct_pv_tipico <= consumo_ms_pct_pv_max)))
+constraint|agx.catalogo_categorias_productivas|catalogo_categorias_grupo_check|c|validated=true|CHECK (((grupo_productivo)::text = ANY ((ARRAY['cria'::character varying, 'levante'::character varying, 'ceba'::character varying, 'leche'::character varying, 'reproduccion'::character varying, 'otro'::character varying])::text[])))
+constraint|agx.catalogo_categorias_productivas|catalogo_categorias_peso_referencia_check|c|validated=true|CHECK ((((peso_min_referencia_kg IS NULL) AND (peso_max_referencia_kg IS NULL)) OR ((peso_min_referencia_kg IS NOT NULL) AND (peso_max_referencia_kg IS NOT NULL) AND (peso_min_referencia_kg > (0)::numeric) AND (peso_max_referencia_kg > peso_min_referencia_kg))))
+constraint|agx.catalogo_categorias_productivas|catalogo_categorias_productivas_codigo_key|u|validated=true|UNIQUE (codigo)
+constraint|agx.catalogo_categorias_productivas|catalogo_categorias_productivas_pkey|p|validated=true|PRIMARY KEY (categoria_id)
+constraint|agx.catalogo_pasturas|catalogo_pasturas_alcance_check|c|validated=true|CHECK (((alcance)::text = ANY ((ARRAY['sistema'::character varying, 'personalizado'::character varying])::text[])))
+constraint|agx.catalogo_pasturas|catalogo_pasturas_alcance_organizacion_check|c|validated=true|CHECK (((((alcance)::text = 'sistema'::text) AND (organizacion_id IS NULL)) OR (((alcance)::text = 'personalizado'::text) AND (organizacion_id IS NOT NULL))))
+constraint|agx.catalogo_pasturas|catalogo_pasturas_pkey|p|validated=true|PRIMARY KEY (pastura_id)
+constraint|agx.catalogo_pasturas|catalogo_pasturas_tipo_check|c|validated=true|CHECK (((tipo)::text = ANY ((ARRAY['graminea'::character varying, 'leguminosa'::character varying, 'mezcla'::character varying, 'otra'::character varying])::text[])))
+constraint|agx.catalogo_razas|catalogo_razas_codigo_key|u|validated=true|UNIQUE (codigo)
+constraint|agx.catalogo_razas|catalogo_razas_nombre_check|c|validated=true|CHECK ((btrim((nombre)::text) <> ''::text))
+constraint|agx.catalogo_razas|catalogo_razas_pkey|p|validated=true|PRIMARY KEY (raza_id)
+constraint|agx.catalogo_razas|catalogo_razas_tipo_productivo_check|c|validated=true|CHECK (((tipo_productivo)::text = ANY ((ARRAY['carne'::character varying, 'leche'::character varying, 'doble_proposito'::character varying])::text[])))
+constraint|agx.potrero_archivo_eventos|potrero_archivo_eventos_motivo_check|c|validated=true|CHECK ((((tipo_evento)::text = 'RESTAURADO'::text) OR ((motivo IS NOT NULL) AND (btrim(motivo) <> ''::text))))
+constraint|agx.potrero_archivo_eventos|potrero_archivo_eventos_pkey|p|validated=true|PRIMARY KEY (evento_id)
+constraint|agx.potrero_archivo_eventos|potrero_archivo_eventos_potrero_organizacion_fkey|f|validated=true|FOREIGN KEY (potrero_id, organizacion_id) REFERENCES agx.potreros(potrero_id, organizacion_id)
+constraint|agx.potrero_archivo_eventos|potrero_archivo_eventos_tipo_check|c|validated=true|CHECK (((tipo_evento)::text = ANY ((ARRAY['ARCHIVADO'::character varying, 'RESTAURADO'::character varying])::text[])))
+constraint|agx.potrero_calculos_pastoreo|potrero_calculos_capacidad_animales_check|c|validated=true|CHECK (((capacidad_animales_periodo IS NULL) OR (capacidad_animales_periodo >= 0)))
+constraint|agx.potrero_calculos_pastoreo|potrero_calculos_consumo_check|c|validated=true|CHECK (((consumo_pct_peso_vivo > (0)::numeric) AND (consumo_pct_peso_vivo <= (10)::numeric)))
+constraint|agx.potrero_calculos_pastoreo|potrero_calculos_demanda_diaria_check|c|validated=true|CHECK (((demanda_diaria_lote_kg_ms IS NULL) OR (demanda_diaria_lote_kg_ms >= (0)::numeric)))
+constraint|agx.potrero_calculos_pastoreo|potrero_calculos_dias_ocupacion_check|c|validated=true|CHECK (((dias_ocupacion_estimados IS NULL) OR (dias_ocupacion_estimados >= (0)::numeric)))
+constraint|agx.potrero_calculos_pastoreo|potrero_calculos_ficha_potrero_organizacion_fkey|f|validated=true|FOREIGN KEY (ficha_id, potrero_id, organizacion_id) REFERENCES agx.potrero_fichas_productivas(ficha_id, potrero_id, organizacion_id)
+constraint|agx.potrero_calculos_pastoreo|potrero_calculos_materia_seca_check|c|validated=true|CHECK (((porcentaje_materia_seca > (0)::numeric) AND (porcentaje_materia_seca <= (100)::numeric)))
+constraint|agx.potrero_calculos_pastoreo|potrero_calculos_materia_seca_total_check|c|validated=true|CHECK ((materia_seca_total_kg >= (0)::numeric))
+constraint|agx.potrero_calculos_pastoreo|potrero_calculos_materia_seca_utilizable_check|c|validated=true|CHECK ((materia_seca_utilizable_kg >= (0)::numeric))
+constraint|agx.potrero_calculos_pastoreo|potrero_calculos_modo_check|c|validated=true|CHECK (((modo)::text = ANY ((ARRAY['dias_ocupacion'::character varying, 'capacidad_animales'::character varying])::text[])))
+constraint|agx.potrero_calculos_pastoreo|potrero_calculos_modo_consistency_check|c|validated=true|CHECK (((((modo)::text = 'dias_ocupacion'::text) AND (numero_animales IS NOT NULL) AND (periodo_objetivo_dias IS NULL) AND (dias_ocupacion_estimados IS NOT NULL) AND (capacidad_animales_periodo IS NULL)) OR (((modo)::text = 'capacidad_animales'::text) AND (periodo_objetivo_dias IS NOT NULL) AND (numero_animales IS NULL) AND (capacidad_animales_periodo IS NOT NULL) AND (dias_ocupacion_estimados IS NULL))))
+constraint|agx.potrero_calculos_pastoreo|potrero_calculos_numero_animales_check|c|validated=true|CHECK (((numero_animales IS NULL) OR ((numero_animales >= 1) AND (numero_animales <= 100000))))
+constraint|agx.potrero_calculos_pastoreo|potrero_calculos_pastoreo_pkey|p|validated=true|PRIMARY KEY (calculo_id)
+constraint|agx.potrero_calculos_pastoreo|potrero_calculos_periodo_objetivo_check|c|validated=true|CHECK (((periodo_objetivo_dias IS NULL) OR ((periodo_objetivo_dias > (0)::numeric) AND (periodo_objetivo_dias <= (365)::numeric))))
+constraint|agx.potrero_calculos_pastoreo|potrero_calculos_peso_vivo_check|c|validated=true|CHECK (((peso_vivo_promedio_kg IS NULL) OR ((peso_vivo_promedio_kg > (0)::numeric) AND (peso_vivo_promedio_kg <= (2000)::numeric))))
+constraint|agx.potrero_calculos_pastoreo|potrero_calculos_potrero_organizacion_fkey|f|validated=true|FOREIGN KEY (potrero_id, organizacion_id) REFERENCES agx.potreros(potrero_id, organizacion_id)
+constraint|agx.potrero_calculos_pastoreo|potrero_calculos_predio_organizacion_fkey|f|validated=true|FOREIGN KEY (predio_id, organizacion_id) REFERENCES agx.predios(predio_id, organizacion_id)
+constraint|agx.potrero_calculos_pastoreo|potrero_calculos_utilizacion_check|c|validated=true|CHECK (((porcentaje_utilizacion > (0)::numeric) AND (porcentaje_utilizacion <= (100)::numeric)))
+constraint|agx.potrero_ciclo_eventos|potrero_ciclo_eventos_ciclo_potrero_organizacion_fkey|f|validated=true|FOREIGN KEY (ciclo_id, potrero_id, organizacion_id) REFERENCES agx.potrero_ciclos_pastoreo(ciclo_id, potrero_id, organizacion_id)
+constraint|agx.potrero_ciclo_eventos|potrero_ciclo_eventos_pkey|p|validated=true|PRIMARY KEY (evento_id)
+constraint|agx.potrero_ciclo_eventos|potrero_ciclo_eventos_potrero_organizacion_fkey|f|validated=true|FOREIGN KEY (potrero_id, organizacion_id) REFERENCES agx.potreros(potrero_id, organizacion_id)
+constraint|agx.potrero_ciclo_eventos|potrero_ciclo_eventos_tipo_check|c|validated=true|CHECK (((tipo_evento)::text = ANY ((ARRAY['PASTOREO_INICIADO'::character varying, 'PASTOREO_FINALIZADO'::character varying, 'PASTOREO_CANCELADO'::character varying, 'PASTOREO_ANULADO'::character varying, 'PASTOREO_CORREGIDO'::character varying, 'RESIDUAL_REAL_REGISTRADO'::character varying, 'RESIDUAL_REAL_COMPARATIVO_ACTUALIZADO'::character varying, 'RESIDUAL_REAL_CORREGIDO'::character varying, 'RESIDUAL_REAL_ANULADO'::character varying, 'DESCANSO_ACTUALIZADO_CON_RESIDUAL_REAL'::character varying])::text[])))
+constraint|agx.potrero_ciclo_lote_real_invalidaciones|potrero_ciclo_lote_real_invalidaciones_motivo_check|c|validated=true|CHECK ((btrim(motivo) <> ''::text))
+constraint|agx.potrero_ciclo_lote_real_invalidaciones|potrero_ciclo_lote_real_invalidaciones_pkey|p|validated=true|PRIMARY KEY (invalidacion_id)
+constraint|agx.potrero_ciclo_lote_real_invalidaciones|potrero_ciclo_lote_real_invalidaciones_snapshot_ciclo_fkey|f|validated=true|FOREIGN KEY (snapshot_id, ciclo_id, potrero_id, organizacion_id) REFERENCES agx.potrero_ciclo_lote_real_versiones(snapshot_id, ciclo_id, potrero_id, organizacion_id)
+constraint|agx.potrero_ciclo_lote_real_versiones|potrero_ciclo_lote_real_categoria_fkey|f|validated=true|FOREIGN KEY (categoria_id) REFERENCES agx.catalogo_categorias_productivas(categoria_id)
+constraint|agx.potrero_ciclo_lote_real_versiones|potrero_ciclo_lote_real_ciclo_potrero_organizacion_fkey|f|validated=true|FOREIGN KEY (ciclo_id, potrero_id, organizacion_id) REFERENCES agx.potrero_ciclos_pastoreo(ciclo_id, potrero_id, organizacion_id)
+constraint|agx.potrero_ciclo_lote_real_versiones|potrero_ciclo_lote_real_ficha_fkey|f|validated=true|FOREIGN KEY (ficha_id_base_real, potrero_id, organizacion_id) REFERENCES agx.potrero_fichas_productivas(ficha_id, potrero_id, organizacion_id)
+constraint|agx.potrero_ciclo_lote_real_versiones|potrero_ciclo_lote_real_id_ciclo_potrero_organizacion_unique|u|validated=true|UNIQUE (snapshot_id, ciclo_id, potrero_id, organizacion_id)
+constraint|agx.potrero_ciclo_lote_real_versiones|potrero_ciclo_lote_real_numero_animales_check|c|validated=true|CHECK (((numero_animales >= 1) AND (numero_animales <= 100000)))
+constraint|agx.potrero_ciclo_lote_real_versiones|potrero_ciclo_lote_real_peso_promedio_check|c|validated=true|CHECK (((peso_promedio_kg > (0)::numeric) AND (peso_promedio_kg <= (2000)::numeric)))
+constraint|agx.potrero_ciclo_lote_real_versiones|potrero_ciclo_lote_real_version_check|c|validated=true|CHECK ((version >= 1))
+constraint|agx.potrero_ciclo_lote_real_versiones|potrero_ciclo_lote_real_versiones_pkey|p|validated=true|PRIMARY KEY (snapshot_id)
+constraint|agx.potrero_ciclo_residual_real_invalidaciones|potrero_ciclo_residual_real_invalidaciones_motivo_check|c|validated=true|CHECK ((btrim(motivo) <> ''::text))
+constraint|agx.potrero_ciclo_residual_real_invalidaciones|potrero_ciclo_residual_real_invalidaciones_pkey|p|validated=true|PRIMARY KEY (invalidacion_id)
+constraint|agx.potrero_ciclo_residual_real_invalidaciones|potrero_ciclo_residual_real_invalidaciones_residual_fkey|f|validated=true|FOREIGN KEY (residual_id, ciclo_id, potrero_id, organizacion_id) REFERENCES agx.potrero_ciclo_residuales_reales_versiones(residual_id, ciclo_id, potrero_id, organizacion_id)
+constraint|agx.potrero_ciclo_residuales_reales_versiones|potrero_ciclo_residual_real_aforo_check|c|validated=true|CHECK ((aforo_promedio_g_m2 >= (0)::numeric))
+constraint|agx.potrero_ciclo_residuales_reales_versiones|potrero_ciclo_residual_real_biomasa_check|c|validated=true|CHECK ((biomasa_fresca_total_kg >= (0)::numeric))
+constraint|agx.potrero_ciclo_residuales_reales_versiones|potrero_ciclo_residual_real_ciclo_potrero_organizacion_fkey|f|validated=true|FOREIGN KEY (ciclo_id, potrero_id, organizacion_id) REFERENCES agx.potrero_ciclos_pastoreo(ciclo_id, potrero_id, organizacion_id)
+constraint|agx.potrero_ciclo_residuales_reales_versiones|potrero_ciclo_residual_real_descanso_origen_fkey|f|validated=true|FOREIGN KEY (descanso_estimado_origen_id, ciclo_id, potrero_id, organizacion_id) REFERENCES agx.potrero_recomendaciones_descanso(descanso_id, ciclo_pastoreo_id, potrero_id, organizacion_id)
+constraint|agx.potrero_ciclo_residuales_reales_versiones|potrero_ciclo_residual_real_id_ciclo_potrero_organizacion_uniqu|u|validated=true|UNIQUE (residual_id, ciclo_id, potrero_id, organizacion_id)
+constraint|agx.potrero_ciclo_residuales_reales_versiones|potrero_ciclo_residual_real_numero_muestras_check|c|validated=true|CHECK ((numero_muestras >= 1))
+constraint|agx.potrero_ciclo_residuales_reales_versiones|potrero_ciclo_residual_real_snapshot_fkey|f|validated=true|FOREIGN KEY (snapshot_lote_real_id, ciclo_id, potrero_id, organizacion_id) REFERENCES agx.potrero_ciclo_lote_real_versiones(snapshot_id, ciclo_id, potrero_id, organizacion_id)
+constraint|agx.potrero_ciclo_residuales_reales_versiones|potrero_ciclo_residual_real_version_check|c|validated=true|CHECK ((version >= 1))
+constraint|agx.potrero_ciclo_residuales_reales_versiones|potrero_ciclo_residuales_reales_versiones_pkey|p|validated=true|PRIMARY KEY (residual_id)
+constraint|agx.potrero_ciclos_pastoreo|potrero_ciclos_id_potrero_organizacion_unique|u|validated=true|UNIQUE (ciclo_id, potrero_id, organizacion_id)
+constraint|agx.potrero_ciclos_pastoreo|potrero_ciclos_pastoreo_categoria_fkey|f|validated=true|FOREIGN KEY (categoria_id) REFERENCES agx.catalogo_categorias_productivas(categoria_id)
+constraint|agx.potrero_ciclos_pastoreo|potrero_ciclos_pastoreo_contexto_fkey|f|validated=true|FOREIGN KEY (contexto_id, potrero_id, organizacion_id) REFERENCES agx.potrero_contextos_agroclimaticos(contexto_id, potrero_id, organizacion_id)
+constraint|agx.potrero_ciclos_pastoreo|potrero_ciclos_pastoreo_estado_check|c|validated=true|CHECK (((estado)::text = ANY ((ARRAY['EN_CURSO'::character varying, 'FINALIZADO'::character varying, 'CANCELADO'::character varying, 'ANULADO'::character varying])::text[])))
+constraint|agx.potrero_ciclos_pastoreo|potrero_ciclos_pastoreo_estado_consistency_check|c|validated=true|CHECK (((((estado)::text = 'EN_CURSO'::text) AND (fecha_ingreso_real IS NOT NULL) AND (fecha_salida_real IS NULL) AND (motivo_cancelacion IS NULL) AND (motivo_anulacion IS NULL)) OR (((estado)::text = 'FINALIZADO'::text) AND (fecha_ingreso_real IS NOT NULL) AND (fecha_salida_real IS NOT NULL) AND (fecha_salida_real >= fecha_ingreso_real) AND (motivo_cancelacion IS NULL) AND (motivo_anulacion IS NULL)) OR (((estado)::text = 'CANCELADO'::text) AND (fecha_ingreso_real IS NOT NULL) AND (fecha_salida_real IS NULL) AND (motivo_cancelacion IS NOT NULL) AND (btrim(motivo_cancelacion) <> ''::text) AND (motivo_anulacion IS NULL)) OR (((estado)::text = 'ANULADO'::text) AND (fecha_ingreso_real IS NOT NULL) AND (motivo_anulacion IS NOT NULL) AND (btrim(motivo_anulacion) <> ''::text) AND (((fecha_salida_real IS NOT NULL) AND (motivo_cancelacion IS NULL)) OR ((fecha_salida_real IS NULL) AND (motivo_cancelacion IS NOT NULL) AND (btrim(motivo_cancelacion) <> ''::text))))))
+constraint|agx.potrero_ciclos_pastoreo|potrero_ciclos_pastoreo_numero_animales_check|c|validated=true|CHECK (((numero_animales_real >= 1) AND (numero_animales_real <= 100000)))
+constraint|agx.potrero_ciclos_pastoreo|potrero_ciclos_pastoreo_peso_promedio_check|c|validated=true|CHECK (((peso_promedio_real_kg > (0)::numeric) AND (peso_promedio_real_kg <= (2000)::numeric)))
+constraint|agx.potrero_ciclos_pastoreo|potrero_ciclos_pastoreo_pkey|p|validated=true|PRIMARY KEY (ciclo_id)
+constraint|agx.potrero_ciclos_pastoreo|potrero_ciclos_pastoreo_potrero_predio_organizacion_fkey|f|validated=true|FOREIGN KEY (potrero_id, predio_id, organizacion_id) REFERENCES agx.potreros(potrero_id, predio_id, organizacion_id)
+constraint|agx.potrero_ciclos_pastoreo|potrero_ciclos_pastoreo_recomendacion_descanso_plan_fkey|f|validated=true|FOREIGN KEY (recomendacion_descanso_plan_id, potrero_id, organizacion_id) REFERENCES agx.potrero_recomendaciones_descanso(descanso_id, potrero_id, organizacion_id)
+constraint|agx.potrero_ciclos_pastoreo|potrero_ciclos_pastoreo_recomendacion_pastoreo_fkey|f|validated=true|FOREIGN KEY (recomendacion_pastoreo_id, potrero_id, organizacion_id) REFERENCES agx.potrero_recomendaciones_pastoreo(recomendacion_id, potrero_id, organizacion_id)
+constraint|agx.potrero_climatologias_agroclimaticas|potrero_climatologias_agroclimaticas_pkey|p|validated=true|PRIMARY KEY (climatologia_id)
+constraint|agx.potrero_climatologias_agroclimaticas|potrero_climatologias_period_check|c|validated=true|CHECK ((period_end_year >= period_start_year))
+constraint|agx.potrero_climatologias_agroclimaticas|potrero_climatologias_potrero_organizacion_fkey|f|validated=true|FOREIGN KEY (potrero_id, organizacion_id) REFERENCES agx.potreros(potrero_id, organizacion_id)
+constraint|agx.potrero_climatologias_agroclimaticas|potrero_climatologias_predio_organizacion_fkey|f|validated=true|FOREIGN KEY (predio_id, organizacion_id) REFERENCES agx.predios(predio_id, organizacion_id)
+constraint|agx.potrero_climatologias_agroclimaticas|potrero_climatologias_soil_period_check|c|validated=true|CHECK ((((soil_period_start_year IS NULL) AND (soil_period_end_year IS NULL)) OR (soil_period_end_year >= soil_period_start_year)))
+constraint|agx.potrero_contextos_agroclimaticos|potrero_contextos_agroclimaticos_pkey|p|validated=true|PRIMARY KEY (contexto_id)
+constraint|agx.potrero_contextos_agroclimaticos|potrero_contextos_calidad_check|c|validated=true|CHECK (((calidad IS NULL) OR ((calidad)::text = ANY ((ARRAY['reanalysis'::character varying, 'raw_observed'::character varying])::text[]))))
+constraint|agx.potrero_contextos_agroclimaticos|potrero_contextos_fuente_principal_check|c|validated=true|CHECK (((fuente_principal)::text = ANY ((ARRAY['ERA5_LAND'::character varying, 'IDEAM'::character varying])::text[])))
+constraint|agx.potrero_contextos_agroclimaticos|potrero_contextos_humedad_relativa_check|c|validated=true|CHECK (((humedad_relativa_media_pct IS NULL) OR ((humedad_relativa_media_pct >= (0)::numeric) AND (humedad_relativa_media_pct <= (100)::numeric))))
+constraint|agx.potrero_contextos_agroclimaticos|potrero_contextos_id_potrero_organizacion_unique|u|validated=true|UNIQUE (contexto_id, potrero_id, organizacion_id)
+constraint|agx.potrero_contextos_agroclimaticos|potrero_contextos_potrero_organizacion_fkey|f|validated=true|FOREIGN KEY (potrero_id, organizacion_id) REFERENCES agx.potreros(potrero_id, organizacion_id)
+constraint|agx.potrero_contextos_agroclimaticos|potrero_contextos_precipitacion_15d_check|c|validated=true|CHECK (((precipitacion_15d_mm IS NULL) OR (precipitacion_15d_mm >= (0)::numeric)))
+constraint|agx.potrero_contextos_agroclimaticos|potrero_contextos_precipitacion_24h_check|c|validated=true|CHECK (((precipitacion_24h_mm IS NULL) OR (precipitacion_24h_mm >= (0)::numeric)))
+constraint|agx.potrero_contextos_agroclimaticos|potrero_contextos_precipitacion_30d_check|c|validated=true|CHECK (((precipitacion_30d_mm IS NULL) OR (precipitacion_30d_mm >= (0)::numeric)))
+constraint|agx.potrero_contextos_agroclimaticos|potrero_contextos_precipitacion_7d_check|c|validated=true|CHECK (((precipitacion_7d_mm IS NULL) OR (precipitacion_7d_mm >= (0)::numeric)))
+constraint|agx.potrero_contextos_agroclimaticos|potrero_contextos_predio_organizacion_fkey|f|validated=true|FOREIGN KEY (predio_id, organizacion_id) REFERENCES agx.predios(predio_id, organizacion_id)
+constraint|agx.potrero_descanso_invalidaciones|potrero_descanso_invalidaciones_descanso_ciclo_fkey|f|validated=true|FOREIGN KEY (descanso_id, ciclo_pastoreo_id, potrero_id, organizacion_id) REFERENCES agx.potrero_recomendaciones_descanso(descanso_id, ciclo_pastoreo_id, potrero_id, organizacion_id)
+constraint|agx.potrero_descanso_invalidaciones|potrero_descanso_invalidaciones_motivo_check|c|validated=true|CHECK ((btrim(motivo) <> ''::text))
+constraint|agx.potrero_descanso_invalidaciones|potrero_descanso_invalidaciones_pkey|p|validated=true|PRIMARY KEY (invalidacion_id)
+constraint|agx.potrero_evaluaciones_reingreso|potrero_evaluaciones_reingreso_ciclo_fkey|f|validated=true|FOREIGN KEY (ciclo_origen_id, potrero_id, organizacion_id) REFERENCES agx.potrero_ciclos_pastoreo(ciclo_id, potrero_id, organizacion_id)
+constraint|agx.potrero_evaluaciones_reingreso|potrero_evaluaciones_reingreso_descanso_ciclo_fkey|f|validated=true|FOREIGN KEY (descanso_id, ciclo_origen_id, potrero_id, organizacion_id) REFERENCES agx.potrero_recomendaciones_descanso(descanso_id, ciclo_pastoreo_id, potrero_id, organizacion_id)
+constraint|agx.potrero_evaluaciones_reingreso|potrero_evaluaciones_reingreso_ficha_fkey|f|validated=true|FOREIGN KEY (ficha_id, potrero_id, organizacion_id) REFERENCES agx.potrero_fichas_productivas(ficha_id, potrero_id, organizacion_id)
+constraint|agx.potrero_evaluaciones_reingreso|potrero_evaluaciones_reingreso_observacion_check|c|validated=true|CHECK ((((resultado)::text = 'APTO'::text) OR ((observacion IS NOT NULL) AND (btrim(observacion) <> ''::text))))
+constraint|agx.potrero_evaluaciones_reingreso|potrero_evaluaciones_reingreso_pkey|p|validated=true|PRIMARY KEY (evaluacion_id)
+constraint|agx.potrero_evaluaciones_reingreso|potrero_evaluaciones_reingreso_potrero_organizacion_fkey|f|validated=true|FOREIGN KEY (potrero_id, organizacion_id) REFERENCES agx.potreros(potrero_id, organizacion_id)
+constraint|agx.potrero_evaluaciones_reingreso|potrero_evaluaciones_reingreso_resultado_check|c|validated=true|CHECK (((resultado)::text = ANY ((ARRAY['APTO'::character varying, 'NO_APTO'::character varying])::text[])))
+constraint|agx.potrero_ficha_pasturas|potrero_ficha_pasturas_ficha_organizacion_fkey|f|validated=true|FOREIGN KEY (ficha_id, organizacion_id) REFERENCES agx.potrero_fichas_productivas(ficha_id, organizacion_id)
+constraint|agx.potrero_ficha_pasturas|potrero_ficha_pasturas_pastura_fkey|f|validated=true|FOREIGN KEY (pastura_id) REFERENCES agx.catalogo_pasturas(pastura_id)
+constraint|agx.potrero_ficha_pasturas|potrero_ficha_pasturas_pkey|p|validated=true|PRIMARY KEY (ficha_pastura_id)
+constraint|agx.potrero_ficha_pasturas|potrero_ficha_pasturas_porcentaje_check|c|validated=true|CHECK (((porcentaje_estimado IS NULL) OR ((porcentaje_estimado > (0)::numeric) AND (porcentaje_estimado <= (100)::numeric))))
+constraint|agx.potrero_fichas_productivas|potrero_fichas_aforo_check|c|validated=true|CHECK (((aforo_promedio_g_m2 > (0)::numeric) AND (aforo_promedio_g_m2 <= (10000)::numeric)))
+constraint|agx.potrero_fichas_productivas|potrero_fichas_biomasa_check|c|validated=true|CHECK ((biomasa_total_kg >= (0)::numeric))
+constraint|agx.potrero_fichas_productivas|potrero_fichas_id_organizacion_unique|u|validated=true|UNIQUE (ficha_id, organizacion_id)
+constraint|agx.potrero_fichas_productivas|potrero_fichas_id_potrero_organizacion_unique|u|validated=true|UNIQUE (ficha_id, potrero_id, organizacion_id)
+constraint|agx.potrero_fichas_productivas|potrero_fichas_materia_seca_check|c|validated=true|CHECK (((porcentaje_materia_seca IS NULL) OR ((porcentaje_materia_seca > (0)::numeric) AND (porcentaje_materia_seca <= (100)::numeric))))
+constraint|agx.potrero_fichas_productivas|potrero_fichas_muestras_check|c|validated=true|CHECK (((numero_muestras IS NULL) OR (numero_muestras >= 1)))
+constraint|agx.potrero_fichas_productivas|potrero_fichas_potrero_organizacion_fkey|f|validated=true|FOREIGN KEY (potrero_id, organizacion_id) REFERENCES agx.potreros(potrero_id, organizacion_id)
+constraint|agx.potrero_fichas_productivas|potrero_fichas_productivas_pkey|p|validated=true|PRIMARY KEY (ficha_id)
+constraint|agx.potrero_fichas_productivas|potrero_fichas_tipo_cobertura_check|c|validated=true|CHECK (((tipo_cobertura)::text = ANY ((ARRAY['pastura'::character varying, 'mezcla'::character varying, 'otra'::character varying])::text[])))
+constraint|agx.potrero_recomendaciones_descanso|potrero_descansos_agroclimate_status_check|c|validated=true|CHECK (((agroclimate_status)::text = ANY ((ARRAY['FAVORABLE'::character varying, 'NORMAL'::character varying, 'RESTRICTIVE'::character varying, 'SEVERELY_RESTRICTIVE'::character varying, 'INSUFFICIENT_DATA'::character varying])::text[])))
+constraint|agx.potrero_recomendaciones_descanso|potrero_descansos_ciclo_pastoreo_fkey|f|validated=true|FOREIGN KEY (ciclo_pastoreo_id, potrero_id, organizacion_id) REFERENCES agx.potrero_ciclos_pastoreo(ciclo_id, potrero_id, organizacion_id)
+constraint|agx.potrero_recomendaciones_descanso|potrero_descansos_confianza_check|c|validated=true|CHECK (((nivel_confianza)::text = ANY ((ARRAY['ALTA'::character varying, 'MEDIA'::character varying, 'BAJA'::character varying])::text[])))
+constraint|agx.potrero_recomendaciones_descanso|potrero_descansos_contexto_potrero_organizacion_fkey|f|validated=true|FOREIGN KEY (contexto_id, potrero_id, organizacion_id) REFERENCES agx.potrero_contextos_agroclimaticos(contexto_id, potrero_id, organizacion_id)
+constraint|agx.potrero_recomendaciones_descanso|potrero_descansos_dias_max_check|c|validated=true|CHECK (((dias_descanso_max >= 0) AND (dias_descanso_max <= 180)))
+constraint|agx.potrero_recomendaciones_descanso|potrero_descansos_dias_min_check|c|validated=true|CHECK (((dias_descanso_min >= 0) AND (dias_descanso_min <= 180)))
+constraint|agx.potrero_recomendaciones_descanso|potrero_descansos_dias_orden_check|c|validated=true|CHECK (((dias_descanso_min <= dias_descanso_recomendado) AND (dias_descanso_recomendado <= dias_descanso_max)))
+constraint|agx.potrero_recomendaciones_descanso|potrero_descansos_dias_recomendado_check|c|validated=true|CHECK (((dias_descanso_recomendado >= 0) AND (dias_descanso_recomendado <= 180)))
+constraint|agx.potrero_recomendaciones_descanso|potrero_descansos_fecha_reingreso_min_check|c|validated=true|CHECK ((fecha_reingreso_min >= fecha_salida_estimada))
+constraint|agx.potrero_recomendaciones_descanso|potrero_descansos_fecha_reingreso_orden_check|c|validated=true|CHECK (((fecha_reingreso_min <= fecha_reingreso_recomendada) AND (fecha_reingreso_recomendada <= fecha_reingreso_max)))
+constraint|agx.potrero_recomendaciones_descanso|potrero_descansos_fecha_salida_check|c|validated=true|CHECK ((fecha_salida_estimada >= fecha_inicio_pastoreo))
+constraint|agx.potrero_recomendaciones_descanso|potrero_descansos_ficha_potrero_organizacion_fkey|f|validated=true|FOREIGN KEY (ficha_id, potrero_id, organizacion_id) REFERENCES agx.potrero_fichas_productivas(ficha_id, potrero_id, organizacion_id)
+constraint|agx.potrero_recomendaciones_descanso|potrero_descansos_id_ciclo_potrero_organizacion_unique|u|validated=true|UNIQUE (descanso_id, ciclo_pastoreo_id, potrero_id, organizacion_id)
+constraint|agx.potrero_recomendaciones_descanso|potrero_descansos_id_potrero_organizacion_unique|u|validated=true|UNIQUE (descanso_id, potrero_id, organizacion_id)
+constraint|agx.potrero_recomendaciones_descanso|potrero_descansos_lote_real_version_fkey|f|validated=true|FOREIGN KEY (lote_real_version_id, ciclo_pastoreo_id, potrero_id, organizacion_id) REFERENCES agx.potrero_ciclo_lote_real_versiones(snapshot_id, ciclo_id, potrero_id, organizacion_id)
+constraint|agx.potrero_recomendaciones_descanso|potrero_descansos_potrero_organizacion_fkey|f|validated=true|FOREIGN KEY (potrero_id, organizacion_id) REFERENCES agx.potreros(potrero_id, organizacion_id)
+constraint|agx.potrero_recomendaciones_descanso|potrero_descansos_predio_organizacion_fkey|f|validated=true|FOREIGN KEY (predio_id, organizacion_id) REFERENCES agx.predios(predio_id, organizacion_id)
+constraint|agx.potrero_recomendaciones_descanso|potrero_descansos_previous_potrero_organizacion_fkey|f|validated=true|FOREIGN KEY (previous_descanso_id, potrero_id, organizacion_id) REFERENCES agx.potrero_recomendaciones_descanso(descanso_id, potrero_id, organizacion_id)
+constraint|agx.potrero_recomendaciones_descanso|potrero_descansos_recomendacion_potrero_organizacion_fkey|f|validated=true|FOREIGN KEY (recomendacion_pastoreo_id, potrero_id, organizacion_id) REFERENCES agx.potrero_recomendaciones_pastoreo(recomendacion_id, potrero_id, organizacion_id)
+constraint|agx.potrero_recomendaciones_descanso|potrero_descansos_residual_real_version_fkey|f|validated=true|FOREIGN KEY (residual_real_version_id, ciclo_pastoreo_id, potrero_id, organizacion_id) REFERENCES agx.potrero_ciclo_residuales_reales_versiones(residual_id, ciclo_id, potrero_id, organizacion_id)
+constraint|agx.potrero_recomendaciones_descanso|potrero_descansos_version_check|c|validated=true|CHECK ((version >= 1))
+constraint|agx.potrero_recomendaciones_descanso|potrero_recomendaciones_descanso_fuente_remanente_check|c|validated=true|CHECK (((fuente_remanente IS NULL) OR ((fuente_remanente)::text = ANY ((ARRAY['ESTIMADO'::character varying, 'MEDIDO'::character varying])::text[]))))
+constraint|agx.potrero_recomendaciones_descanso|potrero_recomendaciones_descanso_pkey|p|validated=true|PRIMARY KEY (descanso_id)
+constraint|agx.potrero_recomendaciones_pastoreo|potrero_recomendaciones_categoria_fkey|f|validated=true|FOREIGN KEY (categoria_id) REFERENCES agx.catalogo_categorias_productivas(categoria_id)
+constraint|agx.potrero_recomendaciones_pastoreo|potrero_recomendaciones_confianza_check|c|validated=true|CHECK (((nivel_confianza)::text = ANY ((ARRAY['ALTA'::character varying, 'MEDIA'::character varying, 'BAJA'::character varying])::text[])))
+constraint|agx.potrero_recomendaciones_pastoreo|potrero_recomendaciones_consumo_pct_check|c|validated=true|CHECK (((consumo_pct_pv_aplicado > (0)::numeric) AND (consumo_pct_pv_aplicado <= (10)::numeric)))
+constraint|agx.potrero_recomendaciones_pastoreo|potrero_recomendaciones_contexto_potrero_organizacion_fkey|f|validated=true|FOREIGN KEY (contexto_id, potrero_id, organizacion_id) REFERENCES agx.potrero_contextos_agroclimaticos(contexto_id, potrero_id, organizacion_id)
+constraint|agx.potrero_recomendaciones_pastoreo|potrero_recomendaciones_demanda_diaria_check|c|validated=true|CHECK ((demanda_diaria_lote_kg_ms >= (0)::numeric))
+constraint|agx.potrero_recomendaciones_pastoreo|potrero_recomendaciones_dias_en_leche_check|c|validated=true|CHECK (((dias_en_leche IS NULL) OR ((dias_en_leche >= (0)::numeric) AND (dias_en_leche <= (500)::numeric))))
+constraint|agx.potrero_recomendaciones_pastoreo|potrero_recomendaciones_dias_ocupacion_check|c|validated=true|CHECK ((dias_ocupacion_estimados >= (0)::numeric))
+constraint|agx.potrero_recomendaciones_pastoreo|potrero_recomendaciones_dias_permanencia_check|c|validated=true|CHECK (((dias_permanencia_recomendada IS NULL) OR (dias_permanencia_recomendada = ANY (ARRAY[2, 3]))))
+constraint|agx.potrero_recomendaciones_pastoreo|potrero_recomendaciones_ficha_potrero_organizacion_fkey|f|validated=true|FOREIGN KEY (ficha_id, potrero_id, organizacion_id) REFERENCES agx.potrero_fichas_productivas(ficha_id, potrero_id, organizacion_id)
+constraint|agx.potrero_recomendaciones_pastoreo|potrero_recomendaciones_grasa_leche_check|c|validated=true|CHECK (((grasa_leche_pct IS NULL) OR ((grasa_leche_pct > (0)::numeric) AND (grasa_leche_pct <= (10)::numeric))))
+constraint|agx.potrero_recomendaciones_pastoreo|potrero_recomendaciones_id_potrero_organizacion_unique|u|validated=true|UNIQUE (recomendacion_id, potrero_id, organizacion_id)
+constraint|agx.potrero_recomendaciones_pastoreo|potrero_recomendaciones_materia_seca_pct_check|c|validated=true|CHECK (((materia_seca_pct_aplicada > (0)::numeric) AND (materia_seca_pct_aplicada <= (100)::numeric)))
+constraint|agx.potrero_recomendaciones_pastoreo|potrero_recomendaciones_materia_seca_total_check|c|validated=true|CHECK ((materia_seca_total_kg >= (0)::numeric))
+constraint|agx.potrero_recomendaciones_pastoreo|potrero_recomendaciones_materia_seca_utilizable_check|c|validated=true|CHECK ((materia_seca_utilizable_kg >= (0)::numeric))
+constraint|agx.potrero_recomendaciones_pastoreo|potrero_recomendaciones_modo_calculo_check|c|validated=true|CHECK (((modo_calculo IS NULL) OR ((modo_calculo)::text = ANY ((ARRAY['MANUAL'::character varying, 'AUTOMATICO'::character varying])::text[]))))
+constraint|agx.potrero_recomendaciones_pastoreo|potrero_recomendaciones_modo_consistency_check|c|validated=true|CHECK (((((modo_calculo)::text = 'AUTOMATICO'::text) AND (dias_permanencia_recomendada IS NOT NULL) AND (motivo_duracion IS NOT NULL) AND (occupation_policy_version IS NOT NULL) AND (fecha_ingreso_prevista IS NOT NULL)) OR (((modo_calculo)::text IS DISTINCT FROM 'AUTOMATICO'::text) AND (dias_permanencia_recomendada IS NULL) AND (motivo_duracion IS NULL) AND (occupation_policy_version IS NULL))))
+constraint|agx.potrero_recomendaciones_pastoreo|potrero_recomendaciones_motivo_duracion_check|c|validated=true|CHECK (((motivo_duracion IS NULL) OR ((motivo_duracion)::text = ANY ((ARRAY['TARGET_3_DAYS'::character varying, 'FALLBACK_MIN_2_DAYS'::character varying])::text[]))))
+constraint|agx.potrero_recomendaciones_pastoreo|potrero_recomendaciones_numero_animales_check|c|validated=true|CHECK (((numero_animales >= 1) AND (numero_animales <= 100000)))
+constraint|agx.potrero_recomendaciones_pastoreo|potrero_recomendaciones_pastoreo_pkey|p|validated=true|PRIMARY KEY (recomendacion_id)
+constraint|agx.potrero_recomendaciones_pastoreo|potrero_recomendaciones_peso_promedio_check|c|validated=true|CHECK (((peso_promedio_kg > (0)::numeric) AND (peso_promedio_kg <= (2000)::numeric)))
+constraint|agx.potrero_recomendaciones_pastoreo|potrero_recomendaciones_potrero_organizacion_fkey|f|validated=true|FOREIGN KEY (potrero_id, organizacion_id) REFERENCES agx.potreros(potrero_id, organizacion_id)
+constraint|agx.potrero_recomendaciones_pastoreo|potrero_recomendaciones_predio_organizacion_fkey|f|validated=true|FOREIGN KEY (predio_id, organizacion_id) REFERENCES agx.predios(predio_id, organizacion_id)
+constraint|agx.potrero_recomendaciones_pastoreo|potrero_recomendaciones_produccion_leche_check|c|validated=true|CHECK (((produccion_leche_l_dia IS NULL) OR ((produccion_leche_l_dia >= (0)::numeric) AND (produccion_leche_l_dia <= (60)::numeric))))
+constraint|agx.potrero_recomendaciones_pastoreo|potrero_recomendaciones_utilizacion_pct_check|c|validated=true|CHECK (((utilizacion_pct_aplicada > (0)::numeric) AND (utilizacion_pct_aplicada <= (100)::numeric)))
+constraint|agx.potreros|potreros_area_ha_check|c|validated=true|CHECK ((area_ha > (0)::numeric))
+constraint|agx.potreros|potreros_capacidad_animales_check|c|validated=true|CHECK (((capacidad_animales IS NULL) OR (capacidad_animales >= 0)))
+constraint|agx.potreros|potreros_estado_check|c|validated=true|CHECK (((estado)::text = ANY ((ARRAY['ACTIVO'::character varying, 'ARCHIVADO'::character varying])::text[])))
+constraint|agx.potreros|potreros_estado_consistency_check|c|validated=true|CHECK (((((estado)::text = 'ACTIVO'::text) AND (archivado_at IS NULL) AND (archivado_por IS NULL) AND (motivo_archivado IS NULL)) OR (((estado)::text = 'ARCHIVADO'::text) AND (archivado_at IS NOT NULL) AND (motivo_archivado IS NOT NULL) AND (btrim(motivo_archivado) <> ''::text))))
+constraint|agx.potreros|potreros_id_organizacion_unique|u|validated=true|UNIQUE (potrero_id, organizacion_id)
+constraint|agx.potreros|potreros_id_predio_organizacion_unique|u|validated=true|UNIQUE (potrero_id, predio_id, organizacion_id)
+constraint|agx.potreros|potreros_metodo_delimitacion_check|c|validated=true|CHECK (((metodo_delimitacion)::text = ANY ((ARRAY['coordenadas'::character varying, 'gps_movil'::character varying, 'kml'::character varying, 'kmz'::character varying])::text[])))
+constraint|agx.potreros|potreros_pkey|p|validated=true|PRIMARY KEY (potrero_id)
+constraint|agx.potreros|potreros_predio_organizacion_fkey|f|validated=true|FOREIGN KEY (predio_id, organizacion_id) REFERENCES agx.predios(predio_id, organizacion_id)
+constraint|agx.predio_archivo_eventos|predio_archivo_eventos_motivo_check|c|validated=true|CHECK ((((tipo_evento)::text = 'RESTAURADO'::text) OR ((motivo IS NOT NULL) AND (btrim(motivo) <> ''::text))))
+constraint|agx.predio_archivo_eventos|predio_archivo_eventos_pkey|p|validated=true|PRIMARY KEY (evento_id)
+constraint|agx.predio_archivo_eventos|predio_archivo_eventos_predio_organizacion_fkey|f|validated=true|FOREIGN KEY (predio_id, organizacion_id) REFERENCES agx.predios(predio_id, organizacion_id)
+constraint|agx.predio_archivo_eventos|predio_archivo_eventos_tipo_check|c|validated=true|CHECK (((tipo_evento)::text = ANY ((ARRAY['ARCHIVADO'::character varying, 'RESTAURADO'::character varying])::text[])))
+constraint|agx.predio_snapshots_catastrales|predio_snapshots_catastrales_pkey|p|validated=true|PRIMARY KEY (snapshot_id)
+constraint|agx.predio_snapshots_catastrales|predio_snapshots_predio_organizacion_fkey|f|validated=true|FOREIGN KEY (predio_id, organizacion_id) REFERENCES agx.predios(predio_id, organizacion_id)
+constraint|agx.predios|predios_estado_check|c|validated=true|CHECK (((estado)::text = ANY ((ARRAY['ACTIVO'::character varying, 'ARCHIVADO'::character varying])::text[])))
+constraint|agx.predios|predios_estado_consistency_check|c|validated=true|CHECK (((((estado)::text = 'ACTIVO'::text) AND (archivado_at IS NULL) AND (archivado_por IS NULL) AND (motivo_archivado IS NULL)) OR (((estado)::text = 'ARCHIVADO'::text) AND (archivado_at IS NOT NULL) AND (motivo_archivado IS NOT NULL) AND (btrim(motivo_archivado) <> ''::text))))
+constraint|agx.predios|predios_id_organizacion_unique|u|validated=true|UNIQUE (predio_id, organizacion_id)
+constraint|agx.predios|predios_pkey|p|validated=true|PRIMARY KEY (predio_id)
+constraint|agx.qr_asignaciones|qr_asignaciones_cantidad_check|c|validated=true|CHECK (((cantidad >= 1) AND (cantidad <= 5000)))
+constraint|agx.qr_asignaciones|qr_asignaciones_client_operation_key|u|validated=true|UNIQUE (client_operation_id)
+constraint|agx.qr_asignaciones|qr_asignaciones_id_organizacion_unique|u|validated=true|UNIQUE (asignacion_id, organizacion_id)
+constraint|agx.qr_asignaciones|qr_asignaciones_lote_id_fkey|f|validated=true|FOREIGN KEY (lote_id) REFERENCES agx.qr_lotes(lote_id)
+constraint|agx.qr_asignaciones|qr_asignaciones_pkey|p|validated=true|PRIMARY KEY (asignacion_id)
+constraint|agx.qr_chapeta_eventos|qr_chapeta_eventos_metadata_check|c|validated=true|CHECK ((jsonb_typeof(metadata_json) = 'object'::text))
+constraint|agx.qr_chapeta_eventos|qr_chapeta_eventos_pkey|p|validated=true|PRIMARY KEY (evento_id)
+constraint|agx.qr_chapeta_eventos|qr_chapeta_eventos_qr_id_fkey|f|validated=true|FOREIGN KEY (qr_id) REFERENCES agx.qr_chapetas(qr_id)
+constraint|agx.qr_chapeta_eventos|qr_chapeta_eventos_tipo_check|c|validated=true|CHECK (((tipo_evento)::text = ANY ((ARRAY['ASIGNADA_ORGANIZACION'::character varying, 'ASOCIADA_ANIMAL'::character varying, 'REVOCADA'::character varying, 'DANADA'::character varying, 'REEMPLAZADA'::character varying, 'ASOCIADA_POR_REEMPLAZO'::character varying])::text[])))
+constraint|agx.qr_chapeta_tokens|qr_chapeta_tokens_clave_version_check|c|validated=true|CHECK ((clave_version = 1))
+constraint|agx.qr_chapeta_tokens|qr_chapeta_tokens_formato_check|c|validated=true|CHECK ((octet_length(token_cifrado) = 60))
+constraint|agx.qr_chapeta_tokens|qr_chapeta_tokens_pkey|p|validated=true|PRIMARY KEY (qr_id)
+constraint|agx.qr_chapeta_tokens|qr_chapeta_tokens_qr_id_fkey|f|validated=true|FOREIGN KEY (qr_id) REFERENCES agx.qr_chapetas(qr_id)
+constraint|agx.qr_chapetas|qr_chapetas_animal_organizacion_fkey|f|validated=true|FOREIGN KEY (animal_id, organizacion_id) REFERENCES agx.animales(animal_id, organizacion_id)
+constraint|agx.qr_chapetas|qr_chapetas_asignacion_organizacion_fkey|f|validated=true|FOREIGN KEY (asignacion_id, organizacion_id) REFERENCES agx.qr_asignaciones(asignacion_id, organizacion_id)
+constraint|agx.qr_chapetas|qr_chapetas_codigo_visible_key|u|validated=true|UNIQUE (codigo_visible)
+constraint|agx.qr_chapetas|qr_chapetas_estado_check|c|validated=true|CHECK (((estado)::text = ANY ((ARRAY['EN_INVENTARIO'::character varying, 'ASIGNADO_ORGANIZACION'::character varying, 'ASIGNADO_ANIMAL'::character varying, 'REVOCADO'::character varying, 'DANADO'::character varying, 'REEMPLAZADO'::character varying])::text[])))
+constraint|agx.qr_chapetas|qr_chapetas_estado_consistencia_check|c|validated=true|CHECK (((((estado)::text = 'EN_INVENTARIO'::text) AND (organizacion_id IS NULL) AND (asignacion_id IS NULL) AND (animal_id IS NULL) AND (asignado_organizacion_at IS NULL) AND (asignado_animal_at IS NULL) AND (revocado_at IS NULL)) OR (((estado)::text = 'ASIGNADO_ORGANIZACION'::text) AND (organizacion_id IS NOT NULL) AND (asignacion_id IS NOT NULL) AND (asignado_organizacion_at IS NOT NULL) AND (animal_id IS NULL) AND (asignado_animal_at IS NULL) AND (revocado_at IS NULL)) OR (((estado)::text = 'ASIGNADO_ANIMAL'::text) AND (organizacion_id IS NOT NULL) AND (animal_id IS NOT NULL) AND (asignado_animal_at IS NOT NULL) AND (revocado_at IS NULL)) OR (((estado)::text = ANY ((ARRAY['REVOCADO'::character varying, 'DANADO'::character varying, 'REEMPLAZADO'::character varying])::text[])) AND (revocado_at IS NOT NULL) AND (revocado_por IS NOT NULL) AND (motivo IS NOT NULL) AND ((length(btrim(motivo)) >= 1) AND (length(btrim(motivo)) <= 500)))))
+constraint|agx.qr_chapetas|qr_chapetas_formato_check|c|validated=true|CHECK (((((tipo)::text = 'QR_AGX'::text) AND agx.fn_qr_codigo_control_ok((codigo_visible)::text) AND (token_hash IS NOT NULL) AND (token_hash ~ '^[0-9a-f]{64}$'::text)) OR (((tipo)::text = 'QR_LEGACY'::text) AND ((codigo_visible)::text ~ '^AGX-[0-9]{6}$'::text) AND (token_hash IS NULL))))
+constraint|agx.qr_chapetas|qr_chapetas_id_organizacion_unique|u|validated=true|UNIQUE (qr_id, organizacion_id)
+constraint|agx.qr_chapetas|qr_chapetas_lote_tipo_fkey|f|validated=true|FOREIGN KEY (lote_id, tipo) REFERENCES agx.qr_lotes(lote_id, tipo)
+constraint|agx.qr_chapetas|qr_chapetas_pkey|p|validated=true|PRIMARY KEY (qr_id)
+constraint|agx.qr_chapetas|qr_chapetas_reemplazado_por_fkey|f|validated=true|FOREIGN KEY (reemplazado_por, organizacion_id) REFERENCES agx.qr_chapetas(qr_id, organizacion_id)
+constraint|agx.qr_chapetas|qr_chapetas_reemplazado_por_self_check|c|validated=true|CHECK (((reemplazado_por IS NULL) OR (reemplazado_por <> qr_id)))
+constraint|agx.qr_chapetas|qr_chapetas_reemplazo_check|c|validated=true|CHECK (((((estado)::text = 'REEMPLAZADO'::text) = (reemplazado_por IS NOT NULL)) AND (((estado)::text <> 'REEMPLAZADO'::text) OR (animal_id IS NOT NULL))))
+constraint|agx.qr_chapetas|qr_chapetas_tipo_check|c|validated=true|CHECK (((tipo)::text = ANY ((ARRAY['QR_AGX'::character varying, 'QR_LEGACY'::character varying])::text[])))
+constraint|agx.qr_chapetas|qr_chapetas_token_hash_key|u|validated=true|UNIQUE (token_hash)
+constraint|agx.qr_lote_eventos|qr_lote_eventos_lote_id_fkey|f|validated=true|FOREIGN KEY (lote_id) REFERENCES agx.qr_lotes(lote_id)
+constraint|agx.qr_lote_eventos|qr_lote_eventos_metadata_check|c|validated=true|CHECK ((jsonb_typeof(metadata_json) = 'object'::text))
+constraint|agx.qr_lote_eventos|qr_lote_eventos_pkey|p|validated=true|PRIMARY KEY (evento_id)
+constraint|agx.qr_lote_eventos|qr_lote_eventos_tipo_check|c|validated=true|CHECK (((tipo_evento)::text = ANY ((ARRAY['GENERADO'::character varying, 'IMPORTADO_LEGACY'::character varying, 'ESTADO_CAMBIADO'::character varying, 'ASIGNADO_ORGANIZACION'::character varying])::text[])))
+constraint|agx.qr_lotes|qr_lotes_cantidad_check|c|validated=true|CHECK (((cantidad >= 1) AND (cantidad <= 5000)))
+constraint|agx.qr_lotes|qr_lotes_client_operation_key|u|validated=true|UNIQUE (client_operation_id)
+constraint|agx.qr_lotes|qr_lotes_codigo_lote_formato_check|c|validated=true|CHECK (((codigo_lote)::text ~ '^LQR-[0-9]{8}-[A-HJ-NP-Z2-9]{4}$'::text))
+constraint|agx.qr_lotes|qr_lotes_codigo_lote_key|u|validated=true|UNIQUE (codigo_lote)
+constraint|agx.qr_lotes|qr_lotes_estado_check|c|validated=true|CHECK (((estado)::text = ANY ((ARRAY['GENERADO'::character varying, 'EN_FABRICACION'::character varying, 'EN_STOCK'::character varying, 'CERRADO'::character varying])::text[])))
+constraint|agx.qr_lotes|qr_lotes_id_tipo_unique|u|validated=true|UNIQUE (lote_id, tipo)
+constraint|agx.qr_lotes|qr_lotes_legacy_estado_check|c|validated=true|CHECK ((((tipo)::text = 'QR_AGX'::text) OR ((estado)::text = ANY ((ARRAY['EN_STOCK'::character varying, 'CERRADO'::character varying])::text[]))))
+constraint|agx.qr_lotes|qr_lotes_pkey|p|validated=true|PRIMARY KEY (lote_id)
+constraint|agx.qr_lotes|qr_lotes_tipo_check|c|validated=true|CHECK (((tipo)::text = ANY ((ARRAY['QR_AGX'::character varying, 'QR_LEGACY'::character varying])::text[])))
+constraint|agx.qr_lotes|qr_lotes_url_base_check|c|validated=true|CHECK (((((tipo)::text = 'QR_AGX'::text) AND ((url_base)::text ~ '^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?$'::text)) OR (((tipo)::text = 'QR_LEGACY'::text) AND (url_base IS NULL))))
+constraint|agx.reproduccion_eventos|reproduccion_eventos_aborto_check|c|validated=true|CHECK (((aborto_causa IS NULL) OR ((tipo_evento)::text = 'ABORTO'::text)))
+constraint|agx.reproduccion_eventos|reproduccion_eventos_animal_organizacion_fkey|f|validated=true|FOREIGN KEY (animal_id, organizacion_id) REFERENCES agx.animales(animal_id, organizacion_id)
+constraint|agx.reproduccion_eventos|reproduccion_eventos_anulacion_consistency_check|c|validated=true|CHECK (((((estado_registro)::text = 'ACTIVO'::text) AND (anulado_por IS NULL) AND (anulado_at IS NULL) AND (motivo_anulacion IS NULL) AND (anulacion_client_operation_id IS NULL)) OR (((estado_registro)::text = 'ANULADO'::text) AND (anulado_por IS NOT NULL) AND (anulado_at IS NOT NULL) AND (anulacion_client_operation_id IS NOT NULL) AND (motivo_anulacion IS NOT NULL) AND (btrim(motivo_anulacion) <> ''::text) AND (char_length(motivo_anulacion) <= 500))))
+constraint|agx.reproduccion_eventos|reproduccion_eventos_celo_check|c|validated=true|CHECK ((((tipo_evento)::text = 'CELO_OBSERVADO'::text) OR ((intensidad_celo IS NULL) AND (metodo_deteccion IS NULL))))
+constraint|agx.reproduccion_eventos|reproduccion_eventos_corrige_check|c|validated=true|CHECK (((corrige_evento_id IS NULL) OR (corrige_evento_id <> evento_id)))
+constraint|agx.reproduccion_eventos|reproduccion_eventos_corrige_fkey|f|validated=true|FOREIGN KEY (corrige_evento_id, animal_id, organizacion_id) REFERENCES agx.reproduccion_eventos(evento_id, animal_id, organizacion_id)
+constraint|agx.reproduccion_eventos|reproduccion_eventos_diagnostico_check|c|validated=true|CHECK (((((tipo_evento)::text = 'DIAGNOSTICO_PRENEZ'::text) AND (diagnostico_resultado IS NOT NULL) AND ((diagnostico_resultado)::text = ANY ((ARRAY['PRENADA'::character varying, 'VACIA'::character varying, 'DUDOSA'::character varying])::text[])) AND (diagnostico_metodo IS NOT NULL) AND ((diagnostico_metodo)::text = ANY ((ARRAY['PALPACION'::character varying, 'ECOGRAFIA'::character varying, 'OTRO'::character varying])::text[]))) OR (((tipo_evento)::text <> 'DIAGNOSTICO_PRENEZ'::text) AND (diagnostico_resultado IS NULL) AND (diagnostico_metodo IS NULL))))
+constraint|agx.reproduccion_eventos|reproduccion_eventos_dias_gestacion_check|c|validated=true|CHECK (((dias_gestacion IS NULL) OR (((dias_gestacion >= 1) AND (dias_gestacion <= 300)) AND (((tipo_evento)::text = 'ABORTO'::text) OR (((tipo_evento)::text = 'DIAGNOSTICO_PRENEZ'::text) AND (NOT ((diagnostico_resultado)::text IS DISTINCT FROM 'PRENADA'::text)))))))
+constraint|agx.reproduccion_eventos|reproduccion_eventos_embrion_check|c|validated=true|CHECK (((((tipo_evento)::text = 'TRANSFERENCIA_EMBRION'::text) AND (embrion_conservacion IS NOT NULL) AND ((embrion_conservacion)::text = ANY ((ARRAY['FRESCO'::character varying, 'CONGELADO'::character varying])::text[]))) OR (((tipo_evento)::text <> 'TRANSFERENCIA_EMBRION'::text) AND (embrion_codigo IS NULL) AND (embrion_raza IS NULL) AND (embrion_donadora IS NULL) AND (embrion_estadio IS NULL) AND (embrion_calidad IS NULL) AND (embrion_conservacion IS NULL))))
+constraint|agx.reproduccion_eventos|reproduccion_eventos_estado_registro_check|c|validated=true|CHECK (((estado_registro)::text = ANY ((ARRAY['ACTIVO'::character varying, 'ANULADO'::character varying])::text[])))
+constraint|agx.reproduccion_eventos|reproduccion_eventos_fecha_min_check|c|validated=true|CHECK ((fecha_evento >= '1990-01-01'::date))
+constraint|agx.reproduccion_eventos|reproduccion_eventos_id_animal_organizacion_unique|u|validated=true|UNIQUE (evento_id, animal_id, organizacion_id)
+constraint|agx.reproduccion_eventos|reproduccion_eventos_intensidad_celo_check|c|validated=true|CHECK (((intensidad_celo IS NULL) OR ((intensidad_celo)::text = ANY ((ARRAY['BAJA'::character varying, 'MEDIA'::character varying, 'ALTA'::character varying])::text[]))))
+constraint|agx.reproduccion_eventos|reproduccion_eventos_intent_hash_check|c|validated=true|CHECK (((intent_hash)::text ~ '^v1:[0-9a-f]{64}$'::text))
+constraint|agx.reproduccion_eventos|reproduccion_eventos_metodo_deteccion_check|c|validated=true|CHECK (((metodo_deteccion IS NULL) OR ((metodo_deteccion)::text = ANY ((ARRAY['VISUAL'::character varying, 'PARCHE_DETECTOR'::character varying, 'PODOMETRO'::character varying, 'TORO_CELADOR'::character varying, 'OTRO'::character varying])::text[]))))
+constraint|agx.reproduccion_eventos|reproduccion_eventos_observaciones_check|c|validated=true|CHECK (((observaciones IS NULL) OR ((btrim(observaciones) <> ''::text) AND (char_length(observaciones) <= 500))))
+constraint|agx.reproduccion_eventos|reproduccion_eventos_org_client_operation_key|u|validated=true|UNIQUE (organizacion_id, client_operation_id)
+constraint|agx.reproduccion_eventos|reproduccion_eventos_parto_check|c|validated=true|CHECK (((((tipo_evento)::text = 'PARTO'::text) AND (parto_tipo IS NOT NULL) AND ((parto_tipo)::text = ANY ((ARRAY['NORMAL'::character varying, 'ASISTIDO'::character varying, 'CESAREA'::character varying, 'OTRO'::character varying])::text[])) AND (numero_crias IS NOT NULL) AND ((numero_crias >= 1) AND (numero_crias <= 4))) OR (((tipo_evento)::text <> 'PARTO'::text) AND (parto_tipo IS NULL) AND (numero_crias IS NULL))))
+constraint|agx.reproduccion_eventos|reproduccion_eventos_pkey|p|validated=true|PRIMARY KEY (evento_id)
+constraint|agx.reproduccion_eventos|reproduccion_eventos_protocolo_iatf_check|c|validated=true|CHECK (((protocolo_iatf IS NULL) OR ((tipo_evento)::text = 'IATF'::text)))
+constraint|agx.reproduccion_eventos|reproduccion_eventos_semen_check|c|validated=true|CHECK (((semen_codigo IS NULL) OR ((tipo_evento)::text = ANY ((ARRAY['INSEMINACION_ARTIFICIAL'::character varying, 'IATF'::character varying])::text[]))))
+constraint|agx.reproduccion_eventos|reproduccion_eventos_tecnico_check|c|validated=true|CHECK (((tecnico IS NULL) OR ((tipo_evento)::text = ANY ((ARRAY['INSEMINACION_ARTIFICIAL'::character varying, 'IATF'::character varying, 'TRANSFERENCIA_EMBRION'::character varying, 'DIAGNOSTICO_PRENEZ'::character varying])::text[]))))
+constraint|agx.reproduccion_eventos|reproduccion_eventos_textos_check|c|validated=true|CHECK ((((toro_externo IS NULL) OR (btrim((toro_externo)::text) <> ''::text)) AND ((semen_codigo IS NULL) OR (btrim((semen_codigo)::text) <> ''::text)) AND ((protocolo_iatf IS NULL) OR (btrim((protocolo_iatf)::text) <> ''::text)) AND ((tecnico IS NULL) OR (btrim((tecnico)::text) <> ''::text)) AND ((embrion_codigo IS NULL) OR (btrim((embrion_codigo)::text) <> ''::text)) AND ((embrion_raza IS NULL) OR (btrim((embrion_raza)::text) <> ''::text)) AND ((embrion_donadora IS NULL) OR (btrim((embrion_donadora)::text) <> ''::text)) AND ((embrion_estadio IS NULL) OR (btrim((embrion_estadio)::text) <> ''::text)) AND ((embrion_calidad IS NULL) OR (btrim((embrion_calidad)::text) <> ''::text)) AND ((aborto_causa IS NULL) OR (btrim((aborto_causa)::text) <> ''::text))))
+constraint|agx.reproduccion_eventos|reproduccion_eventos_tipo_check|c|validated=true|CHECK (((tipo_evento)::text = ANY ((ARRAY['CELO_OBSERVADO'::character varying, 'SERVICIO_MONTA'::character varying, 'INSEMINACION_ARTIFICIAL'::character varying, 'IATF'::character varying, 'TRANSFERENCIA_EMBRION'::character varying, 'DIAGNOSTICO_PRENEZ'::character varying, 'ABORTO'::character varying, 'PARTO'::character varying])::text[])))
+constraint|agx.reproduccion_eventos|reproduccion_eventos_tipo_servicio_check|c|validated=true|CHECK (((((tipo_evento)::text = 'SERVICIO_MONTA'::text) = (tipo_servicio IS NOT NULL)) AND ((tipo_servicio IS NULL) OR ((tipo_servicio)::text = ANY ((ARRAY['CONTROLADA'::character varying, 'LIBRE'::character varying])::text[])))))
+constraint|agx.reproduccion_eventos|reproduccion_eventos_toro_animal_check|c|validated=true|CHECK (((toro_animal_id IS NULL) OR (((tipo_evento)::text = ANY ((ARRAY['SERVICIO_MONTA'::character varying, 'INSEMINACION_ARTIFICIAL'::character varying, 'IATF'::character varying])::text[])) AND (toro_animal_id <> animal_id))))
+constraint|agx.reproduccion_eventos|reproduccion_eventos_toro_externo_check|c|validated=true|CHECK (((toro_externo IS NULL) OR ((tipo_evento)::text = ANY ((ARRAY['SERVICIO_MONTA'::character varying, 'INSEMINACION_ARTIFICIAL'::character varying, 'IATF'::character varying, 'TRANSFERENCIA_EMBRION'::character varying])::text[]))))
+constraint|agx.reproduccion_eventos|reproduccion_eventos_toro_organizacion_fkey|f|validated=true|FOREIGN KEY (toro_animal_id, organizacion_id) REFERENCES agx.animales(animal_id, organizacion_id)
+database_acl|agx_qr_admin=c/postgres,=Tc/postgres
+extension|plpgsql|1.0|pg_catalog
+extension|postgis|3.4.3|public
+function|agx.enforce_ficha_pastura_tenant_scope()|owner=agx_ficha_pastura_validator|secdef=true|config=search_path=pg_catalog, agx, pg_temp|acl=agx_ficha_pastura_validator=X/agx_ficha_pastura_validator|src_md5=eaaf72a0ac0e2d4715b0ad908726a459
+function|agx.fn_animales_cierre_guard()|owner=agx_owner|secdef=false|config=-|acl=-|src_md5=87c8b0d7c4cbf3c61075475f416ef859
+function|agx.fn_qr_chapetas_guard()|owner=agx_owner|secdef=false|config=-|acl=-|src_md5=c5aacb294ec8c0d7520818a15e82d68b
+function|agx.fn_qr_codigo_control_ok(codigo text)|owner=agx_owner|secdef=false|config=-|acl=agx_app=X/agx_owner,agx_owner=X/agx_owner,agx_qr_admin=X/agx_owner,=X/agx_owner|src_md5=e3d371c20cd727b79a5ef86f51f1731f
+function|agx.fn_reproduccion_eventos_guard()|owner=agx_owner|secdef=false|config=-|acl=-|src_md5=4b538259c998d348c4fe4b4e22757140
+index|agx.animal_eventos_animal_ocurrido_idx|CREATE INDEX animal_eventos_animal_ocurrido_idx ON agx.animal_eventos USING btree (animal_id, ocurrido_en)
+index|agx.animal_eventos_organizacion_id_idx|CREATE INDEX animal_eventos_organizacion_id_idx ON agx.animal_eventos USING btree (organizacion_id)
+index|agx.animal_eventos_pkey|CREATE UNIQUE INDEX animal_eventos_pkey ON agx.animal_eventos USING btree (evento_id)
+index|agx.animal_eventos_un_anulado_idx|CREATE UNIQUE INDEX animal_eventos_un_anulado_idx ON agx.animal_eventos USING btree (animal_id) WHERE ((tipo_evento)::text = 'ANULADO'::text)
+index|agx.animal_eventos_un_cierre_idx|CREATE UNIQUE INDEX animal_eventos_un_cierre_idx ON agx.animal_eventos USING btree (animal_id) WHERE ((tipo_evento)::text = ANY ((ARRAY['SALIDO'::character varying, 'MUERTO'::character varying])::text[]))
+index|agx.animal_eventos_un_registrado_idx|CREATE UNIQUE INDEX animal_eventos_un_registrado_idx ON agx.animal_eventos USING btree (animal_id) WHERE ((tipo_evento)::text = 'REGISTRADO'::text)
+index|agx.animal_pesajes_animal_fecha_idx|CREATE INDEX animal_pesajes_animal_fecha_idx ON agx.animal_pesajes USING btree (animal_id, fecha DESC, pesaje_id DESC)
+index|agx.animal_pesajes_org_client_operation_key|CREATE UNIQUE INDEX animal_pesajes_org_client_operation_key ON agx.animal_pesajes USING btree (organizacion_id, client_operation_id) WHERE (client_operation_id IS NOT NULL)
+index|agx.animal_pesajes_organizacion_id_idx|CREATE INDEX animal_pesajes_organizacion_id_idx ON agx.animal_pesajes USING btree (organizacion_id)
+index|agx.animal_pesajes_pkey|CREATE UNIQUE INDEX animal_pesajes_pkey ON agx.animal_pesajes USING btree (pesaje_id)
+index|agx.animal_pesajes_un_registro_inicial_idx|CREATE UNIQUE INDEX animal_pesajes_un_registro_inicial_idx ON agx.animal_pesajes USING btree (animal_id) WHERE ((origen)::text = 'REGISTRO_INICIAL'::text)
+index|agx.animales_id_organizacion_unique|CREATE UNIQUE INDEX animales_id_organizacion_unique ON agx.animales USING btree (animal_id, organizacion_id)
+index|agx.animales_org_cierre_client_operation_key|CREATE UNIQUE INDEX animales_org_cierre_client_operation_key ON agx.animales USING btree (organizacion_id, cierre_client_operation_id) WHERE (cierre_client_operation_id IS NOT NULL)
+index|agx.animales_org_client_operation_key|CREATE UNIQUE INDEX animales_org_client_operation_key ON agx.animales USING btree (organizacion_id, client_operation_id)
+index|agx.animales_org_estado_created_idx|CREATE INDEX animales_org_estado_created_idx ON agx.animales USING btree (organizacion_id, estado, created_at DESC, animal_id DESC)
+index|agx.animales_org_numero_visual_activo_key|CREATE UNIQUE INDEX animales_org_numero_visual_activo_key ON agx.animales USING btree (organizacion_id, lower((numero_visual)::text)) WHERE (((estado)::text = 'ACTIVO'::text) AND (numero_visual IS NOT NULL))
+index|agx.animales_org_predio_estado_idx|CREATE INDEX animales_org_predio_estado_idx ON agx.animales USING btree (organizacion_id, predio_id, estado)
+index|agx.animales_pkey|CREATE UNIQUE INDEX animales_pkey ON agx.animales USING btree (animal_id)
+index|agx.catalogo_categorias_codigo_idx|CREATE UNIQUE INDEX catalogo_categorias_codigo_idx ON agx.catalogo_categorias_productivas USING btree (codigo)
+index|agx.catalogo_categorias_grupo_idx|CREATE INDEX catalogo_categorias_grupo_idx ON agx.catalogo_categorias_productivas USING btree (grupo_productivo)
+index|agx.catalogo_categorias_organizacion_id_idx|CREATE INDEX catalogo_categorias_organizacion_id_idx ON agx.catalogo_categorias_productivas USING btree (organizacion_id)
+index|agx.catalogo_categorias_productivas_codigo_key|CREATE UNIQUE INDEX catalogo_categorias_productivas_codigo_key ON agx.catalogo_categorias_productivas USING btree (codigo)
+index|agx.catalogo_categorias_productivas_pkey|CREATE UNIQUE INDEX catalogo_categorias_productivas_pkey ON agx.catalogo_categorias_productivas USING btree (categoria_id)
+index|agx.catalogo_pasturas_nombre_comun_idx|CREATE INDEX catalogo_pasturas_nombre_comun_idx ON agx.catalogo_pasturas USING btree (nombre_comun)
+index|agx.catalogo_pasturas_organizacion_id_idx|CREATE INDEX catalogo_pasturas_organizacion_id_idx ON agx.catalogo_pasturas USING btree (organizacion_id)
+index|agx.catalogo_pasturas_pkey|CREATE UNIQUE INDEX catalogo_pasturas_pkey ON agx.catalogo_pasturas USING btree (pastura_id)
+index|agx.catalogo_razas_codigo_key|CREATE UNIQUE INDEX catalogo_razas_codigo_key ON agx.catalogo_razas USING btree (codigo)
+index|agx.catalogo_razas_organizacion_id_idx|CREATE INDEX catalogo_razas_organizacion_id_idx ON agx.catalogo_razas USING btree (organizacion_id)
+index|agx.catalogo_razas_pkey|CREATE UNIQUE INDEX catalogo_razas_pkey ON agx.catalogo_razas USING btree (raza_id)
+index|agx.potrero_archivo_eventos_organizacion_id_idx|CREATE INDEX potrero_archivo_eventos_organizacion_id_idx ON agx.potrero_archivo_eventos USING btree (organizacion_id)
+index|agx.potrero_archivo_eventos_pkey|CREATE UNIQUE INDEX potrero_archivo_eventos_pkey ON agx.potrero_archivo_eventos USING btree (evento_id)
+index|agx.potrero_archivo_eventos_potrero_id_idx|CREATE INDEX potrero_archivo_eventos_potrero_id_idx ON agx.potrero_archivo_eventos USING btree (potrero_id, ocurrido_en)
+index|agx.potrero_calculos_ficha_id_idx|CREATE INDEX potrero_calculos_ficha_id_idx ON agx.potrero_calculos_pastoreo USING btree (ficha_id)
+index|agx.potrero_calculos_organizacion_id_idx|CREATE INDEX potrero_calculos_organizacion_id_idx ON agx.potrero_calculos_pastoreo USING btree (organizacion_id)
+index|agx.potrero_calculos_organizacion_potrero_idx|CREATE INDEX potrero_calculos_organizacion_potrero_idx ON agx.potrero_calculos_pastoreo USING btree (organizacion_id, potrero_id)
+index|agx.potrero_calculos_pastoreo_pkey|CREATE UNIQUE INDEX potrero_calculos_pastoreo_pkey ON agx.potrero_calculos_pastoreo USING btree (calculo_id)
+index|agx.potrero_calculos_potrero_created_idx|CREATE INDEX potrero_calculos_potrero_created_idx ON agx.potrero_calculos_pastoreo USING btree (potrero_id, created_at DESC)
+index|agx.potrero_calculos_potrero_id_idx|CREATE INDEX potrero_calculos_potrero_id_idx ON agx.potrero_calculos_pastoreo USING btree (potrero_id)
+index|agx.potrero_ciclo_eventos_ciclo_id_idx|CREATE INDEX potrero_ciclo_eventos_ciclo_id_idx ON agx.potrero_ciclo_eventos USING btree (ciclo_id, ocurrido_en)
+index|agx.potrero_ciclo_eventos_organizacion_id_idx|CREATE INDEX potrero_ciclo_eventos_organizacion_id_idx ON agx.potrero_ciclo_eventos USING btree (organizacion_id)
+index|agx.potrero_ciclo_eventos_pkey|CREATE UNIQUE INDEX potrero_ciclo_eventos_pkey ON agx.potrero_ciclo_eventos USING btree (evento_id)
+index|agx.potrero_ciclo_eventos_potrero_organizacion_idx|CREATE INDEX potrero_ciclo_eventos_potrero_organizacion_idx ON agx.potrero_ciclo_eventos USING btree (organizacion_id, potrero_id)
+index|agx.potrero_ciclo_lote_real_ciclo_id_idx|CREATE INDEX potrero_ciclo_lote_real_ciclo_id_idx ON agx.potrero_ciclo_lote_real_versiones USING btree (ciclo_id, version DESC)
+index|agx.potrero_ciclo_lote_real_id_ciclo_potrero_organizacion_unique|CREATE UNIQUE INDEX potrero_ciclo_lote_real_id_ciclo_potrero_organizacion_unique ON agx.potrero_ciclo_lote_real_versiones USING btree (snapshot_id, ciclo_id, potrero_id, organizacion_id)
+index|agx.potrero_ciclo_lote_real_invalidaciones_ciclo_id_idx|CREATE INDEX potrero_ciclo_lote_real_invalidaciones_ciclo_id_idx ON agx.potrero_ciclo_lote_real_invalidaciones USING btree (ciclo_id)
+index|agx.potrero_ciclo_lote_real_invalidaciones_organizacion_id_idx|CREATE INDEX potrero_ciclo_lote_real_invalidaciones_organizacion_id_idx ON agx.potrero_ciclo_lote_real_invalidaciones USING btree (organizacion_id)
+index|agx.potrero_ciclo_lote_real_invalidaciones_pkey|CREATE UNIQUE INDEX potrero_ciclo_lote_real_invalidaciones_pkey ON agx.potrero_ciclo_lote_real_invalidaciones USING btree (invalidacion_id)
+index|agx.potrero_ciclo_lote_real_invalidaciones_un_snapshot_idx|CREATE UNIQUE INDEX potrero_ciclo_lote_real_invalidaciones_un_snapshot_idx ON agx.potrero_ciclo_lote_real_invalidaciones USING btree (snapshot_id)
+index|agx.potrero_ciclo_lote_real_organizacion_id_idx|CREATE INDEX potrero_ciclo_lote_real_organizacion_id_idx ON agx.potrero_ciclo_lote_real_versiones USING btree (organizacion_id)
+index|agx.potrero_ciclo_lote_real_potrero_id_idx|CREATE INDEX potrero_ciclo_lote_real_potrero_id_idx ON agx.potrero_ciclo_lote_real_versiones USING btree (potrero_id)
+index|agx.potrero_ciclo_lote_real_un_ciclo_version_idx|CREATE UNIQUE INDEX potrero_ciclo_lote_real_un_ciclo_version_idx ON agx.potrero_ciclo_lote_real_versiones USING btree (ciclo_id, version)
+index|agx.potrero_ciclo_lote_real_versiones_pkey|CREATE UNIQUE INDEX potrero_ciclo_lote_real_versiones_pkey ON agx.potrero_ciclo_lote_real_versiones USING btree (snapshot_id)
+index|agx.potrero_ciclo_residual_real_ciclo_id_idx|CREATE INDEX potrero_ciclo_residual_real_ciclo_id_idx ON agx.potrero_ciclo_residuales_reales_versiones USING btree (ciclo_id, version DESC)
+index|agx.potrero_ciclo_residual_real_id_ciclo_potrero_organizacion_uniqu|CREATE UNIQUE INDEX potrero_ciclo_residual_real_id_ciclo_potrero_organizacion_uniqu ON agx.potrero_ciclo_residuales_reales_versiones USING btree (residual_id, ciclo_id, potrero_id, organizacion_id)
+index|agx.potrero_ciclo_residual_real_invalidaciones_ciclo_id_idx|CREATE INDEX potrero_ciclo_residual_real_invalidaciones_ciclo_id_idx ON agx.potrero_ciclo_residual_real_invalidaciones USING btree (ciclo_id)
+index|agx.potrero_ciclo_residual_real_invalidaciones_organizacion_id_idx|CREATE INDEX potrero_ciclo_residual_real_invalidaciones_organizacion_id_idx ON agx.potrero_ciclo_residual_real_invalidaciones USING btree (organizacion_id)
+index|agx.potrero_ciclo_residual_real_invalidaciones_pkey|CREATE UNIQUE INDEX potrero_ciclo_residual_real_invalidaciones_pkey ON agx.potrero_ciclo_residual_real_invalidaciones USING btree (invalidacion_id)
+index|agx.potrero_ciclo_residual_real_invalidaciones_un_residual_idx|CREATE UNIQUE INDEX potrero_ciclo_residual_real_invalidaciones_un_residual_idx ON agx.potrero_ciclo_residual_real_invalidaciones USING btree (residual_id)
+index|agx.potrero_ciclo_residual_real_organizacion_id_idx|CREATE INDEX potrero_ciclo_residual_real_organizacion_id_idx ON agx.potrero_ciclo_residuales_reales_versiones USING btree (organizacion_id)
+index|agx.potrero_ciclo_residual_real_potrero_id_idx|CREATE INDEX potrero_ciclo_residual_real_potrero_id_idx ON agx.potrero_ciclo_residuales_reales_versiones USING btree (potrero_id)
+index|agx.potrero_ciclo_residual_real_un_ciclo_version_idx|CREATE UNIQUE INDEX potrero_ciclo_residual_real_un_ciclo_version_idx ON agx.potrero_ciclo_residuales_reales_versiones USING btree (ciclo_id, version)
+index|agx.potrero_ciclo_residuales_reales_versiones_pkey|CREATE UNIQUE INDEX potrero_ciclo_residuales_reales_versiones_pkey ON agx.potrero_ciclo_residuales_reales_versiones USING btree (residual_id)
+index|agx.potrero_ciclos_id_potrero_organizacion_unique|CREATE UNIQUE INDEX potrero_ciclos_id_potrero_organizacion_unique ON agx.potrero_ciclos_pastoreo USING btree (ciclo_id, potrero_id, organizacion_id)
+index|agx.potrero_ciclos_pastoreo_organizacion_id_idx|CREATE INDEX potrero_ciclos_pastoreo_organizacion_id_idx ON agx.potrero_ciclos_pastoreo USING btree (organizacion_id)
+index|agx.potrero_ciclos_pastoreo_organizacion_potrero_idx|CREATE INDEX potrero_ciclos_pastoreo_organizacion_potrero_idx ON agx.potrero_ciclos_pastoreo USING btree (organizacion_id, potrero_id)
+index|agx.potrero_ciclos_pastoreo_pkey|CREATE UNIQUE INDEX potrero_ciclos_pastoreo_pkey ON agx.potrero_ciclos_pastoreo USING btree (ciclo_id)
+index|agx.potrero_ciclos_pastoreo_potrero_created_idx|CREATE INDEX potrero_ciclos_pastoreo_potrero_created_idx ON agx.potrero_ciclos_pastoreo USING btree (potrero_id, created_at DESC)
+index|agx.potrero_ciclos_pastoreo_potrero_id_idx|CREATE INDEX potrero_ciclos_pastoreo_potrero_id_idx ON agx.potrero_ciclos_pastoreo USING btree (potrero_id)
+index|agx.potrero_ciclos_pastoreo_un_en_curso_idx|CREATE UNIQUE INDEX potrero_ciclos_pastoreo_un_en_curso_idx ON agx.potrero_ciclos_pastoreo USING btree (organizacion_id, potrero_id) WHERE ((estado)::text = 'EN_CURSO'::text)
+index|agx.potrero_climatologias_agroclimaticas_pkey|CREATE UNIQUE INDEX potrero_climatologias_agroclimaticas_pkey ON agx.potrero_climatologias_agroclimaticas USING btree (climatologia_id)
+index|agx.potrero_climatologias_organizacion_id_idx|CREATE INDEX potrero_climatologias_organizacion_id_idx ON agx.potrero_climatologias_agroclimaticas USING btree (organizacion_id)
+index|agx.potrero_climatologias_potrero_created_idx|CREATE INDEX potrero_climatologias_potrero_created_idx ON agx.potrero_climatologias_agroclimaticas USING btree (potrero_id, created_at DESC)
+index|agx.potrero_climatologias_potrero_id_idx|CREATE INDEX potrero_climatologias_potrero_id_idx ON agx.potrero_climatologias_agroclimaticas USING btree (potrero_id)
+index|agx.potrero_contextos_agroclimaticos_pkey|CREATE UNIQUE INDEX potrero_contextos_agroclimaticos_pkey ON agx.potrero_contextos_agroclimaticos USING btree (contexto_id)
+index|agx.potrero_contextos_id_potrero_organizacion_unique|CREATE UNIQUE INDEX potrero_contextos_id_potrero_organizacion_unique ON agx.potrero_contextos_agroclimaticos USING btree (contexto_id, potrero_id, organizacion_id)
+index|agx.potrero_contextos_organizacion_id_idx|CREATE INDEX potrero_contextos_organizacion_id_idx ON agx.potrero_contextos_agroclimaticos USING btree (organizacion_id)
+index|agx.potrero_contextos_potrero_created_idx|CREATE INDEX potrero_contextos_potrero_created_idx ON agx.potrero_contextos_agroclimaticos USING btree (potrero_id, created_at DESC)
+index|agx.potrero_contextos_potrero_id_idx|CREATE INDEX potrero_contextos_potrero_id_idx ON agx.potrero_contextos_agroclimaticos USING btree (potrero_id)
+index|agx.potrero_descanso_invalidaciones_ciclo_id_idx|CREATE INDEX potrero_descanso_invalidaciones_ciclo_id_idx ON agx.potrero_descanso_invalidaciones USING btree (ciclo_pastoreo_id)
+index|agx.potrero_descanso_invalidaciones_organizacion_id_idx|CREATE INDEX potrero_descanso_invalidaciones_organizacion_id_idx ON agx.potrero_descanso_invalidaciones USING btree (organizacion_id)
+index|agx.potrero_descanso_invalidaciones_pkey|CREATE UNIQUE INDEX potrero_descanso_invalidaciones_pkey ON agx.potrero_descanso_invalidaciones USING btree (invalidacion_id)
+index|agx.potrero_descanso_invalidaciones_un_descanso_idx|CREATE UNIQUE INDEX potrero_descanso_invalidaciones_un_descanso_idx ON agx.potrero_descanso_invalidaciones USING btree (descanso_id)
+index|agx.potrero_descansos_ficha_id_idx|CREATE INDEX potrero_descansos_ficha_id_idx ON agx.potrero_recomendaciones_descanso USING btree (ficha_id)
+index|agx.potrero_descansos_id_ciclo_potrero_organizacion_unique|CREATE UNIQUE INDEX potrero_descansos_id_ciclo_potrero_organizacion_unique ON agx.potrero_recomendaciones_descanso USING btree (descanso_id, ciclo_pastoreo_id, potrero_id, organizacion_id)
+index|agx.potrero_descansos_id_potrero_organizacion_unique|CREATE UNIQUE INDEX potrero_descansos_id_potrero_organizacion_unique ON agx.potrero_recomendaciones_descanso USING btree (descanso_id, potrero_id, organizacion_id)
+index|agx.potrero_descansos_organizacion_id_idx|CREATE INDEX potrero_descansos_organizacion_id_idx ON agx.potrero_recomendaciones_descanso USING btree (organizacion_id)
+index|agx.potrero_descansos_organizacion_potrero_idx|CREATE INDEX potrero_descansos_organizacion_potrero_idx ON agx.potrero_recomendaciones_descanso USING btree (organizacion_id, potrero_id)
+index|agx.potrero_descansos_potrero_created_idx|CREATE INDEX potrero_descansos_potrero_created_idx ON agx.potrero_recomendaciones_descanso USING btree (potrero_id, created_at DESC)
+index|agx.potrero_descansos_potrero_id_idx|CREATE INDEX potrero_descansos_potrero_id_idx ON agx.potrero_recomendaciones_descanso USING btree (potrero_id)
+index|agx.potrero_descansos_recomendacion_pastoreo_id_idx|CREATE INDEX potrero_descansos_recomendacion_pastoreo_id_idx ON agx.potrero_recomendaciones_descanso USING btree (recomendacion_pastoreo_id)
+index|agx.potrero_evaluaciones_reingreso_descanso_id_idx|CREATE INDEX potrero_evaluaciones_reingreso_descanso_id_idx ON agx.potrero_evaluaciones_reingreso USING btree (descanso_id, created_at DESC)
+index|agx.potrero_evaluaciones_reingreso_organizacion_id_idx|CREATE INDEX potrero_evaluaciones_reingreso_organizacion_id_idx ON agx.potrero_evaluaciones_reingreso USING btree (organizacion_id)
+index|agx.potrero_evaluaciones_reingreso_pkey|CREATE UNIQUE INDEX potrero_evaluaciones_reingreso_pkey ON agx.potrero_evaluaciones_reingreso USING btree (evaluacion_id)
+index|agx.potrero_evaluaciones_reingreso_potrero_id_idx|CREATE INDEX potrero_evaluaciones_reingreso_potrero_id_idx ON agx.potrero_evaluaciones_reingreso USING btree (potrero_id)
+index|agx.potrero_evaluaciones_reingreso_un_apto_idx|CREATE UNIQUE INDEX potrero_evaluaciones_reingreso_un_apto_idx ON agx.potrero_evaluaciones_reingreso USING btree (descanso_id) WHERE ((resultado)::text = 'APTO'::text)
+index|agx.potrero_ficha_pasturas_ficha_id_idx|CREATE INDEX potrero_ficha_pasturas_ficha_id_idx ON agx.potrero_ficha_pasturas USING btree (ficha_id)
+index|agx.potrero_ficha_pasturas_organizacion_id_idx|CREATE INDEX potrero_ficha_pasturas_organizacion_id_idx ON agx.potrero_ficha_pasturas USING btree (organizacion_id)
+index|agx.potrero_ficha_pasturas_pastura_id_idx|CREATE INDEX potrero_ficha_pasturas_pastura_id_idx ON agx.potrero_ficha_pasturas USING btree (pastura_id)
+index|agx.potrero_ficha_pasturas_pkey|CREATE UNIQUE INDEX potrero_ficha_pasturas_pkey ON agx.potrero_ficha_pasturas USING btree (ficha_pastura_id)
+index|agx.potrero_fichas_id_organizacion_unique|CREATE UNIQUE INDEX potrero_fichas_id_organizacion_unique ON agx.potrero_fichas_productivas USING btree (ficha_id, organizacion_id)
+index|agx.potrero_fichas_id_potrero_organizacion_unique|CREATE UNIQUE INDEX potrero_fichas_id_potrero_organizacion_unique ON agx.potrero_fichas_productivas USING btree (ficha_id, potrero_id, organizacion_id)
+index|agx.potrero_fichas_organizacion_id_idx|CREATE INDEX potrero_fichas_organizacion_id_idx ON agx.potrero_fichas_productivas USING btree (organizacion_id)
+index|agx.potrero_fichas_organizacion_potrero_idx|CREATE INDEX potrero_fichas_organizacion_potrero_idx ON agx.potrero_fichas_productivas USING btree (organizacion_id, potrero_id)
+index|agx.potrero_fichas_potrero_created_idx|CREATE INDEX potrero_fichas_potrero_created_idx ON agx.potrero_fichas_productivas USING btree (potrero_id, created_at DESC)
+index|agx.potrero_fichas_potrero_id_idx|CREATE INDEX potrero_fichas_potrero_id_idx ON agx.potrero_fichas_productivas USING btree (potrero_id)
+index|agx.potrero_fichas_productivas_pkey|CREATE UNIQUE INDEX potrero_fichas_productivas_pkey ON agx.potrero_fichas_productivas USING btree (ficha_id)
+index|agx.potrero_recomendaciones_categoria_id_idx|CREATE INDEX potrero_recomendaciones_categoria_id_idx ON agx.potrero_recomendaciones_pastoreo USING btree (categoria_id)
+index|agx.potrero_recomendaciones_descanso_lote_real_version_idx|CREATE INDEX potrero_recomendaciones_descanso_lote_real_version_idx ON agx.potrero_recomendaciones_descanso USING btree (lote_real_version_id) WHERE (lote_real_version_id IS NOT NULL)
+index|agx.potrero_recomendaciones_descanso_pkey|CREATE UNIQUE INDEX potrero_recomendaciones_descanso_pkey ON agx.potrero_recomendaciones_descanso USING btree (descanso_id)
+index|agx.potrero_recomendaciones_descanso_residual_real_version_idx|CREATE INDEX potrero_recomendaciones_descanso_residual_real_version_idx ON agx.potrero_recomendaciones_descanso USING btree (residual_real_version_id) WHERE (residual_real_version_id IS NOT NULL)
+index|agx.potrero_recomendaciones_descanso_un_ciclo_version_idx|CREATE UNIQUE INDEX potrero_recomendaciones_descanso_un_ciclo_version_idx ON agx.potrero_recomendaciones_descanso USING btree (ciclo_pastoreo_id, version) WHERE (ciclo_pastoreo_id IS NOT NULL)
+index|agx.potrero_recomendaciones_ficha_id_idx|CREATE INDEX potrero_recomendaciones_ficha_id_idx ON agx.potrero_recomendaciones_pastoreo USING btree (ficha_id)
+index|agx.potrero_recomendaciones_id_potrero_organizacion_unique|CREATE UNIQUE INDEX potrero_recomendaciones_id_potrero_organizacion_unique ON agx.potrero_recomendaciones_pastoreo USING btree (recomendacion_id, potrero_id, organizacion_id)
+index|agx.potrero_recomendaciones_organizacion_id_idx|CREATE INDEX potrero_recomendaciones_organizacion_id_idx ON agx.potrero_recomendaciones_pastoreo USING btree (organizacion_id)
+index|agx.potrero_recomendaciones_organizacion_potrero_idx|CREATE INDEX potrero_recomendaciones_organizacion_potrero_idx ON agx.potrero_recomendaciones_pastoreo USING btree (organizacion_id, potrero_id)
+index|agx.potrero_recomendaciones_pastoreo_pkey|CREATE UNIQUE INDEX potrero_recomendaciones_pastoreo_pkey ON agx.potrero_recomendaciones_pastoreo USING btree (recomendacion_id)
+index|agx.potrero_recomendaciones_potrero_created_idx|CREATE INDEX potrero_recomendaciones_potrero_created_idx ON agx.potrero_recomendaciones_pastoreo USING btree (potrero_id, created_at DESC)
+index|agx.potrero_recomendaciones_potrero_id_idx|CREATE INDEX potrero_recomendaciones_potrero_id_idx ON agx.potrero_recomendaciones_pastoreo USING btree (potrero_id)
+index|agx.potreros_geometry_gix|CREATE INDEX potreros_geometry_gix ON agx.potreros USING gist (geometry)
+index|agx.potreros_id_organizacion_unique|CREATE UNIQUE INDEX potreros_id_organizacion_unique ON agx.potreros USING btree (potrero_id, organizacion_id)
+index|agx.potreros_id_predio_organizacion_unique|CREATE UNIQUE INDEX potreros_id_predio_organizacion_unique ON agx.potreros USING btree (potrero_id, predio_id, organizacion_id)
+index|agx.potreros_organizacion_id_idx|CREATE INDEX potreros_organizacion_id_idx ON agx.potreros USING btree (organizacion_id)
+index|agx.potreros_organizacion_predio_idx|CREATE INDEX potreros_organizacion_predio_idx ON agx.potreros USING btree (organizacion_id, predio_id)
+index|agx.potreros_pkey|CREATE UNIQUE INDEX potreros_pkey ON agx.potreros USING btree (potrero_id)
+index|agx.potreros_predio_id_idx|CREATE INDEX potreros_predio_id_idx ON agx.potreros USING btree (predio_id)
+index|agx.predio_archivo_eventos_organizacion_id_idx|CREATE INDEX predio_archivo_eventos_organizacion_id_idx ON agx.predio_archivo_eventos USING btree (organizacion_id)
+index|agx.predio_archivo_eventos_pkey|CREATE UNIQUE INDEX predio_archivo_eventos_pkey ON agx.predio_archivo_eventos USING btree (evento_id)
+index|agx.predio_archivo_eventos_predio_id_idx|CREATE INDEX predio_archivo_eventos_predio_id_idx ON agx.predio_archivo_eventos USING btree (predio_id, ocurrido_en)
+index|agx.predio_snapshots_catastrales_pkey|CREATE UNIQUE INDEX predio_snapshots_catastrales_pkey ON agx.predio_snapshots_catastrales USING btree (snapshot_id)
+index|agx.predios_geometry_gix|CREATE INDEX predios_geometry_gix ON agx.predios USING gist (geometry)
+index|agx.predios_id_organizacion_unique|CREATE UNIQUE INDEX predios_id_organizacion_unique ON agx.predios USING btree (predio_id, organizacion_id)
+index|agx.predios_org_client_operation_id_key|CREATE UNIQUE INDEX predios_org_client_operation_id_key ON agx.predios USING btree (organizacion_id, client_operation_id) WHERE (client_operation_id IS NOT NULL)
+index|agx.predios_org_codigo_predial_key|CREATE UNIQUE INDEX predios_org_codigo_predial_key ON agx.predios USING btree (organizacion_id, codigo_predial) WHERE (codigo_predial IS NOT NULL)
+index|agx.predios_organizacion_id_idx|CREATE INDEX predios_organizacion_id_idx ON agx.predios USING btree (organizacion_id)
+index|agx.predios_pkey|CREATE UNIQUE INDEX predios_pkey ON agx.predios USING btree (predio_id)
+index|agx.qr_asignaciones_client_operation_key|CREATE UNIQUE INDEX qr_asignaciones_client_operation_key ON agx.qr_asignaciones USING btree (client_operation_id)
+index|agx.qr_asignaciones_id_organizacion_unique|CREATE UNIQUE INDEX qr_asignaciones_id_organizacion_unique ON agx.qr_asignaciones USING btree (asignacion_id, organizacion_id)
+index|agx.qr_asignaciones_lote_idx|CREATE INDEX qr_asignaciones_lote_idx ON agx.qr_asignaciones USING btree (lote_id)
+index|agx.qr_asignaciones_organizacion_idx|CREATE INDEX qr_asignaciones_organizacion_idx ON agx.qr_asignaciones USING btree (organizacion_id, created_at DESC)
+index|agx.qr_asignaciones_pkey|CREATE UNIQUE INDEX qr_asignaciones_pkey ON agx.qr_asignaciones USING btree (asignacion_id)
+index|agx.qr_chapeta_eventos_organizacion_idx|CREATE INDEX qr_chapeta_eventos_organizacion_idx ON agx.qr_chapeta_eventos USING btree (organizacion_id)
+index|agx.qr_chapeta_eventos_pkey|CREATE UNIQUE INDEX qr_chapeta_eventos_pkey ON agx.qr_chapeta_eventos USING btree (evento_id)
+index|agx.qr_chapeta_eventos_qr_idx|CREATE INDEX qr_chapeta_eventos_qr_idx ON agx.qr_chapeta_eventos USING btree (qr_id, ocurrido_en)
+index|agx.qr_chapeta_tokens_pkey|CREATE UNIQUE INDEX qr_chapeta_tokens_pkey ON agx.qr_chapeta_tokens USING btree (qr_id)
+index|agx.qr_chapetas_animal_idx|CREATE INDEX qr_chapetas_animal_idx ON agx.qr_chapetas USING btree (animal_id)
+index|agx.qr_chapetas_codigo_visible_key|CREATE UNIQUE INDEX qr_chapetas_codigo_visible_key ON agx.qr_chapetas USING btree (codigo_visible)
+index|agx.qr_chapetas_id_organizacion_unique|CREATE UNIQUE INDEX qr_chapetas_id_organizacion_unique ON agx.qr_chapetas USING btree (qr_id, organizacion_id)
+index|agx.qr_chapetas_lote_idx|CREATE INDEX qr_chapetas_lote_idx ON agx.qr_chapetas USING btree (lote_id, qr_id)
+index|agx.qr_chapetas_organizacion_estado_idx|CREATE INDEX qr_chapetas_organizacion_estado_idx ON agx.qr_chapetas USING btree (organizacion_id, estado)
+index|agx.qr_chapetas_organizacion_updated_idx|CREATE INDEX qr_chapetas_organizacion_updated_idx ON agx.qr_chapetas USING btree (organizacion_id, updated_at)
+index|agx.qr_chapetas_pkey|CREATE UNIQUE INDEX qr_chapetas_pkey ON agx.qr_chapetas USING btree (qr_id)
+index|agx.qr_chapetas_token_hash_key|CREATE UNIQUE INDEX qr_chapetas_token_hash_key ON agx.qr_chapetas USING btree (token_hash)
+index|agx.qr_chapetas_un_activa_por_animal_idx|CREATE UNIQUE INDEX qr_chapetas_un_activa_por_animal_idx ON agx.qr_chapetas USING btree (animal_id) WHERE ((estado)::text = 'ASIGNADO_ANIMAL'::text)
+index|agx.qr_lote_eventos_lote_idx|CREATE INDEX qr_lote_eventos_lote_idx ON agx.qr_lote_eventos USING btree (lote_id, ocurrido_en)
+index|agx.qr_lote_eventos_pkey|CREATE UNIQUE INDEX qr_lote_eventos_pkey ON agx.qr_lote_eventos USING btree (evento_id)
+index|agx.qr_lotes_client_operation_key|CREATE UNIQUE INDEX qr_lotes_client_operation_key ON agx.qr_lotes USING btree (client_operation_id)
+index|agx.qr_lotes_codigo_lote_key|CREATE UNIQUE INDEX qr_lotes_codigo_lote_key ON agx.qr_lotes USING btree (codigo_lote)
+index|agx.qr_lotes_id_tipo_unique|CREATE UNIQUE INDEX qr_lotes_id_tipo_unique ON agx.qr_lotes USING btree (lote_id, tipo)
+index|agx.qr_lotes_pkey|CREATE UNIQUE INDEX qr_lotes_pkey ON agx.qr_lotes USING btree (lote_id)
+index|agx.reproduccion_eventos_animal_fecha_idx|CREATE INDEX reproduccion_eventos_animal_fecha_idx ON agx.reproduccion_eventos USING btree (animal_id, fecha_evento, evento_id)
+index|agx.reproduccion_eventos_id_animal_organizacion_unique|CREATE UNIQUE INDEX reproduccion_eventos_id_animal_organizacion_unique ON agx.reproduccion_eventos USING btree (evento_id, animal_id, organizacion_id)
+index|agx.reproduccion_eventos_org_anulacion_client_operation_key|CREATE UNIQUE INDEX reproduccion_eventos_org_anulacion_client_operation_key ON agx.reproduccion_eventos USING btree (organizacion_id, anulacion_client_operation_id) WHERE (anulacion_client_operation_id IS NOT NULL)
+index|agx.reproduccion_eventos_org_client_operation_key|CREATE UNIQUE INDEX reproduccion_eventos_org_client_operation_key ON agx.reproduccion_eventos USING btree (organizacion_id, client_operation_id)
+index|agx.reproduccion_eventos_org_tipo_fecha_idx|CREATE INDEX reproduccion_eventos_org_tipo_fecha_idx ON agx.reproduccion_eventos USING btree (organizacion_id, tipo_evento, fecha_evento)
+index|agx.reproduccion_eventos_pkey|CREATE UNIQUE INDEX reproduccion_eventos_pkey ON agx.reproduccion_eventos USING btree (evento_id)
+index|agx.reproduccion_eventos_toro_idx|CREATE INDEX reproduccion_eventos_toro_idx ON agx.reproduccion_eventos USING btree (toro_animal_id) WHERE (toro_animal_id IS NOT NULL)
+index|agx.reproduccion_eventos_una_correccion_idx|CREATE UNIQUE INDEX reproduccion_eventos_una_correccion_idx ON agx.reproduccion_eventos USING btree (corrige_evento_id) WHERE (corrige_evento_id IS NOT NULL)
+index|agx.snapshots_geometry_gix|CREATE INDEX snapshots_geometry_gix ON agx.predio_snapshots_catastrales USING gist (geometry)
+index|agx.snapshots_org_codigo_predial_idx|CREATE INDEX snapshots_org_codigo_predial_idx ON agx.predio_snapshots_catastrales USING btree (organizacion_id, codigo_predial)
+index|agx.snapshots_organizacion_id_idx|CREATE INDEX snapshots_organizacion_id_idx ON agx.predio_snapshots_catastrales USING btree (organizacion_id)
+index|agx.snapshots_predio_id_idx|CREATE INDEX snapshots_predio_id_idx ON agx.predio_snapshots_catastrales USING btree (predio_id)
+policy|agx.animal_eventos|animal_eventos_tenant_isolation|PERMISSIVE|ALL|roles=public|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.animal_pesajes|animal_pesajes_tenant_isolation|PERMISSIVE|ALL|roles=public|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.animales|animales_tenant_isolation|PERMISSIVE|ALL|roles=public|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.catalogo_categorias_productivas|catalogo_categorias_read|PERMISSIVE|SELECT|roles=public|using=((organizacion_id IS NULL) OR (organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid))|check=-
+policy|agx.catalogo_pasturas|catalogo_pasturas_read|PERMISSIVE|SELECT|roles=public|using=((organizacion_id IS NULL) OR (organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid))|check=-
+policy|agx.catalogo_pasturas|catalogo_pasturas_tenant_update|PERMISSIVE|UPDATE|roles=public|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.catalogo_pasturas|catalogo_pasturas_tenant_write|PERMISSIVE|INSERT|roles=public|using=-|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.catalogo_razas|catalogo_razas_read|PERMISSIVE|SELECT|roles=public|using=((organizacion_id IS NULL) OR (organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid))|check=-
+policy|agx.potrero_archivo_eventos|potrero_archivo_eventos_tenant_isolation|PERMISSIVE|ALL|roles=public|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.potrero_calculos_pastoreo|potrero_calculos_tenant_isolation|PERMISSIVE|ALL|roles=public|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.potrero_ciclo_eventos|potrero_ciclo_eventos_tenant_isolation|PERMISSIVE|ALL|roles=public|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.potrero_ciclo_lote_real_invalidaciones|potrero_ciclo_lote_real_invalidaciones_tenant_isolation|PERMISSIVE|ALL|roles=public|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.potrero_ciclo_lote_real_versiones|potrero_ciclo_lote_real_versiones_tenant_isolation|PERMISSIVE|ALL|roles=public|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.potrero_ciclo_residual_real_invalidaciones|potrero_ciclo_residual_real_invalidaciones_tenant_isolation|PERMISSIVE|ALL|roles=public|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.potrero_ciclo_residuales_reales_versiones|potrero_ciclo_residuales_reales_versiones_tenant_isolation|PERMISSIVE|ALL|roles=public|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.potrero_ciclos_pastoreo|potrero_ciclos_pastoreo_tenant_isolation|PERMISSIVE|ALL|roles=public|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.potrero_climatologias_agroclimaticas|potrero_climatologias_tenant_isolation|PERMISSIVE|ALL|roles=public|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.potrero_contextos_agroclimaticos|potrero_contextos_tenant_isolation|PERMISSIVE|ALL|roles=public|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.potrero_descanso_invalidaciones|potrero_descanso_invalidaciones_tenant_isolation|PERMISSIVE|ALL|roles=public|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.potrero_evaluaciones_reingreso|potrero_evaluaciones_reingreso_tenant_isolation|PERMISSIVE|ALL|roles=public|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.potrero_ficha_pasturas|potrero_ficha_pasturas_tenant_isolation|PERMISSIVE|ALL|roles=public|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.potrero_fichas_productivas|potrero_fichas_tenant_isolation|PERMISSIVE|ALL|roles=public|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.potrero_recomendaciones_descanso|potrero_descansos_tenant_isolation|PERMISSIVE|ALL|roles=public|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.potrero_recomendaciones_pastoreo|potrero_recomendaciones_tenant_isolation|PERMISSIVE|ALL|roles=public|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.potreros|potreros_tenant_isolation|PERMISSIVE|ALL|roles=public|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.predio_archivo_eventos|predio_archivo_eventos_tenant_isolation|PERMISSIVE|ALL|roles=public|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.predio_snapshots_catastrales|predio_snapshots_catastrales_tenant_isolation|PERMISSIVE|ALL|roles=public|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.predios|predios_tenant_isolation|PERMISSIVE|ALL|roles=public|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.qr_asignaciones|qr_asignaciones_admin|PERMISSIVE|ALL|roles=agx_qr_admin|using=true|check=true
+policy|agx.qr_asignaciones|qr_asignaciones_tenant_read|PERMISSIVE|SELECT|roles=agx_app|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=-
+policy|agx.qr_chapeta_eventos|qr_chapeta_eventos_admin|PERMISSIVE|ALL|roles=agx_qr_admin|using=true|check=true
+policy|agx.qr_chapeta_eventos|qr_chapeta_eventos_tenant|PERMISSIVE|ALL|roles=agx_app|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.qr_chapeta_tokens|qr_chapeta_tokens_admin|PERMISSIVE|ALL|roles=agx_qr_admin|using=true|check=true
+policy|agx.qr_chapetas|qr_chapetas_admin|PERMISSIVE|ALL|roles=agx_qr_admin|using=true|check=true
+policy|agx.qr_chapetas|qr_chapetas_tenant_read|PERMISSIVE|SELECT|roles=agx_app|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=-
+policy|agx.qr_chapetas|qr_chapetas_tenant_update|PERMISSIVE|UPDATE|roles=agx_app|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+policy|agx.qr_lote_eventos|qr_lote_eventos_admin|PERMISSIVE|ALL|roles=agx_qr_admin|using=true|check=true
+policy|agx.qr_lotes|qr_lotes_admin|PERMISSIVE|ALL|roles=agx_qr_admin|using=true|check=true
+policy|agx.reproduccion_eventos|reproduccion_eventos_tenant_isolation|PERMISSIVE|ALL|roles=public|using=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)|check=(organizacion_id = (NULLIF(current_setting('app.current_org_id'::text, true), ''::text))::uuid)
+relation|agx.animal_eventos_evento_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner,agx_qr_admin=rU/agx_owner
+relation|agx.animal_eventos|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=ar/agx_owner,agx_owner=arwdDxt/agx_owner,agx_qr_admin=ar/agx_owner
+relation|agx.animal_pesajes_pesaje_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner
+relation|agx.animal_pesajes|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=ar/agx_owner,agx_owner=arwdDxt/agx_owner
+relation|agx.animales_animal_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner
+relation|agx.animales|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=ar/agx_owner,agx_owner=arwdDxt/agx_owner,agx_qr_admin=r/agx_owner
+relation|agx.catalogo_categorias_productivas_categoria_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner
+relation|agx.catalogo_categorias_productivas|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=r/agx_owner,agx_owner=arwdDxt/agx_owner
+relation|agx.catalogo_pasturas_pastura_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner
+relation|agx.catalogo_pasturas|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=arw/agx_owner,agx_ficha_pastura_validator=r/agx_owner,agx_owner=arwdDxt/agx_owner
+relation|agx.catalogo_razas_raza_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_owner=rwU/agx_owner
+relation|agx.catalogo_razas|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=r/agx_owner,agx_owner=arwdDxt/agx_owner
+relation|agx.potrero_archivo_eventos_evento_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner
+relation|agx.potrero_archivo_eventos|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=ar/agx_owner,agx_owner=arwdDxt/agx_owner
+relation|agx.potrero_calculos_pastoreo_calculo_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner
+relation|agx.potrero_calculos_pastoreo|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=ar/agx_owner,agx_owner=arwdDxt/agx_owner
+relation|agx.potrero_ciclo_eventos_evento_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner
+relation|agx.potrero_ciclo_eventos|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=ar/agx_owner,agx_owner=arwdDxt/agx_owner
+relation|agx.potrero_ciclo_lote_real_invalidaciones_invalidacion_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner
+relation|agx.potrero_ciclo_lote_real_invalidaciones|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=ar/agx_owner,agx_owner=arwdDxt/agx_owner
+relation|agx.potrero_ciclo_lote_real_versiones_snapshot_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner
+relation|agx.potrero_ciclo_lote_real_versiones|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=ar/agx_owner,agx_owner=arwdDxt/agx_owner
+relation|agx.potrero_ciclo_residual_real_invalidaciones_invalidacion_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner
+relation|agx.potrero_ciclo_residual_real_invalidaciones|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=ar/agx_owner,agx_owner=arwdDxt/agx_owner
+relation|agx.potrero_ciclo_residuales_reales_versiones_residual_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner
+relation|agx.potrero_ciclo_residuales_reales_versiones|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=ar/agx_owner,agx_owner=arwdDxt/agx_owner
+relation|agx.potrero_ciclos_pastoreo_ciclo_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner
+relation|agx.potrero_ciclos_pastoreo|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=ar/agx_owner,agx_owner=arwdDxt/agx_owner
+relation|agx.potrero_climatologias_agroclimaticas_climatologia_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner
+relation|agx.potrero_climatologias_agroclimaticas|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=ar/agx_owner,agx_owner=arwdDxt/agx_owner
+relation|agx.potrero_contextos_agroclimaticos_contexto_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner
+relation|agx.potrero_contextos_agroclimaticos|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=ar/agx_owner,agx_owner=arwdDxt/agx_owner
+relation|agx.potrero_descanso_invalidaciones_invalidacion_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner
+relation|agx.potrero_descanso_invalidaciones|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=ar/agx_owner,agx_owner=arwdDxt/agx_owner
+relation|agx.potrero_evaluaciones_reingreso_evaluacion_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner
+relation|agx.potrero_evaluaciones_reingreso|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=ar/agx_owner,agx_owner=arwdDxt/agx_owner
+relation|agx.potrero_ficha_pasturas_ficha_pastura_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner
+relation|agx.potrero_ficha_pasturas|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=ar/agx_owner,agx_owner=arwdDxt/agx_owner
+relation|agx.potrero_fichas_productivas_ficha_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner
+relation|agx.potrero_fichas_productivas|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=ar/agx_owner,agx_owner=arwdDxt/agx_owner
+relation|agx.potrero_recomendaciones_descanso_descanso_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner
+relation|agx.potrero_recomendaciones_descanso|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=ar/agx_owner,agx_owner=arwdDxt/agx_owner
+relation|agx.potrero_recomendaciones_pastoreo_recomendacion_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner
+relation|agx.potrero_recomendaciones_pastoreo|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=ar/agx_owner,agx_owner=arwdDxt/agx_owner
+relation|agx.potreros_potrero_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner
+relation|agx.potreros|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=arw/agx_owner,agx_owner=arwdDxt/agx_owner
+relation|agx.predio_archivo_eventos_evento_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner
+relation|agx.predio_archivo_eventos|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=ar/agx_owner,agx_owner=arwdDxt/agx_owner
+relation|agx.predio_snapshots_catastrales|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=ar/agx_owner,agx_owner=arwdDxt/agx_owner
+relation|agx.predios_predio_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner
+relation|agx.predios|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=arw/agx_owner,agx_owner=arwdDxt/agx_owner
+relation|agx.qr_asignaciones_asignacion_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_owner=rwU/agx_owner,agx_qr_admin=rU/agx_owner
+relation|agx.qr_asignaciones|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=r/agx_owner,agx_owner=arwdDxt/agx_owner,agx_qr_admin=ar/agx_owner
+relation|agx.qr_chapeta_eventos_evento_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner,agx_qr_admin=rU/agx_owner
+relation|agx.qr_chapeta_eventos|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=ar/agx_owner,agx_owner=arwdDxt/agx_owner,agx_qr_admin=ar/agx_owner
+relation|agx.qr_chapeta_tokens|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_owner=arwdDxt/agx_owner,agx_qr_admin=ar/agx_owner
+relation|agx.qr_chapetas_qr_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_owner=rwU/agx_owner,agx_qr_admin=rU/agx_owner
+relation|agx.qr_chapetas|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=r/agx_owner,agx_owner=arwdDxt/agx_owner,agx_qr_admin=ar/agx_owner
+relation|agx.qr_lote_eventos_evento_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_owner=rwU/agx_owner,agx_qr_admin=rU/agx_owner
+relation|agx.qr_lote_eventos|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_owner=arwdDxt/agx_owner,agx_qr_admin=ar/agx_owner
+relation|agx.qr_lotes_lote_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_owner=rwU/agx_owner,agx_qr_admin=rU/agx_owner
+relation|agx.qr_lotes|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_owner=arwdDxt/agx_owner,agx_qr_admin=ar/agx_owner
+relation|agx.reproduccion_eventos_evento_id_seq|kind=S|owner=agx_owner|rls=false|force=false|acl=agx_app=rU/agx_owner,agx_owner=rwU/agx_owner
+relation|agx.reproduccion_eventos|kind=r|owner=agx_owner|rls=true|force=true|acl=agx_app=ar/agx_owner,agx_owner=arwdDxt/agx_owner
+role|agx_app|super=false|inherit=true|createrole=false|createdb=false|login=true|replication=false|bypassrls=false
+role|agx_ficha_pastura_validator|super=false|inherit=true|createrole=false|createdb=false|login=false|replication=false|bypassrls=true
+role|agx_owner|super=false|inherit=true|createrole=false|createdb=false|login=false|replication=false|bypassrls=false
+role|agx_qr_admin|super=false|inherit=false|createrole=false|createdb=false|login=true|replication=false|bypassrls=false
+schema|agx|owner=postgres|acl={postgres=UC/postgres,agx_owner=UC/postgres,agx_app=U/postgres,agx_ficha_pastura_validator=U/postgres,agx_qr_admin=U/postgres}
+trigger|agx.animales|animales_cierre_guard|enabled=O|CREATE TRIGGER animales_cierre_guard BEFORE UPDATE ON agx.animales FOR EACH ROW EXECUTE FUNCTION agx.fn_animales_cierre_guard()
+trigger|agx.potrero_ficha_pasturas|potrero_ficha_pasturas_tenant_scope_trigger|enabled=O|CREATE TRIGGER potrero_ficha_pasturas_tenant_scope_trigger BEFORE INSERT OR UPDATE ON agx.potrero_ficha_pasturas FOR EACH ROW EXECUTE FUNCTION agx.enforce_ficha_pastura_tenant_scope()
+trigger|agx.qr_chapetas|qr_chapetas_guard|enabled=O|CREATE TRIGGER qr_chapetas_guard BEFORE UPDATE ON agx.qr_chapetas FOR EACH ROW EXECUTE FUNCTION agx.fn_qr_chapetas_guard()
+trigger|agx.reproduccion_eventos|reproduccion_eventos_guard|enabled=O|CREATE TRIGGER reproduccion_eventos_guard BEFORE DELETE OR UPDATE ON agx.reproduccion_eventos FOR EACH ROW EXECUTE FUNCTION agx.fn_reproduccion_eventos_guard()

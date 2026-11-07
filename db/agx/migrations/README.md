@@ -1,5 +1,15 @@
 # Migraciones de Postgres-AGX (plano de identidad/autorización)
 
+> **HARDENING PRE-SANIDAD:** `0000_baseline_auth_schema.sql` versiona la estructura
+> preexistente (extraída solo lectura de producción el 2026-11-06, sin datos).
+> `0000`+`0001`+`0002` reconstruyen Auth desde cero con huella idéntica a producción
+> (`db/agx/verify/prod_auth_20261106.fingerprint`):
+> `node .tools/agx-migrate.mjs up --target auth --fresh --url-env VAR --var agx_auth_password=ENV`.
+> 0000 falla a propósito sobre una base existente: no se aplica en producción.
+> Este target todavía no tiene ledger. Ver
+> [`docs/runbooks/agx-db-dr-migraciones.md`](../../../docs/runbooks/agx-db-dr-migraciones.md).
+> El bloque "Entorno local desechable" de abajo queda obsoleto: ya no hace falta recrear las tablas a mano.
+
 Convención nueva para este directorio (no existía ninguna migración
 versionada de `agx.*` antes de `0001`; ese esquema fue provisionado
 directamente en Railway). A partir de aquí, cualquier cambio de esquema
