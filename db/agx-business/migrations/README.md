@@ -1,5 +1,12 @@
 # Migraciones de Postgres-AGX-Business
 
+> **Desde 0027 (HARDENING PRE-SANIDAD):** las migraciones se aplican SOLO con
+> `node .tools/agx-migrate.mjs` (una transacción, ledger `agx_meta.schema_migrations`,
+> checksums, orden estricto). Los comandos `psql -f` de abajo quedan como referencia
+> histórica de cómo se aplicaron 0000–0026. Rollbacks 0001–0026: bloqueados salvo la
+> opción extraordinaria del runner. Procedimiento completo, backups y restore:
+> [`docs/runbooks/agx-db-dr-migraciones.md`](../../../docs/runbooks/agx-db-dr-migraciones.md).
+
 Base NUEVA, separada del Postgres legacy de producción (que queda intacto,
 ver informe SPRINT-3B1-BUSINESS-DB-FOUNDATION) y separada también de
 Postgres-AGX (plano de identidad -- `db/agx/migrations/`). Primera
