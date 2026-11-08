@@ -10,6 +10,8 @@ import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { LexError, lexPsql } from './agx-psql-lexer.mjs';
 
 export const RUNNER_VERSION = 'agx-migrate/1';
 // Clave fija del advisory lock transaccional del ledger (bigint).
@@ -34,27 +36,23 @@ export const TARGETS = {
 };
 
 const FILE_RE = /^(\d{4})_([a-z0-9_]+)\.sql$/;
-// Whitelist explícita de metacomandos psql dentro de una migración. Todo lo
-// demás (\connect, \i, \ir, \include*, \!, \o, \g, \gx, \gexec, \copy,
-// \getenv, \setenv, \pset, \\, ...) se rechaza. Reglas adicionales por
-// metacomando en assertMetaCommand().
-const ALLOWED_META = new Set(['set', 'unset', 'if', 'elif', 'else', 'endif', 'echo', 'warn', 'gset']);
-// Excepciones históricas fijadas por archivo + checksum exacto (contenido LF):
-// migraciones ya aplicadas en producción que no se pueden reescribir. Si el
-// archivo cambia, la excepción deja de valer.
-const HISTORICAL_META_EXEMPTIONS = {
-  // GRANT CONNECT ON DATABASE <base actual>: el nombre de la base no se conoce de antemano.
-  '0023_qr_inventario_chapetas.sql': {
-    checksum: 'a1c630e8ee7c31194e79d9e613b35a18d1a8ef9404325c73d83d8a5a321bf861',
-    meta: ['gexec'],
-  },
-};
-// Único \set de variable especial admitido: reafirmar ON_ERROR_STOP (no desactivarlo).
-const ON_ERROR_STOP_ON = /^(on|1|true)$/i;
 // Parámetros de URL que el runner implementa; cualquier otro se rechaza.
 export const SSL_MODES = new Set(['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full']);
 // Tamaño mínimo de un dump aceptable como evidencia de backup.
 export const MIN_BACKUP_EVIDENCE_BYTES = 16 * 1024;
+// Variables psql reservadas para el runner: ninguna migración puede leerlas ni fijarlas.
+export const RESERVED_VAR_PREFIX = 'agx_migrate_';
+
+/**
+ * Historial CONGELADO: cada migración histórica (Business 0000-0027, Auth
+ * 0000-0002, con sus rollbacks) está fijada por nombre + SHA-256 (contenido
+ * LF) + la secuencia exacta de metacomandos psql que contiene. Vive junto al
+ * runner (no en el directorio de migraciones) para que --root o
+ * --migrations-dir no puedan sustituirlo. Las migraciones posteriores son
+ * SQL puro (ver auditMigration).
+ */
+export const FROZEN_MANIFEST_PATH = fileURLToPath(new URL('./agx-migrate-frozen.json', import.meta.url));
+export const FROZEN = JSON.parse(fs.readFileSync(FROZEN_MANIFEST_PATH, 'utf8'));
 
 export function fail(code, message) {
   return Object.assign(new Error(`${code}: ${message}`), { code });
@@ -83,104 +81,90 @@ export function md5(text) {
 }
 
 /**
- * Elimina comentarios, cuerpos dollar-quoted y literales de cadena para
- * poder buscar sentencias de nivel superior sin falsos positivos.
+ * Texto de "código" (sin cadenas, identificadores entre comillas, cuerpos
+ * dollar-quoted, comentarios ni metacomandos) según el lexer compatible con psql.
  */
 export function stripSqlForScan(sql) {
-  let out = '';
-  let i = 0;
-  while (i < sql.length) {
-    const ch = sql[i];
-    if (ch === '-' && sql[i + 1] === '-') {
-      const nl = sql.indexOf('\n', i);
-      i = nl === -1 ? sql.length : nl;
-      continue;
-    }
-    if (ch === '/' && sql[i + 1] === '*') {
-      const end = sql.indexOf('*/', i + 2);
-      i = end === -1 ? sql.length : end + 2;
-      out += ' ';
-      continue;
-    }
-    if (ch === '$') {
-      const m = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i));
-      if (m) {
-        const end = sql.indexOf(m[0], i + m[0].length);
-        i = end === -1 ? sql.length : end + m[0].length;
-        out += ' $body$ ';
-        continue;
-      }
-    }
-    if (ch === "'") {
-      let j = i + 1;
-      while (j < sql.length) {
-        if (sql[j] === "'" && sql[j + 1] === "'") { j += 2; continue; }
-        if (sql[j] === "'") break;
-        j += 1;
-      }
-      i = j + 1;
-      out += " '' ";
-      continue;
-    }
-    out += ch;
-    i += 1;
-  }
-  return out;
+  return lexPsql(sql).code;
 }
 
-/** Variables psql que el archivo interpola (`:'nombre'` o `:nombre`), fuera de comentarios. */
+/** Variables psql que el archivo interpola como literal (`:'nombre'`), en código. */
 export function psqlVariables(sql) {
-  const noComments = sql.replace(/--[^\n]*/g, '');
-  const names = new Set();
-  for (const m of noComments.matchAll(/(?<!:):'([A-Za-z_][A-Za-z0-9_]*)'/g)) names.add(m[1]);
+  const names = new Set(lexPsql(sql).vars.filter((v) => v.kind === 'literal').map((v) => v.name));
   return [...names].sort();
 }
 
-/**
- * Rechaza control de transacción de nivel superior y metacomandos psql que
- * romperían la atomicidad del bundle (cambiar de conexión, incluir otros
- * archivos, salir).
- */
-export function assertBundleSafe(sql, filename, checksum = null) {
-  const scan = stripSqlForScan(sql);
-  const tx = /(^|;)\s*(begin|start\s+transaction|commit|end|rollback|abort|savepoint|release|prepare\s+transaction)\b[^;]*;/i;
-  if (tx.test(scan)) {
+const TX_CONTROL = /(^|;)\s*(begin|start\s+transaction|commit|end|rollback|abort|savepoint|release|prepare\s+transaction)\b[^;]*;/i;
+
+function assertNoTxControl(code, filename) {
+  if (TX_CONTROL.test(code)) {
     throw fail('AGX_MIGRATE_TX_CONTROL', `${filename} contiene control de transacción de nivel superior; el runner gestiona BEGIN/COMMIT.`);
-  }
-  const exemption = HISTORICAL_META_EXEMPTIONS[filename];
-  const exempt = new Set(exemption && checksum === exemption.checksum ? exemption.meta : []);
-  // psql interpreta una barra invertida fuera de cadenas/cuerpos como metacomando
-  // en cualquier posición de la línea: se examinan TODAS.
-  for (const m of scan.matchAll(/\\([A-Za-z]+|.)([^\n]*)/g)) {
-    assertMetaCommand(m[1], m[2], { filename, exempt, before: scan.slice(0, m.index) });
   }
 }
 
-const meta = (filename, cmd, why) => fail('AGX_MIGRATE_META_COMMAND', `${filename} usa \\${cmd}: ${why}`);
+function lexOrFail(content, filename, opts) {
+  try {
+    return lexPsql(content, opts);
+  } catch (e) {
+    if (e instanceof LexError) throw fail('AGX_MIGRATE_LEXER', `${filename}: ${e.message} (offset ${e.offset}); no se adivina qué haría psql`);
+    throw e;
+  }
+}
 
-function assertMetaCommand(cmd, rest, { filename, exempt, before }) {
-  if (!ALLOWED_META.has(cmd) && !exempt.has(cmd)) throw meta(filename, cmd, 'metacomando psql no permitido dentro de una migración');
-  // psql ejecuta comandos de shell entre comillas invertidas en los argumentos.
-  if (rest.includes('`')) throw meta(filename, cmd, 'comillas invertidas (ejecución de shell) no permitidas');
-  const args = rest.trim().split(/\s+/).filter(Boolean);
-  if (cmd === 'set' || cmd === 'unset') {
-    const name = args[0] ?? '';
-    if (/^[a-z_][a-z0-9_]*$/.test(name)) return;
-    // Las variables especiales de psql van en mayúsculas (ON_ERROR_STOP,
-    // ON_ERROR_ROLLBACK, AUTOCOMMIT, SINGLESTEP...): alteran el control del runner.
-    if (cmd === 'set' && name === 'ON_ERROR_STOP' && args.length === 2 && ON_ERROR_STOP_ON.test(args[1])) return;
-    throw meta(filename, `${cmd} ${name}`, 'solo se admiten variables en minúsculas (y \\set ON_ERROR_STOP on)');
-  }
-  if (cmd === 'gset') {
-    // Sin prefijo, \gset crea variables con el nombre de cada columna: un
-    // alias entre comillas ("ON_ERROR_ROLLBACK") o un * podrían fijar una
-    // variable especial. Se exige alias simple (en minúsculas por el parser).
-    if (args.length && !/^[a-z_][a-z0-9_]*$/.test(args[0])) throw meta(filename, cmd, 'prefijo no válido');
-    const stmt = before.slice(before.lastIndexOf(';') + 1);
-    if (!args.length && (stmt.includes('"') || /\*/.test(stmt.replace(/count\s*\(\s*\*\s*\)/gi, '')))) {
-      throw meta(filename, cmd, 'consulta con identificadores entre comillas o * no permitida');
+function versionOf(filename) {
+  const m = FILE_RE.exec(filename);
+  if (!m) throw fail('AGX_MIGRATE_BAD_FILENAME', `nombre de migración no válido: ${filename}`);
+  return Number(m[1]);
+}
+
+/**
+ * Política de contenido de una migración (UP o rollback).
+ *
+ * - HISTÓRICA (versión <= maxVersion del manifiesto congelado del target):
+ *   debe figurar en el manifiesto con el mismo SHA-256, y su secuencia de
+ *   metacomandos (según el lexer) debe ser EXACTAMENTE la congelada. Un byte
+ *   significativo distinto, otro nombre, un metacomando de más o una variante:
+ *   FAIL. No hay forma de "añadir" una excepción sin editar el manifiesto.
+ * - NUEVA (posterior): SQL PURO. Ninguna barra invertida en todo el archivo
+ *   (tampoco en cadenas o comentarios), de modo que ningún metacomando psql
+ *   es posible aunque el lexer se equivocara. Además: el lexer (en las dos
+ *   interpretaciones de standard_conforming_strings) no debe encontrar
+ *   metacomandos, y no puede referenciar variables reservadas agx_migrate_*.
+ */
+export function auditMigration({ content, filename, checksum, target }) {
+  const frozen = FROZEN[target];
+  if (!frozen) throw fail('AGX_MIGRATE_ARGS', `target sin manifiesto congelado: ${target}`);
+  const version = versionOf(filename);
+  if (version <= frozen.maxVersion) {
+    const entry = frozen.files[filename];
+    if (!entry) throw fail('AGX_MIGRATE_HISTORICAL_NOT_FROZEN', `${filename} está en el rango histórico (<= ${pad(frozen.maxVersion)}) pero no figura en el manifiesto congelado`);
+    if (entry.sha256 !== checksum) throw fail('AGX_MIGRATE_HISTORICAL_TAMPERED', `${filename} no coincide con el historial congelado (sha256 ${checksum.slice(0, 12)}…, esperado ${entry.sha256.slice(0, 12)}…)`);
+    const lex = lexOrFail(content, filename);
+    const metas = lex.metas.map((m) => m.text);
+    if (JSON.stringify(metas) !== JSON.stringify(entry.metas)) {
+      throw fail('AGX_MIGRATE_META_COMMAND', `${filename}: metacomandos distintos de los congelados`);
     }
+    assertNoTxControl(lex.code, filename);
+    return lex;
   }
+  const backslash = content.indexOf('\\');
+  if (backslash !== -1) {
+    const line = content.slice(0, backslash).split('\n').length;
+    throw fail('AGX_MIGRATE_META_COMMAND', `${filename}:${line}: las migraciones nuevas son SQL puro; no se admite ninguna barra invertida (metacomandos psql prohibidos)`);
+  }
+  const lex = lexOrFail(content, filename, { stdStrings: true });
+  const alt = lexOrFail(content, filename, { stdStrings: false });
+  if (lex.metas.length || alt.metas.length) throw fail('AGX_MIGRATE_META_COMMAND', `${filename}: metacomando psql detectado`);
+  const reserved = [...lex.vars, ...alt.vars].find((v) => v.name.toLowerCase().startsWith(RESERVED_VAR_PREFIX));
+  if (reserved) throw fail('AGX_MIGRATE_RESERVED_VAR', `${filename}: la variable psql ${reserved.name} está reservada para el runner`);
+  assertNoTxControl(lex.code, filename);
+  assertNoTxControl(alt.code, filename);
+  return lex;
+}
+
+/** Compatibilidad: audita `sql` como si fuera el archivo `filename` del target. */
+export function assertBundleSafe(sql, filename, checksum = null, target = 'business') {
+  auditMigration({ content: sql, filename, checksum: checksum ?? sha256(sql), target });
 }
 
 /**
@@ -213,10 +197,12 @@ function readMigration(dir, filename) {
 }
 
 /**
- * Lista migraciones UP (y su rollback si existe). Exige versiones únicas y
- * contiguas desde 0000: un hueco en el directorio es un error.
+ * Lista migraciones UP (y su rollback si existe) del `target`. Exige
+ * versiones únicas y contiguas desde 0000 y aplica auditMigration a cada
+ * archivo: un hueco o un archivo fuera de política es un error.
  */
-export function listMigrations(dir) {
+export function listMigrations(dir, target) {
+  if (!FROZEN[target]) throw fail('AGX_MIGRATE_ARGS', `listMigrations requiere target (business|auth), recibió ${target}`);
   const entries = fs.readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
   const ups = new Map();
   const downs = new Map();
@@ -236,11 +222,15 @@ export function listMigrations(dir) {
   for (const v of downs.keys()) {
     if (!ups.has(v)) throw fail('AGX_MIGRATE_ORPHAN_ROLLBACK', `rollback sin migración UP: ${downs.get(v)}`);
   }
+  // El historial congelado debe estar completo: no se puede "retirar" un archivo histórico.
+  for (const f of Object.keys(FROZEN[target].files)) {
+    if (!entries.includes(f)) throw fail('AGX_MIGRATE_HISTORICAL_NOT_FROZEN', `falta el archivo histórico congelado ${f}`);
+  }
   return versions.map((version) => {
     const up = readMigration(dir, ups.get(version));
-    assertBundleSafe(up.content, up.filename, up.checksum);
+    auditMigration({ ...up, target });
     const rollback = downs.has(version) ? readMigration(dir, downs.get(version)) : null;
-    if (rollback) assertBundleSafe(rollback.content, rollback.filename, rollback.checksum);
+    if (rollback) auditMigration({ ...rollback, target });
     return { version, ...up, variables: psqlVariables(up.content), rollback };
   });
 }
@@ -285,7 +275,17 @@ function assertEntry(entry) {
   }
 }
 
-function header({ target, kind, migration, extra = [] }) {
+/** Nonce por bundle: identifica de forma inequívoca la marca de COMMIT de ESTA ejecución. */
+export function newNonce() {
+  return crypto.randomBytes(16).toString('hex');
+}
+
+function assertNonce(nonce) {
+  if (!/^[0-9a-f]{32}$/.test(nonce)) throw fail('AGX_MIGRATE_BAD_NONCE', 'nonce inválido');
+}
+
+function header({ target, kind, migration, extra = [], nonce }) {
+  assertNonce(nonce);
   return [
     `-- AGX_MIGRATE bundle (${RUNNER_VERSION}) -- generado, no editar.`,
     `-- target=${target} tipo=${kind} archivo=${migration.filename} sha256=${migration.checksum}`,
@@ -293,6 +293,12 @@ function header({ target, kind, migration, extra = [] }) {
     '\\set ON_ERROR_STOP 1',
     '\\set AUTOCOMMIT on',
     '\\unset ON_ERROR_ROLLBACK',
+    // Sesión psql nueva: no puede haber errores previos. Ver REASSERT.
+    `select set_config('agx_migrate.last_error_sqlstate', :'LAST_ERROR_SQLSTATE', false) = '00000' as agx_migrate_sin_errores \\gset`,
+    '\\if :agx_migrate_sin_errores',
+    '\\else',
+    "do $agx_migrate_err$ begin raise exception 'AGX_MIGRATE_SUPPRESSED_ERROR: la sesión psql ya tenía un error (SQLSTATE %)', current_setting('agx_migrate.last_error_sqlstate'); end $agx_migrate_err$;",
+    '\\endif',
     'begin;',
     `select pg_advisory_xact_lock(${LEDGER_LOCK_KEY}) as agx_migrate_lock \\gset`,
     // xid de la transacción: el runner verifica después con pg_xact_status que hizo COMMIT.
@@ -301,18 +307,47 @@ function header({ target, kind, migration, extra = [] }) {
   ].join('\n');
 }
 
-/** Reafirma el control del runner tras el contenido de la migración. */
-const REASSERT = '\\set ON_ERROR_STOP 1\n\\unset ON_ERROR_ROLLBACK\n';
+/**
+ * Reafirma el control del runner tras el contenido de una migración y
+ * comprueba el ERROR ACUMULADO de la sesión: psql conserva en
+ * LAST_ERROR_SQLSTATE el SQLSTATE del último error aunque después haya
+ * sentencias exitosas (verificado con psql 16 y 18). Si una sentencia falló
+ * y su error se ignoró (ON_ERROR_STOP desactivado, ON_ERROR_ROLLBACK...),
+ * vale distinto de 00000 y el bundle aborta ANTES de registrar el ledger.
+ */
+const REASSERT = [
+  '\\set ON_ERROR_STOP 1',
+  '\\unset ON_ERROR_ROLLBACK',
+  `select set_config('agx_migrate.last_error_sqlstate', :'LAST_ERROR_SQLSTATE', true) = '00000' as agx_migrate_sin_errores \\gset`,
+  '\\if :agx_migrate_sin_errores',
+  '\\else',
+  "do $agx_migrate_err$ begin raise exception 'AGX_MIGRATE_SUPPRESSED_ERROR: la migración tuvo un error ignorado (SQLSTATE %); no se registra', current_setting('agx_migrate.last_error_sqlstate'); end $agx_migrate_err$;",
+  '\\endif',
+  '',
+].join('\n');
 
 /**
  * Cierre: COMMIT y, ya fuera de la transacción, verificación en servidor
- * del ledger esperado (si aplica) y marca con el xid para el runner.
+ * del ledger esperado (si aplica) y marca con nonce + xid para el runner.
  */
-function trailer(expectation) {
+function trailer(expectation, nonce) {
+  assertNonce(nonce);
   const parts = ['-- <agx-migrate-commit>', REASSERT, 'commit;', '-- </agx-migrate-commit>'];
   if (expectation) parts.push(postCommitCheck(expectation));
-  parts.push("\\echo 'AGX_MIGRATE_COMMITTED xid=' :agx_migrate_xid", '');
+  parts.push(`\\echo 'AGX_MIGRATE_COMMITTED ${nonce} xid=' :agx_migrate_xid`, '');
   return parts.join('\n');
+}
+
+/**
+ * xid de la ÚLTIMA marca de COMMIT con el nonce de esta ejecución; null si no hay.
+ * Una marca sin el nonce (o con otro) se ignora.
+ */
+export function parseCommitMarker(stdout, nonce) {
+  assertNonce(nonce);
+  const re = new RegExp(`^AGX_MIGRATE_COMMITTED ${nonce} xid=\\s*(\\d+)\\s*$`, 'gm');
+  let xid = null;
+  for (const m of String(stdout ?? '').replace(/\r/g, '').matchAll(re)) xid = m[1];
+  return xid;
 }
 
 /**
@@ -489,14 +524,14 @@ $agx_migrate_check$;
  * Las migraciones anteriores al ledger (o de un target sin ledger) no tienen
  * bundle individual: solo se construyen con buildFreshBundle, sobre una base vacía.
  */
-export function buildUpBundle({ target, migration, kind, expected = [], fingerprint = null }) {
+export function buildUpBundle({ target, migration, kind, expected = [], fingerprint = null, nonce = newNonce() }) {
   if (kind !== 'bootstrap' && kind !== 'ledger') {
     throw fail('AGX_MIGRATE_HISTORICAL_BUNDLE_BLOCKED', `${migration.filename}: las migraciones anteriores al ledger solo se construyen con --fresh sobre una base vacía`);
   }
   return [
-    header({ target, kind, migration }),
+    header({ target, kind, migration, nonce }),
     migrationBody({ migration, kind, expected, fingerprint }),
-    trailer(ledgerExpectation({ migration, kind, expected })),
+    trailer(ledgerExpectation({ migration, kind, expected }), nonce),
   ].join('\n');
 }
 
@@ -511,11 +546,11 @@ export function kindFor(config, version) {
  * servidor si la base ya tiene esquema agx o ledger: nunca reaplica historia
  * sobre una base existente.
  */
-export function buildFreshBundle({ target, config, migrations, to, fingerprint = null }) {
+export function buildFreshBundle({ target, config, migrations, to, fingerprint = null, nonce = newNonce() }) {
   const chosen = migrations.filter((m) => m.version <= to);
   if (!chosen.length || chosen[chosen.length - 1].version !== to) throw fail('AGX_MIGRATE_ARGS', `--to fuera de rango: ${to}`);
   const last = chosen[chosen.length - 1];
-  const parts = [header({ target, kind: 'fresh', migration: last, extra: [`construcción desde cero 0000..${pad(to)}`] })];
+  const parts = [header({ target, kind: 'fresh', migration: last, extra: [`construcción desde cero 0000..${pad(to)}`], nonce })];
   parts.push(`do $agx_migrate_check$
 begin
   if to_regnamespace('agx') is not null or to_regnamespace('agx_meta') is not null then
@@ -537,8 +572,8 @@ $agx_migrate_check$;
       }
     }
   }
-  parts.push(trailer(present.length ? { present, absent: [] } : null));
-  return { sql: parts.join('\n'), expectation: present.length ? { present, absent: [] } : null };
+  parts.push(trailer(present.length ? { present, absent: [] } : null, nonce));
+  return { sql: parts.join('\n'), expectation: present.length ? { present, absent: [] } : null, nonce };
 }
 
 /**
@@ -601,11 +636,11 @@ $agx_migrate_pre$;
  * propio ledger), con su checksum UP intacto. Las precondiciones de datos
  * se comprueban en la misma transacción.
  */
-export function buildRollbackBundle({ target, migration, ledgerVersion, historical, evidence = null }) {
+export function buildRollbackBundle({ target, migration, ledgerVersion, historical, evidence = null, nonce = newNonce() }) {
   if (!migration.rollback) throw fail('AGX_MIGRATE_NO_ROLLBACK', `${migration.filename} no tiene archivo de rollback`);
   const v = migration.version;
   const extra = evidence ? [`backup-evidence sha256=${evidence.sha256} bytes=${evidence.size} toc=${evidence.entries}`] : [];
-  const parts = [header({ target, kind: historical ? 'rollback-historico' : 'rollback', migration: migration.rollback, extra })];
+  const parts = [header({ target, kind: historical ? 'rollback-historico' : 'rollback', migration: migration.rollback, extra, nonce })];
   parts.push(`do $agx_migrate_check$
 declare
   top integer;
@@ -631,7 +666,7 @@ $agx_migrate_check$;
   parts.push(REASSERT);
   parts.push(`select set_config('agx_meta.revertir_version', '${v}', true) as agx_migrate_revert \\gset\n`);
   parts.push(`delete from agx_meta.schema_migrations where version = ${v};\n`);
-  parts.push(trailer({ present: [], absent: [v] }));
+  parts.push(trailer({ present: [], absent: [v] }, nonce));
   return parts.join('\n');
 }
 

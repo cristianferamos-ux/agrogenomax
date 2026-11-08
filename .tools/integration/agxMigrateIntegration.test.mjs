@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { main as migrate, defaultExecPsql } from '../agx-migrate.mjs';
 import { sanitizedPgEnv } from '../agx-migrate-lib.mjs';
+import { lexPsql } from '../agx-psql-lexer.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const BUSINESS = process.env.AGX_MIG_BUSINESS_ADMIN_URL;
@@ -341,7 +342,7 @@ describe('guards del runner (integración real)', { skip }, () => {
     const vars = ['-v', `agx_app_password=${secrets.AGX_MIG_APP_PW}`, '-v', `agx_qr_admin_password=${secrets.AGX_MIG_QR_PW}`];
     let res = psqlFile(empty, out, vars);
     assert.equal(res.status, 0, res.stderr);
-    assert.match(res.stdout, /AGX_MIGRATE_COMMITTED xid=/);
+    assert.match(res.stdout, /AGX_MIGRATE_COMMITTED [0-9a-f]{32} xid=/);
     const r = (await admin(empty, "select to_regnamespace('agx') is not null as agx, to_regnamespace('agx_meta') is null as sin_ledger, to_regclass('agx.reproduccion_eventos') is not null as t26")).rows[0];
     assert.deepEqual(r, { agx: true, sin_ledger: true, t26: true });
     // Mismo bundle sobre la base ya construida (sin ledger) y sobre una base con ledger: NOT_FRESH, nada cambia.
@@ -450,5 +451,185 @@ describe('guards del runner (integración real)', { skip }, () => {
     } finally {
       fs.rmSync(f, { force: true });
     }
+  });
+});
+
+// ---------------------------------------------------------------------
+// Fix del bypass de la revisión final del PR #119.
+// ---------------------------------------------------------------------
+const EXPLOIT = fs.readFileSync(path.join(ROOT, '.tools/integration/fixtures/exploit_0028_quoted_identifier.sql'), 'utf8').replace(/\r\n/g, '\n');
+const BUSINESS_CONTAINER = process.env.AGX_MIG_BUSINESS_CONTAINER;
+const AUTH_CONTAINER = process.env.AGX_MIG_AUTH_CONTAINER;
+
+function containerPsql(container, db, input) {
+  return spawnSync('docker', ['exec', '-i', container, 'psql', '-U', 'postgres', '-d', db, '-X', '-q', '-At', '-f', '-'], { input, encoding: 'utf8' });
+}
+
+describe('bypass del escáner: exploit, SQL puro y defensa en runtime', { skip }, () => {
+  let root;
+  let url;
+
+  before(async () => {
+    root = sandbox();
+    url = dbUrl(BUSINESS, await createDb(BUSINESS, 'agx_exploit'));
+    await run(['up', '--target', 'business', '--fresh', ...BUSINESS_VARS], url, root);
+  });
+
+  after(() => { if (root) fs.rmSync(root, { recursive: true, force: true }); });
+
+  test('exploit ANTES (clase de fallo en psql): exit 0, error 1/0, COMMIT real y ledger 0028 con aplicación parcial', async () => {
+    // Base aparte: lo que hacía el bundle sin el fix (contenido + reafirmación + ledger + commit).
+    const demo = dbUrl(BUSINESS, await createDb(BUSINESS, 'agx_exploit_before'));
+    await run(['up', '--target', 'business', '--fresh', ...BUSINESS_VARS], demo, root);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agx-exploit-'));
+    try {
+      const f = path.join(dir, 'antes.sql');
+      fs.writeFileSync(f, [
+        '\\set ON_ERROR_STOP 1', 'begin;', EXPLOIT, '\\set ON_ERROR_STOP 1', '\\unset ON_ERROR_ROLLBACK',
+        "insert into agx_meta.schema_migrations (version, filename, checksum_sha256, kind, runner_version) values (28, '0028_bypass_quoted_identifier.sql', repeat('a', 64), 'aplicada', 'pre-fix');",
+        'commit;', '',
+      ].join('\n'));
+      const res = psqlFile(demo, f);
+      assert.equal(res.status, 0, res.stderr);
+      assert.match(res.stderr, /division by zero/);
+      assert.deepEqual((await ledger(demo)).filter((r) => r.version === 28), [{ version: 28, kind: 'aplicada' }]);
+      const t = (await admin(demo, "select to_regclass('agx.bypass_a') is not null as a, to_regclass('agx.bypass_b') is not null as b")).rows[0];
+      assert.deepEqual(t, { a: true, b: true });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('exploit DESPUÉS: el mismo archivo aborta ANTES de ejecutar nada (sin ledger 0028, sin bypass_a/b)', async () => {
+    const f = path.join(MIG_DIR(root), '0028_bypass_quoted_identifier.sql');
+    fs.writeFileSync(f, EXPLOIT);
+    try {
+      await rejectsWith(run(['up', '--target', 'business'], url, root), 'AGX_MIGRATE_META_COMMAND');
+      await rejectsWith(run(['plan', '--target', 'business'], url, root), 'AGX_MIGRATE_META_COMMAND');
+      // Ni siquiera se conecta: con una URL inalcanzable falla igual por política, no por conexión.
+      await rejectsWith(run(['up', '--target', 'business'], 'postgres://x:y@127.0.0.1:1/nada', root), 'AGX_MIGRATE_META_COMMAND');
+      const out = path.join(root, 'b28.sql');
+      await rejectsWith(migrate(['bundle', '--target', 'business', '--version', '28', '--out', out, '--root', root], { log: () => {} }), 'AGX_MIGRATE_META_COMMAND');
+      assert.equal(fs.existsSync(out), false);
+      assert.equal((await ledger(url)).length, 28);
+      const t = (await admin(url, "select to_regclass('agx.bypass_a') as a, to_regclass('agx.bypass_b') as b")).rows[0];
+      assert.deepEqual(t, { a: null, b: null });
+    } finally {
+      fs.rmSync(f, { force: true });
+    }
+  });
+
+  test('LAST_ERROR_SQLSTATE es acumulativo en psql 16 y 18 (OK, ERROR ignorado, OK, OK)', () => {
+    const script = [
+      '\\set ON_ERROR_STOP 0',
+      "\\echo 'inicio=' :LAST_ERROR_SQLSTATE",
+      'select 1;', 'select 1 / 0;', 'select 2;', 'select 3;',
+      "\\echo 'tras_exitos=' :LAST_ERROR_SQLSTATE",
+      'begin;', '\\set ON_ERROR_ROLLBACK on', 'select 4;', "select 'x'::integer;", 'select 5;', 'commit;',
+      "\\echo 'tras_on_error_rollback=' :LAST_ERROR_SQLSTATE", '',
+    ].join('\n');
+    const runs = [['local', null]];
+    if (BUSINESS_CONTAINER) runs.push(['psql 16 (contenedor business)', BUSINESS_CONTAINER]);
+    if (AUTH_CONTAINER) runs.push(['psql 18 (contenedor auth)', AUTH_CONTAINER]);
+    assert.ok(runs.length === 3, 'faltan los contenedores para probar psql 16 y 18');
+    for (const [label, container] of runs) {
+      let res;
+      if (container) {
+        res = containerPsql(container, 'postgres', script);
+      } else {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agx-lasterr-'));
+        const f = path.join(dir, 's.sql');
+        fs.writeFileSync(f, script);
+        res = psqlFile(BUSINESS, f, ['-At']);
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+      const lines = Object.fromEntries(res.stdout.replace(/\r/g, '').split('\n').filter((l) => l.includes('=')).map((l) => l.split('= ').map((x) => x.trim())));
+      assert.equal(lines.inicio, '00000', `${label}: ${res.stdout}`);
+      assert.equal(lines.tras_exitos, '22012', `${label}: el error se perdió tras sentencias exitosas`);
+      assert.equal(lines.tras_on_error_rollback, '22P02', label);
+    }
+  });
+
+  test('runtime: aunque la política estática fallara, el error acumulado aborta antes del ledger (OK, ERROR ignorado, OK, ledger, COMMIT -> FAIL)', async () => {
+    const f = path.join(MIG_DIR(root), '0028_it_runtime.sql');
+    fs.writeFileSync(f, 'create table agx.it_rt_ok1 (id integer);\n');
+    // psql "manipulado": sustituye el contenido SQL puro por el exploit, como si el lexer no lo hubiera visto.
+    const execPsql = (env, args) => {
+      const file = args[args.indexOf('-f') + 1];
+      const sql = fs.readFileSync(file, 'utf8').replace('create table agx.it_rt_ok1 (id integer);\n', `${EXPLOIT}create table agx.it_rt_ok2 (id integer);\n`);
+      fs.writeFileSync(file, sql);
+      return defaultExecPsql(env, args);
+    };
+    try {
+      await rejectsWith(run(['up', '--target', 'business'], url, root, { execPsql }), 'AGX_MIGRATE_SUPPRESSED_ERROR');
+      assert.equal((await ledger(url)).length, 28);
+      const t = (await admin(url, "select to_regclass('agx.bypass_a') as a, to_regclass('agx.bypass_b') as b, to_regclass('agx.it_rt_ok2') as c")).rows[0];
+      assert.deepEqual(t, { a: null, b: null, c: null });
+    } finally {
+      fs.rmSync(f, { force: true });
+    }
+  });
+
+  test('marcador de COMMIT falso anterior al real (mismo nonce, xid committed ajeno) no engaña al runner', async () => {
+    const empty = dbUrl(BUSINESS, await createDb(BUSINESS, 'agx_marker'));
+    const foreignXid = (await admin(empty, 'select pg_current_xact_id()::text as x')).rows[0].x; // transacción ajena, committed
+    const execPsql = (env, args) => {
+      const file = args[args.indexOf('-f') + 1];
+      let sql = fs.readFileSync(file, 'utf8');
+      const nonce = /AGX_MIGRATE_COMMITTED ([0-9a-f]{32}) xid=/.exec(sql)[1];
+      sql = sql
+        .replace(/-- <agx-migrate-commit>[\s\S]*?-- <\/agx-migrate-commit>/, 'rollback;')
+        .replace('begin;', `\\echo 'AGX_MIGRATE_COMMITTED ${nonce} xid=' ${foreignXid}\nbegin;`);
+      fs.writeFileSync(file, sql);
+      const res = defaultExecPsql(env, args);
+      assert.equal(res.status, 0, res.stderr);
+      assert.ok(res.stdout.indexOf(`xid= ${foreignXid}`) < res.stdout.lastIndexOf('AGX_MIGRATE_COMMITTED'));
+      return res;
+    };
+    // fresh sin ledger (0000..0026): solo el xid puede probar el COMMIT.
+    await rejectsWith(run(['up', '--target', 'business', '--fresh', '--to', '26', ...BUSINESS_VARS], empty, root, { execPsql }), 'AGX_MIGRATE_POST_VERIFY');
+    assert.equal((await admin(empty, "select to_regnamespace('agx') as r")).rows[0].r, null);
+  });
+
+  test('diferencial lexer vs psql real: si psql ejecuta el metacomando, el lexer lo detecta (o rechaza el archivo)', () => {
+    const fragments = [
+      '"it\'s"', '"a--b"', 'x$q$', '$q$', "E'\\''", "e'\\\\'", "'it''s'", "'a\\'", '$$', '$t$ \' $t$', '/* /* */ */', '/* */',
+      '--', ';', '\n', ' ', '\t', ' ', "U&'x'", 'U&"a\'b"', "N'x'", "B'1'", ":'v'", ':v', '::text', 'select 1', '"', "'", '$', 'x', '1', '/*', '*/', "E'", '\\\\',
+      "-- 'x\n", '-- "x\n', '-- $q$\n', "/* ' */", "1E'\\'", "2x'\\'", 'a1$q$', '1$q$',
+    ];
+    let seed = 42;
+    const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agx-diff-'));
+    let executed = 0;
+    let rejected = 0;
+    try {
+      for (let c = 0; c < 160; c += 1) {
+        let prefix = '';
+        for (let k = 0, len = 1 + rnd(6); k < len; k += 1) prefix += fragments[rnd(fragments.length)];
+        const mark = `AGXMARK${c}`;
+        const sql = `${prefix} \\echo ${mark}\nselect 1;\n`;
+        const f = path.join(dir, `c${c}.sql`);
+        fs.writeFileSync(f, sql);
+        const res = psqlFile(BUSINESS, f, ['-v', 'ON_ERROR_STOP=0']);
+        const ran = res.stdout.replace(/\r/g, '').split('\n').some((l) => l.trim() === mark);
+        let detected;
+        try {
+          detected = lexPsql(sql).metas.some((m) => m.text.includes(mark));
+        } catch (e) {
+          assert.equal(e.code, 'AGX_MIGRATE_LEXER');
+          detected = 'rechazado';
+          rejected += 1;
+        }
+        if (ran) {
+          executed += 1;
+          assert.ok(detected, `psql ejecutó el metacomando y el lexer no lo vio: ${JSON.stringify(prefix)}`);
+        }
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+    // El corpus aleatorio debe ejercer ambos lados (casos que psql ejecuta y casos ocultos/rechazados).
+    assert.ok(executed > 20, `solo ${executed} casos ejecutados`);
+    assert.ok(rejected > 5, `solo ${rejected} casos rechazados`);
   });
 });

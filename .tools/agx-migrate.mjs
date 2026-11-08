@@ -24,6 +24,7 @@ import {
   TARGETS, RUNNER_VERSION, SSL_MODES, fail, pad, listMigrations, ledgerEntries, planFromLedger,
   buildUpBundle, buildFreshBundle, buildRollbackBundle, assertRollbackAllowed, extractFingerprintQuery,
   certificationMd5, certificationLines, kindFor, ledgerExpectation, rollbackExpectation, sanitizedPgEnv, redact,
+  newNonce, parseCommitMarker,
 } from './agx-migrate-lib.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -161,7 +162,7 @@ export function verifyLedgerExpectation(ledger, expectation) {
   if (bad.length) throw fail('AGX_MIGRATE_POST_VERIFY', `el ledger no refleja la ejecución: ${bad.slice(0, 5).join('; ')}`);
 }
 
-function runBundle({ env, sql, vars, label, log, expectation, execPsql }) {
+function runBundle({ env, sql, nonce, vars, label, log, expectation, execPsql }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agx-migrate-'));
   const file = path.join(dir, 'bundle.sql');
   // Las variables (contraseñas) viajan por el entorno del proceso psql y
@@ -177,7 +178,8 @@ function runBundle({ env, sql, vars, label, log, expectation, execPsql }) {
   try {
     const res = execPsql(childEnv, ['-f', file]);
     if (res.status !== 0) {
-      const err = (res.stderr || '').replace(/\r/g, '').split('\n').find((l) => /ERROR|FATAL/.test(l)) || `psql salió con ${res.status}`;
+      // El error que detuvo psql es el ÚLTIMO (con ON_ERROR_STOP, psql se detiene en él).
+      const err = (res.stderr || '').replace(/\r/g, '').split('\n').filter((l) => /ERROR|FATAL/.test(l)).pop() || `psql salió con ${res.status}`;
       const code = /AGX_MIGRATE_[A-Z_]+/.exec(err)?.[0] ?? 'AGX_MIGRATE_SQL_ERROR';
       const detail = err.replace(/^.*?(ERROR|FATAL):\s*/, '').replace(/^AGX_MIGRATE_[A-Z_]+:\s*/, '');
       throw fail(code, redact(`${label}: ${detail} (transacción revertida, ledger sin cambios)`, secrets));
@@ -188,7 +190,8 @@ function runBundle({ env, sql, vars, label, log, expectation, execPsql }) {
       const state = readDbState(env);
       verifyLedgerExpectation(state.ledger, expectation);
     }
-    const xid = /AGX_MIGRATE_COMMITTED xid=\s*(\d+)/.exec(res.stdout || '')?.[1];
+    // Solo cuenta la ÚLTIMA marca con el nonce de esta ejecución.
+    const xid = parseCommitMarker(res.stdout, nonce);
     if (!xid) throw fail('AGX_MIGRATE_POST_VERIFY', `${label}: psql no emitió la marca de COMMIT`);
     const status = query(env, `select pg_xact_status('${xid}'::xid8)`);
     if (status !== 'committed') throw fail('AGX_MIGRATE_POST_VERIFY', `${label}: la transacción ${xid} terminó ${status || 'sin estado'}, no committed`);
@@ -218,8 +221,9 @@ export function bundleFor(target, migrations, version) {
     throw fail('AGX_MIGRATE_HISTORICAL_BUNDLE_BLOCKED', `${migration.filename} es anterior al ledger: solo se construye con --fresh sobre una base vacía`);
   }
   const expected = ledgerEntries(migrations, version);
-  const sql = buildUpBundle({ target: target.name, migration, kind, expected, fingerprint: kind === 'bootstrap' ? fingerprintSpec(target) : null });
-  return { migration, kind, sql, expectation: ledgerExpectation({ migration, kind, expected }) };
+  const nonce = newNonce();
+  const sql = buildUpBundle({ target: target.name, migration, kind, expected, fingerprint: kind === 'bootstrap' ? fingerprintSpec(target) : null, nonce });
+  return { migration, kind, sql, nonce, expectation: ledgerExpectation({ migration, kind, expected }) };
 }
 
 export function freshBundleFor(target, migrations, options) {
@@ -244,13 +248,14 @@ function rollbackPlan(target, migrations, options, log) {
   if (!migration) throw fail('AGX_MIGRATE_ARGS', `no existe ${pad(version)}`);
   const { historical, evidence } = assertRollbackAllowed({ config: target, version, options });
   if (evidence) log(`backup-evidence sha256=${evidence.sha256} bytes=${evidence.size} entradas_toc=${evidence.entries}`);
-  return { version, migration, historical, sql: buildRollbackBundle({ target: target.name, migration, ledgerVersion: target.ledgerVersion, historical, evidence }) };
+  const nonce = newNonce();
+  return { version, migration, historical, nonce, sql: buildRollbackBundle({ target: target.name, migration, ledgerVersion: target.ledgerVersion, historical, evidence, nonce }) };
 }
 
 export async function main(argv, { env = process.env, log = console.log, execPsql = defaultExecPsql } = {}) {
   const { command, options } = parseArgs(argv);
   const target = resolveTarget(options);
-  const migrations = listMigrations(target.dir);
+  const migrations = listMigrations(target.dir, target.name);
 
   if (command === 'status') {
     for (const m of migrations) log(`${pad(m.version)} ${m.filename} sha256=${m.checksum}${m.rollback ? ' [rollback]' : ''}${m.variables.length ? ` vars=${m.variables.join(',')}` : ''}`);
@@ -287,7 +292,7 @@ export async function main(argv, { env = process.env, log = console.log, execPsq
         return 0;
       }
       requireVars(fresh.chosen, vars);
-      runBundle({ env: conn, sql: fresh.sql, vars, label: `fresh 0000..${pad(fresh.to)}`, log, expectation: fresh.expectation, execPsql });
+      runBundle({ env: conn, sql: fresh.sql, nonce: fresh.nonce, vars, label: `fresh 0000..${pad(fresh.to)}`, log, expectation: fresh.expectation, execPsql });
       return 0;
     }
     const to = options.to === undefined ? migrations.length - 1 : Number(options.to);
@@ -315,8 +320,8 @@ export async function main(argv, { env = process.env, log = console.log, execPsq
     }
     requireVars(pending, vars);
     for (const m of pending) {
-      const { sql, kind, expectation } = bundleFor(target, migrations, m.version);
-      runBundle({ env: conn, sql, vars, label: `${m.filename} (${kind})`, log, expectation, execPsql });
+      const { sql, nonce, kind, expectation } = bundleFor(target, migrations, m.version);
+      runBundle({ env: conn, sql, nonce, vars, label: `${m.filename} (${kind})`, log, expectation, execPsql });
     }
     if (!pending.length) log('sin migraciones pendientes');
     return 0;
@@ -327,7 +332,7 @@ export async function main(argv, { env = process.env, log = console.log, execPsq
     if (!state.hasLedger) throw fail('AGX_MIGRATE_NO_LEDGER', 'sin ledger no se ejecutan rollbacks');
     planFromLedger(migrations, state.ledger);
     runBundle({
-      env: conn, sql: plan.sql, vars, label: `${plan.migration.rollback.filename}${plan.historical ? ' (histórico)' : ''}`,
+      env: conn, sql: plan.sql, nonce: plan.nonce, vars, label: `${plan.migration.rollback.filename}${plan.historical ? ' (histórico)' : ''}`,
       log, expectation: rollbackExpectation(plan.version), execPsql,
     });
     return 0;

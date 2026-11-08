@@ -10,13 +10,15 @@ import {
   planFromLedger, destructiveTargets, assertRollbackAllowed, certificationMd5, certificationLines,
   extractFingerprintQuery, buildUpBundle, buildRollbackBundle, ledgerEntries, buildFreshBundle,
   sanitizedPgEnv, redact, inspectBackupEvidence, MIN_BACKUP_EVIDENCE_BYTES,
+  auditMigration, FROZEN, FROZEN_MANIFEST_PATH, newNonce, parseCommitMarker,
 } from '../agx-migrate-lib.mjs';
+import { lexPsql } from '../agx-psql-lexer.mjs';
 import { parseArgs, connectionEnv, main, verifyLedgerExpectation } from '../agx-migrate.mjs';
 import { normalizeForRestoreCompare, databaseLevelStatements } from '../agx-dr-verify.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
-const business = listMigrations(path.join(ROOT, TARGETS.business.dir));
-const auth = listMigrations(path.join(ROOT, TARGETS.auth.dir));
+const business = listMigrations(path.join(ROOT, TARGETS.business.dir), 'business');
+const auth = listMigrations(path.join(ROOT, TARGETS.auth.dir), 'auth');
 
 test('las migraciones reales son contiguas, sin control de transacción y con rollback emparejado', () => {
   assert.equal(business.length, 28);
@@ -42,13 +44,13 @@ test('checksum sobre contenido LF: solo CRLF -> LF; BOM y CR suelto se rechazan;
 
 test('detección de control de transacción y metacomandos peligrosos', () => {
   for (const sql of ['begin;\nselect 1;', 'select 1;\ncommit;', 'select 1;\nEND;', 'start transaction;', 'select 1; rollback;', 'savepoint a;']) {
-    assert.throws(() => assertBundleSafe(sql, 'x.sql'), (e) => e.code === 'AGX_MIGRATE_TX_CONTROL', sql);
+    assert.throws(() => assertBundleSafe(sql, '0099_x.sql'), (e) => e.code === 'AGX_MIGRATE_TX_CONTROL', sql);
   }
   for (const sql of ['\\connect otra', '\\c otra', '\\i otro.sql', '\\! rm -rf /', 'select 1 \\g /tmp/x']) {
-    assert.throws(() => assertBundleSafe(sql, 'x.sql'), (e) => e.code === 'AGX_MIGRATE_META_COMMAND', sql);
+    assert.throws(() => assertBundleSafe(sql, '0099_x.sql'), (e) => e.code === 'AGX_MIGRATE_META_COMMAND', sql);
   }
-  // Válidos: plpgsql con begin/end dentro de $$, comentarios y cadenas con la palabra commit, \if/\gset.
-  assertBundleSafe("create function f() returns void language plpgsql as $$\nbegin\n  perform 1;\nend;\n$$;\n-- commit;\nselect 'commit;';\nselect 1 as a \\gset\n\\if :a\n\\endif\n", 'ok.sql');
+  // Válido: plpgsql con begin/end dentro de $$, comentarios y cadenas con la palabra commit (SQL puro).
+  assertBundleSafe("create function f() returns void language plpgsql as $$\nbegin\n  perform 1;\nend;\n$$;\n-- commit;\nselect 'commit;';\nselect 1 as a;\n", '0099_ok.sql');
   assert.ok(!stripSqlForScan("select 'a;b' -- c;\n").includes('a;b'));
 });
 
@@ -121,7 +123,7 @@ test('bundles: transacción explícita, lock, verificaciones antes de la migraci
   for (const code of ['AGX_MIGRATE_NO_LEDGER', 'AGX_MIGRATE_ALREADY_APPLIED', 'AGX_MIGRATE_CHECKSUM_MISMATCH', 'AGX_MIGRATE_GAP', 'AGX_MIGRATE_OUT_OF_ORDER']) assert.match(normal, new RegExp(code));
   assert.ok(normal.indexOf('AGX_MIGRATE_OUT_OF_ORDER') < normal.indexOf('>>> 0028_x.sql'));
   assert.ok(normal.indexOf("'aplicada'") < normal.indexOf('commit;'));
-  assert.ok(normal.trimEnd().endsWith("\\echo 'AGX_MIGRATE_COMMITTED xid=' :agx_migrate_xid"));
+  assert.match(normal.trimEnd().split('\n').pop(), /^\\echo 'AGX_MIGRATE_COMMITTED [0-9a-f]{32} xid=' :agx_migrate_xid$/);
   // Una migración anterior al ledger nunca tiene bundle individual.
   assert.throws(() => buildUpBundle({ target: 'business', migration: business[26], kind: 'plain' }), (e) => e.code === 'AGX_MIGRATE_HISTORICAL_BUNDLE_BLOCKED');
 });
@@ -193,13 +195,10 @@ test('guard B: whitelist de metacomandos -- control del runner, SQL dinámico, c
   for (const sql of rejected) {
     assert.throws(() => assertBundleSafe(sql, '0099_x.sql'), (e) => e.code === 'AGX_MIGRATE_META_COMMAND', sql);
   }
-  // Permitidos: variables en minúsculas, \set ON_ERROR_STOP on (refuerza), \if, \echo, \gset simple.
-  assertBundleSafe("\\set ON_ERROR_STOP on\n\\set x 1\n\\unset x\nselect count(*) > 0 as hay \\gset\n\\if :hay\n\\echo 'si'\n\\elif :hay\n\\else\n\\warn 'no'\n\\endif\nselect 1 as a \\gset pre_\n", '0099_ok.sql');
-  // Excepción histórica \gexec: solo 0023 con su checksum exacto.
-  const m23 = business[23];
-  assertBundleSafe(m23.content, m23.filename, m23.checksum);
-  assert.throws(() => assertBundleSafe(`${m23.content}-- cambio\n`, m23.filename, sha256(`${m23.content}-- cambio\n`)), (e) => e.code === 'AGX_MIGRATE_META_COMMAND');
-  assert.throws(() => assertBundleSafe(m23.content, '0099_copia.sql', m23.checksum), (e) => e.code === 'AGX_MIGRATE_META_COMMAND');
+  // SQL puro: en una migración nueva ya no se admite NINGÚN metacomando, ni siquiera los "inocuos".
+  for (const sql of ['\\set ON_ERROR_STOP on', '\\set x 1', '\\unset x', 'select 1 as a \\gset', '\\if :a\n\\endif', "\\echo 'si'", "\\warn 'no'", 'select 1 as a \\gset pre_']) {
+    assert.throws(() => assertBundleSafe(`${sql}\n`, '0099_x.sql'), (e) => e.code === 'AGX_MIGRATE_META_COMMAND', sql);
+  }
 });
 
 test('guard A (1): bundle de una versión anterior al ledger sin --fresh FAIL; con --fresh es una construcción desde cero', async () => {
@@ -305,4 +304,198 @@ test('guard F (12): evidencia de backup -- 5 bytes PGDMP, tamaño mínimo y dump
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ---------------------------------------------------------------------
+// Fix del bypass (PR #119, revisión final): lexer compatible con psql,
+// SQL puro para migraciones nuevas, historial congelado, nonce.
+// ---------------------------------------------------------------------
+
+// Corpus adversarial: cada entrada contiene un metacomando que psql SÍ
+// ejecutaría. En una migración nueva todas deben fallar.
+const ADVERSARIAL = {
+  'A identificador con apóstrofo': 'select 1 as "it\'s"; \\set ON_ERROR_STOP 0\n',
+  'A bis (exploit real)': 'select 1 as "it\'s";\n\\set ON_ERROR_STOP 0\n\\set ON_ERROR_ROLLBACK on\nselect \'x\';\ncreate table agx.bypass_a (id integer);\nselect 1 / 0;\ncreate table agx.bypass_b (id integer);\n',
+  'B identificador con --': 'select 1 as "a--b"; \\gexec\n',
+  'C x$q$...y$q$': 'select 1 as x$q$;\n\\set ON_ERROR_ROLLBACK on\nselect 1 as y$q$;\n',
+  "D E'\\'' + meta": "select E'\\'';\n\\set ON_ERROR_STOP 0\nselect 'x';\n",
+  "D bis e'\\\\' + meta": "select e'\\\\';\n\\set ON_ERROR_STOP 0\n",
+  'comentario anidado /* /* */ */ seguido de meta': '/* a /* b */ c */ \\set ON_ERROR_STOP 0\n',
+  'dollar quote cerrado y meta': 'select $f$ a \' b $f$; \\o /tmp/x\n',
+  'dollar quote con tag y meta dentro de otro tag': 'select $a$ $b$ $a$; \\gexec\n',
+  'meta tras ;': 'select 1; \\set ON_ERROR_STOP 0\n',
+  'meta con tabs': 'select 1;\t\\set\tON_ERROR_STOP\t0\n',
+  'meta tras espacio Unicode (NBSP)': 'select 1;\u00a0\\set ON_ERROR_STOP 0\n',
+  'CRLF': 'select 1;\r\n\\set ON_ERROR_STOP 0\r\n',
+  'varias \\set en una línea': '\\set A 1 \\set ON_ERROR_STOP 0\n',
+  '\\gexec oculto en "a--b"': 'select \'select 1\' as "x--y" \\gexec\n',
+  '\\connect oculto': 'select 1 as "it\'s"; \\connect otra\n',
+  '\\!': '\\! id\n',
+  '\\o': '\\o /tmp/salida\n',
+  '\\copy': '\\copy agx.t from \'/etc/passwd\'\n',
+  '\\gset malicioso (TABLE)': 'create temp table t ("ON_ERROR_ROLLBACK" text);\ninsert into t values (\'on\');\ntable t \\gset\n',
+  'agx_migrate_* reservado (\\set)': '\\set agx_migrate_xid 3\n',
+  'marcador COMMIT falso (\\echo)': "\\echo 'AGX_MIGRATE_COMMITTED 00000000000000000000000000000000 xid=' 3\n",
+  'U&"..." con apóstrofo': 'select 1 as U&"it\'s"; \\set ON_ERROR_STOP 0\n',
+  'N\'...\' y meta': "select N'x'; \\set ON_ERROR_STOP 0\n",
+  // PG >= 15: 1E'...' es token basura 1E + cadena ESTÁNDAR: el \' NO escapa y el meta queda en código.
+  "número basura 1E'\\' + meta": "select 1E'\\' \\set ON_ERROR_STOP 0\n",
+  "comentario -- con comilla": "-- 'x\n\\set ON_ERROR_STOP 0\n",
+};
+
+test('lexer: detecta el metacomando que psql ejecutaría en cada caso del corpus', () => {
+  for (const [name, sql] of Object.entries(ADVERSARIAL)) {
+    const { metas } = lexPsql(normalizeSql(sql.replace(/\r(?!\n)/g, '')));
+    assert.ok(metas.length >= 1, `${name}: el lexer no vio el metacomando`);
+  }
+  // Y NO inventa metacomandos dentro de construcciones que psql trata como texto.
+  for (const sql of [
+    "select 'a \\set x';", 'select "id \\set";', "select $$ \\set x $$;", "select $t$ \\gexec $t$;",
+    '-- \\set ON_ERROR_STOP 0\nselect 1;', '/* \\gexec */ select 1;', '/* /* */ \\set x */ select 1;',
+    "select E'\\\\';", "select E'\\'\\set';", "select U&'\\0041';",
+  ]) {
+    assert.deepEqual(lexPsql(sql).metas, [], sql);
+  }
+  // Construcciones sin cerrar: error explícito, nunca una suposición.
+  for (const sql of ["select 'abierta", 'select "abierto', 'select $q$ abierto', '/* /* */ abierto', "select E'\\'"]) {
+    assert.throws(() => lexPsql(sql), (e) => e.code === 'AGX_MIGRATE_LEXER', sql);
+  }
+  // $ dentro de identificadores no abre dollar-quote; tras un número sí.
+  assert.deepEqual(lexPsql('select x$q$ \\set a 1\n').metas.map((m) => m.cmd), ['set']);
+  assert.deepEqual(lexPsql('select 1$q$ \\set a 1 $q$;').metas, []);
+  // Variables psql: literal, identificador, raw y {?}.
+  assert.deepEqual(lexPsql("select :'a', :\"b\", :c, :{?d}, x::text;").vars.map((v) => `${v.kind}:${v.name}`), ['literal:a', 'identifier:b', 'raw:c', 'defined:d']);
+});
+
+test('política SQL puro: todo el corpus adversarial FALLA en una migración nueva (0028+)', () => {
+  for (const [name, raw] of Object.entries(ADVERSARIAL)) {
+    const content = normalizeSql(raw.replace(/\r(?!\n)/g, ''));
+    assert.throws(() => auditMigration({ content, filename: '0028_x.sql', checksum: sha256(content), target: 'business' }),
+      (e) => ['AGX_MIGRATE_META_COMMAND', 'AGX_MIGRATE_RESERVED_VAR'].includes(e.code), name);
+    assert.throws(() => auditMigration({ content, filename: '0003_x.sql', checksum: sha256(content), target: 'auth' }),
+      (e) => ['AGX_MIGRATE_META_COMMAND', 'AGX_MIGRATE_RESERVED_VAR'].includes(e.code), `auth ${name}`);
+  }
+  // Ninguna barra invertida, ni siquiera dentro de cadenas o comentarios.
+  for (const sql of ["select 'a\\b';\n", "-- comentario \\ con barra\nselect 1;\n", "select E'\\n';\n"]) {
+    assert.throws(() => assertBundleSafe(sql, '0028_x.sql'), (e) => e.code === 'AGX_MIGRATE_META_COMMAND', sql);
+  }
+  // Variables reservadas aunque sean solo interpolación (sin metacomando).
+  for (const sql of ["select :'agx_migrate_xid';\n", 'select :agx_migrate_xid;\n', 'select :"AGX_MIGRATE_X";\n', 'select :{?agx_migrate_x};\n']) {
+    assert.throws(() => assertBundleSafe(sql, '0028_x.sql'), (e) => e.code === 'AGX_MIGRATE_RESERVED_VAR', sql);
+  }
+  // SQL puro válido, incluida interpolación de una variable no reservada.
+  assertBundleSafe("create table agx.t (id integer check (id > 0));\ncomment on table agx.t is 'it''s';\nselect $$ a $$, :'pw', x$y from agx.t;\n", '0028_ok.sql');
+});
+
+test('historial congelado: solo los archivos y checksums exactos, con sus metacomandos exactos', () => {
+  const frozenB = FROZEN.business.files;
+  assert.equal(FROZEN.business.maxVersion, 27);
+  assert.equal(FROZEN.auth.maxVersion, 2);
+  assert.equal(Object.keys(frozenB).length, 54);
+  assert.equal(Object.keys(FROZEN.auth.files).length, 5);
+  // Solo tres archivos históricos tienen metacomandos.
+  const withMeta = (t) => Object.entries(FROZEN[t].files).filter(([, e]) => e.metas.length).map(([f]) => f);
+  assert.deepEqual(withMeta('business'), ['0000_bootstrap_roles.sql', '0023_qr_inventario_chapetas.sql']);
+  assert.deepEqual(withMeta('auth'), ['0000_baseline_auth_schema.sql']);
+  assert.deepEqual(frozenB['0023_qr_inventario_chapetas.sql'].metas.map((m) => m.split(/\s/)[0]), ['\\gset', '\\if', '\\else', '\\echo', '\\endif', '\\gexec']);
+  assert.equal(frozenB['0023_qr_inventario_chapetas.sql'].sha256, 'a1c630e8ee7c31194e79d9e613b35a18d1a8ef9404325c73d83d8a5a321bf861');
+  assert.deepEqual(FROZEN.auth.files['0000_baseline_auth_schema.sql'].metas.filter((m) => m.startsWith('\\set')), ['\\set ON_ERROR_STOP on']);
+
+  const m23 = business[23];
+  const a0 = auth[0];
+  auditMigration({ ...m23, target: 'business' });
+  auditMigration({ ...a0, target: 'auth' });
+  const tampered = (m, extra) => ({ content: `${m.content}${extra}`, filename: m.filename, checksum: sha256(`${m.content}${extra}`) });
+  // 0023: un byte significativo, un \gexec extra, otro archivo, otro checksum.
+  assert.throws(() => auditMigration({ ...tampered(m23, '-- cambio\n'), target: 'business' }), (e) => e.code === 'AGX_MIGRATE_HISTORICAL_TAMPERED');
+  assert.throws(() => auditMigration({ ...tampered(m23, "select 'select 1' \\gexec\n"), target: 'business' }), (e) => e.code === 'AGX_MIGRATE_HISTORICAL_TAMPERED');
+  assert.throws(() => auditMigration({ content: m23.content, filename: '0028_copia.sql', checksum: m23.checksum, target: 'business' }), (e) => e.code === 'AGX_MIGRATE_META_COMMAND');
+  assert.throws(() => auditMigration({ content: m23.content, filename: '0022_otro.sql', checksum: m23.checksum, target: 'business' }), (e) => e.code === 'AGX_MIGRATE_HISTORICAL_NOT_FROZEN');
+  assert.throws(() => auditMigration({ content: m23.content, filename: m23.filename, checksum: '0'.repeat(64), target: 'business' }), (e) => e.code === 'AGX_MIGRATE_HISTORICAL_TAMPERED');
+  // Auth 0000: \set ON_ERROR_STOP on es el ÚNICO \set; debilitarlo o variarlo cambia el checksum.
+  for (const variant of ['\\set ON_ERROR_STOP off', '\\set ON_ERROR_STOP 0', '\\unset ON_ERROR_STOP', '\\set ON_ERROR_STOP  on']) {
+    const content = a0.content.replace('\\set ON_ERROR_STOP on', variant);
+    assert.notEqual(content, a0.content);
+    assert.throws(() => auditMigration({ content, filename: a0.filename, checksum: sha256(content), target: 'auth' }), (e) => e.code === 'AGX_MIGRATE_HISTORICAL_TAMPERED', variant);
+  }
+  // Aunque el checksum "cuadrara" (manifiesto alterado), la secuencia de metacomandos se compara exacta.
+  const fakeEntry = { ...FROZEN.auth.files['0000_baseline_auth_schema.sql'] };
+  const weakened = a0.content.replace('\\set ON_ERROR_STOP on', '\\set ON_ERROR_STOP off');
+  FROZEN.auth.files['0000_baseline_auth_schema.sql'] = { ...fakeEntry, sha256: sha256(weakened) };
+  try {
+    assert.throws(() => auditMigration({ content: weakened, filename: a0.filename, checksum: sha256(weakened), target: 'auth' }), (e) => e.code === 'AGX_MIGRATE_META_COMMAND');
+  } finally {
+    FROZEN.auth.files['0000_baseline_auth_schema.sql'] = fakeEntry;
+  }
+  // El manifiesto vive junto al runner, no en el directorio de migraciones.
+  assert.ok(FROZEN_MANIFEST_PATH.replace(/\\/g, '/').endsWith('.tools/agx-migrate-frozen.json'));
+});
+
+test('historial congelado: --root/--migrations-dir no pueden retirar ni sustituir un archivo histórico', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agx-frozen-'));
+  try {
+    for (const f of fs.readdirSync(path.join(ROOT, TARGETS.business.dir))) fs.copyFileSync(path.join(ROOT, TARGETS.business.dir, f), path.join(dir, f));
+    listMigrations(dir, 'business');
+    fs.rmSync(path.join(dir, '0026_reproduccion_bovina_rollback.sql'));
+    assert.throws(() => listMigrations(dir, 'business'), (e) => e.code === 'AGX_MIGRATE_HISTORICAL_NOT_FROZEN');
+    fs.copyFileSync(path.join(ROOT, TARGETS.business.dir, '0026_reproduccion_bovina_rollback.sql'), path.join(dir, '0026_reproduccion_bovina_rollback.sql'));
+    fs.appendFileSync(path.join(dir, '0005_potrero_capacidad_pastoreo.sql'), 'select 1;\n');
+    assert.throws(() => listMigrations(dir, 'business'), (e) => e.code === 'AGX_MIGRATE_HISTORICAL_TAMPERED');
+    assert.throws(() => listMigrations(dir), (e) => e.code === 'AGX_MIGRATE_ARGS');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('runtime: cada migración termina con la comprobación de error acumulado antes del ledger', () => {
+  const next = { ...business[27], version: 28, filename: '0028_x.sql', content: 'select 1;\n', checksum: 'a'.repeat(64) };
+  const sql = buildUpBundle({ target: 'business', migration: next, kind: 'ledger', expected: ledgerEntries(business, 28), nonce: 'f'.repeat(32) });
+  const content = sql.indexOf('<<< 0028_x.sql');
+  const check = sql.indexOf("set_config('agx_migrate.last_error_sqlstate', :'LAST_ERROR_SQLSTATE', true)", content);
+  const insert = sql.indexOf("'aplicada', 'agx-migrate/1')");
+  assert.ok(content > 0 && check > content && check < insert, JSON.stringify({ content, check, insert }));
+  assert.match(sql.slice(check, insert), /AGX_MIGRATE_SUPPRESSED_ERROR/);
+  // También al inicio de la sesión y justo antes del COMMIT.
+  assert.ok(sql.indexOf('AGX_MIGRATE_SUPPRESSED_ERROR') < sql.indexOf('begin;'));
+  assert.ok(sql.lastIndexOf('AGX_MIGRATE_SUPPRESSED_ERROR') < sql.indexOf('\ncommit;'));
+  assert.ok(sql.lastIndexOf('AGX_MIGRATE_SUPPRESSED_ERROR') > insert);
+});
+
+test('marcador de COMMIT: nonce por ejecución, solo la última marca válida cuenta', () => {
+  const n = newNonce();
+  const other = newNonce();
+  assert.match(n, /^[0-9a-f]{32}$/);
+  assert.notEqual(n, other);
+  assert.equal(parseCommitMarker('AGX_MIGRATE_COMMITTED xid= 5\n', n), null);
+  assert.equal(parseCommitMarker(`AGX_MIGRATE_COMMITTED ${other} xid= 5\n`, n), null);
+  assert.equal(parseCommitMarker(`AGX_MIGRATE_COMMITTED ${n} xid= 7\n`, n), '7');
+  // Falso anterior (incluso con el nonce correcto) + real posterior: cuenta el último.
+  assert.equal(parseCommitMarker(`AGX_MIGRATE_COMMITTED ${n} xid= 3\nruido\nAGX_MIGRATE_COMMITTED ${n} xid= 912\n`, n), '912');
+  // Una marca incrustada en otra línea no cuenta.
+  assert.equal(parseCommitMarker(`x AGX_MIGRATE_COMMITTED ${n} xid= 3\n`, n), null);
+  assert.throws(() => parseCommitMarker('', 'abc'), (e) => e.code === 'AGX_MIGRATE_BAD_NONCE');
+  const bundle = buildUpBundle({ target: 'business', migration: business[27], kind: 'bootstrap', expected: ledgerEntries(business, 27), nonce: n,
+    fingerprint: { query: 'select 1 as line', schemas: 'agx', expectedMd5: '0'.repeat(32), expectedLines: 1 } });
+  assert.ok(bundle.trimEnd().endsWith(`\\echo 'AGX_MIGRATE_COMMITTED ${n} xid=' :agx_migrate_xid`));
+});
+
+// Mutation testing del detector: cada mutación que reintroduce una
+// interpretación errónea (la del escáner anterior) debe hacer fallar el
+// corpus. Se simula con el escáner antiguo, que es exactamente esa mutación.
+test('mutación: el escáner anterior (sin identificadores, E-strings ni $ en identificadores) pierde casos del corpus', () => {
+  const oldStrip = (sql) => {
+    let out = ''; let i = 0;
+    while (i < sql.length) {
+      const ch = sql[i];
+      if (ch === '-' && sql[i + 1] === '-') { const nl = sql.indexOf('\n', i); i = nl === -1 ? sql.length : nl; continue; }
+      if (ch === '/' && sql[i + 1] === '*') { const e = sql.indexOf('*/', i + 2); i = e === -1 ? sql.length : e + 2; continue; }
+      if (ch === '$') { const m = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i)); if (m) { const e = sql.indexOf(m[0], i + m[0].length); i = e === -1 ? sql.length : e + m[0].length; continue; } }
+      if (ch === "'") { let j = i + 1; while (j < sql.length) { if (sql[j] === "'" && sql[j + 1] === "'") { j += 2; continue; } if (sql[j] === "'") break; j += 1; } i = j + 1; continue; }
+      out += ch; i += 1;
+    }
+    return out;
+  };
+  const missedByOld = Object.entries(ADVERSARIAL).filter(([, sql]) => !oldStrip(sql).includes('\\')).map(([k]) => k);
+  assert.ok(missedByOld.length >= 4, missedByOld.join(', '));
+  for (const k of missedByOld) assert.ok(lexPsql(normalizeSql(ADVERSARIAL[k].replace(/\r(?!\n)/g, ''))).metas.length, k);
 });
