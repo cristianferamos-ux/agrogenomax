@@ -24,7 +24,7 @@ import {
   TARGETS, RUNNER_VERSION, SSL_MODES, fail, pad, listMigrations, ledgerEntries, planFromLedger,
   buildUpBundle, buildFreshBundle, buildRollbackBundle, assertRollbackAllowed, extractFingerprintQuery,
   certificationMd5, certificationLines, kindFor, ledgerExpectation, rollbackExpectation, sanitizedPgEnv, redact,
-  newNonce, parseCommitMarker,
+  newNonce, parseCommitMarker, FROZEN, normalizeSql, sha256,
 } from './agx-migrate-lib.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -52,12 +52,15 @@ export function parseArgs(argv) {
 export function resolveTarget(options) {
   const base = TARGETS[options.target];
   if (!base) throw fail('AGX_MIGRATE_ARGS', '--target debe ser business o auth');
+  if (options['baseline-fingerprint'] !== undefined) {
+    throw fail('AGX_MIGRATE_ARGS', '--baseline-fingerprint ya no existe: la referencia de certificación está fijada por checksum en el manifiesto congelado');
+  }
   const root = options.root ? path.resolve(options.root) : ROOT;
   return {
     name: options.target,
     ...base,
     dir: path.resolve(root, options['migrations-dir'] ?? base.dir),
-    baselineFingerprint: base.baselineFingerprint && path.resolve(root, options['baseline-fingerprint'] ?? base.baselineFingerprint),
+    baselineFingerprint: base.baselineFingerprint && path.resolve(root, base.baselineFingerprint),
     fingerprintSql: path.resolve(root, 'db/verify/schema_fingerprint.sql'),
   };
 }
@@ -201,11 +204,23 @@ function runBundle({ env, sql, nonce, vars, label, log, expectation, execPsql })
   }
 }
 
+/**
+ * Lee una entrada del bootstrap y exige el SHA-256 (LF) congelado en el
+ * manifiesto: --root no puede sustituir la consulta de huella ni la referencia.
+ */
+function readPinnedBootstrapInput(file, rel) {
+  const content = normalizeSql(fs.readFileSync(file, 'utf8'));
+  const expected = FROZEN.bootstrapInputs?.files?.[rel];
+  if (!expected) throw fail('AGX_MIGRATE_FINGERPRINT_TAMPERED', `${rel} no está fijado en el manifiesto congelado`);
+  if (sha256(content) !== expected) throw fail('AGX_MIGRATE_FINGERPRINT_TAMPERED', `${rel} no coincide con el checksum congelado; el bootstrap no se construye`);
+  return content;
+}
+
 function fingerprintSpec(target) {
   if (!target.baselineFingerprint) return null;
-  const reference = fs.readFileSync(target.baselineFingerprint, 'utf8');
+  const reference = readPinnedBootstrapInput(target.baselineFingerprint, TARGETS[target.name].baselineFingerprint);
   return {
-    query: extractFingerprintQuery(fs.readFileSync(target.fingerprintSql, 'utf8')),
+    query: extractFingerprintQuery(readPinnedBootstrapInput(target.fingerprintSql, 'db/verify/schema_fingerprint.sql')),
     schemas: target.fingerprintSchemas,
     expectedMd5: certificationMd5(reference),
     expectedLines: certificationLines(reference).length,

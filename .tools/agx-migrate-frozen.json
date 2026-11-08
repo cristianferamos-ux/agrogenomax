@@ -1,5 +1,12 @@
 {
   "_comment": "Historial congelado de migraciones (HARDENING). Nombre + SHA-256 del contenido LF + metacomandos psql exactos. Generado desde git HEAD 4e5e429; no editar a mano para que \"pase\": un cambio aquí es un cambio de política que requiere revisión.",
+  "bootstrapInputs": {
+    "_comment": "Entradas que el bootstrap del ledger (0027) incrusta o compara: consulta de huella y huella de referencia 0000-0026. SHA-256 del contenido LF; --root no puede sustituirlas.",
+    "files": {
+      "db/verify/schema_fingerprint.sql": "616b953d676abec79a98c2a95485c0ca3f7b50fa969dbfb2325a996c9cf399fc",
+      "db/agx-business/verify/baseline_0000_0026.fingerprint": "238335bf56003b8401a2f8ec0a075ae1339bc456fc4642b624470d520c27377a"
+    }
+  },
   "business": {
     "maxVersion": 27,
     "files": {

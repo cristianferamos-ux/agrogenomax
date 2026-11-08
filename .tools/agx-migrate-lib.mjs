@@ -129,7 +129,8 @@ function versionOf(filename) {
  *   (tampoco en cadenas o comentarios), de modo que ningún metacomando psql
  *   es posible aunque el lexer se equivocara. Además: el lexer (en las dos
  *   interpretaciones de standard_conforming_strings) no debe encontrar
- *   metacomandos, y no puede referenciar variables reservadas agx_migrate_*.
+ *   metacomandos, no puede referenciar variables reservadas agx_migrate_*, y
+ *   la ÚNICA interpolación psql admitida es :'nombre' (literal escapado).
  */
 export function auditMigration({ content, filename, checksum, target }) {
   const frozen = FROZEN[target];
@@ -157,6 +158,15 @@ export function auditMigration({ content, filename, checksum, target }) {
   if (lex.metas.length || alt.metas.length) throw fail('AGX_MIGRATE_META_COMMAND', `${filename}: metacomando psql detectado`);
   const reserved = [...lex.vars, ...alt.vars].find((v) => v.name.toLowerCase().startsWith(RESERVED_VAR_PREFIX));
   if (reserved) throw fail('AGX_MIGRATE_RESERVED_VAR', `${filename}: la variable psql ${reserved.name} está reservada para el runner`);
+  // Única interpolación admitida: :'nombre' (psql la emite como literal SQL
+  // escapado). :nombre se copia tal cual y psql VUELVE A LEXEAR el valor
+  // (puede traer metacomandos); :"nombre" y :{?nombre} tampoco son necesarios.
+  const unsafe = [...lex.vars, ...alt.vars].find((v) => v.kind !== 'literal');
+  if (unsafe) {
+    const line = content.slice(0, unsafe.offset).split('\n').length;
+    const form = { raw: `:${unsafe.name}`, identifier: `:"${unsafe.name}"`, defined: `:{?${unsafe.name}}` }[unsafe.kind];
+    throw fail('AGX_MIGRATE_UNSAFE_VAR', `${filename}:${line}: interpolación psql ${form} no permitida; usar :'${unsafe.name}' (literal). Un slice de array se escribe con espacios: a[1 : 2]`);
+  }
   assertNoTxControl(lex.code, filename);
   assertNoTxControl(alt.code, filename);
   return lex;

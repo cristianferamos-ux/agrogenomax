@@ -633,3 +633,90 @@ describe('bypass del escáner: exploit, SQL puro y defensa en runtime', { skip }
     assert.ok(rejected > 5, `solo ${rejected} casos rechazados`);
   });
 });
+
+// ---------------------------------------------------------------------
+// Interpolación psql :var sin comillas (revisión final PR #119).
+// ---------------------------------------------------------------------
+describe('interpolación psql: solo :\'nombre\' en migraciones nuevas (payload real \\echo PWNED)', { skip }, () => {
+  const PAYLOAD = '\\echo PWNED';
+  let root;
+  let url;
+
+  before(async () => {
+    root = sandbox();
+    url = dbUrl(BUSINESS, await createDb(BUSINESS, 'agx_var'));
+    await run(['up', '--target', 'business', '--fresh', ...BUSINESS_VARS], url, root);
+  });
+
+  after(() => { if (root) fs.rmSync(root, { recursive: true, force: true }); });
+
+  test('psql real: :payload ejecuta el metacomando; :\'payload\' y :"payload" no', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agx-var-'));
+    try {
+      const runCase = (sql) => {
+        const f = path.join(dir, 'c.sql');
+        fs.writeFileSync(f, sql);
+        const r = psqlFile(url, f, ['-v', 'ON_ERROR_STOP=0', '-v', `payload=${PAYLOAD}`, '-At']);
+        return { out: r.stdout.replace(/\r/g, '').split('\n').map((l) => l.trim()), err: r.stderr };
+      };
+      const raw = runCase('select 1 :payload\nselect 2;\n');
+      assert.ok(raw.out.includes('PWNED'), 'con :payload psql debería ejecutar el \\echo (motivo de la regla)');
+      const lit = runCase("select :'payload';\n");
+      assert.ok(!lit.out.includes('PWNED'), ':\'payload\' no debe ejecutar el metacomando');
+      assert.ok(lit.out.includes(PAYLOAD), ':\'payload\' se devuelve como dato literal');
+      const ident = runCase('select :"payload";\n');
+      assert.ok(!ident.out.includes('PWNED'));
+      assert.match(ident.err, /column ".*echo PWNED" does not exist|no existe la columna/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('A. migración nueva con :payload: el runner la rechaza ANTES de conectar o ejecutar', async () => {
+    const f = path.join(MIG_DIR(root), '0028_var_raw.sql');
+    fs.writeFileSync(f, 'select 1 :payload;\n');
+    const env = { extraEnv: { AGX_MIG_PAYLOAD: PAYLOAD } };
+    try {
+      await rejectsWith(run(['up', '--target', 'business', '--var', 'payload=AGX_MIG_PAYLOAD'], url, root, env), 'AGX_MIGRATE_UNSAFE_VAR');
+      await rejectsWith(run(['up', '--target', 'business', '--var', 'payload=AGX_MIG_PAYLOAD'], 'postgres://x:y@127.0.0.1:1/nada', root, env), 'AGX_MIGRATE_UNSAFE_VAR');
+      const out = path.join(root, 'b28.sql');
+      await rejectsWith(migrate(['bundle', '--target', 'business', '--version', '28', '--out', out, '--root', root], { log: () => {} }), 'AGX_MIGRATE_UNSAFE_VAR');
+      assert.equal(fs.existsSync(out), false);
+      assert.equal((await ledger(url)).length, 28);
+    } finally {
+      fs.rmSync(f, { force: true });
+    }
+  });
+
+  test('C. migración nueva con :"payload": rechazada', async () => {
+    const f = path.join(MIG_DIR(root), '0028_var_ident.sql');
+    fs.writeFileSync(f, 'select 1 from :"payload";\n');
+    try {
+      await rejectsWith(run(['plan', '--target', 'business'], url, root), 'AGX_MIGRATE_UNSAFE_VAR');
+      assert.equal((await ledger(url)).length, 28);
+    } finally {
+      fs.rmSync(f, { force: true });
+    }
+  });
+
+  test("B. migración nueva con :'payload': se aplica y el valor es un dato, nunca un metacomando", async () => {
+    const f = path.join(MIG_DIR(root), '0028_var_literal.sql');
+    fs.writeFileSync(f, "create table agx.it_var (v text);\ninsert into agx.it_var values (:'payload');\nselect :'payload' as eco;\n");
+    const seen = [];
+    const execPsql = (env, args) => {
+      const res = defaultExecPsql(env, args);
+      seen.push(res.stdout || '', res.stderr || '');
+      return res;
+    };
+    try {
+      await run(['up', '--target', 'business', '--var', 'payload=AGX_MIG_PAYLOAD'], url, root, { extraEnv: { AGX_MIG_PAYLOAD: PAYLOAD }, execPsql });
+      const text = seen.join('\n').replace(/\r/g, '');
+      assert.ok(!text.split('\n').some((l) => l.trim() === 'PWNED'), 'el \\echo no debe ejecutarse');
+      assert.equal((await admin(url, 'select v from agx.it_var')).rows[0].v, PAYLOAD);
+      const rows = await ledger(url);
+      assert.deepEqual(rows[rows.length - 1], { version: 28, kind: 'aplicada' });
+    } finally {
+      fs.rmSync(f, { force: true });
+    }
+  });
+});

@@ -123,7 +123,14 @@ si algo falla, no queda nada aplicado ni registrado.
   `\ir`, `\include*`, `\!`, `\o`, etc.) y, para que ninguno sea posible aunque el lexer se equivocara,
   **ninguna barra invertida en todo el archivo** (tampoco en cadenas ni comentarios: usar `[.]` en vez de
   `\.`, `chr(10)` en vez de `E'\n'`). Tampoco pueden referenciar variables `agx_migrate_*` (reservadas al
-  runner). Solo se admite interpolación `:'nombre'` de variables pasadas con `--var`.
+  runner).
+- **Interpolación psql en migraciones nuevas: solo `:'nombre'`** (psql la emite como literal SQL escapado;
+  el valor nunca se interpreta como sintaxis). Prohibidas (`AGX_MIGRATE_UNSAFE_VAR`):
+  - `:nombre` — psql copia el valor tal cual y **lo vuelve a lexear**: un valor `\echo …` se ejecuta
+    como metacomando (verificado con psql real).
+  - `:"nombre"` y `:{?nombre}` — no son peligrosas por sí mismas, pero no hacen falta: política simple.
+  - Un slice de array `a[1:n]` cuenta como `:n` (psql lo interpolaría): escribir `a[1 : n]`.
+  Las históricas congeladas solo usan `:'nombre'` (Business `0000`/`0023`, Auth `0000`).
 - **Migraciones históricas (Business 0000–0027, Auth 0000–0002, con rollbacks): congeladas** en
   `.tools/agx-migrate-frozen.json` (junto al runner, no en el directorio de migraciones: `--root` o
   `--migrations-dir` no lo sustituyen) por nombre + SHA-256 (contenido LF) + **secuencia exacta** de
@@ -175,6 +182,9 @@ El bundle de 0027 **certifica** antes de crear el ledger: calcula la huella de c
 aborta (`AGX_MIGRATE_BASELINE_FINGERPRINT_MISMATCH`) si no coincide con
 `db/agx-business/verify/baseline_0000_0026.fingerprint` (0000–0026 aplicadas desde cero). Solo si
 coincide registra 0000–0026 como `baseline_certificada` y 0027 como `aplicada`.
+La consulta de huella (`db/verify/schema_fingerprint.sql`) y la referencia están **fijadas por SHA-256** en
+`.tools/agx-migrate-frozen.json` (`bootstrapInputs`): si cualquiera difiere, el bundle no se construye
+(`AGX_MIGRATE_FINGERPRINT_TAMPERED`), también con `--root`. La opción `--baseline-fingerprint` ya no existe.
 **`baseline_certificada` es una certificación del estado actual, no historia:** `applied_at` es la
 fecha de certificación. La existencia de un archivo nunca se registra como evidencia de que corrió.
 

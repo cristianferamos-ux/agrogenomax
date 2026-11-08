@@ -499,3 +499,92 @@ test('mutación: el escáner anterior (sin identificadores, E-strings ni $ en id
   assert.ok(missedByOld.length >= 4, missedByOld.join(', '));
   for (const k of missedByOld) assert.ok(lexPsql(normalizeSql(ADVERSARIAL[k].replace(/\r(?!\n)/g, ''))).metas.length, k);
 });
+
+// ---------------------------------------------------------------------
+// Interpolación psql: en migraciones nuevas solo :'nombre'.
+// ---------------------------------------------------------------------
+
+test("interpolación: migraciones nuevas rechazan :var, :\"var\" y :{?var} en cualquier posición", () => {
+  const rejected = {
+    'raw simple': 'select 1 :payload;\n',
+    'raw sin espacio': 'select 1:payload;\n',
+    'raw tras tabs': 'select\t\t:payload;\n',
+    'raw con CRLF': 'select 1\r\n:payload;\r\n',
+    'raw dentro de expresión': 'select (1 + :n) * 2;\n',
+    'raw tras operador': 'select * from agx.t where id=:id;\n',
+    'raw tras coma en la misma línea que una literal': "select :'a', :b;\n",
+    'dos raw en una línea': 'select :a, :b;\n',
+    'raw tras cast': 'select 1::text || :x;\n',
+    'slice de array sin espacios (psql lo interpola)': 'select a[1:n] from agx.t;\n',
+    'raw con nombre no ASCII': 'select :ñ;\n',
+    'identificador :"var"': 'select 1 from :"tabla";\n',
+    'identificador tras operador': 'select * from agx.t where c=:"x";\n',
+    'existencia :{?var}': 'select :{?x};\n',
+  };
+  for (const [name, raw] of Object.entries(rejected)) {
+    const content = normalizeSql(raw);
+    assert.throws(() => auditMigration({ content, filename: '0028_x.sql', checksum: sha256(content), target: 'business' }),
+      (e) => e.code === 'AGX_MIGRATE_UNSAFE_VAR', name);
+    assert.throws(() => auditMigration({ content, filename: '0003_x.sql', checksum: sha256(content), target: 'auth' }),
+      (e) => e.code === 'AGX_MIGRATE_UNSAFE_VAR', `auth ${name}`);
+  }
+  // Rollback futuro: misma política.
+  assert.throws(() => assertBundleSafe('drop table agx.t_:sufijo;\n', '0028_x_rollback.sql'), (e) => e.code === 'AGX_MIGRATE_UNSAFE_VAR');
+  // Sin falsos positivos dentro de cadenas, identificadores, cuerpos, comentarios ni casts.
+  for (const sql of [
+    "select '12:30', 'a :b', E'x :y';\n", 'select 1 as "a:b";\n', 'select $$ :x $$, $t$ :"y" $t$;\n',
+    '-- :x\nselect 1;\n', '/* :x :"y" /* :z */ */ select 1;\n', 'select 1::text, x::integer[];\n',
+    'select a[1 : 2] from agx.t;\n', "select U&'a :b', N':c', B'1';\n",
+  ]) {
+    assertBundleSafe(sql, '0028_ok.sql');
+  }
+  // La forma segura sí se admite (y se declara como variable requerida).
+  assertBundleSafe("create role r login password :'payload';\nselect :'payload' as p, (:'a' || :'b');\n", '0028_ok.sql');
+  assert.deepEqual(psqlVariables("select :'payload', :'a', :'a';\n"), ['a', 'payload']);
+});
+
+test('interpolación: los históricos congelados solo usan :\'nombre\' y siguen válidos', () => {
+  for (const [list, target] of [[business, 'business'], [auth, 'auth']]) {
+    for (const m of list) {
+      for (const f of [m, m.rollback].filter(Boolean)) {
+        const kinds = new Set(lexPsql(f.content).vars.map((v) => v.kind));
+        assert.ok([...kinds].every((k) => k === 'literal'), `${target}/${f.filename}: ${[...kinds]}`);
+      }
+    }
+  }
+  assert.deepEqual(business[0].variables, ['agx_app_password']);
+  assert.deepEqual(business[23].variables, ['agx_qr_admin_password']);
+  assert.deepEqual(auth[0].variables, ['agx_auth_password']);
+});
+
+test('bootstrap: consulta y referencia de huella fijadas por checksum; --root no las sustituye; --baseline-fingerprint no existe', async () => {
+  assert.deepEqual(Object.keys(FROZEN.bootstrapInputs.files).sort(), ['db/agx-business/verify/baseline_0000_0026.fingerprint', 'db/verify/schema_fingerprint.sql']);
+  for (const [rel, sha] of Object.entries(FROZEN.bootstrapInputs.files)) {
+    assert.equal(sha256(normalizeSql(fs.readFileSync(path.join(ROOT, rel), 'utf8'))), sha, rel);
+  }
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agx-fp-pin-'));
+  try {
+    for (const rel of ['db/agx-business/migrations', 'db/agx/migrations', 'db/agx-business/verify', 'db/agx/verify', 'db/verify']) {
+      fs.cpSync(path.join(ROOT, rel), path.join(root, rel), { recursive: true });
+    }
+    const out = path.join(root, 'b27.sql');
+    const bundle27 = () => main(['bundle', '--target', 'business', '--version', '27', '--out', out, '--root', root], { log: () => {} });
+    await bundle27();
+    assert.match(fs.readFileSync(out, 'utf8'), /AGX_MIGRATE_BASELINE_FINGERPRINT_MISMATCH/);
+    fs.rmSync(out);
+    await assert.rejects(main(['bundle', '--target', 'business', '--version', '27', '--out', out, '--baseline-fingerprint', 'otra.fingerprint'], { log: () => {} }), (e) => e.code === 'AGX_MIGRATE_ARGS');
+    // Consulta de huella alterada (p. ej. un metacomando inyectado) bajo --root.
+    const fpFile = path.join(root, 'db/verify/schema_fingerprint.sql');
+    const fpOrig = fs.readFileSync(fpFile, 'utf8');
+    fs.writeFileSync(fpFile, fpOrig.replace('-- <fp-query>', '-- <fp-query>\n\\set ON_ERROR_STOP 0'));
+    await assert.rejects(bundle27(), (e) => e.code === 'AGX_MIGRATE_FINGERPRINT_TAMPERED');
+    fs.writeFileSync(fpFile, fpOrig);
+    // Referencia alterada (una línea de más) bajo --root.
+    const refFile = path.join(root, 'db/agx-business/verify/baseline_0000_0026.fingerprint');
+    fs.appendFileSync(refFile, 'relation|agx.extra|kind=r\n');
+    await assert.rejects(bundle27(), (e) => e.code === 'AGX_MIGRATE_FINGERPRINT_TAMPERED');
+    assert.equal(fs.existsSync(out), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -19,7 +19,7 @@ try {
   // psql del propio contenedor (16 en Business, 18 en Auth) para pruebas de semántica de psql.
   process.env.AGX_MIG_BUSINESS_CONTAINER = business.name;
   process.env.AGX_MIG_AUTH_CONTAINER = auth.name;
-  process.exitCode = await runTestFiles([FILE], { requiredPasses: { [FILE]: 22 } });
+  process.exitCode = await runTestFiles([FILE], { requiredPasses: { [FILE]: 26 } });
 } catch (error) {
   console.error(error.message);
   process.exitCode = 1;
