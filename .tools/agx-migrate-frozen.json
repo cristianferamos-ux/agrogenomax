@@ -1,0 +1,282 @@
+{
+  "_comment": "Historial congelado de migraciones (HARDENING). Nombre + SHA-256 del contenido LF + metacomandos psql exactos. Generado desde git HEAD 4e5e429; no editar a mano para que \"pase\": un cambio aquí es un cambio de política que requiere revisión.",
+  "bootstrapInputs": {
+    "_comment": "Entradas que el bootstrap del ledger (0027) incrusta o compara: consulta de huella y huella de referencia 0000-0026. SHA-256 del contenido LF; --root no puede sustituirlas.",
+    "files": {
+      "db/verify/schema_fingerprint.sql": "616b953d676abec79a98c2a95485c0ca3f7b50fa969dbfb2325a996c9cf399fc",
+      "db/agx-business/verify/baseline_0000_0026.fingerprint": "238335bf56003b8401a2f8ec0a075ae1339bc456fc4642b624470d520c27377a"
+    }
+  },
+  "business": {
+    "maxVersion": 27,
+    "files": {
+      "0000_bootstrap_roles.sql": {
+        "sha256": "b6f38a49772e347e5a357fb2befab30983e3d20d7ed5d57f4afb55145cc4bc74",
+        "metas": [
+          "\\gset",
+          "\\if :should_create_agx_app",
+          "\\else",
+          "\\echo 'agx_app ya existe -- se omite la creación (la contraseña existente no se modifica aquí; para rotarla usar ALTER ROLE por separado).'",
+          "\\endif"
+        ]
+      },
+      "0001_business_foundation.sql": {
+        "sha256": "11ece027231ba9976a56c3e1ecceeb801668ebd1a7acd4d34462d25fe74ed272",
+        "metas": []
+      },
+      "0001_business_foundation_rollback.sql": {
+        "sha256": "516eebd2f3c3b79456484de44a7470f3b3e9a1c82ba6c1167561c7c50924d0b3",
+        "metas": []
+      },
+      "0002_predio_operational_fields.sql": {
+        "sha256": "1849dd0b60cc18c572dc3f4adfa9ecc5936983e0de504c6a471717e89680b3e5",
+        "metas": []
+      },
+      "0002_predio_operational_fields_rollback.sql": {
+        "sha256": "74b70dee6db57fc1f692b949d5448f7fe105f759121d6493b6f104cffc49ccd0",
+        "metas": []
+      },
+      "0003_potreros_foundation.sql": {
+        "sha256": "f61c2b7ee934e2a69860ffafc60cb65c11ea2de4403daacd16865c499b84a593",
+        "metas": []
+      },
+      "0003_potreros_foundation_rollback.sql": {
+        "sha256": "e6d7101841a3359eeaa74adc32bc1075e4239abef7857924ab1b1577cbc1c9be",
+        "metas": []
+      },
+      "0004_potrero_ficha_productiva.sql": {
+        "sha256": "7ca60219f0904b418746a2e439544f9690d2780b298800227575232888058cd5",
+        "metas": []
+      },
+      "0004_potrero_ficha_productiva_rollback.sql": {
+        "sha256": "62c13d3ac598a004da1eb6af721eddb1b383922866e963a8c6c85e8a215f018d",
+        "metas": []
+      },
+      "0005_potrero_capacidad_pastoreo.sql": {
+        "sha256": "6ccbbce9633d69d3497cbd04f773e55c7d7b4b59156f5c4e5a5e63800368593d",
+        "metas": []
+      },
+      "0005_potrero_capacidad_pastoreo_rollback.sql": {
+        "sha256": "36a7f4a9af9548ef2b653126252e02d61ff954942fe6b4bc2b10e6c5300e459f",
+        "metas": []
+      },
+      "0006_potrero_contexto_agroclimatico.sql": {
+        "sha256": "3fe3f6cfb9381378ff243296885e31e85986553a3aadf57c797faadc21640ff3",
+        "metas": []
+      },
+      "0006_potrero_contexto_agroclimatico_rollback.sql": {
+        "sha256": "8ce27ba322cf8fc538b9558a3b661f4c8c98f82745e547eaaf09ac2e0700dbbf",
+        "metas": []
+      },
+      "0007_potrero_recomendacion_pastoreo.sql": {
+        "sha256": "8ca51a38915425ca3ed82888d1fa88112e8904bc51785bdd8f59757b07a19e02",
+        "metas": []
+      },
+      "0007_potrero_recomendacion_pastoreo_rollback.sql": {
+        "sha256": "24782a1f4d63730f1684dc3fc0a9064dbc6060abf6b90592deaaeb4214211ad4",
+        "metas": []
+      },
+      "0008_potrero_descanso_reentrada.sql": {
+        "sha256": "b0a44757d24d3c33c19f5e15df8087dd44c54da1684ab9b3868f52ec8f80f674",
+        "metas": []
+      },
+      "0008_potrero_descanso_reentrada_rollback.sql": {
+        "sha256": "5632bd2eb72804cdf0ebf0fc52207c189683b17fccca66af1e26f7eb62e35328",
+        "metas": []
+      },
+      "0009_potrero_ciclo_real_pastoreo.sql": {
+        "sha256": "5ed730bb7171e61ad23d9304c8dc6ae1bfa06c12c4a73253beef7f1c40c8530f",
+        "metas": []
+      },
+      "0009_potrero_ciclo_real_pastoreo_rollback.sql": {
+        "sha256": "f41b69676db5d82642f88b2b33f6fb2040755dddd99c64995c8454cbca3aecda",
+        "metas": []
+      },
+      "0010_predio_potrero_archivo.sql": {
+        "sha256": "787c04a2e8ff13c6ea579b489ba81bc8dd86b774c4da3cd39451fe52355653fe",
+        "metas": []
+      },
+      "0010_predio_potrero_archivo_rollback.sql": {
+        "sha256": "f6c596d6e7fe171682c8d27996c41bb759074e02b8cec995b138deaa4fca2d8c",
+        "metas": []
+      },
+      "0011_potrero_ciclo_anulacion_correccion.sql": {
+        "sha256": "7c0170992b23530617bda8268ee27fb5818361bcfd8d1690f65b1ebb17673c8d",
+        "metas": []
+      },
+      "0011_potrero_ciclo_anulacion_correccion_rollback.sql": {
+        "sha256": "60c14206eed8226ca3ef3e0a2eed053c620a406935863227a619506a8e6d3e25",
+        "metas": []
+      },
+      "0012_potrero_descanso_version_invalidacion.sql": {
+        "sha256": "947bde8ac684c9ab9678d20a82d5b6c89b62bc188b4801e551cc7103cde9987d",
+        "metas": []
+      },
+      "0012_potrero_descanso_version_invalidacion_rollback.sql": {
+        "sha256": "6deec6613ab1dfba48bb20dd2ca05a926679365e96532cfcb468d91a86b56656",
+        "metas": []
+      },
+      "0013_potrero_evaluacion_reingreso.sql": {
+        "sha256": "5bc50f60c4bb10997a18ee79ae4abd70d02dbeaa7f4bd09ffa850ea763abe5c7",
+        "metas": []
+      },
+      "0013_potrero_evaluacion_reingreso_rollback.sql": {
+        "sha256": "8d8d2243268f9c4811943050269d1de9115ab5353b152317761b0b973f38b1e6",
+        "metas": []
+      },
+      "0014_ciclo_timestamps_ternero_plan.sql": {
+        "sha256": "b2fd308b29be17bee3aa2bdeee16f55764642bf8de9be84e71d4df9816c8c527",
+        "metas": []
+      },
+      "0014_ciclo_timestamps_ternero_plan_rollback.sql": {
+        "sha256": "afd145df03ccfb85bf73dc1a96c717499a44c80c41aa5b151149e1a503a049ae",
+        "metas": []
+      },
+      "0015_potrero_ciclo_lote_real_versiones.sql": {
+        "sha256": "17bd61b969872b0ae0a389df9fa84737769fb6772a647923ebc245e17a22f908",
+        "metas": []
+      },
+      "0015_potrero_ciclo_lote_real_versiones_rollback.sql": {
+        "sha256": "15fc55110b7c2e35b89e901102dd66c8f5a40627c3f6d6bba5493411c15005a1",
+        "metas": []
+      },
+      "0016_descanso_lote_real_fk.sql": {
+        "sha256": "4c1f73eef0e7181e2a45de72948c99e31315dc4e6ec46668c2a71b2a65a3e150",
+        "metas": []
+      },
+      "0016_descanso_lote_real_fk_rollback.sql": {
+        "sha256": "26292bb3e728e74ee95445a6e7628f3a72896f60e18d2d4df62d998857c14001",
+        "metas": []
+      },
+      "0017_potrero_ciclo_residuales_reales.sql": {
+        "sha256": "408262da92b8d639c7fadb98eb213498bae7e997c00ab44c16d8323a0bc16ab8",
+        "metas": []
+      },
+      "0017_potrero_ciclo_residuales_reales_rollback.sql": {
+        "sha256": "ef2e100cae2a6a4ea61abf5786ed53033190a517e90ac37005a976b0ccdcbbbb",
+        "metas": []
+      },
+      "0018_descanso_residual_real_fk.sql": {
+        "sha256": "c2fdcb31f8cf8fcd19444b5c1a5cd92f5a5337ae3e4ed3e05d111bf25213f454",
+        "metas": []
+      },
+      "0018_descanso_residual_real_fk_rollback.sql": {
+        "sha256": "bfed73e181bf4d2be471f2076d64597ac4ce5e3d4f319da710a16a754c64f15f",
+        "metas": []
+      },
+      "0019_ciclo_eventos_residual_real.sql": {
+        "sha256": "4c490e8f4aed937b7937d8f57c9942b288d0ffae9abeff9b81ed82d830e69f64",
+        "metas": []
+      },
+      "0019_ciclo_eventos_residual_real_rollback.sql": {
+        "sha256": "146b16d2e0db6aacc490f1a7c0125a3ff307e446c4b0d8e599331ffa17255b61",
+        "metas": []
+      },
+      "0020_potrero_recomendacion_carga_automatica.sql": {
+        "sha256": "00557ca37ad62e8dab5768e57f0a61d6156af7e55393744392d4e3d1e970c9fd",
+        "metas": []
+      },
+      "0020_potrero_recomendacion_carga_automatica_rollback.sql": {
+        "sha256": "5f153f8426e4da6a35f834875cf6a080e119e2b4bd18f7a5df9c15fc837960e9",
+        "metas": []
+      },
+      "0021_predio_client_operation_id.sql": {
+        "sha256": "47165eb4a6d1251e7290806785d02766e66a1204dcdc7d6feb7a4fec78b09584",
+        "metas": []
+      },
+      "0021_predio_client_operation_id_rollback.sql": {
+        "sha256": "873b2f1a0af4f5edbb7d16b104bf331b651463e4c1282c05c17c2efe203f82cb",
+        "metas": []
+      },
+      "0022_animales_foundation.sql": {
+        "sha256": "8e794002a9eb4fecfd08b9c92aa504751db88dfff36471aa71c369241a964819",
+        "metas": []
+      },
+      "0022_animales_foundation_rollback.sql": {
+        "sha256": "67b059e8e42e22162bef47882321a54197ddae758b83041532ea1345c346455d",
+        "metas": []
+      },
+      "0023_qr_inventario_chapetas.sql": {
+        "sha256": "a1c630e8ee7c31194e79d9e613b35a18d1a8ef9404325c73d83d8a5a321bf861",
+        "metas": [
+          "\\gset",
+          "\\if :should_create_agx_qr_admin",
+          "\\else",
+          "\\echo 'agx_qr_admin ya existe -- se omite la creación (la contraseña existente no se modifica aquí).'",
+          "\\endif",
+          "\\gexec"
+        ]
+      },
+      "0023_qr_inventario_chapetas_rollback.sql": {
+        "sha256": "9b40001cc646f74ad6286e586b70a0df9c86094a85019aeba762b7f368440b7e",
+        "metas": []
+      },
+      "0024_animal_pesajes_manual.sql": {
+        "sha256": "60c5fe5b17c36f93742e92a3bea8d57f66fce03e090f4e5a13cf58c6d8f6c03d",
+        "metas": []
+      },
+      "0024_animal_pesajes_manual_rollback.sql": {
+        "sha256": "cf59617673e2a3d542472b72b645e8fa6fd20af679bfc6361f12a9c9d6018f53",
+        "metas": []
+      },
+      "0025_animal_cierre_operativo.sql": {
+        "sha256": "c5af735fabbc6c5c27db043f88eb218c08c4432ae24b3684d9a22d433feb6a76",
+        "metas": []
+      },
+      "0025_animal_cierre_operativo_rollback.sql": {
+        "sha256": "93641d7e44d1a54b5c06f21bf4c029200d3a422264748c630eb8faf408b2e0b2",
+        "metas": []
+      },
+      "0026_reproduccion_bovina.sql": {
+        "sha256": "8c6b348ab5c4df31fdb0af4245f4851a65aa97ecec3324cb06b53c541fd7c59a",
+        "metas": []
+      },
+      "0026_reproduccion_bovina_rollback.sql": {
+        "sha256": "9f394f4b9b3bd5b351343bf27481700e2d1d183bd0a3e1cd33826b853e59fd34",
+        "metas": []
+      },
+      "0027_schema_migrations_ledger.sql": {
+        "sha256": "51d584ce700d5968dd4c326228d2a0578a12e0a188c0731d8188d904bd5e6968",
+        "metas": []
+      }
+    }
+  },
+  "auth": {
+    "maxVersion": 2,
+    "files": {
+      "0000_baseline_auth_schema.sql": {
+        "sha256": "1258023c95fadef9e90226653f4009e6a51b08a39953f2355c420b78b28ed814",
+        "metas": [
+          "\\set ON_ERROR_STOP on",
+          "\\if :{?agx_auth_password}",
+          "\\else",
+          "\\endif",
+          "\\gset",
+          "\\if :agx_auth_password_vacia",
+          "\\endif",
+          "\\gset",
+          "\\if :should_create_agx_auth",
+          "\\else",
+          "\\echo 'agx_auth ya existe -- se omite la creación (la contraseña existente no se modifica aquí).'",
+          "\\endif"
+        ]
+      },
+      "0001_organizaciones_membresias_auth.sql": {
+        "sha256": "6dba857f6e7b67cc54741e2a57e7f5c4a8cf14e37ff964e1b4b716a530282f16",
+        "metas": []
+      },
+      "0001_organizaciones_membresias_auth_rollback.sql": {
+        "sha256": "b3af5fed1f8c212358aeefe0519ef11d468ddcaebd4e7a54f6464b32457757f9",
+        "metas": []
+      },
+      "0002_client_provisioning_grants.sql": {
+        "sha256": "59bfc8348f815133442c9c8eb9a51ae96b49ca4e758afd18b04ce3ee0c77b6de",
+        "metas": []
+      },
+      "0002_client_provisioning_grants_rollback.sql": {
+        "sha256": "16dc4ad42818f5c0845a1a410dfa735239a024688a5fd8060e69fd864ebfbe62",
+        "metas": []
+      }
+    }
+  }
+}
