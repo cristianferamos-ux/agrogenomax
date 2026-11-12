@@ -49,11 +49,22 @@ async function createDb(adminUrl, prefix) {
   return name;
 }
 
-/** Copia aislada del repo mínimo: migraciones reales + huella, para añadir migraciones sintéticas. */
+/**
+ * Copia aislada del repo mínimo: migraciones reales + huella, para añadir migraciones sintéticas.
+ * La mecánica del runner se prueba sobre el historial congelado hasta el ledger (Business
+ * 0000-0027): las migraciones reales posteriores (0028+) se excluyen del sandbox para que las
+ * sintéticas 0028/0029 de estas pruebas no choquen con ellas. Cada migración real >= 0028 tiene
+ * su propia integración (p. ej. agxBusiness0028Integration.test.mjs).
+ */
 function sandbox() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agx-mig-it-'));
   for (const rel of ['db/agx-business/migrations', 'db/agx/migrations', 'db/agx-business/verify', 'db/agx/verify', 'db/verify']) {
     fs.cpSync(path.join(ROOT, rel), path.join(root, rel), { recursive: true });
+  }
+  const businessDir = path.join(root, 'db/agx-business/migrations');
+  for (const f of fs.readdirSync(businessDir)) {
+    const m = /^(\d{4})_/.exec(f);
+    if (m && Number(m[1]) > 27) fs.rmSync(path.join(businessDir, f));
   }
   return root;
 }
