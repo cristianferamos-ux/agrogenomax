@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { startCluster, stopCluster } from './agx-docker-pg.mjs';
 import { main as migrate } from './agx-migrate.mjs';
-import { sanitizedPgEnv } from './agx-migrate-lib.mjs';
+import { TARGETS, listMigrations, sanitizedPgEnv } from './agx-migrate-lib.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const DB = 'agx_dr_test';
@@ -202,8 +202,10 @@ async function smokeBusiness(dst, appPassword) {
     });
   });
   await withClient(dst, {}, async (c) => {
+    // Una fila por migración UP del repo (0000..última): el origen se construyó con --fresh.
+    const esperadas = listMigrations(path.join(ROOT, TARGETS.business.dir), 'business').length;
     const n = Number((await c.query('select count(*) from agx_meta.schema_migrations')).rows[0].count);
-    check('business: ledger restaurado completo (0000-0027)', n === 28, `${n} filas`);
+    check(`business: ledger restaurado completo (0000-${String(esperadas - 1).padStart(4, '0')})`, n === esperadas, `${n} filas`);
   });
 }
 

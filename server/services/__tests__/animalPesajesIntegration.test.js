@@ -136,6 +136,8 @@ describe('FASE 1A: migración 0024 y esquema', { skip: !dbAvailable }, () => {
     const idx = (await adminPool.query(`select indexname from pg_indexes where schemaname='agx' and tablename='animal_pesajes' order by 1`)).rows.map((r) => r.indexname);
     assert.deepEqual(idx, [
       'animal_pesajes_animal_fecha_idx',
+      // FASE 5A.1a (0028): idempotencia de la anulación, UNIQUE parcial por organización.
+      'animal_pesajes_org_anulacion_client_operation_key',
       'animal_pesajes_org_client_operation_key',
       'animal_pesajes_organizacion_id_idx',
       'animal_pesajes_pkey',
