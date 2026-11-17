@@ -21,11 +21,15 @@ const business = listMigrations(path.join(ROOT, TARGETS.business.dir), 'business
 const auth = listMigrations(path.join(ROOT, TARGETS.auth.dir), 'auth');
 
 test('las migraciones reales son contiguas, sin control de transacción y con rollback emparejado', () => {
-  assert.equal(business.length, 28);
-  assert.deepEqual(business.map((m) => m.version), [...Array(28).keys()]);
+  assert.equal(business.length, 29);
+  assert.deepEqual(business.map((m) => m.version), [...Array(29).keys()]);
   assert.equal(business[27].filename, '0027_schema_migrations_ledger.sql');
   assert.equal(business[27].rollback, null);
   assert.ok(business.slice(1, 27).every((m) => m.rollback));
+  // FASE 5A.1a: primera migración posterior al ledger, SQL puro, con rollback.
+  assert.equal(business[28].filename, '0028_animal_pesajes_anulacion.sql');
+  assert.equal(business[28].rollback?.filename, '0028_animal_pesajes_anulacion_rollback.sql');
+  assert.deepEqual(business[28].variables, []);
   assert.deepEqual(business[0].variables, ['agx_app_password']);
   assert.deepEqual(business[23].variables, ['agx_qr_admin_password']);
   assert.deepEqual(auth.map((m) => m.filename), ['0000_baseline_auth_schema.sql', '0001_organizaciones_membresias_auth.sql', '0002_client_provisioning_grants.sql']);
@@ -59,12 +63,16 @@ test('variables psql requeridas', () => {
 });
 
 test('planFromLedger: pendientes, checksum cambiado, desconocida, hueco', () => {
-  const ledger = ledgerEntries(business, 28);
-  assert.equal(planFromLedger(business, ledger).length, 0);
-  assert.equal(planFromLedger(business, ledger.slice(0, 27))[0].version, 27);
-  assert.throws(() => planFromLedger(business, ledger.map((e, i) => (i === 5 ? { ...e, checksum: '0'.repeat(64) } : e))), (e) => e.code === 'AGX_MIGRATE_CHECKSUM_MISMATCH');
-  assert.throws(() => planFromLedger(business, [...ledger, { version: 28, filename: '0028_x.sql', checksum: '0'.repeat(64) }]), (e) => e.code === 'AGX_MIGRATE_UNKNOWN_VERSION');
-  assert.throws(() => planFromLedger(business, ledger.filter((e) => e.version !== 3)), (e) => e.code === 'AGX_MIGRATE_GAP');
+  // Fixture: historial congelado hasta el ledger (0000-0027), independiente de migraciones posteriores.
+  const historico = business.slice(0, 28);
+  const ledger = ledgerEntries(historico, 28);
+  assert.equal(planFromLedger(historico, ledger).length, 0);
+  assert.equal(planFromLedger(historico, ledger.slice(0, 27))[0].version, 27);
+  assert.throws(() => planFromLedger(historico, ledger.map((e, i) => (i === 5 ? { ...e, checksum: '0'.repeat(64) } : e))), (e) => e.code === 'AGX_MIGRATE_CHECKSUM_MISMATCH');
+  assert.throws(() => planFromLedger(historico, [...ledger, { version: 28, filename: '0028_x.sql', checksum: '0'.repeat(64) }]), (e) => e.code === 'AGX_MIGRATE_UNKNOWN_VERSION');
+  assert.throws(() => planFromLedger(historico, ledger.filter((e) => e.version !== 3)), (e) => e.code === 'AGX_MIGRATE_GAP');
+  // Repo real: con el ledger 0000-0027 (producción hoy), la única pendiente es 0028.
+  assert.deepEqual(planFromLedger(business, ledger).map((m) => m.filename), ['0028_animal_pesajes_anulacion.sql']);
 });
 
 test('precondiciones de rollback extraídas de los rollbacks reales', () => {
