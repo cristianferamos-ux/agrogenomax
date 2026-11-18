@@ -282,6 +282,8 @@ const ERROR_MESSAGES = Object.freeze({
   ANIMAL_NOT_FOUND: 'Este animal no está disponible.',
   ANIMAL_ANULADO: 'Este registro está anulado y no admite cambios.',
   ANIMAL_MODIFICADO: 'El animal fue modificado mientras lo editabas. Recargamos sus datos: revisa y vuelve a guardar.',
+  // FASE 5A.2: corrección de nacimiento/ingreso posterior a un pesaje ACTIVO (409).
+  HISTORIAL_PESAJES_FECHA_INCOMPATIBLE: 'La nueva fecha de nacimiento o de ingreso quedaría después de un pesaje activo del animal. Revisa la fecha o, si ese pesaje es erróneo, anúlalo primero.',
   CATEGORIA_INCOMPATIBLE_SEXO: 'La categoría no corresponde al sexo del animal.',
   INVALID_RAZA: 'Revisa la raza seleccionada.',
   INVALID_CATEGORIA: 'Revisa la categoría seleccionada.',

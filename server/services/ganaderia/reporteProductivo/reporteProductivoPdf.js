@@ -257,21 +257,98 @@ function bloqueAlertas(doc, cursor, alertas) {
   parrafo(doc, cursor, `Nota: ${alertas.nota}`, { size: 7.5, color: C.soft, despues: 8 });
 }
 
+// FASE 5A.2 (P1-5): bloque derecho del encabezado. La identificación se MIDE
+// (heightOfString) y el sello de generación se coloca justo debajo de su
+// altura real, nunca en una y fija: una identificación de 2-3 líneas ya no se
+// superpone con el sello. Se prueba 10 -> 7.5 pt hasta caber en 2 líneas (3
+// a 7.5 pt); solo si ni así cabe sobre la línea divisoria se acorta con "…"
+// (la identificación completa figura en la sección "Identificación del animal").
+// anchoDerecho 236: el título (15 pt, ~212 px desde x=98) termina en x≈310 y
+// el bloque derecho empieza en x=328 (sin invadirse).
+const ENC = Object.freeze({ anchoDerecho: 236, divisor: 48, margenDivisor: 2, sello: 7.5, tamanos: [10, 9, 8, 7.5] });
+
+/** Texto en UNA línea: si no cabe en `width`, se acorta con "…" (nunca se parte ni crea páginas). */
+export function unaLinea(doc, valor, width, { size, bold = false } = {}) {
+  doc.font(bold ? F.bold : F.regular).fontSize(size);
+  let t = String(valor);
+  if (doc.widthOfString(t) <= width) return t;
+  while (t.length > 1 && doc.widthOfString(`${t}…`) > width) t = t.slice(0, -1);
+  return `${t.trimEnd()}…`;
+}
+
+function lineasDe(doc, valor, width, size) {
+  const h = alto(doc, valor, width, { size, bold: true });
+  const linea = alto(doc, 'Ag', width, { size, bold: true });
+  return { h, lineas: Math.max(1, Math.round(h / linea)) };
+}
+
+/**
+ * Disposición medida del bloque derecho del encabezado (posiciones relativas a
+ * la página). Exportada para las pruebas de no-solapamiento.
+ */
+export function disposicionEncabezado(doc, modelo) {
+  const y = M;
+  const width = ENC.anchoDerecho;
+  const limite = y + ENC.divisor - ENC.margenDivisor;
+  const sello = modelo.generado.texto;
+  const selloH = alto(doc, sello, width, { size: ENC.sello });
+  const identY = y + 4;
+  let ident = String(modelo.animal.identificacion);
+  let size = ENC.tamanos.at(-1);
+  let medida = null;
+  for (const t of ENC.tamanos) {
+    const m = lineasDe(doc, ident, width, t);
+    const maxLineas = t === ENC.tamanos.at(-1) ? 3 : 2;
+    if (m.lineas <= maxLineas && identY + m.h + 2 + selloH <= limite) {
+      size = t;
+      medida = m;
+      break;
+    }
+  }
+  let truncada = false;
+  if (!medida) {
+    // Último recurso: acortar con "…" hasta caber sobre la divisoria.
+    while (ident.length > 1) {
+      const m = lineasDe(doc, `${ident}…`, width, size);
+      if (identY + m.h + 2 + selloH <= limite) {
+        medida = m;
+        break;
+      }
+      ident = ident.slice(0, -1).trimEnd();
+    }
+    ident = `${ident}…`;
+    truncada = true;
+    medida = medida ?? lineasDe(doc, ident, width, size);
+  }
+  const selloY = identY + medida.h + 2;
+  return {
+    x: M + CONTENT_W - width,
+    width,
+    identificacion: { texto: ident, y: identY, size, h: medida.h, lineas: medida.lineas, truncada },
+    sello: { texto: sello, y: selloY, size: ENC.sello, h: selloH },
+    divisorY: y + ENC.divisor,
+  };
+}
+
 function encabezado(doc, modelo, logo) {
   const y = M;
   if (logo) doc.image(logo, M, y, { width: 40, height: 40 });
   const tx = M + (logo ? 50 : 0);
   texto(doc, modelo.titulo, tx, y + 3, { size: 15, bold: true, color: C.ink, width: 300 });
   texto(doc, modelo.subtitulo, tx, y + 22, { size: 9, color: C.brand, width: 300 });
-  texto(doc, modelo.animal.identificacion, M + CONTENT_W - 200, y + 4, { size: 10, bold: true, color: C.ink, width: 200, align: 'right' });
-  texto(doc, modelo.generado.texto, M + CONTENT_W - 200, y + 20, { size: 7.5, color: C.soft, width: 200, align: 'right' });
-  doc.moveTo(M, y + 48).lineTo(M + CONTENT_W, y + 48).lineWidth(1.2).strokeColor(C.brand).stroke();
+  const d = disposicionEncabezado(doc, modelo);
+  texto(doc, d.identificacion.texto, d.x, d.identificacion.y, { size: d.identificacion.size, bold: true, color: C.ink, width: d.width, align: 'right' });
+  texto(doc, d.sello.texto, d.x, d.sello.y, { size: d.sello.size, color: C.soft, width: d.width, align: 'right' });
+  doc.moveTo(M, d.divisorY).lineTo(M + CONTENT_W, d.divisorY).lineWidth(1.2).strokeColor(C.brand).stroke();
 }
 
 function pie(doc, modelo, pagina, total) {
   const y = PAGE.height - M - 14;
   doc.moveTo(M, y - 8).lineTo(M + CONTENT_W, y - 8).lineWidth(0.5).strokeColor(C.line).stroke();
-  texto(doc, `AgroGenomaX · Ganadería Inteligente · ${modelo.titulo} · ${modelo.animal.identificacion}`, M, y, { size: 7, color: C.soft, width: CONTENT_W - 90 });
+  // FASE 5A.2: una sola línea; una identificación muy larga ya no se parte
+  // fuera de la página (antes generaba páginas fantasma).
+  const marca = unaLinea(doc, `AgroGenomaX · Ganadería Inteligente · ${modelo.titulo} · ${modelo.animal.identificacion}`, CONTENT_W - 96, { size: 7 });
+  texto(doc, marca, M, y, { size: 7, color: C.soft, width: CONTENT_W - 90 });
   texto(doc, `Página ${pagina} de ${total}`, M + CONTENT_W - 90, y, { size: 7, color: C.soft, width: 90, align: 'right' });
 }
 

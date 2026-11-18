@@ -419,6 +419,8 @@ export default function HatoDetallePage() {
                 estadoOperativo={situacion}
                 online={offline.online}
                 repoOffline={repoOrg}
+                fechaNacimiento={animal.fechaNacimiento ?? null}
+                fechaIngreso={animal.fechaIngreso ?? null}
                 onPesajeRegistrado={() => {
                   load({ silencioso: true });
                   marcarActividad();
