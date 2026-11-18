@@ -24,6 +24,7 @@ export const CAPACIDADES = Object.freeze({
   // Animales / pesajes / QR
   crearAnimal: OPERACION,
   registrarPesaje: OPERACION,
+  anularPesaje: ADMINISTRACION, // FASE 5A.2 (backend: POST .../pesajes/:id/anular)
   asociarQr: OPERACION,
   corregirAnimal: ADMINISTRACION,
   anularAnimal: ADMINISTRACION,
@@ -64,6 +65,7 @@ export function capacidadesDe(rol) {
 
 export const canCrearAnimal = (rol) => puede(rol, 'crearAnimal');
 export const canRegistrarPesaje = (rol) => puede(rol, 'registrarPesaje');
+export const canAnularPesaje = (rol) => puede(rol, 'anularPesaje');
 export const canAsociarQr = (rol) => puede(rol, 'asociarQr');
 export const canCorregirAnimal = (rol) => puede(rol, 'corregirAnimal');
 export const canAnularAnimal = (rol) => puede(rol, 'anularAnimal');

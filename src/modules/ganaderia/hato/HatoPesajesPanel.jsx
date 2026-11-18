@@ -35,6 +35,17 @@
 // atraso ("Sin alertas: el animal ya no está en el hato."). Un 409
 // ANIMAL_YA_SALIDO/MUERTO al guardar (cierre hecho en otro dispositivo)
 // produce el mismo estado y refresca la ficha.
+//
+// FASE 5A.2 (solo online): owner/admin ven "Anular" en pesajes ACTIVOS. El
+// diálogo exige motivo (1..500, misma regla que el backend) y envía
+// { motivo, clientOperationId, identidadEsperada }; un controlador de una
+// sola intención impide el doble POST y conserva el id ante un resultado
+// incierto. Tras éxito se cierra el diálogo y se recargan resumen, gráficas,
+// alertas e historial. Sin conexión NO se anula ni se encola (5A.3): se
+// explica que requiere red. El historial muestra ACTIVOS + ANULADOS
+// (`historial`); KPIs, gráficas y alertas siguen usando solo `pesajes`
+// (ACTIVOS, serie diaria del servidor). La fecha del pesaje se valida también
+// contra nacimiento/ingreso del animal (mismo orden que el backend).
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { StatusMessage } from '../components/FormField.jsx';
 import HatoPesajeForm from './HatoPesajeForm.jsx';
@@ -43,7 +54,17 @@ import HatoPesajesHistorial from './HatoPesajesHistorial.jsx';
 import HatoPesajesKpis from './HatoPesajesKpis.jsx';
 import HatoPesajesPendientes from './HatoPesajesPendientes.jsx';
 import HatoReporteProductivoBoton from './HatoReporteProductivoBoton.jsx';
-import { listPesajes, registrarPesaje } from './hatoApi.js';
+import HatoPesajeAnularDialog from './HatoPesajeAnularDialog.jsx';
+import { anularPesaje, listPesajes, registrarPesaje } from './hatoApi.js';
+import {
+  MENSAJE_ANULACION_REQUIERE_CONEXION,
+  buildAnularPesajeBody,
+  crearControladorAnulacion,
+  filasHistorial,
+  validarMotivoAnulacion,
+} from './pesajesAnulacionModel.js';
+import { identidadEsperadaDe } from './reproduccionOfflineModel.js';
+import { useGanaderiaAuthOptional } from '../auth/GanaderiaAuthContext.jsx';
 import { newClientOperationId } from './hatoFormModel.js';
 import { buildPesajeBody, initialPesajeForm, resultadoRegistro, validatePesajeForm } from './pesajesModel.js';
 import {
@@ -64,10 +85,21 @@ const HatoPesajesGrafica = lazy(() => import('./HatoPesajesGrafica.jsx'));
 /** Relectura del outbox local mientras haya pendientes (confirmaciones de otra pestaña / SW). */
 const RELECTURA_PENDIENTES_MS = 4_000;
 
-export default function HatoPesajesPanel({ animalId, animalActivo, estadoOperativo = 'EN_HATO', online = true, repoOffline = null, onPesajeRegistrado }) {
+export default function HatoPesajesPanel({
+  animalId, animalActivo, estadoOperativo = 'EN_HATO', online = true, repoOffline = null, onPesajeRegistrado,
+  fechaNacimiento = null, fechaIngreso = null,
+}) {
   const fechaNegocio = fechaHoyNegocio();
   // FASE 3A: lector consulta pesajes pero no registra (ni encola sin red).
   const permisos = useGanaderiaPermisos();
+  const auth = useGanaderiaAuthOptional();
+  // FASE 5A.2: anulación (solo online).
+  const [anulando, setAnulando] = useState(null); // pesaje objetivo del diálogo
+  const [motivoAnulacion, setMotivoAnulacion] = useState('');
+  const [errorMotivo, setErrorMotivo] = useState(null);
+  const [falloAnulacion, setFalloAnulacion] = useState(null);
+  const [enviandoAnulacion, setEnviandoAnulacion] = useState(false);
+  const controladorRef = useRef(null);
   const [state, setState] = useState({ status: 'loading', data: null });
   const [form, setForm] = useState(() => initialPesajeForm(fechaNegocio));
   const [errores, setErrores] = useState({});
@@ -187,7 +219,7 @@ export default function HatoPesajesPanel({ animalId, animalActivo, estadoOperati
       return;
     }
     setMensaje(null);
-    const { valido, errores: problemas } = validatePesajeForm(form, { hoy: fechaNegocio });
+    const { valido, errores: problemas } = validatePesajeForm(form, { hoy: fechaNegocio, fechaNacimiento, fechaIngreso });
     if (!valido) {
       setErrores(problemas);
       return;
@@ -245,7 +277,74 @@ export default function HatoPesajesPanel({ animalId, animalActivo, estadoOperati
     }
   }
 
+  // ---------------------------------------------------------------- anulación
+  function abrirAnulacion(pesaje) {
+    if (!permisos.anularPesaje || enviandoAnulacion) return;
+    if (!online) {
+      setMensaje({ type: 'info', text: MENSAJE_ANULACION_REQUIERE_CONEXION });
+      return;
+    }
+    setAnulando(pesaje);
+    setMotivoAnulacion('');
+    setErrorMotivo(null);
+    setFalloAnulacion(null);
+    // Una intención por diálogo: el id se conserva entre reintentos inciertos.
+    controladorRef.current = crearControladorAnulacion({
+      nuevoId: newClientOperationId,
+      enviar: ({ clientOperationId, motivo }) => anularPesaje(animalId, pesaje.pesajeId, buildAnularPesajeBody({
+        motivo,
+        clientOperationId,
+        identidadEsperada: identidadEsperadaDe(auth),
+      })),
+    });
+  }
+
+  function cerrarAnulacion() {
+    if (enviandoAnulacion) return;
+    setAnulando(null);
+    controladorRef.current = null;
+  }
+
+  async function confirmarAnulacion() {
+    const controlador = controladorRef.current;
+    if (!controlador || controlador.enCurso) return;
+    if (!online) {
+      setFalloAnulacion(MENSAJE_ANULACION_REQUIERE_CONEXION);
+      return;
+    }
+    const { valido, motivo, error } = validarMotivoAnulacion(motivoAnulacion);
+    if (!valido) {
+      setErrorMotivo(error);
+      return;
+    }
+    setErrorMotivo(null);
+    setFalloAnulacion(null);
+    setEnviandoAnulacion(true);
+    let resultado;
+    try {
+      // Otro motivo = otra intención (id nuevo); el mismo motivo reintenta con el mismo id.
+      resultado = await controlador.anular(motivo);
+    } finally {
+      setEnviandoAnulacion(false);
+    }
+    if (!resultado) return; // otro envío ya estaba en curso (doble clic)
+    if (resultado.exito || resultado.tipo === 'RECARGAR') {
+      setAnulando(null);
+      controladorRef.current = null;
+      setMensaje({ type: resultado.exito ? 'success' : 'info', text: resultado.mensaje });
+      await cargar();
+      onRegistradoRef.current?.();
+      return;
+    }
+    if (resultado.tipo === 'CAMPO') {
+      setErrorMotivo(resultado.mensaje);
+      return;
+    }
+    setFalloAnulacion(resultado.mensaje);
+  }
+
   const pesajes = state.data?.pesajes ?? [];
+  const historial = filasHistorial(state.data);
   const sinPesajes = state.status === 'ok' && pesajes.length === 0;
   // El formulario: con red, cuando el historial confirmado cargó; sin red,
   // siempre que el dispositivo pueda guardar en el outbox (aunque el
@@ -329,9 +428,37 @@ export default function HatoPesajesPanel({ animalId, animalActivo, estadoOperati
           ) : null}
           {formulario}
 
-          {pesajes.length ? <HatoPesajesHistorial pesajes={pesajes} /> : null}
+          {permisos.anularPesaje && !online && historial.length ? (
+            <p className="gan-hato-hint">{MENSAJE_ANULACION_REQUIERE_CONEXION}</p>
+          ) : null}
+          {historial.length ? (
+            <HatoPesajesHistorial
+              pesajes={historial}
+              puedeAnular={permisos.anularPesaje}
+              admitePesajes={animalActivo && !anuladoEnServidor}
+              online={online}
+              ocupado={enviandoAnulacion}
+              onAnular={abrirAnulacion}
+            />
+          ) : null}
         </>
       ) : formulario}
+
+      {anulando ? (
+        <HatoPesajeAnularDialog
+          pesaje={anulando}
+          motivo={motivoAnulacion}
+          setMotivo={(valor) => {
+            setMotivoAnulacion(valor);
+            if (errorMotivo) setErrorMotivo(null);
+          }}
+          error={errorMotivo}
+          fallo={falloAnulacion}
+          enviando={enviandoAnulacion}
+          onCancelar={cerrarAnulacion}
+          onConfirmar={confirmarAnulacion}
+        />
+      ) : null}
     </section>
   );
 }

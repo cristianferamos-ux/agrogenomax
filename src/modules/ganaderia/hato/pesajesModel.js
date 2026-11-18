@@ -34,7 +34,7 @@ function parsePeso(raw) {
  * Validación del cliente (el backend sigue siendo la autoridad). Devuelve
  * { valido, errores: { campo: mensaje } }.
  */
-export function validatePesajeForm(form, { hoy }) {
+export function validatePesajeForm(form, { hoy, fechaNacimiento = null, fechaIngreso = null }) {
   const errores = {};
   if (!/^\d{4}-\d{2}-\d{2}$/.test(form.fecha ?? '') || numeroDeDia(form.fecha) === null) {
     errores.fecha = 'Indica una fecha válida.';
@@ -42,6 +42,11 @@ export function validatePesajeForm(form, { hoy }) {
     errores.fecha = 'La fecha no puede ser futura.';
   } else if (form.fecha < '1990-01-01') {
     errores.fecha = 'La fecha no puede ser anterior a 1990.';
+  } else if (fechaNacimiento && form.fecha < fechaNacimiento) {
+    // FASE 5A.2: mismo orden que el backend (nacimiento antes que ingreso).
+    errores.fecha = mensajeFechaAnterior('FECHA_ANTERIOR_A_NACIMIENTO', fechaNacimiento);
+  } else if (fechaIngreso && form.fecha < fechaIngreso) {
+    errores.fecha = mensajeFechaAnterior('FECHA_ANTERIOR_A_INGRESO', fechaIngreso);
   }
   const peso = parsePeso(form.pesoKg);
   if (peso === null || !(peso > 0)) errores.pesoKg = 'Indica un peso mayor que 0 kg.';
@@ -70,7 +75,18 @@ const CAMPO_POR_ERROR = Object.freeze({
   INVALID_PESO: 'pesoKg',
   INVALID_METODO: 'metodo',
   INVALID_OBSERVACIONES: 'observaciones',
+  // FASE 5A.1b/5A.2: límites de fecha contra el animal (400 del servidor).
+  FECHA_ANTERIOR_A_NACIMIENTO: 'fecha',
+  FECHA_ANTERIOR_A_INGRESO: 'fecha',
 });
+
+/** Mensaje claro (sin códigos técnicos) para una fecha anterior a nacimiento / ingreso. */
+export function mensajeFechaAnterior(code, fechaLimite = null) {
+  const cuando = fechaLimite ? ` (${formatFecha(fechaLimite)})` : '';
+  if (code === 'FECHA_ANTERIOR_A_NACIMIENTO') return `La fecha del pesaje no puede ser anterior a la fecha de nacimiento del animal${cuando}.`;
+  if (code === 'FECHA_ANTERIOR_A_INGRESO') return `La fecha del pesaje no puede ser anterior a la fecha de ingreso del animal al hato${cuando}.`;
+  return null;
+}
 
 /**
  * Traduce el resultado de postJsonWithCsrf ({ ok, status, data, failure })
@@ -108,7 +124,7 @@ export function resultadoRegistro(result) {
   }
   if (result?.status === 400 && CAMPO_POR_ERROR[code]) {
     const campo = CAMPO_POR_ERROR[code];
-    return { tipo: 'CAMPO', campo, mensaje: result.data?.message || 'Revisa este dato.' };
+    return { tipo: 'CAMPO', campo, mensaje: mensajeFechaAnterior(code) || result.data?.message || 'Revisa este dato.' };
   }
   if (code === 'ANIMAL_ANULADO') {
     return { tipo: 'ANULADO', mensaje: 'Este animal está anulado y no admite nuevos pesajes.' };
@@ -181,7 +197,8 @@ export function kpisDePesajes(resumen) {
   const acumulada = r.gananciaAcumulada;
   return [
     { id: 'ultimo', label: 'Último peso', valor: formatKg(r.ultimoPesoKg), detalle: r.fechaUltimoPeso ? formatFecha(r.fechaUltimoPeso) : null },
-    { id: 'anterior', label: 'Peso anterior', valor: formatKg(r.pesoAnteriorKg), detalle: null },
+    // FASE 5A: peso anterior = día distinto anterior de la serie diaria ACTIVA.
+    { id: 'anterior', label: 'Peso anterior', valor: formatKg(r.pesoAnteriorKg), detalle: r.fechaPesoAnterior ? formatFecha(r.fechaPesoAnterior) : null },
     { id: 'diferencia', label: 'Diferencia', valor: formatDiferenciaKg(r.diferenciaKg), detalle: null },
     { id: 'dias', label: 'Días desde el anterior', valor: formatDias(r.diasDesdeAnterior), detalle: null },
     { id: 'gmd', label: 'GMD (ganancia media diaria)', valor: formatGmd(r.gmdKgDia), detalle: null },

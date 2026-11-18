@@ -171,6 +171,7 @@
   "src/modules/ganaderia/hato/__tests__/hatoFormModel.test.js",
   "src/modules/ganaderia/hato/__tests__/pesajesModel.test.js",
   "src/modules/ganaderia/hato/__tests__/pesajesUiArchitecture.test.js",
+  "src/modules/ganaderia/hato/__tests__/pesajesAnulacion.test.js",
   "src/modules/ganaderia/hato/__tests__/pesajesAlertas.test.js",
   "src/modules/ganaderia/hato/__tests__/pesajesAlertasUiArchitecture.test.js",
   "src/modules/ganaderia/hato/__tests__/pesajesAlertasFechaNegocio.test.js",

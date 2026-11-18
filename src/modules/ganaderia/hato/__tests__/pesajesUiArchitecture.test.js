@@ -54,7 +54,9 @@ test('pesajes: solo la API Business de Fase 1A vía hatoApi; nunca legacy ni fet
     assert.doesNotMatch(code, /\bfetch\(|XMLHttpRequest|axios/, `${name} no hace red directa`);
     assert.doesNotMatch(code, /localStorage|sessionStorage|indexedDB/, `${name} no persiste en el navegador`);
   }
-  assert.match(panel, /import \{ listPesajes, registrarPesaje \} from '\.\/hatoApi\.js'/);
+  // FASE 5A.2: + anularPesaje (POST .../pesajes/:pesajeId/anular, solo online).
+  assert.match(panel, /import \{ anularPesaje, listPesajes, registrarPesaje \} from '\.\/hatoApi\.js'/);
+  assert.match(api, /export function anularPesaje\(animalId, pesajeId, body\) \{\s*return postJsonWithCsrf\(`\$\{BASE\}\/animales\/\$\{encodeURIComponent\(animalId\)\}\/pesajes\/\$\{encodeURIComponent\(pesajeId\)\}\/anular`, body\)/);
 });
 
 test('pesajes: organizacionId nunca sale del frontend (lo resuelve la sesión)', () => {
@@ -114,7 +116,8 @@ test('panel: sin doble envío ni reintento automático del POST', () => {
 
 test('panel: refresca historial y KPIs tras guardar; valida antes de enviar', () => {
   assert.match(panel, /setMensaje\(\{ type: 'success', text: resultado\.mensaje \}\);\s*await cargar\(\);\s*onPesajeRegistrado\?\.\(\)/);
-  assert.match(panel, /validatePesajeForm\(form, \{ hoy: fechaNegocio \}\)/);
+  // FASE 5A.2: también contra nacimiento/ingreso del animal.
+  assert.match(panel, /validatePesajeForm\(form, \{ hoy: fechaNegocio, fechaNacimiento, fechaIngreso \}\)/);
   assert.ok(panel.indexOf('validatePesajeForm(') < panel.indexOf('registrarPesaje('), 'validación antes del POST');
   assert.match(panel, /setForm\(initialPesajeForm\(fechaNegocio\)\)/);
 });
@@ -130,7 +133,8 @@ test('panel: estado vacío, anulado, sin conexión y error de carga', () => {
   // FASE 3A: el formulario exige además la capacidad registrarPesaje.
   assert.match(panel, /const mostrarFormulario = permisos\.registrarPesaje && admitePesajes && \(online \? state\.status === 'ok' : puedeGuardarOffline && state\.status !== 'not_found'\);/);
   assert.match(panel, /const formulario = mostrarFormulario \? \(\s*<HatoPesajeForm/);
-  assert.match(panel, /\{pesajes\.length \? <HatoPesajesHistorial/, 'historial visible también si está anulado');
+  // FASE 5A.2: el historial (ACTIVOS + ANULADOS) es visible aunque no queden activos.
+  assert.match(panel, /\{historial\.length \? \(\s*<HatoPesajesHistorial/, 'historial visible también si está anulado');
   assert.match(panel, /Reintentar/);
   assert.match(panel, /aria-live="polite"/);
 });
@@ -154,8 +158,10 @@ test('formulario: labels reales, errores asociados por aria, límites del backen
 test('historial y KPIs: tabla con encabezados, etiquetas móviles y lista de definiciones', () => {
   assert.match(historial, /historialParaVista\(pesajes\)/);
   assert.match(historial, /<caption>Historial de pesajes \(más reciente primero\)<\/caption>/);
-  assert.equal((historial.match(/<th scope="col">/g) ?? []).length, 7);
-  assert.equal((historial.match(/data-label="/g) ?? []).length, 7);
+  // FASE 5A.2: + Estado, celda de cálculo (anulado / mismo día) y Acciones (solo owner/admin).
+  const labels = [...historial.matchAll(/data-label="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(labels, ['Fecha', 'Peso', 'Método', 'Estado', 'Cálculo', 'Diferencia', 'Días', 'GMD', 'Observaciones', 'Acciones']);
+  assert.equal((historial.match(/<th scope="col">/g) ?? []).length, 9);
   assert.match(kpis, /<dl className="gan-pesajes-kpis" aria-label="Indicadores de peso">/);
 });
 
@@ -191,7 +197,13 @@ test('gráfica de GMD: solo si hay períodos con GMD; referencia en 0; sin umbra
 });
 
 test('ningún texto de pesajes habla de "nacimiento"', () => {
-  for (const name of PESAJES_FILES) assert.doesNotMatch(src(name), /nacimiento|al nacer/i, name);
+  // BUG-02: el primer pesaje NUNCA es "peso al nacimiento". FASE 5A.2: la
+  // única mención permitida es la FECHA de nacimiento del animal (límite de
+  // la fecha del pesaje), como identificador o en el mensaje de validación.
+  for (const name of PESAJES_FILES) {
+    const code = src(name).replace(/fechaNacimiento|fecha de nacimiento|FECHA_ANTERIOR_A_NACIMIENTO/g, '');
+    assert.doesNotMatch(code, /nacimiento|al nacer/i, name);
+  }
 });
 
 test('CSS móvil: pestañas propias (no la regla legacy), grids que encogen, tabla como tarjetas, inputs ≥ 16px', () => {

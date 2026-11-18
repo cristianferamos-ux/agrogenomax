@@ -1550,3 +1550,52 @@
     display: none;
   }
 }
+
+/* FASE 5A.2: historial de pesajes ACTIVO / ANULADO y anulación. */
+.gan-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.gan-pesajes-historial .gan-repro-badge {
+  margin-left: 0;
+}
+
+.gan-pesaje-fila.is-anulado td {
+  color: #9aa4b1;
+}
+
+.gan-pesaje-fila.is-anulado td[data-label="Peso"] {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.gan-pesaje-nota-calculo {
+  color: #b6c0cc;
+  font-size: 0.82rem;
+  font-style: italic;
+}
+
+.gan-pesaje-nota-mismo-dia {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.78rem;
+}
+
+.gan-pesaje-anular {
+  padding: 0.25rem 0.65rem;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.gan-pesaje-anular-resumen {
+  margin: 0 0 0.35rem;
+  font-weight: 700;
+}

@@ -46,7 +46,7 @@ import { messageForError } from '../../hato/hatoFormModel.js';
 
 const OPERATIVAS = ['crearAnimal', 'registrarPesaje', 'asociarQr', 'operarCiclo', 'planificarPastoreo', 'registrarReproduccion'];
 const ADMINISTRATIVAS = ['corregirAnimal', 'anularAnimal', 'reemplazarQr', 'darBajaQr', 'cerrarAnimal',
-  'editarPredio', 'editarPotrero', 'administrarCiclo', 'crearCatalogoPersonalizado', 'administrarReproduccion'];
+  'editarPredio', 'editarPotrero', 'administrarCiclo', 'crearCatalogoPersonalizado', 'administrarReproduccion', 'anularPesaje'];
 
 // ---------------------------------------------------------------------------
 // Matriz

@@ -98,7 +98,7 @@ test('panel: formulario (defecto, max y validación) y alertas usan UNA fecha de
   assert.equal((panel.match(/fechaHoyNegocio\(\)/g) ?? []).length, 1, 'una sola lectura de la fecha por render');
   assert.match(panel, /const fechaNegocio = fechaHoyNegocio\(\);/);
   assert.match(panel, /useState\(\(\) => initialPesajeForm\(fechaNegocio\)\)/);
-  assert.match(panel, /validatePesajeForm\(form, \{ hoy: fechaNegocio \}\)/);
+  assert.match(panel, /validatePesajeForm\(form, \{ hoy: fechaNegocio, fechaNacimiento, fechaIngreso \}\)/);
   assert.match(panel, /setForm\(initialPesajeForm\(fechaNegocio\)\)/);
   assert.match(panel, /hoy=\{fechaNegocio\}/, 'max del input date');
   assert.match(panel, /fechaReferencia: fechaNegocio/, 'alertas sin cambios');

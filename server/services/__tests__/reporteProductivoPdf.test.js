@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { construirHistorialPesajes } from '../ganaderia/pesajesService.js';
 import { ALERTAS_ANULADO, ALERTAS_FUERA_DEL_HATO, NOTA_CHAPETA_HISTORICA, NOTA_UMBRALES, construirReporteProductivo } from '../ganaderia/reporteProductivo/reporteProductivoModelo.js';
-import { LOGO_PATH, escalaTemporal, generarPdfReporteProductivo } from '../ganaderia/reporteProductivo/reporteProductivoPdf.js';
+import { LOGO_PATH, disposicionEncabezado, escalaTemporal, generarPdfReporteProductivo } from '../ganaderia/reporteProductivo/reporteProductivoPdf.js';
+import PDFDocument from 'pdfkit';
 
 const AHORA = new Date('2026-10-21T02:00:00Z');
 let seq = 0;
@@ -212,4 +213,104 @@ test('2C. MUERTO y ANULADO + MUERTO: bloque "Muerte" con causa y observaciones; 
   assert.ok(anulado.includes('30/10/2026') && anulado.includes('Enfermedad') && anulado.includes('Necropsia pendiente'));
   assert.ok(anulado.includes('No operativa') && anulado.includes(ALERTAS_ANULADO));
   assert.ok(anulado.includes('06/08/2026'), 'pesajes conservados');
+});
+
+// ---------------------------------------------------------------------
+// FASE 5A.2 (P1-5): encabezado sin solapamiento + pesajes ANULADOS.
+// Se leen las POSICIONES reales del PDF: cada línea de texto es
+// "1 0 0 1 x y Tm / Fn s Tf / [..] TJ" con y en coordenadas PDF (origen abajo).
+// ---------------------------------------------------------------------
+const ALTO_PAGINA = 792;
+function lineasPorPagina(buffer) {
+  const s = buffer.toString('latin1');
+  const objeto = (n) => {
+    const i = s.indexOf(`\n${n} 0 obj`);
+    return s.slice(i, s.indexOf('endobj', i));
+  };
+  const kids = s.match(/\/Type \/Pages[\s\S]*?\/Kids \[([^\]]*)\]/)[1].match(/\d+ 0 R/g).map((r) => r.split(' ')[0]);
+  return kids.map((k) => {
+    const contenido = objeto(objeto(k).match(/\/Contents (\d+) 0 R/)[1]);
+    const stream = contenido.slice(contenido.indexOf('stream') + 6, contenido.lastIndexOf('endstream'));
+    return [...stream.matchAll(/1 0 0 1 ([\d.]+) ([\d.]+) Tm\s+\/F\d+ ([\d.]+) Tf\s+\[(.*?)\] TJ/g)].map((m) => ({
+      x: Number(m[1]),
+      base: ALTO_PAGINA - Number(m[2]), // línea base, medida desde arriba
+      size: Number(m[3]),
+      texto: [...m[4].matchAll(/<([0-9a-fA-F]*)>/g)].map((h) => WINANSI.decode(Buffer.from(h[1], 'hex'))).join(''),
+    }));
+  });
+}
+
+/** Comprueba en CADA página que el sello queda debajo de la última línea de la identificación y sobre la divisoria. */
+function assertEncabezadoSinSolape(buffer, m) {
+  const d = disposicionEncabezado(new PDFDocument({ size: 'LETTER' }), m);
+  const paginasLineas = lineasPorPagina(buffer);
+  for (const [i, lineas] of paginasLineas.entries()) {
+    const derecha = lineas.filter((l) => l.x >= d.x - 1 && l.base < d.divisorY);
+    const ident = derecha.filter((l) => l.size === d.identificacion.size && !l.texto.startsWith('Generado el'));
+    const sello = derecha.filter((l) => l.texto.startsWith('Generado el'));
+    assert.equal(ident.length, d.identificacion.lineas, `página ${i + 1}: ${ident.length} líneas de identificación`);
+    assert.equal(sello.length, 1, `página ${i + 1}: un sello`);
+    const finIdent = Math.max(...ident.map((l) => l.base + l.size * 0.25)); // descendente aprox.
+    const inicioSello = sello[0].base - sello[0].size * 0.75; // ascendente aprox.
+    assert.ok(inicioSello >= finIdent, `página ${i + 1}: el sello (${inicioSello.toFixed(1)}) se superpone a la identificación (${finIdent.toFixed(1)})`);
+    assert.ok(sello[0].base + sello[0].size * 0.25 <= d.divisorY, `página ${i + 1}: el sello cruza la divisoria`);
+  }
+  return { d, paginasLineas };
+}
+
+const NOMBRE_LARGO = 'Lucero de la Esperanza del Valle Alto de San Isidro';
+for (const [nombre, extra, esperado] of [
+  ['identificación corta', { nombre: 'Lucero' }, { lineas: 1, size: 10 }],
+  ['identificación larga en 2 líneas', { numeroVisual: 'AGX-7KM4-P2XZ-R', nombre: 'Lucero de la Esperanza del Valle' }, { lineas: 2, size: 10 }],
+  ['nombre largo', { numeroVisual: 'AGX-7KM4-P2XZ-R', nombre: `${NOMBRE_LARGO} ${NOMBRE_LARGO}` }, { maxLineas: 3 }],
+  ['SALIDO', { numeroVisual: 'AGX-7KM4-P2XZ-R', nombre: NOMBRE_LARGO, estadoOperativo: 'SALIDO', cierre: { tipo: 'SALIDA', fecha: '2026-10-30', causa: 'VENTA', observaciones: null } }, { maxLineas: 3 }],
+  ['MUERTO', { numeroVisual: 'AGX-7KM4-P2XZ-R', nombre: NOMBRE_LARGO, estadoOperativo: 'MUERTO', cierre: { tipo: 'MUERTE', fecha: '2026-10-30', causa: 'ENFERMEDAD', observaciones: 'Necropsia pendiente' } }, { maxLineas: 3 }],
+]) {
+  test(`P1-5: encabezado sin solapamiento -- ${nombre} (todas las páginas, pie correcto)`, async () => {
+    const m = modelo(muchos(46), animal(extra));
+    const b = await pdf(m);
+    const { d, paginasLineas } = assertEncabezadoSinSolape(b, m);
+    if (esperado.lineas) assert.equal(d.identificacion.lineas, esperado.lineas);
+    if (esperado.size) assert.equal(d.identificacion.size, esperado.size);
+    if (esperado.maxLineas) assert.ok(d.identificacion.lineas <= esperado.maxLineas);
+    assert.equal(d.identificacion.truncada, false, 'información relevante no truncada');
+    // La identificación completa se dibuja (concatenando sus líneas).
+    const pagina1 = paginasLineas[0].filter((l) => l.x >= d.x - 1 && l.size === d.identificacion.size && l.base < d.divisorY).map((l) => l.texto).join(' ');
+    assert.equal(pagina1.replace(/\s+/g, ' ').trim(), m.animal.identificacion);
+    const n = paginas(b);
+    assert.ok(n >= 3, 'hay saltos de página');
+    textoPorPagina(b).forEach((t, i) => assert.ok(t.includes(`Página ${i + 1} de ${n}`), `pie de la página ${i + 1}`));
+  });
+}
+
+test('P1-5: una identificación absurda se acorta con "…" solo como último recurso y nunca se superpone', async () => {
+  const m = modelo([p('2026-10-19', 350)], animal({ numeroVisual: 'X'.repeat(300), nombre: 'Y'.repeat(300) }));
+  const b = await pdf(m);
+  const { d } = assertEncabezadoSinSolape(b, m);
+  assert.equal(d.identificacion.truncada, true);
+  assert.ok(d.identificacion.texto.endsWith('…'));
+});
+
+test('5A.2: PDF con pesaje ANULADO -- resumen sin él, historial con estado/fecha/motivo, sin actor ni ids', async () => {
+  const ACTOR = '6f1c2d3e-0000-4000-8000-00000000abcd';
+  const OP = '9a8b7c6d-0000-4000-8000-0000000000ef';
+  const filas = [
+    p('2026-10-19', 350),
+    p('2026-10-20', 355),
+    p('2026-10-20', 360, { estadoRegistro: 'ANULADO', anulacion: { anuladoEn: '2026-11-17T15:00:00.000000Z', motivo: 'Error de digitación' }, anuladoPor: ACTOR, anulacionClientOperationId: OP }),
+  ];
+  const m = modelo(filas);
+  const valor = (etiqueta) => m.resumen.find((x) => x.etiqueta === etiqueta)?.valor;
+  assert.equal(valor('Último peso'), '355 kg (báscula)', 'el anulado no es el último peso');
+  assert.equal(valor('Pesajes registrados'), '2');
+  assert.equal(m.historial.filas.length, 3);
+  const anulada = m.historial.filas.find((f) => f[1] === '360');
+  assert.equal(anulada[6], 'ANULADO el 17/11/2026. Motivo: Error de digitación');
+  assert.deepEqual(anulada.slice(3, 6), ['—', '—', '—']);
+  assert.equal(m.graficaPeso.puntos.length, 2, 'la gráfica no incluye el anulado');
+  // La celda se parte en varias líneas del PDF: se normalizan los saltos.
+  const texto = textoPorPagina(await pdf(m)).join('\n').replace(/\s+/g, ' ');
+  assert.ok(texto.includes('ANULADO el 17/11/2026. Motivo: Error de digitación'));
+  assert.ok(!texto.includes(ACTOR) && !texto.includes(OP), 'sin UUID del actor ni id de operación');
+  assert.ok(!JSON.stringify(m).includes(ACTOR), 'el modelo tampoco los conserva');
 });

@@ -64,6 +64,11 @@ export function registrarPesaje(animalId, body) {
   return postJsonWithCsrf(`${BASE}/animales/${encodeURIComponent(animalId)}/pesajes`, body);
 }
 
+// FASE 5A.2: anulación auditada (owner/admin). body = { motivo, clientOperationId, identidadEsperada? }. Solo online.
+export function anularPesaje(animalId, pesajeId, body) {
+  return postJsonWithCsrf(`${BASE}/animales/${encodeURIComponent(animalId)}/pesajes/${encodeURIComponent(pesajeId)}/anular`, body);
+}
+
 // SPRINT-3D11.3 (R1): chapetas QR de la organización (asignadas por el
 // Super Admin). La organización nunca genera chapetas ni ve el stock central.
 // FASE 3B: el token NUNCA va en la URL. Con token en memoria (escáner) va en

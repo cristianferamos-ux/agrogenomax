@@ -30,6 +30,19 @@ Transacción `READ ONLY` + `ROLLBACK`, solo agregados, sin datos personales. No 
 1 grupo mismo día (355/360); 0 pesajes antes de nacimiento/ingreso, después de cierre o futuros; 0 inconsistencias tenant;
 0 objetos de 0028 preexistentes; RLS ENABLE+FORCE; `agx_app` = INSERT, SELECT.
 
+### Estado por subfase
+- 5A.1a (0028) — mergeada y **aplicada en producción** (2026-11-17, ledger 29).
+- 5A.1b (backend) — mergeada y desplegada (`40ff7b4`), smoke de solo lectura PASS.
+- 5A.2 (frontend online) — anulación owner/admin solo online, historial ACTIVO/ANULADO, aclaración del mismo día, errores específicos, PDF P1-5. Sin offline.
+- 5A.3 (offline) — pendiente: `PESAJE_ANULAR` en el outbox, reconciliación y refresco de la caché de último peso.
+
+### Deuda menor registrada (no bloqueante)
+- **Accesibilidad del historial de pesajes (5A.2):** en un pesaje ANULADO o en una medición previa del mismo día, una sola celda
+  `colSpan=3` con `data-label="Cálculo"` reemplaza Diferencia / Días / GMD. Visualmente es claro, pero un lector de pantalla anuncia
+  "Cálculo" en lugar de las tres columnas. Revisar en una fase posterior (p. ej. tres celdas con el texto en la primera y `aria-describedby`,
+  o `headers` explícitos).
+- Flaky conocido `animalPesajesIntegration` "28-30" (conteo global de `qr_chapetas` en paralelo): sigue sin corregir.
+
 ---
 
 ## REVISIÓN 2 — decisiones cerradas (prevalece sobre §1–§18 donde difiera)
