@@ -35,8 +35,9 @@ function errorReused(message = 'Esta operación ya fue usada con datos distintos
 
 // Fechas como texto (sin conversión de zona horaria del driver) y peso como
 // texto exacto de numeric (se convierte a Number al serializar). Nunca se
-// leen anulado_por ni los client_operation_id: no se exponen.
-const PESAJE_COLUMNS = `
+// leen anulado_por ni los client_operation_id: no se exponen (FASE 5A.3a: los
+// client_operation_id solo los lee pesajesSyncRepository, para /sync/pesajes).
+export const PESAJE_COLUMNS = `
   pesaje_id::text as pesaje_id,
   animal_id::text as animal_id,
   to_char(fecha, 'YYYY-MM-DD') as fecha,

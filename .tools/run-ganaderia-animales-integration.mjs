@@ -16,6 +16,7 @@ try {
     'server/services/__tests__/timelineIntegration.test.js',
     'server/services/__tests__/animalCierreIntegration.test.js',
     'server/services/__tests__/pesajesAnulacionIntegration.test.js',
+    'server/services/__tests__/pesajesSyncIntegration.test.js',
   ], { requiredPasses: {
     'server/services/__tests__/animalesSchemaIntegration.test.js': 24,
     'server/services/__tests__/animalesRepositoryIntegration.test.js': 27,
@@ -28,6 +29,8 @@ try {
     'server/services/__tests__/animalCierreIntegration.test.js': 18,
     // FASE 5A.1b: anulación, serie diaria y fechas (exige 0028).
     'server/services/__tests__/pesajesAnulacionIntegration.test.js': 21,
+    // FASE 5A.3a: GET /sync/pesajes (keyset, tenant, evidencia de conciliación).
+    'server/services/__tests__/pesajesSyncIntegration.test.js': 18,
   } });
 } catch (error) {
   console.error(error.message);
