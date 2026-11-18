@@ -94,10 +94,12 @@ test('1 pesaje: sin tendencia inventada ni sección GMD', async () => {
   assert.ok(!texto.includes('GMD POR PERÍODO'));
 });
 
-test('GMD negativa y período del mismo día', async () => {
+test('GMD negativa y mismo día (serie diaria: el último del día representa la fecha)', async () => {
   const texto = textoPorPagina(await pdf(modelo([p('2026-06-01', 320), p('2026-07-01', 330), p('2026-08-06', 300), p('2026-08-06', 301)]))).join('\n');
-  assert.ok(texto.includes('-0,83'));
-  assert.ok(texto.includes('-30'));
+  // FASE 5A: 330 (01/07) -> 301 (06/08): -29 kg en 36 días.
+  assert.ok(texto.includes('-0,81'));
+  assert.ok(texto.includes('-29'));
+  assert.ok(texto.includes('Medición previa del mismo día'));
   assert.ok(texto.includes('URGENTE'));
   assert.ok(texto.includes('Han pasado 75 días desde el último pesaje.'));
 });

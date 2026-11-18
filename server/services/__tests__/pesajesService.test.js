@@ -62,12 +62,15 @@ describe('historial derivado (motor canónico)', () => {
     });
     assert.equal(h.orden, 'ASCENDENTE');
     assert.deepEqual(h.pesajes.map((x) => x.pesajeId), ['1', '2', '3']);
+    // FASE 5A.1b: contrato ampliado (aditivo); las claves históricas se conservan.
     assert.deepEqual(Object.keys(h.pesajes[0]), [
-      'pesajeId', 'fecha', 'pesoKg', 'metodo', 'origen', 'observaciones', 'createdAt', 'diferenciaKg', 'diasDesdeAnterior', 'gmdKgDia',
+      'pesajeId', 'fecha', 'pesoKg', 'metodo', 'origen', 'observaciones', 'createdAt', 'estadoRegistro', 'anulacion',
+      'representativoDelDia', 'pesoAnteriorKg', 'fechaAnterior', 'diferenciaKg', 'diasDesdeAnterior', 'gmdKgDia', 'mismoDia',
     ]);
+    assert.deepEqual(h.historial.map((x) => x.pesajeId), ['1', '2', '3']);
   });
 
-  test('GMD positiva, negativa, cero; null sin anterior; null el mismo día (ambos se conservan)', () => {
+  test('GMD positiva, negativa, cero; null sin anterior; el mismo día ambos se conservan y calcula el ÚLTIMO (serie diaria)', () => {
     const h = construirHistorialPesajes({
       animalId: '7',
       pesajes: [
@@ -82,10 +85,12 @@ describe('historial derivado (motor canónico)', () => {
     assert.equal(g[0], null);
     close(g[1], 1);
     close(g[2], -0.5);
-    assert.equal(g[3], 0);
-    assert.equal(g[4], null);
-    assert.equal(h.pesajes[4].diasDesdeAnterior, 0);
+    // FASE 5A: 305 y 306 el 31/01 -> representa el último (306) frente a 305 del 21/01.
+    assert.equal(g[3], null, 'medición previa del mismo día: sin derivaciones');
+    close(g[4], 0.1);
+    assert.equal(h.pesajes[4].diasDesdeAnterior, 10);
     assert.equal(h.pesajes[4].diferenciaKg, 1);
+    assert.deepEqual(h.pesajes[4].mismoDia, { fecha: '2025-01-31', mediciones: 2, primerPesoKg: 305, ultimoPesoKg: 306, diferenciaKg: 1 });
     assert.equal(h.pesajes.length, 5);
   });
 
@@ -95,13 +100,16 @@ describe('historial derivado (motor canónico)', () => {
       { ...h.resumen, gmdKgDia: null, gananciaAcumulada: { ...h.resumen.gananciaAcumulada, gmdPromedioKgDia: null } },
       {
         totalPesajes: 2,
+        totalAnulados: 0,
         ultimoPesoKg: 260,
         fechaUltimoPeso: '2025-04-11',
         metodoUltimoPeso: 'BASCULA',
         pesoAnteriorKg: 200,
+        fechaPesoAnterior: '2025-01-01',
         diferenciaKg: 60,
         diasDesdeAnterior: 100,
         gmdKgDia: null,
+        mismoDia: null,
         gananciaAcumulada: {
           primerPesoRegistradoKg: 200,
           fechaPrimerPesoRegistrado: '2025-01-01',
@@ -149,6 +157,11 @@ describe('una sola fórmula para backend y frontend', () => {
     // Copia byte a byte de shared/ (paridad en ganaderiaEngineParidad.test.js).
     assert.match(service, /from '\.\/engine\/pesajes\.js'/);
     assert.doesNotMatch(service + repo, /\/\s*dias|\(peso.*-.*\)\s*\//);
-    assert.doesNotMatch(repo, /db\.js|update agx\.|delete from|insert into agx\.animal_eventos|insert into agx\.animales/i);
+    assert.doesNotMatch(repo, /db\.js|delete from|truncate|insert into agx\.animal_eventos|insert into agx\.animales|update agx\.animales/i);
+    // FASE 5A.1b: el ÚNICO update es la anulación (solo columnas de anulación,
+    // actor de la sesión y now() del servidor), nunca un dato original.
+    const updates = repo.match(/update agx\.[a-z_]+\s+set[^`]*/gi) ?? [];
+    assert.equal(updates.length, 1);
+    assert.match(updates[0], /^update agx\.animal_pesajes\s+set estado_registro = 'ANULADO', anulado_por = \$2, anulado_at = now\(\),\s+motivo_anulacion = \$3, anulacion_client_operation_id = \$4\s+where pesaje_id = \$1\s*$/);
   });
 });

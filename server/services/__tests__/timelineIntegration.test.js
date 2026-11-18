@@ -114,7 +114,7 @@ async function huella(org) {
 }
 
 describe('FASE 1D.2: línea de tiempo con Postgres real (RLS)', { skip: !dbAvailable }, () => {
-  test('6/7/8/9/10. solo registro y luego registro + pesajes (mismo día: GMD null)', async () => {
+  test('6/7/8/9/10. solo registro y luego registro + pesajes (mismo día: serie diaria)', async () => {
     const org = crypto.randomUUID();
     const animal = await seedAnimal(org);
     let t = await timeline.obtenerTimelineAnimal(org, animal.animalId, { limit: 50 });
@@ -126,9 +126,12 @@ describe('FASE 1D.2: línea de tiempo con Postgres real (RLS)', { skip: !dbAvail
     t = await timeline.obtenerTimelineAnimal(org, animal.animalId, { limit: 50 });
     const pes = t.eventos.filter((e) => e.tipo === 'PESAJE_REGISTRADO');
     assert.deepEqual(pes.map((e) => e.datos.pesoKg), [316, 315, 300], 'DESC: mismo día, el registrado después primero');
-    assert.equal(pes[0].datos.diasDesdeAnterior, 0);
-    assert.equal(pes[0].datos.gmdKgDia, null);
-    assert.equal(pes[1].datos.gmdKgDia, 0.5);
+    // FASE 5A: 316 (último del 09/02) representa la fecha frente a 300 (10/01);
+    // 315 es la medición previa del mismo día, sin derivaciones.
+    assert.equal(pes[0].datos.diasDesdeAnterior, 30);
+    assert.ok(Math.abs(pes[0].datos.gmdKgDia - 16 / 30) < 1e-9);
+    assert.equal(pes[1].datos.gmdKgDia, null);
+    assert.equal(pes[1].datos.diasDesdeAnterior, null);
     assert.equal(pes[1].fecha, '2025-02-09');
     assert.equal(pes[1].fechaHora, null);
   });

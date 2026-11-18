@@ -168,9 +168,15 @@ describe('PESAJES y GMD', () => {
       { pesaje_id: 7, fecha_pesaje: '2025-05-05', peso_kg: '305' },
     ]);
     assert.deepEqual(filas.map((f) => f.pesoKg), [305, 310]);
-    assert.equal(filas[1].diasDesdeAnterior, 0);
+    // FASE 5A: serie diaria -- el último del día representa la fecha; sin
+    // fecha anterior no hay período (GMD null); la medición previa del día
+    // no tiene derivaciones y el representante describe el mismo día.
+    assert.equal(filas[0].representativoDelDia, false);
+    assert.equal(filas[1].representativoDelDia, true);
+    assert.equal(filas[1].diasDesdeAnterior, null);
     assert.equal(filas[1].gmdKgDia, null);
-    assert.equal(filas[1].diferenciaKg, 5);
+    assert.equal(filas[1].diferenciaKg, null);
+    assert.deepEqual(filas[1].mismoDia, { fecha: '2025-05-05', mediciones: 2, primerPesoKg: 305, ultimoPesoKg: 310, diferenciaKg: 5 });
   });
 
   test('primer pesaje (REGISTRO_INICIAL) NO es nacimiento: sin edad ni categoría inventadas', () => {
@@ -194,7 +200,7 @@ describe('PESAJES y GMD', () => {
       { fecha: '2025-04-11', pesoKg: 260 },
       { fecha: '2025-02-01', pesoKg: 215 },
     ]);
-    assert.deepEqual({ ...r, gmdPromedioKgDia: undefined }, { pesoInicialKg: 200, pesoFinalKg: 260, gananciaKg: 60, dias: 100, gmdPromedioKgDia: undefined });
+    assert.deepEqual({ ...r, gmdPromedioKgDia: undefined }, { pesoInicialKg: 200, pesoFinalKg: 260, fechaInicial: '2025-01-01', fechaFinal: '2025-04-11', gananciaKg: 60, dias: 100, gmdPromedioKgDia: undefined });
     close(r.gmdPromedioKgDia, 0.6);
     assert.equal(calcularGananciaAcumulada([{ fecha: '2025-01-01', pesoKg: 200 }]), null);
   });

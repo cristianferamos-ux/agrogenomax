@@ -200,8 +200,10 @@ describe('FASE 1A: registro y lectura de pesajes (repositorio + servicio)', { sk
     const value = pesaje({ pesoKg: 350.5, metodo: 'ESTIMADO', observaciones: 'Báscula en reparación' });
     const { pesaje: creado, yaExistia } = await registrar(org, animalId, value);
     assert.equal(yaExistia, false);
+    // FASE 5A.1b: contrato aditivo (estadoRegistro, anulacion); un pesaje nace ACTIVO.
     assert.deepEqual({ ...creado, pesajeId: 'x', createdAt: 'x' }, {
       pesajeId: 'x', fecha: '2025-01-10', pesoKg: 350.5, metodo: 'ESTIMADO', origen: 'MANUAL', observaciones: 'Báscula en reparación', createdAt: 'x',
+      estadoRegistro: 'ACTIVO', anulacion: null,
     });
     assert.match(creado.createdAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/);
     const h = await service.obtenerHistorialPesajes(org, animalId);
@@ -223,9 +225,11 @@ describe('FASE 1A: registro y lectura de pesajes (repositorio + servicio)', { sk
     assert.equal(g[0], null);
     close(g[1], 1);
     close(g[2], -0.5);
-    assert.equal(g[3], 0);
-    assert.equal(g[4], null);
-    assert.equal(h.pesajes[4].diasDesdeAnterior, 0);
+    // FASE 5A: el 31/01 tiene 305 y 306 -> representa el último (306).
+    assert.equal(g[3], null, 'medición previa del mismo día: sin derivaciones');
+    close(g[4], 0.1);
+    assert.equal(h.pesajes[4].diasDesdeAnterior, 10);
+    assert.deepEqual(h.resumen.mismoDia, { fecha: '2025-01-31', mediciones: 2, primerPesoKg: 305, ultimoPesoKg: 306, diferenciaKg: 1 });
     assert.equal(h.resumen.ultimoPesoKg, 306);
     assert.equal(h.resumen.gananciaAcumulada.primerPesoRegistradoKg, 300);
     assert.equal(h.resumen.gananciaAcumulada.gananciaKg, 6);
@@ -323,7 +327,11 @@ describe('FASE 1A: registro y lectura de pesajes (repositorio + servicio)', { sk
     assert.equal(await countPesajes(animalId, "and origen = 'MANUAL'"), 3);
     const h = await service.obtenerHistorialPesajes(org, animalId);
     assert.equal(h.pesajes[0].origen, 'REGISTRO_INICIAL');
-    assert.equal(h.resumen.gananciaAcumulada.primerPesoRegistradoKg, 250);
+    assert.equal(h.pesajes.length, 4);
+    // FASE 5A: los 4 son del mismo día (alta = HOY): una sola fecha en la serie
+    // diaria -> sin ganancia acumulada; el día se describe en `mismoDia`.
+    assert.equal(h.resumen.gananciaAcumulada, null);
+    assert.deepEqual(h.resumen.mismoDia, { fecha: HOY, mediciones: 4, primerPesoKg: 250, ultimoPesoKg: 253, diferenciaKg: 3 });
   });
 
   test('28-30. no toca QR, animales, eventos ni la columna de estado (solo animal_pesajes)', async () => {

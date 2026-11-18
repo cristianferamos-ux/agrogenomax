@@ -13,6 +13,7 @@ import { computeCreationIntentHash } from './animalIntentHash.js';
 import { isCategoriaCompatibleConSexo } from './categoriaSexoCompat.js';
 import { validateAnimalConsistency } from './animalValidation.js';
 import { assertCorreccionCompatibleConReproduccionEnTx } from './reproduccionRepository.js';
+import { assertCorreccionCompatibleConPesajesEnTx } from './pesajesRepository.js';
 
 const NUMERO_VISUAL_UNIQUE_CONSTRAINT = 'animales_org_numero_visual_activo_key';
 const CLIENT_OPERATION_UNIQUE_CONSTRAINT = 'animales_org_client_operation_key';
@@ -65,9 +66,11 @@ export const ANIMAL_SELECT = `
     left join agx.catalogo_razas r on r.raza_id = a.raza_principal_id
     left join agx.catalogo_categorias_productivas c on c.categoria_id = a.categoria_productiva_id
     left join lateral (
+      -- FASE 5A.1b: último peso = último pesaje ACTIVO (un ANULADO nunca cuenta).
       select ap.peso_kg, ap.metodo, ap.fecha
         from agx.animal_pesajes ap
        where ap.animal_id = a.animal_id
+         and ap.estado_registro = 'ACTIVO'
        order by ap.fecha desc, ap.pesaje_id desc
        limit 1
     ) lp on true`;
@@ -477,6 +480,14 @@ export async function corregirAnimal(
       fechaNacimiento: merged.fechaNacimiento,
       cambiaSexo: changedKeys.includes('sexo'),
       cambiaFechaNacimiento: changedKeys.includes('fechaNacimiento'),
+    });
+    // FASE 5A.1b: nacimiento/ingreso nunca posteriores al primer pesaje ACTIVO
+    // (los ANULADOS no restringen; nunca se tocan pesajes para permitirlo).
+    await assertCorreccionCompatibleConPesajesEnTx(client, animalId, {
+      fechaNacimiento: merged.fechaNacimiento,
+      fechaIngreso: merged.fechaIngreso,
+      cambiaFechaNacimiento: changedKeys.includes('fechaNacimiento'),
+      cambiaFechaIngreso: changedKeys.includes('fechaIngreso'),
     });
 
     if (changedKeys.includes('razaPrincipalId') && merged.razaPrincipalId) {

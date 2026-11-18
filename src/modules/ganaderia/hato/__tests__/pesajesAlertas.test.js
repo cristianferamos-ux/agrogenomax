@@ -91,11 +91,15 @@ test('9b. pérdida decimal formateada es-CO', () => {
   assert.equal(a.mensaje, 'Se registró una pérdida de 5,6 kg desde el pesaje anterior.');
 });
 
-test('10. mismo día (GMD null) -> no inventa pérdida', () => {
+test('10. mismo día (GMD null) -> no inventa pérdida por GMD, pero la deja visible (FASE 5A: PESAJE_MISMO_DIA)', () => {
   const r = api(fila(1, REF, 310), fila(2, REF, 300));
   assert.equal(r.resumen.gmdKgDia, null);
-  assert.equal(r.resumen.diasDesdeAnterior, 0);
-  assert.deepEqual(alertas(r), []);
+  // Serie diaria: una sola fecha -> sin período anterior.
+  assert.equal(r.resumen.diasDesdeAnterior, null);
+  const a = alertas(r);
+  assert.deepEqual(codigos(a), ['INFO:PESAJE_MISMO_DIA'], 'sin PERDIDA_DE_PESO: no hay GMD el mismo día');
+  assert.equal(a[0].datos.diferenciaKg, -10, 'la pérdida intradía queda visible con signo');
+  assert.equal(a[0].datos.mediciones, 2);
 });
 
 test('11 y 12. varias alertas: se muestran todas, ordenadas URGENTE > ATENCION', () => {

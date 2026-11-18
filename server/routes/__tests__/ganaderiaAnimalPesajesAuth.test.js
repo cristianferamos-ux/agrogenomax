@@ -56,7 +56,7 @@ function startApp() {
   });
 }
 
-function wireFakeTenantSession() {
+function wireFakeTenantSession(rol = 'owner') {
   const rawToken = crypto.randomBytes(32).toString('base64url');
   const tokenHash = hashSessionSecret(rawToken);
   const pool = getAgxAuthPool({ AGX_AUTH_DATABASE_URL: FAKE_AUTH_CONNECTION_STRING });
@@ -71,15 +71,15 @@ function wireFakeTenantSession() {
       };
     }
     if (text.includes('fn_resolver_autorizacion_sesion') && params[0] === tokenHash) {
-      return { rows: [{ sesion_id: 'sesion-1', cuenta_id: 'cuenta-1', organizacion_id: ORG_ID, rol: 'owner' }] }; // FASE 3A: rol real de membresía (RBAC)
+      return { rows: [{ sesion_id: 'sesion-1', cuenta_id: 'cuenta-1', organizacion_id: ORG_ID, rol }] }; // FASE 3A: rol real de membresía (RBAC)
     }
     return { rows: [] };
   };
   return rawToken;
 }
 
-async function call(method, path, { body, session = true, csrf = 'valid' } = {}) {
-  const rawToken = session ? wireFakeTenantSession() : null;
+async function call(method, path, { body, session = true, csrf = 'valid', rol = 'owner' } = {}) {
+  const rawToken = session ? wireFakeTenantSession(rol) : null;
   const ctx = await startApp();
   try {
     const headers = { 'Content-Type': 'application/json', Origin: ALLOWED_ORIGIN };
@@ -153,4 +153,89 @@ describe('FASE 1A: validación antes de tocar la base (400)', () => {
       assert.equal(cache, 'no-store');
     });
   }
+});
+
+// ---------------------------------------------------------------------
+// FASE 5A.1b: POST /:pesajeId/anular -- rol -> identidad -> ids -> validación,
+// todo ANTES de tocar Postgres-AGX-Business (no configurado: cualquier acceso
+// sería 500). Idempotencia, cross-tenant y escritura real: integración.
+// ---------------------------------------------------------------------
+const OP_ANULAR = '8c1f2a64-5717-4562-b3fc-2c963f66afa7';
+const ANULAR = Object.freeze({ motivo: 'Error de digitación', clientOperationId: OP_ANULAR });
+const IDENTIDAD_OK = Object.freeze({ cuentaId: 'cuenta-1', organizacionId: ORG_ID });
+
+describe('FASE 5A.1b: anular pesaje -- autenticación y rol', () => {
+  test('sin sesión -> 401', async () => {
+    const { status } = await call('POST', '/animales/1/pesajes/7/anular', { body: ANULAR, session: false });
+    assert.equal(status, 401);
+  });
+  test('sin CSRF -> 403', async () => {
+    const { status } = await call('POST', '/animales/1/pesajes/7/anular', { body: ANULAR, csrf: 'none' });
+    assert.equal(status, 403);
+  });
+  for (const rol of ['operador', 'lector']) {
+    test(`${rol} -> 403 ROLE_FORBIDDEN (antes de validar e incluso con identidad ajena)`, async () => {
+      for (const body of [ANULAR, { motivo: '' }, { ...ANULAR, identidadEsperada: { cuentaId: 'otra', organizacionId: ORG_ID } }]) {
+        const { status, json } = await call('POST', '/animales/1/pesajes/7/anular', { body, rol });
+        assert.equal(status, 403);
+        assert.equal(json.error, 'ROLE_FORBIDDEN');
+      }
+    });
+  }
+});
+
+describe('FASE 5A.1b: anular pesaje -- identidad y validación (400/409) antes de la base', () => {
+  test('identidadEsperada de otra cuenta -> 409 IDENTIDAD_NO_COINCIDE (owner y admin)', async () => {
+    for (const rol of ['owner', 'admin']) {
+      const { status, json } = await call('POST', '/animales/1/pesajes/7/anular', { body: { ...ANULAR, identidadEsperada: { cuentaId: 'cuenta-2', organizacionId: ORG_ID } }, rol });
+      assert.equal(status, 409);
+      assert.equal(json.error, 'IDENTIDAD_NO_COINCIDE');
+    }
+  });
+  test('identidadEsperada de otra organización -> 409 IDENTIDAD_NO_COINCIDE', async () => {
+    const { status, json } = await call('POST', '/animales/1/pesajes/7/anular', { body: { ...ANULAR, identidadEsperada: { cuentaId: 'cuenta-1', organizacionId: '00000000-0000-4000-8000-000000000002' } } });
+    assert.equal(status, 409);
+    assert.equal(json.error, 'IDENTIDAD_NO_COINCIDE');
+  });
+  test('identidadEsperada mal formada -> 400 INVALID_IDENTIDAD_ESPERADA', async () => {
+    const { status, json } = await call('POST', '/animales/1/pesajes/7/anular', { body: { ...ANULAR, identidadEsperada: { cuentaId: 'cuenta-1' } } });
+    assert.equal(status, 400);
+    assert.equal(json.error, 'INVALID_IDENTIDAD_ESPERADA');
+  });
+  test('registrar pesaje con identidadEsperada ajena -> 409 IDENTIDAD_NO_COINCIDE', async () => {
+    const { status, json } = await call('POST', '/animales/1/pesajes', { body: { ...VALIDO, identidadEsperada: { cuentaId: 'cuenta-2', organizacionId: ORG_ID } } });
+    assert.equal(status, 409);
+    assert.equal(json.error, 'IDENTIDAD_NO_COINCIDE');
+  });
+  const casos = [
+    ['pesajeId inválido', '/animales/1/pesajes/abc/anular', ANULAR, 'INVALID_PESAJE_ID'],
+    ['pesajeId 0', '/animales/1/pesajes/0/anular', ANULAR, 'INVALID_PESAJE_ID'],
+    ['animalId inválido', '/animales/x/pesajes/7/anular', ANULAR, 'INVALID_ANIMAL_ID'],
+    ['motivo ausente', '/animales/1/pesajes/7/anular', { clientOperationId: OP_ANULAR }, 'INVALID_MOTIVO'],
+    ['motivo en blanco', '/animales/1/pesajes/7/anular', { ...ANULAR, motivo: '   ' }, 'INVALID_MOTIVO'],
+    ['motivo > 500', '/animales/1/pesajes/7/anular', { ...ANULAR, motivo: 'm'.repeat(501) }, 'INVALID_MOTIVO'],
+    ['motivo no texto', '/animales/1/pesajes/7/anular', { ...ANULAR, motivo: 5 }, 'INVALID_MOTIVO'],
+    ['clientOperationId ausente', '/animales/1/pesajes/7/anular', { motivo: 'x' }, 'INVALID_CLIENT_OPERATION_ID'],
+    ['clientOperationId no UUID', '/animales/1/pesajes/7/anular', { ...ANULAR, clientOperationId: 'abc' }, 'INVALID_CLIENT_OPERATION_ID'],
+    // El actor y el instante NUNCA vienen del cliente.
+    ['anuladoPor en body', '/animales/1/pesajes/7/anular', { ...ANULAR, anuladoPor: 'cuenta-9' }, 'FORBIDDEN_FIELDS'],
+    ['anulado_por en body', '/animales/1/pesajes/7/anular', { ...ANULAR, anulado_por: 'cuenta-9' }, 'FORBIDDEN_FIELDS'],
+    ['anuladoAt en body', '/animales/1/pesajes/7/anular', { ...ANULAR, anuladoAt: '2020-01-01T00:00:00Z' }, 'FORBIDDEN_FIELDS'],
+    ['organizacionId en body', '/animales/1/pesajes/7/anular', { ...ANULAR, organizacionId: ORG_ID }, 'FORBIDDEN_FIELDS'],
+    ['estadoRegistro en body', '/animales/1/pesajes/7/anular', { ...ANULAR, estadoRegistro: 'ANULADO' }, 'FORBIDDEN_FIELDS'],
+    ['body array', '/animales/1/pesajes/7/anular', [ANULAR], 'INVALID_BODY'],
+  ];
+  for (const [nombre, path, body, code] of casos) {
+    test(`${nombre} -> 400 ${code}`, async () => {
+      const { status, json, cache } = await call('POST', path, { body, rol: 'admin' });
+      assert.equal(status, 400);
+      assert.equal(json.error, code);
+      assert.equal(cache, 'no-store');
+    });
+  }
+  test('identidadEsperada correcta se acepta y se retira antes de validar (no es FORBIDDEN_FIELDS)', async () => {
+    const { status, json } = await call('POST', '/animales/1/pesajes/7/anular', { body: { motivo: '', clientOperationId: OP_ANULAR, identidadEsperada: IDENTIDAD_OK } });
+    assert.equal(status, 400);
+    assert.equal(json.error, 'INVALID_MOTIVO');
+  });
 });

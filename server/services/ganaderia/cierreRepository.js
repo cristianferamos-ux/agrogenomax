@@ -142,8 +142,9 @@ export async function registrarCierreIdempotente(organizacionId, animalId, value
     if (cerrado) throw cerrado;
 
     // Con el animal bloqueado, ningún pesaje nuevo puede entrar (FOR SHARE espera).
+    // FASE 5A.1b: solo pesajes ACTIVOS acotan la fecha (un ANULADO no prueba nada).
     const ultimo = await client.query(
-      `select to_char(max(fecha), 'YYYY-MM-DD') as fecha from agx.animal_pesajes where animal_id = $1`,
+      `select to_char(max(fecha), 'YYYY-MM-DD') as fecha from agx.animal_pesajes where animal_id = $1 and estado_registro = 'ACTIVO'`,
       [animalId],
     );
     validarFechaMinima({ ...row, ultimo_pesaje_fecha: ultimo.rows[0]?.fecha ?? null }, value, config.campoFecha);
