@@ -14,7 +14,8 @@ import {
 const animal = { animalId: '1', fechaCreacion: '2026-10-18T12:20:58.490870Z' };
 const ev = (eventoId, tipoEvento, ocurridoEn, metadata = {}) => ({ eventoId: String(eventoId), tipoEvento, metadata, ocurridoEn });
 const ps = (pesajeId, fecha, pesoKg, createdAt, extra = {}) => ({ pesajeId: String(pesajeId), fecha, pesoKg, metodo: 'BASCULA', origen: 'MANUAL', observaciones: null, createdAt, ...extra });
-const derivar = (filas) => construirHistorialPesajes({ animalId: '1', pesajes: filas }).pesajes;
+// FASE 5A.1b: el servicio de timeline usa `historial` (ACTIVOS + ANULADOS).
+const derivar = (filas) => construirHistorialPesajes({ animalId: '1', pesajes: filas }).historial;
 const tl = (p) => construirTimelineAnimal({ animal, ...p });
 const ids = (r) => r.eventos.map((e) => e.id);
 
@@ -40,7 +41,7 @@ test('sin evento REGISTRADO: respaldo único desde animales.created_at (nunca do
   assert.equal(tl({ eventosAnimal: [], animal: { animalId: '1' } }).total, 0, 'sin fuente confiable no se inventa');
 });
 
-test('7/8/9/10. pesajes: fecha EFECTIVA (sin instante UTC), derivaciones canónicas, mismo día GMD null', () => {
+test('7/8/9/10. pesajes: fecha EFECTIVA (sin instante UTC), derivaciones canónicas de la serie diaria', () => {
   const pesajes = derivar([
     ps(1, '2026-10-19', 350, '2026-10-20T01:00:00.000000Z', { observaciones: 'QA FASE1A PESAJE' }),
     ps(2, '2026-10-20', 355, '2026-10-21T00:38:34.603491Z'),
@@ -53,13 +54,37 @@ test('7/8/9/10. pesajes: fecha EFECTIVA (sin instante UTC), derivaciones canóni
   assert.equal(p3.hora, null);
   assert.equal(p3.titulo, 'Pesaje registrado');
   assert.equal(p3.descripcion, '360 kg · Pesado en báscula');
-  assert.deepEqual(p3.datos, { pesoKg: 360, metodo: 'BASCULA', origen: 'MANUAL', diferenciaKg: 5, diasDesdeAnterior: 0, gmdKgDia: null, observaciones: null, registradoEn: '2026-10-21T04:03:05.038204Z' });
+  // FASE 5A: 360 (último del 20/10) frente a 350 (19/10): +10 kg en 1 día.
+  assert.deepEqual(p3.datos, {
+    estadoRegistro: 'ACTIVO', anulacion: null,
+    pesoKg: 360, metodo: 'BASCULA', origen: 'MANUAL', diferenciaKg: 10, diasDesdeAnterior: 1, gmdKgDia: 10, observaciones: null, registradoEn: '2026-10-21T04:03:05.038204Z',
+  });
   const p2 = r.eventos.find((e) => e.id === 'pesaje:2');
-  assert.equal(p2.datos.gmdKgDia, 5);
+  assert.equal(p2.datos.gmdKgDia, null, 'medición previa del mismo día: sin derivaciones');
   const p1 = r.eventos.find((e) => e.id === 'pesaje:1');
   assert.equal(p1.datos.diasDesdeAnterior, null);
   assert.equal(p1.datos.observaciones, 'QA FASE1A PESAJE');
   assert.equal(r.eventos.find((e) => e.id === 'pesaje:1').origen, 'animal_pesajes');
+});
+
+test('FASE 5A.1b: un pesaje ANULADO sigue en la línea de tiempo, marcado, sin derivaciones ni actor', () => {
+  const pesajes = derivar([
+    ps(1, '2026-10-19', 350, '2026-10-20T01:00:00.000000Z'),
+    ps(2, '2026-10-20', 355, '2026-10-21T00:38:34.603491Z'),
+    { ...ps(3, '2026-10-20', 360, '2026-10-21T04:03:05.038204Z'), estadoRegistro: 'ANULADO', anulacion: { anuladoEn: '2026-11-17T15:00:00.000000Z', motivo: 'Error de digitación' } },
+  ]);
+  const r = tl({ eventosAnimal: [REGISTRO], pesajes });
+  const p3 = r.eventos.find((e) => e.id === 'pesaje:3');
+  assert.equal(p3.titulo, 'Pesaje registrado (anulado)');
+  assert.equal(p3.datos.estadoRegistro, 'ANULADO');
+  assert.deepEqual(p3.datos.anulacion, { anuladoEn: '2026-11-17T15:00:00.000000Z', motivo: 'Error de digitación' });
+  assert.equal(p3.datos.gmdKgDia, null);
+  assert.equal(p3.datos.diferenciaKg, null);
+  // El ACTIVO restante representa el 20/10: 355 frente a 350.
+  const p2 = r.eventos.find((e) => e.id === 'pesaje:2');
+  assert.equal(p2.datos.diferenciaKg, 5);
+  assert.equal(p2.datos.gmdKgDia, 5);
+  assert.doesNotMatch(JSON.stringify(r), /anulado_?por|anuladoPor|cuentaId/i);
 });
 
 test('peso inicial del registro: un pesaje propio (no duplica el evento de registro)', () => {

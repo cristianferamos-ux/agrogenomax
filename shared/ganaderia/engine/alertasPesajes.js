@@ -19,10 +19,18 @@
 //     (reutiliza clasificarAntiguedadPesaje del engine canónico).
 //   * Pérdida de peso        -> solo si hay pesaje anterior, días > 0 y
 //                               GMD < 0: ATENCION. GMD = 0 no alerta.
-//   * Sin umbrales productivos de GMD (Excelente/Bueno/Malo/...): no existe
-//     una configuración oficial.
+//                               FASE 5A: entre fechas distintas de la serie
+//                               diaria ACTIVA (último pesaje de cada fecha).
+//   * Mismo día (FASE 5A)    -> la última fecha tiene >= 2 pesajes ACTIVOS:
+//                               INFO objetiva con el número de mediciones y la
+//                               diferencia firmada primera -> última del día
+//                               (una pérdida intradía queda visible aunque no
+//                               tenga GMD). No es un juicio de plausibilidad.
+//   * Pesajes ANULADOS: nunca cuentan (se descartan de la lista).
+//   * Sin umbrales productivos de GMD (Excelente/Bueno/Malo/...) ni de
+//     plausibilidad: no existe una configuración oficial.
 import { aFechaISO } from './fechas.js';
-import { clasificarAntiguedadPesaje } from './pesajes.js';
+import { calcularMismoDiaUltimaFecha, clasificarAntiguedadPesaje, esPesajeActivo } from './pesajes.js';
 
 /**
  * UMBRALES PROVISIONALES CONFIGURABLES de antigüedad del último pesaje (días).
@@ -45,6 +53,7 @@ export const CODIGOS_ALERTA = Object.freeze({
   SIN_PESAJES: 'PESAJE_SIN_REGISTROS',
   ATRASADO: 'PESAJE_ATRASADO',
   PERDIDA_PESO: 'PERDIDA_DE_PESO',
+  MISMO_DIA: 'PESAJE_MISMO_DIA',
 });
 
 const RANGO_SEVERIDAD = Object.freeze(Object.fromEntries(SEVERIDADES_ALERTA.map((s, i) => [s, i])));
@@ -70,6 +79,12 @@ function textoDias(dias) {
   return dias === 1 ? '1 día' : `${dias} días`;
 }
 
+/** Diferencia firmada en kg con signo ASCII (+5 / -15 / 0), apta también para el PDF. */
+function diferenciaFirmadaKg(valor) {
+  const signo = valor > 0 ? '+' : valor < 0 ? '-' : '';
+  return `${signo}${numeroKg(Math.abs(valor))} kg`;
+}
+
 function finito(valor) {
   return typeof valor === 'number' && Number.isFinite(valor) ? valor : null;
 }
@@ -85,7 +100,8 @@ function finito(valor) {
  */
 export function construirAlertasPesajes({ pesajes, resumen, fechaReferencia, configuracion } = {}) {
   const conf = resolverConfiguracionAlertas(configuracion);
-  const lista = Array.isArray(pesajes) ? pesajes : [];
+  // FASE 5A: un pesaje ANULADO nunca cuenta (aunque llegue en la lista).
+  const lista = Array.isArray(pesajes) ? pesajes.filter(esPesajeActivo) : [];
   const r = resumen ?? {};
   const ultimo = lista.at(-1) ?? null;
   const total = finito(r.totalPesajes) ?? lista.length;
@@ -129,7 +145,7 @@ export function construirAlertasPesajes({ pesajes, resumen, fechaReferencia, con
   const gmd = finito(r.gmdKgDia ?? ultimo?.gmdKgDia ?? null);
   const dias = finito(r.diasDesdeAnterior ?? ultimo?.diasDesdeAnterior ?? null);
   const diferencia = finito(r.diferenciaKg ?? ultimo?.diferenciaKg ?? null);
-  const anterior = finito(r.pesoAnteriorKg ?? null) ?? finito(lista.at(-2)?.pesoKg ?? null);
+  const anterior = finito(r.pesoAnteriorKg ?? null) ?? finito(ultimo?.pesoAnteriorKg ?? null);
   const actual = finito(r.ultimoPesoKg ?? ultimo?.pesoKg ?? null);
   if (anterior !== null && dias !== null && dias > 0 && gmd !== null && gmd < 0) {
     const perdida = diferencia !== null ? Math.abs(diferencia) : null;
@@ -145,6 +161,25 @@ export function construirAlertasPesajes({ pesajes, resumen, fechaReferencia, con
         diferenciaKg: diferencia,
         diasDesdeAnterior: dias,
         gmdKgDia: gmd,
+      },
+    });
+  }
+
+  // FASE 5A: varias mediciones ACTIVAS en la última fecha (INFO objetiva).
+  const mismoDia = r.mismoDia !== undefined ? r.mismoDia : (ultimo?.mismoDia ?? calcularMismoDiaUltimaFecha(lista));
+  if (mismoDia && Number.isInteger(mismoDia.mediciones) && mismoDia.mediciones >= 2
+    && finito(mismoDia.primerPesoKg) !== null && finito(mismoDia.ultimoPesoKg) !== null) {
+    const dif = mismoDia.ultimoPesoKg - mismoDia.primerPesoKg;
+    alertas.push({
+      codigo: CODIGOS_ALERTA.MISMO_DIA,
+      severidad: 'INFO',
+      mensaje: `Hay ${mismoDia.mediciones} pesajes activos el ${fechaCorta(mismoDia.fecha)}: de ${numeroKg(mismoDia.primerPesoKg)} kg a ${numeroKg(mismoDia.ultimoPesoKg)} kg (${diferenciaFirmadaKg(dif)}). Los cálculos usan el último del día.`,
+      datos: {
+        fecha: mismoDia.fecha,
+        mediciones: mismoDia.mediciones,
+        primerPesoKg: mismoDia.primerPesoKg,
+        ultimoPesoKg: mismoDia.ultimoPesoKg,
+        diferenciaKg: dif,
       },
     });
   }
@@ -171,6 +206,9 @@ export function detalleAlerta(alerta) {
     const gmd = Math.abs(d.gmdKgDia).toLocaleString('es-CO', { maximumFractionDigits: 2 });
     const pesos = d.ultimoPesoKg !== null ? `De ${numeroKg(d.pesoAnteriorKg)} kg a ${numeroKg(d.ultimoPesoKg)} kg` : `Desde ${numeroKg(d.pesoAnteriorKg)} kg`;
     return `${pesos} en ${textoDias(d.diasDesdeAnterior)} · GMD −${gmd} kg/día`;
+  }
+  if (alerta?.codigo === CODIGOS_ALERTA.MISMO_DIA) {
+    return `${d.mediciones} mediciones el ${fechaCorta(d.fecha)} · De ${numeroKg(d.primerPesoKg)} kg a ${numeroKg(d.ultimoPesoKg)} kg (${diferenciaFirmadaKg(d.diferenciaKg)})`;
   }
   return null;
 }

@@ -160,10 +160,15 @@ describe('FASE 1D.2: timeline -- respuesta', () => {
     assert.equal(r.json.total, 5);
     assert.equal(r.json.truncado, false);
     assert.deepEqual(r.json.eventos.map((e) => e.id), ['pesaje:3', 'pesaje:2', 'pesaje:1', 'animal_evento:3', 'animal_evento:2']);
+    // FASE 5A: serie diaria -- el último pesaje del día (3) representa la
+    // fecha frente al día anterior; la medición previa del mismo día (2) no
+    // tiene derivaciones.
     const p3 = r.json.eventos[0];
-    assert.equal(p3.datos.diasDesdeAnterior, 0);
-    assert.equal(p3.datos.gmdKgDia, null);
-    assert.equal(r.json.eventos[1].datos.gmdKgDia, 5);
+    assert.equal(p3.datos.estadoRegistro, 'ACTIVO');
+    assert.equal(p3.datos.diasDesdeAnterior, 1);
+    assert.equal(p3.datos.gmdKgDia, p3.datos.diferenciaKg);
+    assert.equal(r.json.eventos[1].datos.gmdKgDia, null);
+    assert.equal(r.json.eventos[1].datos.diasDesdeAnterior, null);
   });
 
   test('19. nunca expone token QR, qrId ni intentHash', async () => {

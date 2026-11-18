@@ -33,6 +33,7 @@
 import { Router } from 'express';
 import { createRequireGanaderiaCsrf, createRequireGanaderiaSession } from '../security/ganaderiaSession.js';
 import { createRequireAdministracion, createRequireOperacion } from '../security/ganaderiaPermisos.js';
+import { requireIdentidadEsperada } from '../security/identidadEsperada.js';
 import { resolveFechaHoraNegocio } from '../services/ganaderia/motorDescansoAuto/businessTimezone.js';
 import { isValidPositiveId } from '../services/ganaderia/animalValidation.js';
 import {
@@ -77,28 +78,6 @@ function withIds(fn, { evento = false } = {}) {
   };
 }
 
-const esTextoDeIdentidad = (valor) => typeof valor === 'string' && valor.length > 0 && valor.length <= 64;
-
-function requireIdentidadEsperada(req, res, next) {
-  if (!req.body || typeof req.body !== 'object' || !Object.hasOwn(req.body, 'identidadEsperada')) {
-    next();
-    return;
-  }
-  res.setHeader('Cache-Control', 'no-store');
-  const { identidadEsperada, ...cuerpo } = req.body;
-  const claves = identidadEsperada && typeof identidadEsperada === 'object' ? Object.keys(identidadEsperada) : [];
-  if (claves.length !== 2 || !esTextoDeIdentidad(identidadEsperada.cuentaId) || !esTextoDeIdentidad(identidadEsperada.organizacionId)) {
-    res.status(400).json({ error: 'INVALID_IDENTIDAD_ESPERADA' });
-    return;
-  }
-  const { cuentaId, organizacionId } = req.ganaderiaAuth;
-  if (identidadEsperada.cuentaId !== cuentaId || identidadEsperada.organizacionId !== organizacionId) {
-    res.status(409).json({ error: 'IDENTIDAD_NO_COINCIDE', message: 'La operación pertenece a otra cuenta u organización.' });
-    return;
-  }
-  req.body = cuerpo;
-  next();
-}
 
 export default function createGanaderiaAnimalReproduccionRouter({
   appEnv,

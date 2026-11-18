@@ -210,8 +210,9 @@ function construirResumen(resumen, pesajes) {
   const r = resumen ?? {};
   const acumulada = r.gananciaAcumulada ?? null;
   // Con un solo pesaje no hay ganancia acumulada, pero el primer peso
-  // registrado sí existe (es ese pesaje).
-  const primero = pesajes[0] ?? null;
+  // registrado sí existe (es ese pesaje). FASE 5A.1b: el de la serie diaria
+  // (último ACTIVO de la primera fecha).
+  const primero = pesajes.find((p) => p.representativoDelDia !== false) ?? null;
   const ultimo = finito(r.ultimoPesoKg) && r.metodoUltimoPeso
     ? `${formatKg(r.ultimoPesoKg)} (${(METODOS[r.metodoUltimoPeso] ?? r.metodoUltimoPeso).toLowerCase()})`
     : formatKg(r.ultimoPesoKg);
@@ -240,16 +241,35 @@ export const COLUMNAS_HISTORIAL = Object.freeze([
   'Fecha', 'Peso (kg)', 'Método', 'Diferencia (kg)', 'Días', 'GMD (kg/día)', 'Observaciones',
 ]);
 
-function construirHistorial(pesajes) {
+/**
+ * FASE 5A.1b: celda de observaciones. Un pesaje ANULADO muestra estado, fecha
+ * de anulación (calendario de negocio) y motivo -- nunca el actor ni IDs --,
+ * seguidos de la observación original si la tenía. Una medición previa del
+ * mismo día lo indica (no interviene en los cálculos).
+ */
+function celdaObservaciones(p) {
+  const partes = [];
+  if (p.estadoRegistro === 'ANULADO') {
+    const fecha = p.anulacion?.anuladoEn ? formatFecha(resolveFechaHoraNegocio(new Date(p.anulacion.anuladoEn)).fecha) : SIN_DATO;
+    partes.push(`ANULADO el ${fecha}. Motivo: ${p.anulacion?.motivo ?? SIN_DATO}`);
+  } else if (p.representativoDelDia === false) {
+    partes.push('Medición previa del mismo día (no usada en cálculos)');
+  }
+  if (p.observaciones) partes.push(p.observaciones);
+  return partes.length ? textoPdf(partes.join(' · ')) : '—';
+}
+
+function construirHistorial(filas) {
   // Orden cronológico ASCENDENTE (lectura productiva), igual que la API.
-  return pesajes.map((p) => [
+  // FASE 5A.1b: ACTIVOS + ANULADOS; un ANULADO no muestra derivaciones.
+  return filas.map((p) => [
     formatFecha(p.fecha),
     celdaNumero(p.pesoKg, 1),
     METODOS[p.metodo] ?? textoPdf(p.metodo),
     celdaNumero(p.diferenciaKg, 1, { signo: true }),
     finito(p.diasDesdeAnterior) ? String(p.diasDesdeAnterior) : '—',
     celdaNumero(p.gmdKgDia, 2, { signo: true }),
-    p.observaciones ? textoPdf(p.observaciones) : '—',
+    celdaObservaciones(p),
   ]);
 }
 
@@ -262,12 +282,13 @@ function construirGraficaPeso(pesajes) {
 
 function construirGmd(pesajes) {
   const periodos = [];
-  pesajes.forEach((p, i) => {
-    if (i === 0 || !finito(p.gmdKgDia)) return;
-    const anterior = pesajes[i - 1];
+  // FASE 5A.1b: períodos de la serie diaria ACTIVA (solo filas representativas
+  // tienen GMD; `fechaAnterior` es la fecha anterior de la serie).
+  pesajes.forEach((p) => {
+    if (!finito(p.gmdKgDia) || !p.fechaAnterior) return;
     periodos.push({
       dia: numeroDeDia(p.fecha),
-      desde: anterior.fecha,
+      desde: p.fechaAnterior,
       hasta: p.fecha,
       dias: p.diasDesdeAnterior,
       diferenciaKg: p.diferenciaKg,
@@ -294,6 +315,9 @@ function detalleAlerta(alerta) {
   if (alerta.codigo === 'PERDIDA_DE_PESO') {
     const pesos = finito(d.ultimoPesoKg) ? `De ${formatKg(d.pesoAnteriorKg)} a ${formatKg(d.ultimoPesoKg)}` : `Desde ${formatKg(d.pesoAnteriorKg)}`;
     return `${pesos} en ${formatDias(d.diasDesdeAnterior)}; GMD ${formatGmd(d.gmdKgDia)}.`;
+  }
+  if (alerta.codigo === 'PESAJE_MISMO_DIA') {
+    return `${d.mediciones} mediciones el ${formatFecha(d.fecha)}: de ${formatKg(d.primerPesoKg)} a ${formatKg(d.ultimoPesoKg)} (${formatDiferenciaKg(d.diferenciaKg)}). Los cálculos usan el último del día.`;
   }
   return null;
 }
@@ -339,7 +363,11 @@ export function construirReporteProductivo({ animal, historial, chapetas = null,
   const situacion = situacionDe(animal);
   const chapeta = construirChapeta(animal, chapetas);
   const generado = resolveFechaHoraNegocio(ahora);
-  const pesajes = Array.isArray(historial.pesajes) ? historial.pesajes : [];
+  // FASE 5A.1b: `pesajes` = solo ACTIVOS (resumen, gráficas, GMD, alertas);
+  // `historial` = ACTIVOS + ANULADOS (tabla del historial). Un historial sin
+  // ese campo (anterior a 5A) se lee como la lista productiva.
+  const pesajes = (Array.isArray(historial.pesajes) ? historial.pesajes : []).filter((p) => p.estadoRegistro !== 'ANULADO');
+  const filasHistorial = Array.isArray(historial.historial) ? historial.historial : pesajes;
   const alertas = construirAlertas(animal, { ...historial, pesajes }, generado.fecha);
   return {
     titulo: TITULO_REPORTE,
@@ -359,7 +387,7 @@ export function construirReporteProductivo({ animal, historial, chapetas = null,
     notaChapeta: chapeta?.nota ?? null,
     cierre: construirCierre(animal),
     resumen: construirResumen(historial.resumen, pesajes),
-    historial: { orden: 'ASCENDENTE', columnas: [...COLUMNAS_HISTORIAL], filas: construirHistorial(pesajes), vacio: SIN_PESAJES },
+    historial: { orden: 'ASCENDENTE', columnas: [...COLUMNAS_HISTORIAL], filas: construirHistorial(filasHistorial), vacio: SIN_PESAJES },
     graficaPeso: construirGraficaPeso(pesajes),
     gmd: construirGmd(pesajes),
     alertas: { lista: alertas.lista, vacio: alertas.vacio, nota: NOTA_UMBRALES },

@@ -114,16 +114,22 @@ test('historial en orden cronológico ASCENDENTE con unidades en las columnas', 
   assert.deepEqual(r.historial.filas[2], ['20/04/2026', '301,5', 'Estimado', '+36,5', '70', '+0,52', '—']);
 });
 
-test('GMD positiva, negativa y nula el mismo día (sin inventar valor)', () => {
+test('GMD positiva y negativa; el mismo día usa el ÚLTIMO pesaje (serie diaria) y nunca un período de 0 días', () => {
   const r = reporte([p('2026-06-01', 320), p('2026-07-01', 330), p('2026-08-06', 300), p('2026-08-06', 301)]);
+  // FASE 5A: el 06/08 se representa con 301 (último del día).
   assert.deepEqual(r.gmd.filas, [
     ['01/06/2026', '01/07/2026', '30', '+10', '+0,33'],
-    ['01/07/2026', '06/08/2026', '36', '-30', '-0,83'],
-  ], 'el período de 0 días no tiene GMD');
-  assert.equal(r.historial.filas[3][5], '—', 'GMD del mismo día: sin dato');
-  assert.equal(valor(r.resumen, 'GMD (ganancia media diaria)'), SIN_DATO);
-  assert.equal(valor(r.resumen, 'Días entre los últimos pesajes'), '0 días');
+    ['01/07/2026', '06/08/2026', '36', '-29', '-0,81'],
+  ], 'el período de 0 días no existe: solo fechas distintas');
+  assert.equal(r.historial.filas[2][5], '—', 'medición previa del mismo día: sin GMD');
+  assert.equal(r.historial.filas[2][6], 'Medición previa del mismo día (no usada en cálculos)');
+  assert.equal(r.historial.filas[3][5], '-0,81');
+  assert.equal(valor(r.resumen, 'GMD (ganancia media diaria)'), '-0,81 kg/día');
+  assert.equal(valor(r.resumen, 'Días entre los últimos pesajes'), '36 días');
   assert.equal(r.gmd.conLinea, true);
+  const mismoDia = r.alertas.lista.find((a) => a.codigo === 'PESAJE_MISMO_DIA');
+  assert.equal(mismoDia?.severidad, 'INFO');
+  assert.match(mismoDia.detalle, /2 mediciones el 06\/08\/2026: de 300 kg a 301 kg \(\+1 kg\)/);
 });
 
 test('gráfica de peso: eje X en días calendario reales (proporcional)', () => {

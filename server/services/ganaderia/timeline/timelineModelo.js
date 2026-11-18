@@ -275,6 +275,11 @@ function eventoAnimal(row) {
 function eventoPesaje(p) {
   const peso = `${numero(p.pesoKg, 1)} kg`;
   const inicial = p.origen === 'REGISTRO_INICIAL';
+  // FASE 5A.1b: un pesaje ANULADO sigue en la línea de tiempo (no desaparece
+  // del historial técnico) pero marcado y sin derivaciones; nunca como activo.
+  // Sin actor (política de este modelo). DEUDA 5B: evento "Pesaje anulado".
+  const anulado = p.estadoRegistro === 'ANULADO';
+  const titulo = inicial ? 'Peso inicial registrado' : 'Pesaje registrado';
   return {
     id: `pesaje:${p.pesajeId}`,
     tipo: TIPOS_TIMELINE.PESAJE_REGISTRADO,
@@ -282,9 +287,13 @@ function eventoPesaje(p) {
     fechaHora: null,
     fecha: p.fecha,
     hora: null,
-    titulo: inicial ? 'Peso inicial registrado' : 'Pesaje registrado',
-    descripcion: `${peso} · ${METODOS[p.metodo] ?? p.metodo}`,
+    titulo: anulado ? `${titulo} (anulado)` : titulo,
+    descripcion: `${peso} · ${METODOS[p.metodo] ?? p.metodo}${anulado ? ' · Anulado' : ''}`,
     datos: {
+      estadoRegistro: anulado ? 'ANULADO' : 'ACTIVO',
+      anulacion: anulado
+        ? { anuladoEn: p.anulacion?.anuladoEn ?? null, motivo: textoSeguro(p.anulacion?.motivo, 500) }
+        : null,
       pesoKg: p.pesoKg,
       metodo: p.metodo,
       origen: p.origen,

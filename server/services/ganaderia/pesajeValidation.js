@@ -4,6 +4,9 @@
 import { MAX_PESO_KG, PESO_METODOS, normalizeClientOperationId, normalizeFecha } from './animalValidation.js';
 
 export const MAX_OBSERVACIONES_PESAJE = 500;
+// FASE 5A.1b: mismo límite que 0028 (CHECK motivo_anulacion 1..500).
+export const MAX_MOTIVO_ANULACION_PESAJE = 500;
+const ANULAR_ALLOWED_KEYS = new Set(['motivo', 'clientOperationId']);
 const ALLOWED_KEYS = new Set(['fecha', 'pesoKg', 'metodo', 'observaciones', 'clientOperationId']);
 
 function badRequest(code, message) {
@@ -58,4 +61,26 @@ export function validateCreatePesajeBody(body, { hoy }) {
     metodo: normalizeMetodo(body.metodo),
     observaciones: normalizeObservacionesPesaje(body.observaciones),
   };
+}
+
+/**
+ * FASE 5A.1b -- body de POST .../pesajes/:pesajeId/anular. Solo motivo y
+ * clientOperationId: el actor (anulado_por) y el instante (anulado_at) salen
+ * de la sesión y de Postgres; cualquier otro campo (anuladoPor, anuladoAt,
+ * organizacionId, ...) es FORBIDDEN_FIELDS. `identidadEsperada` lo retira
+ * antes el middleware común (security/identidadEsperada.js).
+ */
+export function validateAnularPesajeBody(body) {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    throw badRequest('INVALID_BODY', 'El cuerpo de la solicitud debe ser un objeto JSON.');
+  }
+  const unknownKeys = Object.keys(body).filter((key) => !ANULAR_ALLOWED_KEYS.has(key));
+  if (unknownKeys.length > 0) throw badRequest('FORBIDDEN_FIELDS', `Campos no permitidos: ${unknownKeys.join(', ')}`);
+  if (typeof body.motivo !== 'string') throw badRequest('INVALID_MOTIVO', 'motivo es obligatorio.');
+  const motivo = body.motivo.replace(/\r\n?/g, '\n').trim();
+  if (motivo === '') throw badRequest('INVALID_MOTIVO', 'motivo es obligatorio.');
+  if (motivo.length > MAX_MOTIVO_ANULACION_PESAJE) {
+    throw badRequest('INVALID_MOTIVO', `motivo admite máximo ${MAX_MOTIVO_ANULACION_PESAJE} caracteres.`);
+  }
+  return { clientOperationId: normalizeClientOperationId(body.clientOperationId), motivo };
 }

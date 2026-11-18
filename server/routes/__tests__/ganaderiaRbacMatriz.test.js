@@ -87,6 +87,8 @@ const ESCRITURAS = [
   ['POST', '/animales/1/anular', ADM],
   // Pesajes
   ['POST', '/animales/1/pesajes', OP],
+  // FASE 5A.1b: anular un pesaje = administración (operador NO anula).
+  ['POST', '/animales/1/pesajes/7/anular', ADM],
   // QR
   ['POST', '/animales/1/qr/asociar', OP],
   ['POST', '/animales/1/qr/reemplazar', ADM],
@@ -290,7 +292,7 @@ describe('FASE 3A: matriz RBAC de escrituras /api/ganaderia/*', () => {
 const norm = (p) => p
   .replace('/predios/:predioId/potreros/:potreroId', POT)
   .replace('/predios/:predioId', P)
-  .replace(/:cicloId/g, '5').replace(/:eventoId/g, '7').replace(/:animalId/g, '1').replace(':codigo', 'AGX-000001');
+  .replace(/:cicloId/g, '5').replace(/:eventoId/g, '7').replace(/:pesajeId/g, '7').replace(/:animalId/g, '1').replace(':codigo', 'AGX-000001');
 // Únicas rutas POST abiertas a los 4 roles: previews de cálculo que NUNCA persisten.
 // FASE 3B: POST de LECTURA (con rol de lectura explícito), no es un preview.
 const LECTURAS_POST = new Set(['POST /qr/resolver']);
