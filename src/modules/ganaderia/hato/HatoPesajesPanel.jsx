@@ -198,7 +198,8 @@ export default function HatoPesajesPanel({
   /** Sin conexión: se persiste en el outbox; NUNCA se hace POST aquí. */
   async function guardarOffline(body) {
     try {
-      await repoOffline.registrarPesajeLocal({ animalId, body });
+      // FASE 5A.3b: con la cuenta de la sesión la operación es v2 (FIFO por animal + identidad).
+      await repoOffline.registrarPesajeLocal({ animalId, body, cuentaId: auth?.cuenta?.cuentaId ?? null });
     } catch (error) {
       setMensaje({ type: 'error', text: mensajeErrorGuardadoLocal(error) });
       return;

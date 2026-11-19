@@ -46,6 +46,10 @@
 // animal y con esta misma clasificación: 409 EVENTO_YA_ANULADO, 404 EVENTO_NOT_FOUND y
 // 409 CLIENT_OPERATION_ID_REUSED -> CONFLICTO; 400 -> RECHAZADO; 403 ROLE_FORBIDDEN ->
 // RECHAZADO conservando posibleEnServidor; nada de eso es un fallo de red.
+// FASE 5A.3b -- PESAJE_CREAR v2 y PESAJE_ANULAR usan la cadena 'pesaje:animal:<id>' con
+// exactamente esta misma ruta (reclamo atómico, identidad, posibleEnServidor, backoff);
+// un PESAJE_CREAR legacy (sin claveOrden) conserva su camino anterior. Tras el pull
+// reproductivo corre el pull de pesajes (GET /sync/pesajes, cursorSiguiente propio).
 // Tipo desconocido (bundle antiguo): la operación se conserva, se marca
 // `runtimeNoSoporta` y nunca se descarta. Las operaciones sin claveOrden
 // conservan su comportamiento anterior.
@@ -57,6 +61,9 @@ const SESSION_PATH = '/api/ganaderia/auth/session';
 const REPRO_PULL_PATH = '/api/ganaderia/sync/reproduccion';
 /** 40 páginas de 500: una descarga inicial grande reparte su coste entre ciclos. */
 export const REPRO_MAX_PAGINAS_POR_CICLO = 40;
+const PESAJES_PULL_PATH = '/api/ganaderia/sync/pesajes';
+/** FASE 5A.3b: mismo reparto que el reproductivo (páginas de 500 en el servidor). */
+export const PESAJES_MAX_PAGINAS_POR_CICLO = 40;
 /** Reintento fijo tras un fallo de red (sin crecer): la red suele volver sola. */
 export const RED_REINTENTO_MS = 30_000;
 export { SINCRONIZANDO_LEASE_MS };
@@ -411,6 +418,45 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
     }
   }
 
+  /**
+   * FASE 5A.3b: pull de pesajes (GET /sync/pesajes) con su propio cursor, leído de
+   * `cursorSiguiente` (no `cursor`). Igual que el reproductivo, un fallo aquí no cambia
+   * el resultado del ciclo. Cada página se aplica y su cursor se persiste en la misma
+   * transacción; si la cuenta de la sesión cambia entre páginas el recorrido se aborta
+   * sin aplicar la página (SESION_CAMBIADA). Corre dentro del lock del ciclo.
+   */
+  async function pullPesajes() {
+    const registrar = async (codigo, status) => {
+      const previo = (await repo.getMeta()).pesajesUltimoError;
+      if (previo?.codigo === codigo && previo?.status === status) return;
+      await repo.putMeta({ pesajesUltimoError: { codigo, status, at: now().toISOString() } });
+    };
+    try {
+      let cursor = (await repo.getMeta()).pesajesCursor ?? null;
+      let cuentaEsperada = null;
+      let reiniciado = false;
+      for (let pagina = 0; pagina < PESAJES_MAX_PAGINAS_POR_CICLO; pagina += 1) {
+        const result = await transport.getJson(cursor ? `${PESAJES_PULL_PATH}?cursor=${encodeURIComponent(cursor)}` : PESAJES_PULL_PATH);
+        if (!result?.ok && result?.status === 400 && result?.data?.error === 'INVALID_CURSOR' && cursor && !reiniciado) {
+          await repo.reiniciarCursorPesajes();
+          cursor = null;
+          reiniciado = true;
+          continue;
+        }
+        if (!result?.ok) {
+          await registrar(result?.data?.error ?? result?.failure ?? 'ERROR', result?.status ?? 0);
+          return;
+        }
+        const { hayMas, cursorSiguiente } = await repo.aplicarPullPesajes(result.data, { cuentaEsperada });
+        cuentaEsperada = result.data.cuentaId;
+        if (!hayMas) return;
+        cursor = cursorSiguiente;
+      }
+    } catch (error) {
+      await registrar(error?.code ?? 'ERROR_LOCAL', 0).catch(() => {});
+    }
+  }
+
   async function run({ forzar = false, soloPush = false } = {}, { exclusivo = false } = {}) {
     if (!isOnline()) {
       state.ultimoResultado = RUN_RESULT.OFFLINE;
@@ -428,6 +474,7 @@ export function createSyncEngine({ repo, transport, isOnline = () => true, now =
       resultado = await push({ forzar, exclusivo });
       if (resultado === RUN_RESULT.OK && !soloPush) resultado = await pull();
       if (resultado === RUN_RESULT.OK && !soloPush) await pullReproduccion();
+      if (resultado === RUN_RESULT.OK && !soloPush) await pullPesajes();
     } catch (error) {
       resultado = RUN_RESULT.ERROR;
       await repo.putMeta({ ultimaSyncOk: false, ultimoError: { codigo: error?.code ?? 'ERROR_LOCAL', status: 0, at: now().toISOString() } }).catch(() => {});

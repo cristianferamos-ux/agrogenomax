@@ -222,7 +222,9 @@ test('21. sin conexión: la anulación se bloquea con aviso claro y NUNCA se enc
   for (const fuente of [historialJsx, dialogo, src('../pesajesAnulacionModel.js')]) {
     assert.doesNotMatch(fuente, /PESAJE_ANULAR|registrarAnulacionLocal|outbox|repoOffline/i);
   }
-  assert.doesNotMatch(src('../../offline/operationHandlers.js'), /PESAJE_ANULAR/, 'sin manejador offline todavía (5A.3)');
+  // FASE 5A.3b: el motor ya tiene PESAJE_ANULAR, pero ninguna pantalla lo encola (UI en 5A.3c).
+  assert.match(src('../../offline/operationHandlers.js'), /PESAJE_ANULAR/);
+  assert.doesNotMatch(panel, /encolarAnulacionPesaje|cancelarPesajePendiente|cancelarAnulacionPesajePendiente/);
 });
 
 // Diálogo y privacidad ---------------------------------------------------------------

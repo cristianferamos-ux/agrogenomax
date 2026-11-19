@@ -195,6 +195,7 @@
   "src/modules/ganaderia/offline/__tests__/reproduccionPull.test.js",
   "src/modules/ganaderia/offline/__tests__/syncSinBucle.test.js",
   "src/modules/ganaderia/offline/__tests__/reproduccionConciliacion.test.js",
+  "src/modules/ganaderia/offline/__tests__/pesajesOfflineEngine.test.js",
   "src/modules/ganaderia/offline/__tests__/serviceWorker.test.js",
   "src/modules/ganaderia/offline/__tests__/serviceWorkerCatastroxRegression.test.js",
   "src/modules/ganaderia/offline/__tests__/offlineArchitecture.test.js",

@@ -59,8 +59,8 @@ async function baseV1(idb) {
 
 const abrirV2 = (idb, opciones) => openIndexedDb(idb, NOMBRE, ORG_DB_VERSION, ORG_STORES, opciones);
 
-test('la versión vigente es la 2 y el nombre de la base no cambia', () => {
-  assert.equal(ORG_DB_VERSION, 2);
+test('la versión vigente es la 3 (FASE 5A.3b) y el nombre de la base no cambia', () => {
+  assert.equal(ORG_DB_VERSION, 3);
   assert.equal(NOMBRE, `agx-ganaderia-org-v1-${ORG}`);
 });
 
@@ -69,7 +69,7 @@ test('v1 -> v2: conserva outbox, cursor y copia local; agrega store e índice', 
   (await baseV1(idb)).close();
 
   const db = await abrirV2(idb);
-  assert.equal(db.version, 2);
+  assert.equal(db.version, ORG_DB_VERSION);
   assert.ok(db.objectStoreNames.contains('reproduccion_eventos'));
   const tx = db.transaction(['outbox', 'reproduccion_eventos'], 'readonly');
   assert.ok(tx.objectStore('outbox').indexNames.contains('claveOrden'));
@@ -142,7 +142,7 @@ test('conexión v1 sin onversionchange (pestaña antigua): avisa, espera y luego
 
   antigua.close();
   const db = await apertura;
-  assert.equal(db.version, 2);
+  assert.equal(db.version, ORG_DB_VERSION);
   assert.deepEqual(await createIndexedDbStorage(db).get('outbox', 'op-1'), OP_V1);
   db.close();
 });
@@ -152,10 +152,10 @@ test('onversionchange cierra la conexión y notifica; la otra apertura continúa
   let cerrada = 0;
   const actual = await openIndexedDb(idb, NOMBRE, 2, ORG_STORES, { onVersionChange: () => { cerrada += 1; } });
   let bloqueos = 0;
-  const v3 = await openIndexedDb(idb, NOMBRE, 3, ORG_STORES, { onBlocked: () => { bloqueos += 1; } });
+  const v3 = await openIndexedDb(idb, NOMBRE, ORG_DB_VERSION + 1, ORG_STORES, { onBlocked: () => { bloqueos += 1; } });
   assert.equal(cerrada, 1);
   assert.equal(bloqueos, 0);
-  assert.equal(v3.version, 3);
+  assert.equal(v3.version, ORG_DB_VERSION + 1);
   assert.throws(() => actual.transaction('outbox'));
   v3.close();
 });
@@ -182,7 +182,7 @@ test('esperaBloqueoMs (Service Worker): deja de esperar y cierra la conexión si
   await new Promise((resolve) => setTimeout(resolve, 20));
   // La apertura abandonada completó el upgrade y se cerró: no bloquea a nadie.
   let bloqueos = 0;
-  const v3 = await openIndexedDb(idb, NOMBRE, 3, ORG_STORES, { onBlocked: () => { bloqueos += 1; } });
+  const v3 = await openIndexedDb(idb, NOMBRE, ORG_DB_VERSION + 1, ORG_STORES, { onBlocked: () => { bloqueos += 1; } });
   assert.equal(bloqueos, 0);
   assert.deepEqual(await createIndexedDbStorage(v3).get('outbox', 'op-1'), OP_V1);
   v3.close();
@@ -190,12 +190,12 @@ test('esperaBloqueoMs (Service Worker): deja de esperar y cierra la conexión si
 
 test('base más nueva que el código (rollback): VersionError identificable y datos intactos', async () => {
   const idb = new IDBFactory();
-  const v3 = await openIndexedDb(idb, NOMBRE, 3, ORG_STORES);
+  const v3 = await openIndexedDb(idb, NOMBRE, ORG_DB_VERSION + 1, ORG_STORES);
   await createIndexedDbStorage(v3).put('outbox', OP_V1);
   v3.close();
 
   await assert.rejects(abrirV2(idb), (error) => esBaseMasNueva(error));
-  const reabierta = await openIndexedDb(idb, NOMBRE, 3, ORG_STORES);
+  const reabierta = await openIndexedDb(idb, NOMBRE, ORG_DB_VERSION + 1, ORG_STORES);
   assert.deepEqual(await createIndexedDbStorage(reabierta).get('outbox', 'op-1'), OP_V1);
   reabierta.close();
 });

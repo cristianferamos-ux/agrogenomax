@@ -1356,8 +1356,8 @@ test('reinicio de pestaña: una operación SINCRONIZANDO interrumpida se reenví
   assert.deepEqual(await repo.listOutbox(), []);
 });
 
-test('IndexedDB v2: ANULAR y CORREGIR viven en el esquema actual, sin subir de versión', async () => {
-  assert.equal(ORG_DB_VERSION, 2);
+test('IndexedDB actual (v3): ANULAR y CORREGIR siguen en el esquema vigente', async () => {
+  assert.equal(ORG_DB_VERSION, 3);
   const idb = new IDBFactory();
   const db = await openIndexedDb(idb, orgDbName(ORG), ORG_DB_VERSION, ORG_STORES);
   const { repo, engine, srv } = await montar({ storage: createIndexedDbStorage(db) });
