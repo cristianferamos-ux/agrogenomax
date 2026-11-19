@@ -86,6 +86,7 @@ export const CAPACIDAD_OPERACION_OFFLINE = Object.freeze({
   ANIMAL_CREAR: 'crearAnimal',
   ANIMAL_CREAR_CON_CHAPETA: 'crearAnimal',
   PESAJE_CREAR: 'registrarPesaje',
+  PESAJE_ANULAR: 'anularPesaje', // FASE 5A.3b (sin UI offline hasta 5A.3c)
   REPRODUCCION_EVENTO_CREAR: 'registrarReproduccion',
   REPRODUCCION_EVENTO_ANULAR: 'administrarReproduccion',
   REPRODUCCION_EVENTO_CORREGIR: 'administrarReproduccion',

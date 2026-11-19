@@ -25,7 +25,14 @@
 // Un runtime que no conoce un tipo NO falla: handlerDe devuelve null y el motor
 // conserva la operación.
 
+import { origenVerificable } from './outbox.js';
+
 const ANIMAL_ID_SERVIDOR = /^[1-9]\d{0,17}$/;
+
+/** pesaje_id de PostgreSQL (bigint positivo). */
+export function esPesajeIdServidor(pesajeId) {
+  return /^[1-9]\d{0,18}$/.test(String(pesajeId ?? ''));
+}
 
 export function esAnimalIdServidor(animalId) {
   return ANIMAL_ID_SERVIDOR.test(String(animalId ?? ''));
@@ -60,11 +67,30 @@ export const OPERATION_HANDLERS = Object.freeze({
     }),
     onSuccess: (repo, op, data) => repo.confirmarAnimalCreado(op, data.animal, data.chapeta ?? null),
   },
+  // FASE 5A.3b: un CREATE v2 (con `origen`) viaja con identidadEsperada; uno legacy sale
+  // exactamente como antes (no se le inventa identidad).
   PESAJE_CREAR: {
     request: (op) => (esAnimalIdServidor(op.payload?.animalId)
-      ? { path: `/api/ganaderia/animales/${encodeURIComponent(op.payload.animalId)}/pesajes`, body: cuerpoPesaje(op.payload) }
+      ? {
+        path: `/api/ganaderia/animales/${encodeURIComponent(op.payload.animalId)}/pesajes`,
+        body: { ...cuerpoPesaje(op.payload), ...(origenVerificable(op) ? { identidadEsperada: op.origen } : {}) },
+      }
       : null),
     onSuccess: (repo, op, data) => repo.confirmarPesajeCreado(op, data.pesaje ?? null),
+  },
+  // FASE 5A.3b: solo sale con animal y pesaje reales del servidor. Un ANULAR diferido
+  // (pesajeRef) devuelve null -- y detiene su cadena -- hasta que el CREATE del que
+  // depende quede confirmado en el store pesajes por su clientOperationId exacto.
+  PESAJE_ANULAR: {
+    request: async (op, repo) => {
+      const pesajeId = await repo.resolverPesajeIdDeAnulacion(op);
+      if (!esAnimalIdServidor(op.payload?.animalId) || !esPesajeIdServidor(pesajeId)) return null;
+      return {
+        path: `/api/ganaderia/animales/${encodeURIComponent(op.payload.animalId)}/pesajes/${encodeURIComponent(pesajeId)}/anular`,
+        body: { motivo: op.payload.motivo, clientOperationId: op.clientOperationId, identidadEsperada: op.origen },
+      };
+    },
+    onSuccess: (repo, op, data) => repo.confirmarAnulacionPesaje(op, data.pesaje ?? null),
   },
   REPRODUCCION_EVENTO_CREAR: {
     request: (op) => (esAnimalIdServidor(op.payload?.animalId)

@@ -88,7 +88,8 @@ test('1/2/3. online sigue con POST directo; sin conexión -> outbox y NUNCA POST
   assert.equal((panel.match(/registrarPesaje\(/g) ?? []).length, 1, 'un único POST, solo en la rama online');
   const offline = panel.slice(panel.indexOf('async function guardarOffline(body)'), panel.indexOf('async function guardar(event)'));
   assert.doesNotMatch(offline, /registrarPesaje\(|fetch\(|postJson/);
-  assert.match(offline, /await repoOffline\.registrarPesajeLocal\(\{ animalId, body \}\);/);
+  // FASE 5A.3b: con la cuenta de la sesión (CREATE v2); nunca organizacionId.
+  assert.match(offline, /await repoOffline\.registrarPesajeLocal\(\{ animalId, body, cuentaId: auth\?\.cuenta\?\.cuentaId \?\? null \}\);/);
   assert.ok(panel.indexOf('validatePesajeForm(form') < panel.indexOf('await guardarOffline('), 'valida localmente antes de encolar');
 });
 

@@ -20,7 +20,9 @@
 // v21: el respaldo de navegación nunca entrega una respuesta "redirected"
 // (Cloudflare Pages responde /index.html con 308 -> /, y el navegador
 // rechaza una respuesta redirigida para una navegación: ERR_FAILED).
-const CACHE_VERSION = 'agrogenomax-pwa-v21-offline-shell';
+// v22 (FASE 5A.3b): motor offline de pesajes en agx-offline-sync.js (IndexedDB v3,
+// PESAJE_ANULAR, pull /sync/pesajes). Solo cambia la versión: misma estrategia.
+const CACHE_VERSION = 'agrogenomax-pwa-v22-offline-shell';
 const ASSETS_CACHE_PREFIX = 'agrogenomax-assets-';
 const PRECACHE_MANIFEST = '/agx-precache.json';
 const BACKGROUND_SYNC_TAG = 'agx-ganaderia-outbox';

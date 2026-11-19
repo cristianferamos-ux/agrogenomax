@@ -24,7 +24,7 @@
 // store (el outbox queda vacío cuando todo está sincronizado).
 //
 // FASE 4E.1 -- campos opcionales (una operación anterior no los tiene):
-//   claveOrden          cadena causal FIFO: 'repro:animal:<animalId>'
+//   claveOrden          cadena causal FIFO: 'repro:animal:<animalId>' | 'pesaje:animal:<animalId>' (5A.3b)
 //   origen              { organizacionId, cuentaId } de quien la creó. Nunca se
 //                       envía autenticada como otra cuenta ni se reasigna.
 //   posibleEnServidor   true si pudo llegar al servidor (resultado incierto): se
@@ -61,6 +61,48 @@ export const esOperacionReproductiva = (tipo) => tipo === REPRODUCCION_EVENTO_CR
  */
 export const claveOperacionAdministrativa = (eventoId) => `repro-admin:${eventoId}`;
 
+// FASE 5A.3b -- pesajes con cadena FIFO propia por animal (independiente de repro:animal:).
+//   PESAJE_CREAR v2  payload igual que v1 + metadata 4E (claveOrden, origen, posibleEnServidor).
+//   PESAJE_ANULAR    payload { animalId, pesajeId, motivo } o, si el CREATE aún no está
+//                    confirmado, { animalId, pesajeId: null, pesajeRef: { clientOperationId }, motivo }
+//                    (ANULAR diferido: no sale hasta resolver pesajeId desde el store pesajes).
+// CREATE y ANULAR del mismo animal comparten claveOrden 'pesaje:animal:<animalId>'.
+export const PESAJE_CREAR = 'PESAJE_CREAR';
+export const PESAJE_ANULAR = 'PESAJE_ANULAR';
+export const esOperacionPesaje = (tipo) => tipo === PESAJE_CREAR || tipo === PESAJE_ANULAR;
+
+/** Cadena causal FIFO de los pesajes de un animal confirmado por el servidor. */
+export const claveOrdenPesajes = (animalId) => `pesaje:animal:${animalId}`;
+
+/**
+ * Clave lógica (operationId) de la anulación de un pesaje: una sola por pesaje, también
+ * entre pestañas (mutate atómico). Diferida: por el clientOperationId del CREATE.
+ */
+export const claveOperacionAnularPesaje = (pesajeId) => `pesaje-anular:${pesajeId}`;
+export const claveOperacionAnularPesajeRef = (clientOperationId) => `pesaje-anular:ref:${clientOperationId}`;
+
+/**
+ * CREATE legacy (anterior a 5A.3b): sin `origen` o sin `posibleEnServidor`. Su envío es
+ * INCIERTO siempre (un fallo de red no incrementaba intentos): nunca se cancela como
+ * "seguro" y nunca se le inventa identidad.
+ */
+export function esPesajeCrearLegacy(op) {
+  return op?.tipoOperacion === PESAJE_CREAR && (!origenVerificable(op) || typeof op.posibleEnServidor !== 'boolean');
+}
+
+/** ANULAR diferida que aún espera a que su CREATE quede confirmado (sin pesajeId). */
+export function esAnulacionPesajeSinResolver(op) {
+  return op?.tipoOperacion === PESAJE_ANULAR && !op.payload?.pesajeId && Boolean(op.payload?.pesajeRef?.clientOperationId);
+}
+
+/** Solo un CREATE v2 que se puede DEMOSTRAR no enviado admite cancelación local sin POST. */
+export function pesajeCrearCancelableSeguro(op) {
+  return op?.tipoOperacion === PESAJE_CREAR
+    && !esPesajeCrearLegacy(op)
+    && op.posibleEnServidor === false
+    && op.estado !== OUTBOX_ESTADOS.SINCRONIZANDO;
+}
+
 /** Misma normalización que aplica el servidor al motivo antes de guardarlo. */
 export function normalizarMotivo(motivo) {
   return typeof motivo === 'string' ? motivo.replace(/\r\n?/g, '\n').trim() : '';
@@ -72,7 +114,7 @@ export const ESTADOS_ENVIABLES = Object.freeze([OUTBOX_ESTADOS.PENDIENTE, OUTBOX
 export const ESTADOS_BLOQUEADOS = Object.freeze([OUTBOX_ESTADOS.CONFLICTO, OUTBOX_ESTADOS.RECHAZADO]);
 
 /** Reenviar el mismo id solo repetiría estos errores: el servidor ya decidió sobre este dato. */
-export const CODIGOS_SIN_REINTENTO = Object.freeze(['CONCILIACION_INTENCION_DISTINTA', 'CLIENT_OPERATION_ID_REUSED', 'EVENTO_YA_ANULADO', 'EVENTO_NOT_FOUND']);
+export const CODIGOS_SIN_REINTENTO = Object.freeze(['CONCILIACION_INTENCION_DISTINTA', 'CLIENT_OPERATION_ID_REUSED', 'EVENTO_YA_ANULADO', 'EVENTO_NOT_FOUND', 'PESAJE_YA_ANULADO', 'PESAJE_NOT_FOUND']);
 
 /** Sin lock exclusivo, una operación SINCRONIZANDO más reciente puede estar enviándose en otro motor. */
 export const SINCRONIZANDO_LEASE_MS = 2 * 60_000;
@@ -168,7 +210,9 @@ export function operacionesEnTurno(operaciones, { soportado = () => true } = {})
   for (const op of ordenarOutbox(operaciones)) {
     const clave = op.claveOrden ?? op.localUuid;
     if (detenidas.has(clave)) continue;
-    if (!soportado(op) || !activa(op)) {
+    // FASE 5A.3b: una ANULAR diferida sin pesajeId resuelto no puede salir todavía: la
+    // resuelve la confirmación del CREATE (localRepo), que notifica y la deja en turno.
+    if (!soportado(op) || !activa(op) || esAnulacionPesajeSinResolver(op)) {
       detenidas.add(clave);
       continue;
     }

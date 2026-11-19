@@ -24,7 +24,28 @@ import {
   normalizarMotivo,
   ordenarOutbox,
   origenVerificable,
+  PESAJE_ANULAR,
+  PESAJE_CREAR,
+  claveOperacionAnularPesaje,
+  claveOperacionAnularPesajeRef,
+  claveOrdenPesajes,
+  esOperacionPesaje,
+  esAnulacionPesajeSinResolver,
+  esPesajeCrearLegacy,
+  pesajeCrearCancelableSeguro,
 } from './outbox.js';
+import {
+  MAX_MOTIVO_ANULACION_PESAJE,
+  compararPesajesRecientePrimero,
+  derivarUltimoPesoLocal,
+  esIdPesajeValido,
+  filaConfirmaAnular,
+  filaConfirmaCreate,
+  fusionarPesaje,
+  pesajeConfirmadoDeCreate,
+  pesajeIdObjetivo,
+  proyectarPesajeSync,
+} from './pesajesLocales.js';
 import { CONCILIACION, conciliarAnular, conciliarCorregir } from './reproduccionConciliacionAdmin.js';
 import { MENSAJE_OFFLINE_ROLE_FORBIDDEN, puedeEncolar } from '../auth/ganaderiaPermisos.js';
 import { normalizeCodigoChapeta, isQrToken } from '../hato/qrToken.js';
@@ -85,7 +106,42 @@ export function pesajePendienteDe(op) {
     estado: op.estado,
     ultimoError: op.ultimoError ?? null,
     createdAt: op.createdAt,
+    // FASE 5A.3b: un legacy nunca se presenta como "no enviado".
+    posibleEnServidor: esPesajeCrearLegacy(op) ? null : Boolean(op.posibleEnServidor),
+    legacy: esPesajeCrearLegacy(op),
   };
+}
+
+/** FASE 5A.3b: tope de clientOperationId de CREATE cancelados que no se pueden reutilizar. */
+const MAX_PESAJES_CANCELADOS = 500;
+
+/**
+ * FASE 5A.3b: el CREATE del que depende una ANULAR diferida sigue en el outbox en
+ * CONFLICTO o RECHAZADO: el servidor no lo aceptó tal cual y nada prueba que la fila
+ * con ese clientOperationId sea esta intención. La ANULAR no se resuelve ni sale hasta
+ * que el usuario resuelva o descarte el CREATE.
+ */
+function createDependienteBloqueado(outbox, anular) {
+  const ref = anular?.payload?.pesajeRef?.clientOperationId;
+  return outbox.some((op) => op.tipoOperacion === PESAJE_CREAR && op.clientOperationId === ref
+    && (op.estado === OUTBOX_ESTADOS.CONFLICTO || op.estado === OUTBOX_ESTADOS.RECHAZADO));
+}
+
+/**
+ * FASE 5A.3b: ANULAR diferidas que ya pueden resolverse con pesajes confirmados (por el
+ * clientOperationId EXACTO del CREATE y el mismo animal). Solo se fija payload.pesajeId:
+ * la intención no cambia, así que no se toca updatedAt (un reclamo en curso sigue
+ * siendo válido) y la operación queda en turno para salir.
+ */
+function resolverAnulacionesDiferidas(outbox, confirmados, excluir = new Set()) {
+  const resueltas = [];
+  for (const op of outbox) {
+    if (!esAnulacionPesajeSinResolver(op) || excluir.has(op.operationId)) continue;
+    if (createDependienteBloqueado(outbox, op)) continue;
+    const pesajeId = pesajeIdObjetivo(op, confirmados);
+    if (pesajeId) resueltas.push({ op: 'put', store: 'outbox', value: { ...op, payload: { ...op.payload, pesajeId } } });
+  }
+  return resueltas;
 }
 
 /**
@@ -391,17 +447,31 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
      * la sesión). Idempotente: el mismo clientOperationId no crea una segunda
      * operación (doble clic, reintento del usuario). No se fabrica pesajeId:
      * el pesaje solo existe en el servidor cuando este lo confirma.
+     *
+     * FASE 5A.3b -- con `cuentaId` la operación es v2: claveOrden
+     * 'pesaje:animal:<animalId>' (FIFO común con PESAJE_ANULAR), `origen`
+     * { organizacionId, cuentaId } y posibleEnServidor=false hasta el primer
+     * envío; el motor verifica la identidad antes de cada POST y el POST lleva
+     * identidadEsperada. Sin `cuentaId` (llamador antiguo) se conserva el formato
+     * anterior, que el motor trata siempre como INCIERTO. Con `rol` se valida la
+     * capacidad (puedeEncolar). Un clientOperationId cancelado no se reutiliza.
      */
-    async registrarPesajeLocal({ animalId, body }) {
+    async registrarPesajeLocal({ animalId, body, cuentaId = null, ...opciones }) {
       if (!esIdServidor(animalId)) {
         throw localError('PESAJE_REQUIERE_ANIMAL_SINCRONIZADO', 'Este animal aún no está sincronizado: registra el pesaje cuando el servidor lo confirme.');
       }
+      if ('rol' in opciones && !puedeEncolar(opciones.rol, PESAJE_CREAR)) throw errorVisible('ROLE_FORBIDDEN', MENSAJE_OFFLINE_ROLE_FORBIDDEN);
       if (!body?.clientOperationId) throw localError('OPERACION_SIN_ID', 'Falta clientOperationId.');
       if ('organizacionId' in body || 'organizacion_id' in body) throw localError('CAMPO_NO_PERMITIDO', 'La organización la resuelve el servidor.');
-      const previa = (await storage.getAll('outbox')).find((op) => op.tipoOperacion === 'PESAJE_CREAR' && op.clientOperationId === body.clientOperationId);
+      const previa = (await storage.getAll('outbox')).find((op) => op.tipoOperacion === PESAJE_CREAR && op.clientOperationId === body.clientOperationId);
       if (previa) return { localUuid: previa.localUuid, operationId: previa.operationId, pendiente: pesajePendienteDe(previa), yaEncolado: true };
+      if ((await getMeta()).pesajesOperacionesCanceladas?.some((c) => c?.clientOperationId === body.clientOperationId)) {
+        throw localError('OPERACION_CANCELADA', 'Esta operación ya se canceló: registra el pesaje de nuevo.');
+      }
+      const v2 = typeof cuentaId === 'string' && cuentaId.length > 0;
+      const cadena = v2 ? await repo.cadenaPesajes(animalId) : [];
       const op = newOperation({
-        tipoOperacion: 'PESAJE_CREAR',
+        tipoOperacion: PESAJE_CREAR,
         entidad: 'pesaje',
         localUuid: uuid(),
         clientOperationId: body.clientOperationId,
@@ -414,12 +484,204 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
           clientOperationId: body.clientOperationId,
         },
         deviceId,
-        now: now(),
+        now: v2 ? instanteEnCadena(cadena, now()) : now(),
         uuid,
+        ...(v2 ? { claveOrden: claveOrdenPesajes(animalId), origen: { organizacionId, cuentaId } } : {}),
       });
       await storage.batch([{ op: 'put', store: 'outbox', value: op }]);
       notify();
       return { localUuid: op.localUuid, operationId: op.operationId, pendiente: pesajePendienteDe(op), yaEncolado: false };
+    },
+
+    /** FASE 5A.3b: operaciones de la cadena de pesajes de un animal (CREATE v2 + ANULAR), en orden de envío. */
+    async cadenaPesajes(animalId) {
+      return ordenarOutbox(await storage.getAllByIndex('outbox', 'claveOrden', claveOrdenPesajes(animalId)));
+    },
+
+    /** FASE 5A.3b: pesajes CONFIRMADOS del store local de un animal (ACTIVOS y ANULADOS). */
+    async listPesajesConfirmados(animalId) {
+      return (await storage.getAllByIndex('pesajes', 'animalId', String(animalId))).sort(compararPesajesRecientePrimero);
+    },
+
+    /**
+     * FASE 5A.3b: último peso local (pesajesLocales.derivarUltimoPesoLocal). Copia
+     * incompleta (sin recorrido conciliado) -> respaldo animal.ultimoPeso. No toca
+     * animal.updatedAt ni ningún otro dato.
+     */
+    async ultimoPesoLocal(animalId, { incluirPendientes = false } = {}) {
+      const [pesajes, operaciones, animal, meta] = await Promise.all([
+        storage.getAllByIndex('pesajes', 'animalId', String(animalId)),
+        storage.getAll('outbox'),
+        storage.get('animales', `srv:${animalId}`),
+        getMeta(),
+      ]);
+      return derivarUltimoPesoLocal({
+        pesajes,
+        operaciones,
+        animal: animal ?? { animalId: String(animalId), ultimoPeso: null },
+        // Evidencia explícita: un recorrido terminado con totales conciliados y ninguno a medias
+        // (pull interrumpido, sesión cambiada, desfase -> pesajesListaAt null o recorrido en curso).
+        copiaCompleta: Boolean(meta.pesajesListaAt) && meta.pesajesRecorridoEnCurso !== true,
+        incluirPendientes,
+      });
+    },
+
+    /** pesajeId que una PESAJE_ANULAR anula (diferida: por el clientOperationId exacto del CREATE). */
+    async resolverPesajeIdDeAnulacion(op) {
+      if (esIdPesajeValido(op?.payload?.pesajeId)) return String(op.payload.pesajeId);
+      const ref = op?.payload?.pesajeRef?.clientOperationId;
+      if (!ref) return null;
+      if (createDependienteBloqueado(await storage.getAll('outbox'), op)) return null;
+      return pesajeIdObjetivo(op, await storage.getAllByIndex('pesajes', 'clientOperationId', ref));
+    },
+
+    /**
+     * FASE 5A.3b (Caso 1, para 5A.3c; sin UI todavía): cancela un CREATE v2 que se
+     * puede DEMOSTRAR no enviado (posibleEnServidor === false, no SINCRONIZANDO). Se
+     * elimina del outbox como operación nunca materializada: 0 POST, sin evento de
+     * anulación ni auditoría ficticia. Su clientOperationId queda inutilizable. Un
+     * CREATE legacy o con posibleEnServidor=true NUNCA se cancela aquí: se anula con
+     * encolarAnulacionPesaje cuando se confirme. Solo la cuenta de origen.
+     */
+    async cancelarPesajePendiente(operationId, { cuentaId } = {}) {
+      const leida = await storage.get('outbox', operationId);
+      if (!leida) {
+        // Repetición: misma respuesta, sin tocar nada (la marca persiste en meta de esta organización).
+        const previa = (await getMeta()).pesajesOperacionesCanceladas?.find((c) => c?.operationId === operationId);
+        if (previa) return { cancelado: true, yaCancelado: true, operationId, clientOperationId: previa.clientOperationId };
+      }
+      if (!leida || leida.tipoOperacion !== PESAJE_CREAR) throw errorVisible('PESAJE_PENDIENTE_NO_ENCONTRADO', 'No hay un pesaje pendiente con ese identificador.');
+      const dependientes = (await storage.getAll('outbox'))
+        .filter((op) => op.tipoOperacion === PESAJE_ANULAR && op.payload?.pesajeRef?.clientOperationId === leida.clientOperationId);
+      if (dependientes.length > 0) throw errorVisible('PESAJE_ENVIO_INCIERTO', 'Este pesaje pudo haber llegado al servidor: se conserva hasta confirmarlo.');
+      const validar = (actual) => {
+        if (!actual || actual.tipoOperacion !== PESAJE_CREAR) throw errorVisible('PESAJE_PENDIENTE_NO_ENCONTRADO', 'No hay un pesaje pendiente con ese identificador.');
+        if (esPesajeCrearLegacy(actual)) throw errorVisible('PESAJE_ENVIO_INCIERTO', 'Este pesaje pudo haber llegado al servidor: se conserva hasta confirmarlo.');
+        if (!identidadCoincide(actual, cuentaId)) throw errorVisible(OUTBOX_ESTADOS.BLOQUEADA_POR_IDENTIDAD, 'Este pesaje lo registró otra cuenta: solo esa cuenta puede cancelarlo.');
+        if (actual.estado === OUTBOX_ESTADOS.SINCRONIZANDO) throw errorVisible('PESAJE_PENDIENTE_EN_CURSO', 'Este pesaje se está enviando: espera a que termine.');
+        if (!pesajeCrearCancelableSeguro(actual)) throw errorVisible('PESAJE_ENVIO_INCIERTO', 'Este pesaje pudo haber llegado al servidor: se conserva hasta confirmarlo.');
+      };
+      validar(leida);
+      // Primero la marca (store meta de la base de ESTA organización, IndexedDB): así un
+      // corte entre ambas escrituras nunca deja un CREATE borrado con su id reutilizable.
+      // Si la cancelación no se aplica (p. ej. empezó a enviarse), la marca se retira.
+      const marca = { operationId, clientOperationId: leida.clientOperationId };
+      const sinMarca = (lista) => (lista ?? []).filter((c) => c?.clientOperationId !== leida.clientOperationId);
+      const meta = await getMeta();
+      await storage.put('meta', { ...meta, pesajesOperacionesCanceladas: [...sinMarca(meta.pesajesOperacionesCanceladas), marca].slice(-MAX_PESAJES_CANCELADOS), key: META_KEY, organizacionId });
+      try {
+        await storage.mutate('outbox', operationId, (actual) => {
+          validar(actual);
+          if (actual.clientOperationId !== leida.clientOperationId) throw errorVisible('PESAJE_PENDIENTE_EN_CURSO', 'El pesaje cambió: vuelve a intentarlo.');
+          return null;
+        });
+      } catch (error) {
+        const actualMeta = await getMeta();
+        await storage.put('meta', { ...actualMeta, pesajesOperacionesCanceladas: sinMarca(actualMeta.pesajesOperacionesCanceladas), key: META_KEY, organizacionId }).catch(() => {});
+        throw error;
+      }
+      notify();
+      return { cancelado: true, operationId, clientOperationId: leida.clientOperationId };
+    },
+
+    /**
+     * FASE 5A.3b -- encola PESAJE_ANULAR (sin UI hasta 5A.3c). Requiere la capacidad
+     * anularPesaje. Objetivo:
+     *   pesajeId                  pesaje confirmado por el servidor
+     *   pesajeRef.clientOperationId  CREATE pendiente: si ya está en el store se usa su
+     *     pesajeId; si es v2 con posibleEnServidor=false se rechaza (debe cancelarse con
+     *     cancelarPesajePendiente, sin POST); si es v2 incierto o LEGACY se encola una
+     *     ANULAR DIFERIDA que no sale hasta que el CREATE quede confirmado. Nunca se
+     *     borra el CREATE.
+     * Idempotente por clientOperationId (misma intención); una sola anulación por pesaje.
+     */
+    async encolarAnulacionPesaje({ animalId, pesajeId = null, pesajeRef = null, motivo, clientOperationId, cuentaId, rol }) {
+      if (!puedeEncolar(rol, PESAJE_ANULAR)) throw errorVisible('ROLE_FORBIDDEN', MENSAJE_OFFLINE_ROLE_FORBIDDEN);
+      if (!esIdServidor(animalId)) throw errorVisible('PESAJE_REQUIERE_ANIMAL_SINCRONIZADO', 'Este animal aún no está sincronizado.');
+      if (!cuentaId) throw localError('OPERACION_SIN_CUENTA', 'Falta la cuenta de la sesión.');
+      if (!clientOperationId) throw localError('OPERACION_SIN_ID', 'Falta clientOperationId.');
+      const motivoNormal = normalizarMotivo(motivo);
+      if (!motivoNormal) throw errorVisible('INVALID_MOTIVO', 'Indica el motivo.');
+      if (motivoNormal.length > MAX_MOTIVO_ANULACION_PESAJE) throw errorVisible('INVALID_MOTIVO', `El motivo admite máximo ${MAX_MOTIVO_ANULACION_PESAJE} caracteres.`);
+      const animal = String(animalId);
+      const outbox = await storage.getAll('outbox');
+
+      let objetivo = esIdPesajeValido(pesajeId) ? String(pesajeId) : null;
+      let ref = null;
+      if (!objetivo) {
+        const refId = pesajeRef?.clientOperationId;
+        if (!refId) throw errorVisible('PESAJE_NO_ENCONTRADO', 'Indica el pesaje a anular.');
+        const confirmado = pesajeIdObjetivo(
+          { tipoOperacion: PESAJE_ANULAR, payload: { animalId: animal, pesajeRef: { clientOperationId: refId } } },
+          await storage.getAllByIndex('pesajes', 'clientOperationId', refId),
+        );
+        if (confirmado) {
+          objetivo = confirmado;
+        } else {
+          const create = outbox.find((op) => op.tipoOperacion === PESAJE_CREAR && op.clientOperationId === refId);
+          if (!create || create.payload?.animalId !== animal) throw errorVisible('PESAJE_PENDIENTE_NO_ENCONTRADO', 'No hay un pesaje pendiente con ese identificador.');
+          if (pesajeCrearCancelableSeguro(create)) {
+            throw errorVisible('PESAJE_CANCELABLE_LOCALMENTE', 'Este pesaje nunca salió del dispositivo: cancélalo en lugar de anularlo.');
+          }
+          ref = { clientOperationId: refId };
+        }
+      }
+
+      const payload = { animalId: animal, pesajeId: objetivo, ...(ref ? { pesajeRef: ref } : {}), motivo: motivoNormal };
+      const firma = JSON.stringify([payload.animalId, payload.pesajeId, ref?.clientOperationId ?? null, payload.motivo]);
+      const firmaDe = (op) => JSON.stringify([op.payload?.animalId, op.payload?.pesajeId ?? null, op.payload?.pesajeRef?.clientOperationId ?? null, op.payload?.motivo]);
+      const reutilizada = outbox.find((op) => esOperacionPesaje(op.tipoOperacion) && op.clientOperationId === clientOperationId);
+      if (reutilizada) {
+        if (reutilizada.tipoOperacion !== PESAJE_ANULAR || firmaDe(reutilizada) !== firma) {
+          throw errorVisible('CLIENT_OPERATION_ID_REUSED', 'Esta operación ya se registró con datos distintos.');
+        }
+        return { operationId: reutilizada.operationId, yaEncolado: true, diferida: Boolean(reutilizada.payload.pesajeRef) };
+      }
+      if (objetivo) {
+        const conocido = await storage.get('pesajes', objetivo);
+        if (conocido && conocido.animalId !== animal) throw errorVisible('PESAJE_NOT_FOUND', 'El pesaje no pertenece a este animal.');
+        if (conocido?.estadoRegistro === 'ANULADO') throw errorVisible('PESAJE_YA_ANULADO', 'Este pesaje ya fue anulado.');
+        // Una diferida ya resuelta a este mismo pesaje cuenta como su anulación pendiente.
+        const pesajesAnimal = await storage.getAllByIndex('pesajes', 'animalId', animal);
+        const yaPendiente = outbox.some((op) => op.tipoOperacion === PESAJE_ANULAR && pesajeIdObjetivo(op, pesajesAnimal) === objetivo);
+        if (yaPendiente) throw errorVisible('OPERACION_ADMINISTRATIVA_PENDIENTE', 'Este pesaje ya tiene una anulación pendiente en este dispositivo.');
+      }
+
+      const operationId = objetivo ? claveOperacionAnularPesaje(objetivo) : claveOperacionAnularPesajeRef(ref.clientOperationId);
+      const instante = instanteEnCadena(await repo.cadenaPesajes(animal), now());
+      const nueva = newOperation({
+        tipoOperacion: PESAJE_ANULAR,
+        entidad: 'pesaje',
+        localUuid: uuid(),
+        clientOperationId,
+        payload,
+        deviceId,
+        now: instante,
+        uuid: () => operationId,
+        claveOrden: claveOrdenPesajes(animal),
+        origen: { organizacionId, cuentaId },
+      });
+      await storage.mutate('outbox', operationId, (actual) => {
+        if (actual) throw errorVisible('OPERACION_ADMINISTRATIVA_PENDIENTE', 'Este pesaje ya tiene una anulación pendiente en este dispositivo.');
+        return nueva;
+      });
+      notify();
+      return { operationId, yaEncolado: false, diferida: Boolean(ref) };
+    },
+
+    /**
+     * FASE 5A.3b (para 5A.3c): retira una anulación que se puede demostrar no enviada.
+     * Con posibleEnServidor se conserva para reconciliarla. Solo su cuenta.
+     */
+    async cancelarAnulacionPesajePendiente(operationId, { cuentaId } = {}) {
+      await storage.mutate('outbox', operationId, (actual) => {
+        if (!actual || actual.tipoOperacion !== PESAJE_ANULAR) throw errorVisible('PESAJE_PENDIENTE_NO_ENCONTRADO', 'No hay una anulación pendiente con ese identificador.');
+        if (!identidadCoincide(actual, cuentaId)) throw errorVisible(OUTBOX_ESTADOS.BLOQUEADA_POR_IDENTIDAD, 'Esta anulación la registró otra cuenta: solo esa cuenta puede cancelarla.');
+        if (actual.estado === OUTBOX_ESTADOS.SINCRONIZANDO) throw errorVisible('PESAJE_PENDIENTE_EN_CURSO', 'Esta anulación se está enviando: espera a que termine.');
+        if (actual.posibleEnServidor !== false) throw errorVisible('PESAJE_ENVIO_INCIERTO', 'Esta anulación pudo haber llegado al servidor: se conserva hasta confirmarla.');
+        return null;
+      });
+      notify();
     },
 
     /** Pesajes del outbox de un animal (orden de envío). Nunca entran en los datos confirmados. */
@@ -436,7 +698,12 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
       if (![OUTBOX_ESTADOS.CONFLICTO, OUTBOX_ESTADOS.RECHAZADO].includes(op.estado)) {
         throw errorVisible('PESAJE_PENDIENTE_EN_CURSO', 'Solo se descartan pesajes que el servidor no aceptó.');
       }
-      await storage.batch([{ op: 'delete', store: 'outbox', key: operationId }]);
+      // FASE 5A.3b: una ANULAR diferida de este CREATE que nunca salió (sin pesajeId y
+      // posibleEnServidor=false) ya no tiene objetivo: se retira con él. Una que pudo
+      // salir se conserva para reconciliarla.
+      const huerfanas = (await storage.getAll('outbox'))
+        .filter((o) => esAnulacionPesajeSinResolver(o) && o.payload.pesajeRef.clientOperationId === op.clientOperationId && o.posibleEnServidor === false);
+      await storage.batch([{ op: 'delete', store: 'outbox', key: operationId }, ...huerfanas.map((o) => ({ op: 'delete', store: 'outbox', key: o.operationId }))]);
       notify();
     },
 
@@ -850,8 +1117,50 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
      * Se elimina la operación; el historial, KPIs, gráficas, alertas y PDF se
      * vuelven a pedir al servidor (fuente de verdad) vía notify().
      */
-    async confirmarPesajeCreado(op) {
-      await storage.batch([{ op: 'delete', store: 'outbox', key: op.operationId }]);
+    async confirmarPesajeCreado(op, pesaje = null) {
+      const operaciones = [{ op: 'delete', store: 'outbox', key: op.operationId }];
+      // FASE 5A.3b: la respuesta (201 o 200 yaExistia por este clientOperationId) entra en
+      // el store con la evidencia del CREATE; nunca hace retroceder un ANULADO ya conocido.
+      const confirmado = pesajeConfirmadoDeCreate(op, pesaje, organizacionId);
+      if (confirmado) {
+        const existente = await storage.get('pesajes', confirmado.pesajeId);
+        operaciones.push({ op: 'put', store: 'pesajes', value: fusionarPesaje(existente, confirmado) });
+        operaciones.push(...resolverAnulacionesDiferidas(await storage.getAll('outbox'), [confirmado]));
+      }
+      await storage.batch(operaciones);
+      notify();
+    },
+
+    /**
+     * FASE 5A.3b: el servidor respondió 200 a la anulación. Solo se cierra si la
+     * respuesta prueba EXACTAMENTE esta intención (pesajeId esperado, ANULADO, mismo
+     * motivo); si no, CONFLICTO conservando la operación. La evidencia de qué
+     * operación anuló el pesaje queda en anulacionClientOperationId.
+     */
+    async confirmarAnulacionPesaje(op, pesaje = null) {
+      const esperado = await repo.resolverPesajeIdDeAnulacion(op);
+      const existente = esperado ? await storage.get('pesajes', esperado) : null;
+      const fila = pesaje?.pesajeId
+        ? { ...pesaje, animalId: op.payload?.animalId, anulacionClientOperationId: op.clientOperationId }
+        : null;
+      if (!fila || !filaConfirmaAnular(op, fila, esperado)) {
+        await repo.marcarOperacionBloqueada(op, {
+          estado: OUTBOX_ESTADOS.CONFLICTO,
+          codigo: 'CONCILIACION_INTENCION_DISTINTA',
+          mensaje: MENSAJE_CONCILIACION_DISTINTA,
+          status: 0,
+        });
+        return;
+      }
+      const proyectado = proyectarPesajeSync({
+        ...fila,
+        organizacionId,
+        clientOperationId: existente?.clientOperationId ?? fila.clientOperationId ?? null,
+      }, organizacionId);
+      await storage.batch([
+        { op: 'delete', store: 'outbox', key: op.operationId },
+        { op: 'put', store: 'pesajes', value: fusionarPesaje(existente, proyectado) },
+      ]);
       notify();
     },
 
@@ -1065,6 +1374,119 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
 
     async reiniciarCursorReproduccion() {
       await putMeta({ reproduccionCursor: null });
+    },
+
+    /**
+     * FASE 5A.3b -- aplica UNA página de GET /api/ganaderia/sync/pesajes en una sola
+     * transacción: upsert por pesajeId (dedupe dentro de la página y con lo local; el
+     * solape entre recorridos no duplica), ANULADO terminal, conciliación EXACTA de
+     * CREATE / ANULAR inciertos (pesajesLocales.js) y el `cursorSiguiente` -- que
+     * solo se persiste junto con la página guardada.
+     *
+     * Identidad: la página trae organizacionId y cuentaId de la SESIÓN del servidor.
+     * Otra organización -> ORGANIZACION_DISTINTA; otra cuenta que la del inicio del
+     * recorrido (`cuentaEsperada`) -> SESION_CAMBIADA. En ambos casos no se escribe
+     * nada. Las operaciones v2 solo se concilian si son de esa cuenta; un CREATE
+     * legacy (sin origen) solo con su clientOperationId exacto, nunca adoptando otra
+     * identidad para enviarlo.
+     *
+     * Última página: compara los totales del servidor con la copia; si falta algo,
+     * reinicia el cursor (el siguiente ciclo rehace el recorrido completo).
+     */
+    async aplicarPullPesajes(pagina, { cuentaEsperada = null } = {}) {
+      if (pagina?.organizacionId !== organizacionId) throw localError('ORGANIZACION_DISTINTA', 'Los datos recibidos son de otra organización.');
+      if (typeof pagina.cuentaId !== 'string' || !pagina.cuentaId) throw localError('PULL_PESAJES_INVALIDO', 'Respuesta de sincronización no válida.');
+      if (cuentaEsperada && pagina.cuentaId !== cuentaEsperada) throw localError('SESION_CAMBIADA', 'La sesión cambió durante la sincronización.');
+      if (!Array.isArray(pagina.pesajes) || typeof pagina.cursorSiguiente !== 'string' || !pagina.cursorSiguiente
+        || typeof pagina.hayMas !== 'boolean' || (!pagina.hayMas && !pagina.totales)) {
+        throw localError('PULL_PESAJES_INVALIDO', 'Respuesta de sincronización no válida.');
+      }
+      const ahora = now();
+      // Dedupe dentro de la página: misma regla que con lo local (ANULADO gana).
+      const recibidos = new Map();
+      for (const fila of pagina.pesajes) {
+        const proyectado = proyectarPesajeSync(fila, organizacionId);
+        recibidos.set(proyectado.pesajeId, fusionarPesaje(recibidos.get(proyectado.pesajeId), proyectado));
+      }
+      const operaciones = [];
+      const resultantes = new Map();
+      for (const [pesajeId, entrante] of recibidos) {
+        const existente = await storage.get('pesajes', pesajeId);
+        const valor = fusionarPesaje(existente, entrante);
+        resultantes.set(pesajeId, valor);
+        if (valor !== existente) operaciones.push({ op: 'put', store: 'pesajes', value: valor });
+      }
+
+      const deLaSesion = (op) => origenVerificable(op) && op.origen.organizacionId === organizacionId && identidadCoincide(op, pagina.cuentaId);
+      const outboxActual = await storage.getAll('outbox');
+      const cerradasIds = new Set();
+      const conciliables = outboxActual.filter((op) => esOperacionPesaje(op.tipoOperacion)
+        && resultadoIncierto(op, ahora.getTime())
+        && (esPesajeCrearLegacy(op) || deLaSesion(op)));
+      const filasDe = async (indice, valor) => {
+        const mapa = new Map((await storage.getAllByIndex('pesajes', indice, valor)).map((p) => [p.pesajeId, p]));
+        for (const p of resultantes.values()) if (p[indice] === valor) mapa.set(p.pesajeId, p);
+        return [...mapa.values()];
+      };
+      let cerradas = false;
+      for (const op of conciliables) {
+        if (op.tipoOperacion === PESAJE_CREAR) {
+          const filas = await filasDe('clientOperationId', op.clientOperationId);
+          if (filas.length === 1 && filaConfirmaCreate(op, filas[0])) {
+            operaciones.push({ op: 'delete', store: 'outbox', key: op.operationId });
+            cerradasIds.add(op.operationId);
+            cerradas = true;
+          }
+          continue;
+        }
+        const filasAnimal = await filasDe('animalId', String(op.payload?.animalId));
+        const esperado = pesajeIdObjetivo(op, filasAnimal);
+        const fila = esperado ? filasAnimal.find((p) => p.pesajeId === esperado) : null;
+        if (fila && filaConfirmaAnular(op, fila, esperado)) {
+          operaciones.push({ op: 'delete', store: 'outbox', key: op.operationId });
+          cerradasIds.add(op.operationId);
+          cerradas = true;
+        }
+        // Anulado por OTRA operación, o evidencia distinta: no se cierra. El POST con su
+        // clientOperationId obtiene 409 (PESAJE_YA_ANULADO / CLIENT_OPERATION_ID_REUSED) -> CONFLICTO.
+      }
+      // ANULAR diferidas cuyo CREATE llegó en esta página (o ya estaba): quedan resueltas.
+      const resueltas = [];
+      for (const op of outboxActual) {
+        if (!esAnulacionPesajeSinResolver(op) || cerradasIds.has(op.operationId)) continue;
+        const contexto = outboxActual.filter((o) => o === op || o.tipoOperacion === PESAJE_CREAR);
+        resueltas.push(...resolverAnulacionesDiferidas(contexto, await filasDe('clientOperationId', op.payload.pesajeRef.clientOperationId)));
+      }
+      if (resueltas.length > 0) {
+        operaciones.push(...resueltas);
+        cerradas = true;
+      }
+
+      const meta = await getMeta();
+      operaciones.push({
+        op: 'put',
+        store: 'meta',
+        // pesajesRecorridoEnCurso: entre la primera y la última página la copia mezcla dos
+        // momentos; hasta cerrar el recorrido con totales conciliados no cuenta como completa.
+        value: { ...meta, pesajesCursor: pagina.cursorSiguiente, pesajesUltimoError: null, pesajesRecorridoEnCurso: pagina.hayMas, ...(pagina.hayMas ? {} : { pesajesSyncAt: ahora.toISOString() }) },
+      });
+      await storage.batch(operaciones);
+      if (recibidos.size > 0 || cerradas) notify();
+      if (pagina.hayMas) return { hayMas: true, desfase: false, cursorSiguiente: pagina.cursorSiguiente };
+
+      const locales = await storage.getAll('pesajes');
+      const anulados = locales.filter((p) => p.estadoRegistro === 'ANULADO').length;
+      const totales = pagina.totales;
+      const desfase = !Number.isInteger(totales.pesajes) || !Number.isInteger(totales.anulados)
+        || locales.length < totales.pesajes || anulados < totales.anulados;
+      // Sin totales conciliados la copia deja de contar como completa (último peso -> respaldo).
+      if (desfase) await putMeta({ pesajesCursor: null, pesajesDesfaseAt: ahora.toISOString(), pesajesListaAt: null });
+      else if (!meta.pesajesListaAt) await putMeta({ pesajesListaAt: ahora.toISOString() });
+      return { hayMas: false, desfase, cursorSiguiente: desfase ? null : pagina.cursorSiguiente };
+    },
+
+    async reiniciarCursorPesajes() {
+      await putMeta({ pesajesCursor: null });
     },
 
     async aplicarPull(pull) {

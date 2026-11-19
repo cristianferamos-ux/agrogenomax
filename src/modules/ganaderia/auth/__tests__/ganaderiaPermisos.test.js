@@ -144,7 +144,7 @@ test('mapas de error de los paneles con escrituras incluyen ROLE_FORBIDDEN', () 
 
 test('encolar: lector nada; operador solo lo permitido; operación desconocida nunca', () => {
   for (const tipo of Object.keys(CAPACIDAD_OPERACION_OFFLINE)) {
-    const administrativa = tipo === 'REPRODUCCION_EVENTO_ANULAR' || tipo === 'REPRODUCCION_EVENTO_CORREGIR';
+    const administrativa = tipo === 'REPRODUCCION_EVENTO_ANULAR' || tipo === 'REPRODUCCION_EVENTO_CORREGIR' || tipo === 'PESAJE_ANULAR';
     assert.equal(puedeEncolar('lector', tipo), false, tipo);
     assert.equal(puedeEncolar('operador', tipo), !administrativa, tipo);
     assert.equal(puedeEncolar('admin', tipo), true, tipo);
