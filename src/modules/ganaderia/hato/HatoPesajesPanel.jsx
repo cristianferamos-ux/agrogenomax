@@ -46,6 +46,22 @@
 // (`historial`); KPIs, gráficas y alertas siguen usando solo `pesajes`
 // (ACTIVOS, serie diaria del servidor). La fecha del pesaje se valida también
 // contra nacimiento/ingreso del animal (mismo orden que el backend).
+//
+// FASE 5A.3c (UI offline sobre el motor 5A.3b, sin backend nuevo):
+//   * Sin conexión (o sin respuesta del servidor) el historial, KPIs, gráfica y alertas
+//     salen de la copia LOCAL (repoOffline.leerPesajesLocales) solo si el motor demuestra
+//     que está completa; se arman con el mismo motor compartido que el servidor. Si no
+//     está completa no se fabrican: se explica que requieren conexión.
+//   * Pendientes: CREATE ("Pendiente de sincronización" / "Pendiente de confirmar") y
+//     ANULAR ("Anulación pendiente", también sobre las filas del servidor); conflicto,
+//     rechazo e identidad con mensaje claro. Nunca ids internos.
+//   * "Cancelar registro pendiente" solo si el motor lo declara cancelable seguro y es de
+//     esta cuenta (repoOffline.cancelarPesajePendiente: 0 POST, sin ANULAR).
+//   * Anular sin conexión (owner/admin): mismo diálogo; se ENCOLA PESAJE_ANULAR en el motor
+//     (repoOffline.encolarAnulacionPesaje), nunca fetch. Un CREATE incierto se anula de
+//     forma diferida (pesajeRef). Con conexión, el POST directo de 5A.2 no cambia.
+//   * Al confirmarse o retirarse cualquier operación se recarga el servidor sin recargar
+//     la página (suscripción al repo + relectura mientras haya pendientes).
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { StatusMessage } from '../components/FormField.jsx';
 import HatoPesajeForm from './HatoPesajeForm.jsx';
@@ -75,6 +91,16 @@ import {
   mensajeErrorGuardadoLocal,
   mensajeTrasLeerPendientes,
 } from './pesajesOfflineModel.js';
+import {
+  MENSAJE_ANULACION_ENCOLADA,
+  MENSAJE_PENDIENTE_CANCELADO,
+  TEXTO_COPIA_LOCAL,
+  TEXTO_SIN_COPIA_LOCAL,
+  accionesPesajePendiente,
+  marcarAnulacionesPendientes,
+  mensajeAccionOffline,
+  vistaLocalPesajes,
+} from './pesajesOfflineVista.js';
 import { construirAlertasPesajes } from './pesajesAlertas.js';
 import { fechaHoyNegocio } from '../engine/fechaNegocio.js';
 import { TEXTO_SIN_ALERTAS_CERRADO, mensajePesajesCerrado } from './cierreModel.js';
@@ -108,6 +134,11 @@ export default function HatoPesajesPanel({
   const [anuladoEnServidor, setAnuladoEnServidor] = useState(false);
   const [cerradoEnServidor, setCerradoEnServidor] = useState(null);
   const [pendientes, setPendientes] = useState([]);
+  // FASE 5A.3c: copia local del motor (leerPesajesLocales): confirmados, ANULAR pendientes y completitud.
+  const [local, setLocal] = useState(null);
+  const [accionLocal, setAccionLocal] = useState(false);
+  const accionLocalRef = useRef(false);
+  const cuentaId = auth?.cuenta?.cuentaId ?? null;
   const operationIdRef = useRef(newClientOperationId());
   const savingRef = useRef(false);
   const pendientesIdsRef = useRef(new Set());
@@ -133,15 +164,21 @@ export default function HatoPesajesPanel({
   // confirmó), el historial/KPIs/gráficas/alertas se vuelven a pedir al
   // servidor y la ficha se refresca. Otra pestaña o el Service Worker no
   // notifican a este repo: se relee al volver a la pestaña o a la red.
+  // FASE 5A.3c: una sola lectura del motor (CREATE y ANULAR pendientes + copia local).
+  // La desaparición de CUALQUIER operación (confirmada o retirada) recarga el servidor.
   const leerPendientes = useCallback(async () => {
     if (!repoOffline) return;
-    let lista;
+    let lectura;
     try {
-      lista = await repoOffline.listPesajesPendientes(animalId);
+      lectura = typeof repoOffline.leerPesajesLocales === 'function'
+        ? await repoOffline.leerPesajesLocales(animalId)
+        : { pendientes: await repoOffline.listPesajesPendientes(animalId), anulaciones: [], confirmados: [], copiaCompleta: false };
     } catch {
       return;
     }
-    const actuales = idsPendientes(lista);
+    const lista = lectura.pendientes;
+    setLocal(lectura);
+    const actuales = idsPendientes([...lista, ...lectura.anulaciones]);
     const confirmadas = huboConfirmaciones(pendientesIdsRef.current, actuales);
     pendientesIdsRef.current = actuales;
     setPendientes(lista);
@@ -158,6 +195,7 @@ export default function HatoPesajesPanel({
     if (!repoOffline) {
       pendientesIdsRef.current = new Set();
       setPendientes([]);
+      setLocal(null);
       return undefined;
     }
     leerPendientes();
@@ -177,7 +215,7 @@ export default function HatoPesajesPanel({
   // Otra pestaña o el Service Worker pueden confirmar los pendientes sin
   // avisar a este repo: mientras haya pendientes se relee el outbox LOCAL
   // (IndexedDB, sin red) para refrescar en cuanto desaparezcan.
-  const hayPendientes = pendientes.length > 0;
+  const hayPendientes = pendientes.length > 0 || (local?.anulaciones?.length ?? 0) > 0;
   useEffect(() => {
     if (!repoOffline || !hayPendientes) return undefined;
     const id = setInterval(() => { leerPendientes(); }, RELECTURA_PENDIENTES_MS);
@@ -279,9 +317,13 @@ export default function HatoPesajesPanel({
   }
 
   // ---------------------------------------------------------------- anulación
+  // FASE 5A.3c: sin conexión la anulación se ENCOLA en el motor (PESAJE_ANULAR); nunca fetch.
+  // `pesaje.pendiente` = CREATE incierto (pudo llegar): anulación diferida por pesajeRef.
+  const anularOffline = !online && Boolean(repoOffline);
+
   function abrirAnulacion(pesaje) {
     if (!permisos.anularPesaje || enviandoAnulacion) return;
-    if (!online) {
+    if (!online && !repoOffline) {
       setMensaje({ type: 'info', text: MENSAJE_ANULACION_REQUIERE_CONEXION });
       return;
     }
@@ -289,6 +331,10 @@ export default function HatoPesajesPanel({
     setMotivoAnulacion('');
     setErrorMotivo(null);
     setFalloAnulacion(null);
+    if (!online || pesaje.pendiente) {
+      controladorRef.current = { modo: 'offline', enCurso: false };
+      return;
+    }
     // Una intención por diálogo: el id se conserva entre reintentos inciertos.
     controladorRef.current = crearControladorAnulacion({
       nuevoId: newClientOperationId,
@@ -306,16 +352,63 @@ export default function HatoPesajesPanel({
     controladorRef.current = null;
   }
 
+  /** Encola la anulación en el motor offline (una sola intención por diálogo; doble clic ignorado). */
+  async function encolarAnulacion(controlador, motivo) {
+    controlador.enCurso = true;
+    setEnviandoAnulacion(true);
+    try {
+      const objetivo = anulando.pendiente
+        ? { pesajeRef: { clientOperationId: anulando.pendiente.clientOperationId } }
+        : { pesajeId: anulando.pesajeId };
+      await repoOffline.encolarAnulacionPesaje({
+        animalId, ...objetivo, motivo, clientOperationId: newClientOperationId(), cuentaId, rol: permisos.rol,
+      });
+      setAnulando(null);
+      controladorRef.current = null;
+      setMensaje({ type: 'info', text: MENSAJE_ANULACION_ENCOLADA });
+      await leerPendientes();
+    } catch (error) {
+      if (error?.code === 'INVALID_MOTIVO') setErrorMotivo(mensajeAccionOffline(error));
+      else setFalloAnulacion(mensajeAccionOffline(error));
+    } finally {
+      controlador.enCurso = false;
+      setEnviandoAnulacion(false);
+    }
+  }
+
+  /** "Cancelar registro pendiente": solo lo que el motor declaró cancelable seguro. Nunca POST. */
+  async function cancelarPendiente(pendiente) {
+    if (accionLocalRef.current) return;
+    accionLocalRef.current = true;
+    setAccionLocal(true);
+    try {
+      await repoOffline.cancelarPesajePendiente(pendiente.localOperationId, { cuentaId });
+      setMensaje({ type: 'info', text: MENSAJE_PENDIENTE_CANCELADO });
+    } catch (error) {
+      setMensaje({ type: 'error', text: mensajeAccionOffline(error) });
+    } finally {
+      accionLocalRef.current = false;
+      setAccionLocal(false);
+      await leerPendientes();
+    }
+  }
+
   async function confirmarAnulacion() {
     const controlador = controladorRef.current;
     if (!controlador || controlador.enCurso) return;
-    if (!online) {
-      setFalloAnulacion(MENSAJE_ANULACION_REQUIERE_CONEXION);
-      return;
-    }
     const { valido, motivo, error } = validarMotivoAnulacion(motivoAnulacion);
     if (!valido) {
       setErrorMotivo(error);
+      return;
+    }
+    if (controlador.modo === 'offline') {
+      setErrorMotivo(null);
+      setFalloAnulacion(null);
+      await encolarAnulacion(controlador, motivo);
+      return;
+    }
+    if (!online) {
+      setFalloAnulacion(MENSAJE_ANULACION_REQUIERE_CONEXION);
       return;
     }
     setErrorMotivo(null);
@@ -344,13 +437,23 @@ export default function HatoPesajesPanel({
     setFalloAnulacion(resultado.mensaje);
   }
 
-  const pesajes = state.data?.pesajes ?? [];
-  const historial = filasHistorial(state.data);
-  const sinPesajes = state.status === 'ok' && pesajes.length === 0;
+  // FASE 5A.3c: sin conexión (o sin respuesta del servidor) se usa la copia LOCAL, solo
+  // si el motor demuestra que está completa; si no, no se fabrican KPIs ni historial.
+  const vistaLocal = local ? vistaLocalPesajes({ animalId, copiaCompleta: local.copiaCompleta, confirmados: local.confirmados, anulaciones: local.anulaciones }) : null;
+  const usarLocal = Boolean(vistaLocal) && (!online || state.status === 'error');
+  const datos = usarLocal ? vistaLocal : state.data;
+  const estadoDatos = usarLocal ? 'ok' : state.status;
+  const anulacionesLocales = local?.anulaciones ?? [];
+  const pesajes = datos?.pesajes ?? [];
+  const historial = marcarAnulacionesPendientes(filasHistorial(datos), anulacionesLocales);
+  const sinPesajes = estadoDatos === 'ok' && pesajes.length === 0;
+  const accionesDe = (pendiente) => accionesPesajePendiente(pendiente, {
+    cuentaId, puedeRegistrar: permisos.registrarPesaje, puedeAnular: permisos.anularPesaje, anulaciones: anulacionesLocales,
+  });
   // El formulario: con red, cuando el historial confirmado cargó; sin red,
   // siempre que el dispositivo pueda guardar en el outbox (aunque el
   // historial del servidor no esté disponible).
-  const mostrarFormulario = permisos.registrarPesaje && admitePesajes && (online ? state.status === 'ok' : puedeGuardarOffline && state.status !== 'not_found');
+  const mostrarFormulario = permisos.registrarPesaje && admitePesajes && (online ? estadoDatos === 'ok' : puedeGuardarOffline && state.status !== 'not_found');
 
   const formulario = mostrarFormulario ? (
     <HatoPesajeForm
@@ -372,9 +475,11 @@ export default function HatoPesajesPanel({
         <HatoReporteProductivoBoton animalId={animalId} online={online} />
       </div>
 
-      {state.status === 'loading' ? <StatusMessage>Cargando pesajes...</StatusMessage> : null}
+      {estadoDatos === 'loading' && !(!online && local) ? <StatusMessage>Cargando pesajes...</StatusMessage> : null}
       {state.status === 'not_found' ? <StatusMessage type="error">Este animal no está disponible.</StatusMessage> : null}
-      {state.status === 'error' ? (
+      {usarLocal ? <p className="gan-hato-hint" data-fuente="local">{TEXTO_COPIA_LOCAL}</p> : null}
+      {!online && repoOffline && local && !vistaLocal ? <StatusMessage type="info">{TEXTO_SIN_COPIA_LOCAL}</StatusMessage> : null}
+      {estadoDatos === 'error' && !(!online && local) ? (
         <div className="gan-hato-actions">
           <StatusMessage type="error">
             {online ? 'No fue posible cargar los pesajes.' : 'Los pesajes requieren conexión.'}
@@ -385,13 +490,20 @@ export default function HatoPesajesPanel({
 
       <div aria-live="polite">{mensaje ? <StatusMessage type={mensaje.type}>{mensaje.text}</StatusMessage> : null}</div>
 
-      <HatoPesajesPendientes pendientes={pendientes} />
+      <HatoPesajesPendientes
+        pendientes={pendientes}
+        anulaciones={anulacionesLocales}
+        accionesDe={repoOffline ? accionesDe : () => ({})}
+        ocupado={accionLocal || enviandoAnulacion}
+        onCancelar={cancelarPendiente}
+        onAnular={(pendiente) => abrirAnulacion({ ...pendiente, pendiente })}
+      />
 
-      {state.status === 'ok' ? (
+      {estadoDatos === 'ok' ? (
         <>
           {admitePesajes ? (
             <HatoPesajesAlertas
-              alertas={construirAlertasPesajes({ pesajes, resumen: state.data.resumen, fechaReferencia: fechaNegocio })}
+              alertas={construirAlertasPesajes({ pesajes, resumen: datos.resumen, fechaReferencia: fechaNegocio })}
             />
           ) : null}
           {cerrado ? (
@@ -401,7 +513,7 @@ export default function HatoPesajesPanel({
             </section>
           ) : null}
 
-          <HatoPesajesKpis resumen={state.data.resumen} />
+          <HatoPesajesKpis resumen={datos.resumen} />
 
           {sinPesajes ? (
             <div className="gan-pesajes-vacio">
@@ -429,7 +541,7 @@ export default function HatoPesajesPanel({
           ) : null}
           {formulario}
 
-          {permisos.anularPesaje && !online && historial.length ? (
+          {permisos.anularPesaje && !online && !repoOffline && historial.length ? (
             <p className="gan-hato-hint">{MENSAJE_ANULACION_REQUIERE_CONEXION}</p>
           ) : null}
           {historial.length ? (
@@ -438,6 +550,7 @@ export default function HatoPesajesPanel({
               puedeAnular={permisos.anularPesaje}
               admitePesajes={animalActivo && !anuladoEnServidor}
               online={online}
+              puedeEncolar={Boolean(repoOffline)}
               ocupado={enviandoAnulacion}
               onAnular={abrirAnulacion}
             />
@@ -458,6 +571,7 @@ export default function HatoPesajesPanel({
           enviando={enviandoAnulacion}
           onCancelar={cerrarAnulacion}
           onConfirmar={confirmarAnulacion}
+          offline={anularOffline || Boolean(anulando.pendiente)}
         />
       ) : null}
     </section>

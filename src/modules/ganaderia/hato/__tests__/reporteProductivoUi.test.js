@@ -74,7 +74,8 @@ test('descarga: errores devuelven { ok:false, status, data }; la red caída lanz
 test('mensajes amigables (sin detalles internos)', () => {
   assert.equal(TEXTO_BOTON_REPORTE, 'Descargar reporte productivo');
   assert.equal(TEXTO_BOTON_REPORTE_CARGANDO, 'Generando reporte...');
-  assert.equal(AVISO_REPORTE_SIN_CONEXION, 'Descargar el reporte requiere conexión.');
+  // FASE 5A.3c: texto acordado; sin PDF local.
+  assert.equal(AVISO_REPORTE_SIN_CONEXION, 'Conéctate a internet para generar el PDF actualizado.');
   assert.match(mensajeErrorReporte(null), /conexión/);
   assert.match(mensajeErrorReporte({ status: 401 }), /sesión/);
   assert.match(mensajeErrorReporte({ status: 403 }), /sesión/);

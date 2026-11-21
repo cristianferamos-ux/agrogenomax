@@ -209,22 +209,27 @@ test('19/20. mismo día: la medición previa explica por qué no tiene GMD; la G
 });
 
 // 21: offline ----------------------------------------------------------------------
-test('21. sin conexión: la anulación se bloquea con aviso claro y NUNCA se encola', () => {
+test('21. sin conexión: sin motor offline se bloquea con aviso claro; con motor se ENCOLA (nunca fetch)', () => {
   const a = accionAnularPesaje({ puedeAnular: true, pesaje: ACTIVO, online: false });
   assert.deepEqual(a, { visible: true, habilitado: false, motivoBloqueo: MENSAJE_ANULACION_REQUIERE_CONEXION });
   assert.match(MENSAJE_ANULACION_REQUIERE_CONEXION, /requiere conexión/);
-  assert.match(panel, /if \(!online\) \{\s+setMensaje\(\{ type: 'info', text: MENSAJE_ANULACION_REQUIERE_CONEXION \}\);/);
-  // El bloque de anulación del panel no toca el repositorio offline (el
-  // outbox del panel es solo el registro de pesajes, FASE 1D.1).
-  const bloque = panel.slice(panel.indexOf('function abrirAnulacion'), panel.indexOf('const pesajes = state.data'));
-  assert.ok(bloque.length > 200);
-  assert.doesNotMatch(bloque, /repoOffline|outbox|encolar|PESAJE_ANULAR/i);
+  // FASE 5A.3c: sin conexión solo se bloquea si el dispositivo NO puede encolar (sin motor offline).
+  assert.match(panel, /if \(!online && !repoOffline\) \{\s+setMensaje\(\{ type: 'info', text: MENSAJE_ANULACION_REQUIERE_CONEXION \}\);/);
+  // FASE 5A.3c: la vía offline solo encola en el motor; el POST directo queda en la vía online.
+  const encolar = panel.slice(panel.indexOf('async function encolarAnulacion'), panel.indexOf('async function cancelarPendiente'));
+  assert.ok(encolar.length > 200);
+  assert.match(encolar, /await repoOffline\.encolarAnulacionPesaje\(\{/);
+  assert.doesNotMatch(encolar, /anularPesaje\(|fetch\(|postJson/);
+  assert.match(panel, /if \(controlador\.modo === 'offline'\) \{[\s\S]*?await encolarAnulacion\(controlador, motivo\);/);
+  // Historial, diálogo y modelo no tocan el outbox: solo presentan.
   for (const fuente of [historialJsx, dialogo, src('../pesajesAnulacionModel.js')]) {
-    assert.doesNotMatch(fuente, /PESAJE_ANULAR|registrarAnulacionLocal|outbox|repoOffline/i);
+    assert.doesNotMatch(fuente, /PESAJE_ANULAR|registrarAnulacionLocal|outbox|repoOffline\./i);
   }
-  // FASE 5A.3b: el motor ya tiene PESAJE_ANULAR, pero ninguna pantalla lo encola (UI en 5A.3c).
+  // FASE 5A.3c: la ficha encola y cancela SOLO a través del motor (nunca outbox directo).
   assert.match(src('../../offline/operationHandlers.js'), /PESAJE_ANULAR/);
-  assert.doesNotMatch(panel, /encolarAnulacionPesaje|cancelarPesajePendiente|cancelarAnulacionPesajePendiente/);
+  assert.match(panel, /repoOffline\.encolarAnulacionPesaje\(/);
+  assert.match(panel, /repoOffline\.cancelarPesajePendiente\(pendiente\.localOperationId, \{ cuentaId \}\)/);
+  assert.doesNotMatch(panel, /storage\.|putOperacion|'outbox'/);
 });
 
 // Diálogo y privacidad ---------------------------------------------------------------

@@ -12,8 +12,8 @@
 //   * La acción "Anular" es SOLO UX: se muestra a owner/admin
 //     (capacidad anularPesaje) sobre pesajes ACTIVOS; la autoridad es el
 //     backend (403 ROLE_FORBIDDEN).
-//   * Solo online (5A.2). Sin conexión NO se encola nada: el soporte offline
-//     llega en 5A.3.
+//   * Online (5A.2): POST directo. Sin conexión (5A.3c): se encola PESAJE_ANULAR en el
+//     motor offline (repoOffline.encolarAnulacionPesaje), nunca un fetch directo.
 //   * El motivo se valida con la MISMA regla que el backend
 //     (pesajeValidation.validateAnularPesajeBody): CRLF -> LF, trim, 1..500.
 //   * Una intención = un clientOperationId. Se conserva tras un resultado
@@ -30,14 +30,19 @@ export const MAX_MOTIVO_ANULACION_PESAJE = 500;
 export const ADVERTENCIA_ANULACION_PESAJE =
   'El pesaje no se eliminará. Quedará registrado como anulado y dejará de participar en los cálculos productivos.';
 export const MENSAJE_ANULACION_REQUIERE_CONEXION =
-  'La anulación de pesajes requiere conexión. El soporte sin conexión llegará en una actualización posterior.';
+  'Este dispositivo no puede guardar la anulación sin conexión: la anulación de pesajes requiere conexión.';
+export const AVISO_ANULACION_OFFLINE =
+  'Sin conexión: la anulación se guardará en este dispositivo y se enviará al servidor al recuperar la conexión. Hasta entonces el pesaje seguirá activo en el servidor.';
 export const TEXTO_MEDICION_NO_USADA = 'No usada para GMD: existe una medición posterior el mismo día.';
 
 /** ¿Se ofrece "Anular" para este pesaje? Solo UX: decide el backend. */
-export function accionAnularPesaje({ puedeAnular, pesaje, admitePesajes = true, online = true } = {}) {
+export function accionAnularPesaje({ puedeAnular, pesaje, admitePesajes = true, online = true, puedeEncolar = false } = {}) {
   const activo = pesaje?.estadoRegistro !== 'ANULADO';
-  const visible = Boolean(puedeAnular && activo && admitePesajes && pesaje?.pesajeId);
-  return { visible, habilitado: visible && Boolean(online), motivoBloqueo: visible && !online ? MENSAJE_ANULACION_REQUIERE_CONEXION : null };
+  // FASE 5A.3c: con una anulación ya pendiente no se ofrece otra (se muestra su estado).
+  const visible = Boolean(puedeAnular && activo && admitePesajes && pesaje?.pesajeId && !pesaje?.anulacionPendiente);
+  // Sin conexión solo si el dispositivo puede encolarla en el motor offline (PESAJE_ANULAR).
+  const disponible = Boolean(online) || Boolean(puedeEncolar);
+  return { visible, habilitado: visible && disponible, motivoBloqueo: visible && !disponible ? MENSAJE_ANULACION_REQUIERE_CONEXION : null };
 }
 
 /** Misma normalización que el backend. { valido, motivo, error }. */

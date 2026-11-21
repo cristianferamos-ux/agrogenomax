@@ -5,7 +5,7 @@ import { mensajeServidor } from '../api/errorModel.js';
 
 export const TEXTO_BOTON_REPORTE = 'Descargar reporte productivo';
 export const TEXTO_BOTON_REPORTE_CARGANDO = 'Generando reporte...';
-export const AVISO_REPORTE_SIN_CONEXION = 'Descargar el reporte requiere conexión.';
+export const AVISO_REPORTE_SIN_CONEXION = 'Conéctate a internet para generar el PDF actualizado.';
 
 /** Mensaje amigable para un resultado fallido (o null si la red falló). */
 export function mensajeErrorReporte(result) {

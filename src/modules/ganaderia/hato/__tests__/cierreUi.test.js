@@ -302,7 +302,8 @@ test('pesajes cerrados: mensajes exactos, sin alertas de atraso, sin formulario'
   assert.match(pesajesPanel, /const mostrarFormulario = permisos.registrarPesaje && admitePesajes &&/);
   assert.match(pesajesPanel, /\{admitePesajes \? \(\s*<HatoPesajesAlertas/);
   assert.match(pesajesPanel, /\{cerrado \? \([\s\S]*?TEXTO_SIN_ALERTAS_CERRADO/);
-  assert.match(pesajesPanel, /<HatoPesajesKpis resumen=\{state\.data\.resumen\} \/>/, 'KPIs siguen visibles');
+  // FASE 5A.3c: `datos` = servidor o copia local completa (misma forma).
+  assert.match(pesajesPanel, /<HatoPesajesKpis resumen=\{datos\.resumen\} \/>/, 'KPIs siguen visibles');
   assert.match(pesajesPanel, /<HatoPesajesGrafica pesajes=\{pesajes\} \/>/, 'gráfica sigue visible');
   assert.match(detalle, /estadoOperativo=\{situacion\}/);
 });

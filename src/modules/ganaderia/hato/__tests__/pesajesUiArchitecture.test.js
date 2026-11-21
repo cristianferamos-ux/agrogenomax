@@ -131,7 +131,7 @@ test('panel: estado vacío, anulado, sin conexión y error de carga', () => {
   // FASE 1D.1: con red, formulario cuando el historial confirmado cargó; sin
   // red, cuando el dispositivo puede guardar en el outbox.
   // FASE 3A: el formulario exige además la capacidad registrarPesaje.
-  assert.match(panel, /const mostrarFormulario = permisos\.registrarPesaje && admitePesajes && \(online \? state\.status === 'ok' : puedeGuardarOffline && state\.status !== 'not_found'\);/);
+  assert.match(panel, /const mostrarFormulario = permisos\.registrarPesaje && admitePesajes && \(online \? estadoDatos === 'ok' : puedeGuardarOffline && state\.status !== 'not_found'\);/);
   assert.match(panel, /const formulario = mostrarFormulario \? \(\s*<HatoPesajeForm/);
   // FASE 5A.2: el historial (ACTIVOS + ANULADOS) es visible aunque no queden activos.
   assert.match(panel, /\{historial\.length \? \(\s*<HatoPesajesHistorial/, 'historial visible también si está anulado');
@@ -160,7 +160,8 @@ test('historial y KPIs: tabla con encabezados, etiquetas móviles y lista de def
   assert.match(historial, /<caption>Historial de pesajes \(más reciente primero\)<\/caption>/);
   // FASE 5A.2: + Estado, celda de cálculo (anulado / mismo día) y Acciones (solo owner/admin).
   const labels = [...historial.matchAll(/data-label="([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(labels, ['Fecha', 'Peso', 'Método', 'Estado', 'Cálculo', 'Diferencia', 'Días', 'GMD', 'Observaciones', 'Acciones']);
+  // FASE 5A.3c: + celda de cálculo para la anulación pendiente.
+  assert.deepEqual(labels, ['Fecha', 'Peso', 'Método', 'Estado', 'Cálculo', 'Cálculo', 'Diferencia', 'Días', 'GMD', 'Observaciones', 'Acciones']);
   assert.equal((historial.match(/<th scope="col">/g) ?? []).length, 9);
   assert.match(kpis, /<dl className="gan-pesajes-kpis" aria-label="Indicadores de peso">/);
 });

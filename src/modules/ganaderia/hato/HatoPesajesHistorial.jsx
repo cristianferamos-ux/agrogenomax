@@ -10,6 +10,11 @@
 // internos. "Anular" solo aparece si la ficha lo permite (accionAnularPesaje);
 // sin conexión se explica que la anulación requiere red.
 //
+// FASE 5A.3c: una fila con `anulacionPendiente` (PESAJE_ANULAR en el outbox) sigue
+// mostrando su estado confirmado, con la marca "Anulación pendiente" (o conflicto /
+// rechazo / identidad) y sin ofrecer otra anulación. Sin conexión, "Anular" queda
+// disponible si el dispositivo puede encolarla (`puedeEncolar`).
+//
 // DEUDA (accesibilidad, no bloqueante): la celda colSpan=3 "Cálculo" sustituye
 // Diferencia / Días / GMD en filas sin derivaciones; un lector de pantalla
 // anuncia "Cálculo" en vez de las tres columnas. Ver
@@ -24,12 +29,14 @@ import {
   historialParaVista,
 } from './pesajesModel.js';
 import { accionAnularPesaje, presentarFilaHistorial } from './pesajesAnulacionModel.js';
+import { estadoAnulacionPendiente } from './pesajesOfflineVista.js';
 
-export default function HatoPesajesHistorial({ pesajes, puedeAnular = false, admitePesajes = true, online = true, ocupado = false, onAnular }) {
+export default function HatoPesajesHistorial({ pesajes, puedeAnular = false, admitePesajes = true, online = true, puedeEncolar = false, ocupado = false, onAnular }) {
   const filas = historialParaVista(pesajes).map((p) => ({
     p,
     vista: presentarFilaHistorial(p),
-    accion: accionAnularPesaje({ puedeAnular, pesaje: p, admitePesajes, online }),
+    pendiente: p.anulacionPendiente ? estadoAnulacionPendiente(p.anulacionPendiente) : null,
+    accion: accionAnularPesaje({ puedeAnular, pesaje: p, admitePesajes, online, puedeEncolar }),
   }));
   const conAcciones = filas.some((f) => f.accion.visible);
   const anulados = filas.filter((f) => f.vista.estado === 'ANULADO').length;
@@ -51,15 +58,22 @@ export default function HatoPesajesHistorial({ pesajes, puedeAnular = false, adm
           </tr>
         </thead>
         <tbody>
-          {filas.map(({ p, vista, accion }) => (
-            <tr key={p.pesajeId} className={vista.estado === 'ANULADO' ? 'gan-pesaje-fila is-anulado' : 'gan-pesaje-fila'} data-estado={vista.estado}>
+          {filas.map(({ p, vista, pendiente, accion }) => (
+            <tr
+              key={p.pesajeId}
+              className={vista.estado === 'ANULADO' ? 'gan-pesaje-fila is-anulado' : `gan-pesaje-fila${pendiente ? ' is-anulacion-pendiente' : ''}`}
+              data-estado={pendiente ? 'ANULACION_PENDIENTE' : vista.estado}
+            >
               <td data-label="Fecha">{formatFecha(p.fecha)}</td>
               <td data-label="Peso">{formatKg(p.pesoKg)}</td>
               <td data-label="Método">{formatMetodo(p.metodo)}</td>
               <td data-label="Estado">
                 <span className={`gan-repro-badge ${vista.estado === 'ANULADO' ? 'gan-repro-badge-anulado' : 'gan-repro-badge-activo'}`}>{vista.etiquetaEstado}</span>
+                {pendiente ? <span className="gan-repro-badge gan-repro-badge-pendiente" data-anulacion-pendiente="true">{pendiente.etiqueta}</span> : null}
               </td>
-              {vista.sinDerivaciones ? (
+              {pendiente ? (
+                <td data-label="Cálculo" colSpan={3} className="gan-pesaje-nota-calculo">{pendiente.detalle}</td>
+              ) : vista.sinDerivaciones ? (
                 <td data-label="Cálculo" colSpan={3} className="gan-pesaje-nota-calculo">{vista.notaCalculo}</td>
               ) : (
                 <>

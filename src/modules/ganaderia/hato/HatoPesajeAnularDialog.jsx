@@ -1,4 +1,6 @@
-// FASE 5A.2 -- diálogo de anulación de un pesaje (solo online, owner/admin).
+// FASE 5A.2 -- diálogo de anulación de un pesaje (owner/admin).
+// FASE 5A.3c: el mismo diálogo sin conexión (prop offline): mismo motivo y advertencia,
+// más el aviso de que se guardará en el dispositivo y se enviará al sincronizar.
 // Mismo patrón accesible que la anulación reproductiva: role="alertdialog" +
 // aria-modal, foco inicial en el motivo, focus trap, ESC = Cancelar (salvo
 // con el POST en curso). El motivo es obligatorio (1..500, misma regla que el
@@ -7,10 +9,10 @@
 // No hay DELETE: el pesaje queda en el historial marcado como anulado.
 import { useEffect, useRef } from 'react';
 import { StatusMessage } from '../components/FormField.jsx';
-import { ADVERTENCIA_ANULACION_PESAJE, MAX_MOTIVO_ANULACION_PESAJE } from './pesajesAnulacionModel.js';
+import { ADVERTENCIA_ANULACION_PESAJE, AVISO_ANULACION_OFFLINE, MAX_MOTIVO_ANULACION_PESAJE } from './pesajesAnulacionModel.js';
 import { formatFecha, formatKg, formatMetodo } from './pesajesModel.js';
 
-export default function HatoPesajeAnularDialog({ pesaje, motivo, setMotivo, error, fallo, enviando, onCancelar, onConfirmar }) {
+export default function HatoPesajeAnularDialog({ pesaje, motivo, setMotivo, error, fallo, enviando, onCancelar, onConfirmar, offline = false }) {
   const dialogRef = useRef(null);
   const motivoRef = useRef(null);
 
@@ -54,6 +56,7 @@ export default function HatoPesajeAnularDialog({ pesaje, motivo, setMotivo, erro
           {formatKg(pesaje.pesoKg)} del {formatFecha(pesaje.fecha)} · {formatMetodo(pesaje.metodo)}
         </p>
         <p id="pesaje-anular-texto">{ADVERTENCIA_ANULACION_PESAJE}</p>
+        {offline ? <p className="gan-hato-hint" data-aviso="anulacion-offline">{AVISO_ANULACION_OFFLINE}</p> : null}
         <label className="gan-field" htmlFor="pesaje-anular-motivo">
           <span>Motivo (obligatorio)</span>
           <textarea
@@ -80,7 +83,7 @@ export default function HatoPesajeAnularDialog({ pesaje, motivo, setMotivo, erro
             disabled={enviando}
             aria-busy={enviando ? 'true' : undefined}
           >
-            {enviando ? 'Anulando…' : 'Anular pesaje'}
+            {enviando ? (offline ? 'Guardando…' : 'Anulando…') : (offline ? 'Guardar anulación' : 'Anular pesaje')}
           </button>
         </div>
       </div>

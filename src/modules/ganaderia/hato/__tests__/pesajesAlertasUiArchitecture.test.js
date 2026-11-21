@@ -80,7 +80,7 @@ test('cosmético: caption del historial como bloque en tarjetas móviles', () =>
 test('panel: alertas derivadas en render con fecha de negocio (America/Bogota); solo animales activos', () => {
   assert.match(panel, /import HatoPesajesAlertas from '\.\/HatoPesajesAlertas\.jsx'/);
   assert.match(panel, /import \{ construirAlertasPesajes \} from '\.\/pesajesAlertas\.js'/);
-  assert.match(panel, /\{admitePesajes \? \(\s*<HatoPesajesAlertas\s*alertas=\{construirAlertasPesajes\(\{ pesajes, resumen: state\.data\.resumen, fechaReferencia: fechaNegocio \}\)\}/);
+  assert.match(panel, /\{admitePesajes \? \(\s*<HatoPesajesAlertas\s*alertas=\{construirAlertasPesajes\(\{ pesajes, resumen: datos\.resumen, fechaReferencia: fechaNegocio \}\)\}/);
   // Fecha de NEGOCIO (America/Bogota), no la fecha local del navegador.
   assert.match(panel, /import \{ fechaHoyNegocio \} from '\.\.\/engine\/fechaNegocio\.js'/);
   assert.match(panel, /const fechaNegocio = fechaHoyNegocio\(\);/);
