@@ -14,6 +14,8 @@ const ETIQUETAS = Object.freeze({
   ANIMAL_CORREGIDO: 'Corrección',
   ANIMAL_ANULADO: 'Anulación',
   PESAJE_REGISTRADO: 'Pesaje',
+  // FASE 5B: la anulación de un pesaje es un hecho aparte (insignia "Anulado").
+  PESAJE_ANULADO: 'Pesaje',
   QR_ASIGNADO: 'Chapeta QR',
   QR_DESASIGNADO: 'Chapeta QR',
   QR_REEMPLAZADO: 'Chapeta QR',
@@ -35,8 +37,13 @@ export function etiquetaTipoEvento(tipo) {
   return ETIQUETAS[tipo] ?? 'Actividad';
 }
 
-/** FASE 4B: evento reproductivo anulado (sigue visible como historia). */
+/**
+ * FASE 4B: evento reproductivo anulado (sigue visible como historia).
+ * FASE 5B: la ANULACIÓN de un pesaje es su propio hecho (PESAJE_ANULADO) y
+ * lleva la insignia; el registro original (PESAJE_REGISTRADO) nunca la lleva.
+ */
 export function esEventoAnulado(evento) {
+  if (evento?.tipo === 'PESAJE_ANULADO') return true;
   return evento?.origen === 'reproduccion_eventos' && evento?.datos?.estadoRegistro === 'ANULADO';
 }
 
@@ -51,7 +58,14 @@ export function detallesEvento(evento) {
   const d = evento?.datos ?? {};
   if (evento?.tipo === 'PESAJE_REGISTRADO') {
     const lineas = [];
-    if (d.diasDesdeAnterior !== null && d.diasDesdeAnterior !== undefined) {
+    // FASE 5B: la fecha/hora del evento es la del REGISTRO (hecho); la fecha
+    // productiva del pesaje se muestra aparte.
+    if (d.fechaPesaje) lineas.push(`Fecha del pesaje: ${formatFecha(d.fechaPesaje)}`);
+    if (d.vigente === false) {
+      // Anulado después: sin derivaciones (no cuenta en cálculos) y nunca un
+      // "Primer peso registrado" ficticio por no tener anterior.
+      lineas.push('Este pesaje fue anulado posteriormente.');
+    } else if (d.diasDesdeAnterior !== null && d.diasDesdeAnterior !== undefined) {
       lineas.push(`Diferencia: ${formatDiferenciaKg(d.diferenciaKg)}`);
       lineas.push(`Días desde el anterior: ${formatDias(d.diasDesdeAnterior)}`);
       lineas.push(`GMD: ${formatGmd(d.gmdKgDia)}`);

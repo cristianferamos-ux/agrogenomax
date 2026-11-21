@@ -5,9 +5,11 @@
 // (`version`: pesaje confirmado, corrección, anulación, chapeta QR): si la
 // pestaña está abierta se recarga, y si está cerrada se recarga al abrirla.
 // Sin polling. Los pesajes pendientes del outbox NO aparecen aquí (solo los
-// confirmados por el servidor). Si un PESAJE_CREAR de este animal desaparece
-// del outbox (confirmado por el motor) mientras esta pestaña está montada, se
-// marca como desactualizada (avisos del repositorio local, sin polling).
+// confirmados por el servidor). Si un PESAJE_CREAR o un PESAJE_ANULAR (FASE
+// 5B) de este animal desaparece del outbox (confirmado por el motor o
+// retirado) mientras esta pestaña está montada, se marca como desactualizada
+// y se relee el servidor (avisos del repositorio local, sin polling). Una
+// operación pendiente o retirada nunca se muestra como hecho de auditoría.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { StatusMessage } from '../components/FormField.jsx';
 import { getTimelineAnimal } from './hatoApi.js';
@@ -21,7 +23,7 @@ import {
   etiquetaTipoEvento,
   fechaEvento,
 } from './actividadModel.js';
-import { huboConfirmaciones, idsPendientes } from './pesajesOfflineModel.js';
+import { huboConfirmaciones, idsOperacionesPesaje } from './pesajesOfflineModel.js';
 
 export default function HatoActividadPanel({ animalId, visible, version = 0, repoOffline = null }) {
   const [state, setState] = useState({ status: 'idle', eventos: [], total: 0, truncado: false });
@@ -46,19 +48,21 @@ export default function HatoActividadPanel({ animalId, visible, version = 0, rep
     if (visible && versionCargadaRef.current !== clave) cargar(clave);
   }, [visible, clave, cargar]);
 
-  // Pesajes offline confirmados por el motor (outbox local, sin red).
+  // Pesajes offline (CREATE y ANULAR) confirmados por el motor (outbox local, sin red).
   useEffect(() => {
     if (!repoOffline) return undefined;
     let activo = true;
     const revisar = async () => {
-      let lista;
+      let lectura;
       try {
-        lista = await repoOffline.listPesajesPendientes(animalId);
+        lectura = typeof repoOffline.leerPesajesLocales === 'function'
+          ? await repoOffline.leerPesajesLocales(animalId)
+          : { pendientes: await repoOffline.listPesajesPendientes(animalId), anulaciones: [] };
       } catch {
         return;
       }
       if (!activo) return;
-      const actuales = idsPendientes(lista);
+      const actuales = idsOperacionesPesaje(lectura);
       if (huboConfirmaciones(pendientesRef.current, actuales)) setConfirmacionesLocales((n) => n + 1);
       pendientesRef.current = actuales;
     };

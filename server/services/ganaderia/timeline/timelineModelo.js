@@ -8,8 +8,13 @@
 //   ANIMAL_CORREGIDO    agx.animal_eventos DATOS_CORREGIDOS (metadata.campos).
 //   ANIMAL_ANULADO      agx.animal_eventos ANULADO (metadata.motivo). La
 //                       columna animales.estado_* es el MISMO hecho: no se usa.
-//   PESAJE_REGISTRADO   agx.animal_pesajes + derivaciones del motor canónico
-//                       (construirHistorialPesajes). Nunca se copia a eventos.
+//   PESAJE_REGISTRADO   agx.animal_pesajes (TODA fila, ACTIVA o ANULADA) +
+//                       derivaciones del motor canónico solo si sigue ACTIVA.
+//                       Hecho = created_at. Nunca se copia a eventos.
+//   PESAJE_ANULADO      agx.animal_pesajes con estado_registro ANULADO
+//                       (FASE 5B). Hecho = anulado_at; motivo_anulacion. La
+//                       misma fila da DOS hechos con ids distintos (pesaje:N y
+//                       pesaje:N:anulacion): el registro nunca se reemplaza.
 //   QR_ASIGNADO         agx.animal_eventos QR_ASOCIADO.
 //   QR_DESASIGNADO      agx.animal_eventos QR_REVOCADO (revocada/dañada/
 //                       anulación/salida/muerte).
@@ -26,13 +31,18 @@
 //   (ASOCIADA_ANIMAL, REVOCADA, ...) y ASIGNADA_ORGANIZACION no es un hecho
 //   del animal: se EXCLUYE por diseño (deduplicación).
 //
-// Nunca se expone: intentHash, qrId interno, tokens QR, actor, SQL ni el
+// Nunca se expone: intentHash, qrId interno, tokens QR, actor (tampoco
+// actor_cuenta_id / anulado_por de pesajes), client_operation_id, SQL ni el
 // JSON crudo de metadata.
 //
 // Orden (DESCENDENTE, determinístico):
-//   1. fecha efectiva (pesaje y salida/muerte: su fecha calendario; resto:
-//      fecha de negocio America/Bogota del instante) DESC;
-//   2. instante técnico (ocurrido_en / created_at del pesaje) DESC;
+//   1. fecha efectiva (salida/muerte y reproducción: su fecha calendario;
+//      resto: fecha de negocio America/Bogota del instante) DESC;
+//   2. instante técnico (ocurrido_en / registrado_en / instante del hecho) DESC;
+//   FASE 5B: los pesajes son AUDITORÍA (secuencia de hechos): su fecha y
+//   hora son las del instante del hecho (PESAJE_REGISTRADO = created_at,
+//   PESAJE_ANULADO = anulado_at), igual que los eventos de animal_eventos; la
+//   fecha productiva del pesaje va aparte en datos.fechaPesaje y NO ordena.
 //   3. prioridad de tipo (registro al final de su día; anulación primero);
 //   4. id numérico de la fuente DESC.
 import { resolveFechaHoraNegocio } from '../motorDescansoAuto/businessTimezone.js';
@@ -45,6 +55,7 @@ export const TIPOS_TIMELINE = Object.freeze({
   ANIMAL_CORREGIDO: 'ANIMAL_CORREGIDO',
   ANIMAL_ANULADO: 'ANIMAL_ANULADO',
   PESAJE_REGISTRADO: 'PESAJE_REGISTRADO',
+  PESAJE_ANULADO: 'PESAJE_ANULADO',
   QR_ASIGNADO: 'QR_ASIGNADO',
   QR_DESASIGNADO: 'QR_DESASIGNADO',
   QR_REEMPLAZADO: 'QR_REEMPLAZADO',
@@ -65,6 +76,7 @@ export const TIPOS_TIMELINE = Object.freeze({
 // cierre (salida/muerte) precede a la revocación de chapeta que provoca.
 const PRIORIDAD = Object.freeze({
   ANIMAL_ANULADO: 0,
+  PESAJE_ANULADO: 0,
   ANIMAL_MUERTO: 1,
   ANIMAL_SALIDO: 1,
   QR_DESASIGNADO: 2,
@@ -272,40 +284,73 @@ function eventoAnimal(row) {
   }
 }
 
+function fechaCalendario(fecha) {
+  return typeof fecha === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(fecha) ? fecha : null;
+}
+
+function textoFechaCalendario(fecha) {
+  const f = fechaCalendario(fecha);
+  return f ? `${f.slice(8, 10)}/${f.slice(5, 7)}/${f.slice(0, 4)}` : 'sin fecha';
+}
+
+// FASE 5B: hecho "pesaje registrado" (instante = created_at). Existe para
+// TODA fila, también si después se anuló: la anulación es OTRO hecho
+// (eventoAnulacionPesaje) y nunca reemplaza ni marca este. Las derivaciones
+// (diferencia/días/GMD) son las ACTUALES del motor canónico y solo aplican a
+// un pesaje que sigue ACTIVO (vigente); uno anulado las tiene en null.
+// Contrato público (compatible con 5A.1b): estadoRegistro y anulacion se
+// conservan; `vigente` es aditivo.
 function eventoPesaje(p) {
-  const peso = `${numero(p.pesoKg, 1)} kg`;
+  const vigente = p.estadoRegistro !== 'ANULADO';
   const inicial = p.origen === 'REGISTRO_INICIAL';
-  // FASE 5A.1b: un pesaje ANULADO sigue en la línea de tiempo (no desaparece
-  // del historial técnico) pero marcado y sin derivaciones; nunca como activo.
-  // Sin actor (política de este modelo). DEUDA 5B: evento "Pesaje anulado".
-  const anulado = p.estadoRegistro === 'ANULADO';
-  const titulo = inicial ? 'Peso inicial registrado' : 'Pesaje registrado';
-  return {
+  return conFecha({
     id: `pesaje:${p.pesajeId}`,
     tipo: TIPOS_TIMELINE.PESAJE_REGISTRADO,
-    // Fecha EFECTIVA del pesaje (calendario): nunca un instante UTC ficticio.
-    fechaHora: null,
-    fecha: p.fecha,
-    hora: null,
-    titulo: anulado ? `${titulo} (anulado)` : titulo,
-    descripcion: `${peso} · ${METODOS[p.metodo] ?? p.metodo}${anulado ? ' · Anulado' : ''}`,
+    titulo: inicial ? 'Peso inicial registrado' : 'Pesaje registrado',
+    descripcion: `${numero(p.pesoKg, 1)} kg · ${METODOS[p.metodo] ?? p.metodo}`,
     datos: {
-      estadoRegistro: anulado ? 'ANULADO' : 'ACTIVO',
-      anulacion: anulado
-        ? { anuladoEn: p.anulacion?.anuladoEn ?? null, motivo: textoSeguro(p.anulacion?.motivo, 500) }
-        : null,
+      estadoRegistro: vigente ? 'ACTIVO' : 'ANULADO',
+      anulacion: vigente
+        ? null
+        : { anuladoEn: p.anulacion?.anuladoEn ?? null, motivo: textoSeguro(p.anulacion?.motivo, 500) },
+      vigente,
       pesoKg: p.pesoKg,
       metodo: p.metodo,
       origen: p.origen,
-      diferenciaKg: p.diferenciaKg ?? null,
-      diasDesdeAnterior: p.diasDesdeAnterior ?? null,
-      gmdKgDia: p.gmdKgDia ?? null,
+      fechaPesaje: fechaCalendario(p.fecha),
+      diferenciaKg: vigente ? (p.diferenciaKg ?? null) : null,
+      diasDesdeAnterior: vigente ? (p.diasDesdeAnterior ?? null) : null,
+      gmdKgDia: vigente ? (p.gmdKgDia ?? null) : null,
       observaciones: textoSeguro(p.observaciones, 500),
       registradoEn: p.createdAt ?? null,
     },
     origen: 'animal_pesajes',
     _orden: { instante: p.createdAt, fuenteId: Number(p.pesajeId) },
-  };
+  }, p.createdAt);
+}
+
+// FASE 5B: hecho "pesaje anulado" (instante = anulado_at), solo con estado
+// ANULADO confirmado en servidor (CHECK 0028: anulado_at y motivo
+// obligatorios). Sin actor (anulado_por) ni ids de operación.
+function eventoAnulacionPesaje(p) {
+  if (p.estadoRegistro !== 'ANULADO') return null;
+  const anuladoEn = p.anulacion?.anuladoEn ?? null;
+  const motivo = textoSeguro(p.anulacion?.motivo, 500);
+  return conFecha({
+    id: `pesaje:${p.pesajeId}:anulacion`,
+    tipo: TIPOS_TIMELINE.PESAJE_ANULADO,
+    titulo: 'Anulación de pesaje',
+    descripcion: `Peso original: ${numero(p.pesoKg, 1)} kg · Fecha del pesaje: ${textoFechaCalendario(p.fecha)} · Motivo: ${motivo ?? 'sin motivo registrado'}`,
+    datos: {
+      pesoKg: p.pesoKg,
+      metodo: p.metodo,
+      fechaPesaje: fechaCalendario(p.fecha),
+      motivo,
+      anuladoEn,
+    },
+    origen: 'animal_pesajes',
+    _orden: { instante: anuladoEn, fuenteId: Number(p.pesajeId) },
+  }, anuladoEn);
 }
 
 function descripcionReproductiva(e) {
@@ -388,7 +433,7 @@ function comparar(a, b) {
 /**
  * @param {object} p
  * @param {{ animalId, fechaCreacion }} p.animal
- * @param {Array} p.pesajes        pesajes ENRIQUECIDOS (construirHistorialPesajes().pesajes)
+ * @param {Array} p.pesajes        historial ENRIQUECIDO (construirHistorialPesajes().historial: ACTIVOS + ANULADOS)
  * @param {Array} p.eventosAnimal  filas de agx.animal_eventos { eventoId, tipoEvento, metadata, ocurridoEn }
  * @param {number} [p.limit]
  * @returns {{ eventos: Array, total: number, truncado: boolean }}
@@ -402,7 +447,10 @@ export function construirTimelineAnimal({ animal, pesajes = [], eventosAnimal = 
     eventos.push(evento);
   };
   for (const row of eventosAnimal) agregar(eventoAnimal(row));
-  for (const p of pesajes) agregar(eventoPesaje(p));
+  for (const p of pesajes) {
+    agregar(eventoPesaje(p));
+    agregar(eventoAnulacionPesaje(p));
+  }
   for (const e of eventosReproductivos) agregar(eventoReproductivo(e));
   // Respaldo de registro SOLO si no existe el evento canónico REGISTRADO.
   if (!eventos.some((e) => e.tipo === TIPOS_TIMELINE.ANIMAL_REGISTRADO) && animal?.fechaCreacion) {

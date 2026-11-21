@@ -132,8 +132,10 @@ describe('FASE 1D.2: línea de tiempo con Postgres real (RLS)', { skip: !dbAvail
     assert.ok(Math.abs(pes[0].datos.gmdKgDia - 16 / 30) < 1e-9);
     assert.equal(pes[1].datos.gmdKgDia, null);
     assert.equal(pes[1].datos.diasDesdeAnterior, null);
-    assert.equal(pes[1].fecha, '2025-02-09');
-    assert.equal(pes[1].fechaHora, null);
+    // FASE 5B: auditoría -- fecha/hora del REGISTRO (hoy); la productiva aparte.
+    assert.equal(pes[1].datos.fechaPesaje, '2025-02-09');
+    assert.equal(pes[1].fecha, HOY);
+    assert.match(pes[1].fechaHora, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
   });
 
   test('peso inicial al registrar: un pesaje REGISTRO_INICIAL, sin duplicar el registro', async () => {
@@ -203,9 +205,11 @@ describe('FASE 1D.2: línea de tiempo con Postgres real (RLS)', { skip: !dbAvail
     assert.equal(t.eventos.length, 2);
     assert.equal(t.total, 5);
     assert.equal(t.truncado, true);
-    // El registro es de hoy: más reciente que los pesajes de 2025.
-    assert.deepEqual(t.eventos.map((e) => e.tipo), ['ANIMAL_REGISTRADO', 'PESAJE_REGISTRADO']);
-    assert.equal(t.eventos[1].datos.pesoKg, 304);
+    // FASE 5B: orden de auditoría -- los pesajes se registraron DESPUÉS del
+    // animal (aunque su fecha productiva sea de 2025): primero el último registrado.
+    assert.deepEqual(t.eventos.map((e) => e.tipo), ['PESAJE_REGISTRADO', 'PESAJE_REGISTRADO']);
+    assert.deepEqual(t.eventos.map((e) => e.datos.pesoKg), [304, 303]);
+    assert.equal(t.eventos[0].datos.fechaPesaje, '2025-04-01');
   });
 
   test('22. leer la línea de tiempo NO escribe nada', async () => {
