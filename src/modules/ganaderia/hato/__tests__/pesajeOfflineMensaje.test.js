@@ -45,7 +45,7 @@ test('5/6. en CONFLICTO o RECHAZADO: el aviso "pendiente" ya no es cierto y se r
     assert.equal(r, null, estado);
   }
   // La información del conflicto/rechazo sigue en la sección de pendientes (no la decide el mensaje).
-  assert.match(panel, /<HatoPesajesPendientes pendientes=\{pendientes\} \/>/);
+  assert.match(panel, /<HatoPesajesPendientes\s+pendientes=\{pendientes\}/);
 });
 
 test('7. descartada desde Sincronización: el aviso desaparece y nunca se muestra "sincronizado"', () => {

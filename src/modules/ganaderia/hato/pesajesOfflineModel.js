@@ -7,8 +7,16 @@ import { MENSAJE_OFFLINE_ROLE_FORBIDDEN } from '../auth/ganaderiaPermisos.js';
 
 export const MENSAJE_PESAJE_PENDIENTE = 'Pesaje pendiente de sincronización.';
 export const MENSAJE_SIN_ALMACEN_LOCAL = 'Sin conexión, y este dispositivo no puede guardar pesajes para sincronizar. Regístralo cuando vuelva la conexión.';
-export const ETIQUETA_PENDIENTE = 'Pendiente';
-export const ETIQUETA_CONFIRMADO = 'Confirmado';
+// FASE 5A.3c: terminología única de estados (ver pesajesOfflineVista.js).
+export const ETIQUETA_PENDIENTE = 'Pendiente de sincronización';
+export const ETIQUETA_PENDIENTE_CONFIRMAR = 'Pendiente de confirmar';
+export const ETIQUETA_CONFIRMADO = 'Sincronizado';
+export const ETIQUETA_CONFLICTO = 'Conflicto';
+export const ETIQUETA_RECHAZADO = 'Rechazado';
+export const ETIQUETA_IDENTIDAD = 'Bloqueado por cambio de cuenta';
+export const MENSAJE_IDENTIDAD_OPERACION = 'Esta operación fue creada con otra cuenta u organización y no se enviará desde la sesión actual.';
+export const MENSAJE_SESION_NO_VERIFICADA = 'No pudimos verificar tu sesión. Se enviará cuando vuelvas a iniciar sesión con la cuenta que la registró.';
+export const MENSAJE_PENDIENTE_CONFIRMAR = 'Pendiente de confirmar con el servidor.';
 
 /** Texto del botón del formulario según conexión y estado de guardado. */
 export function textoBotonPesaje({ online, saving = false, primerPesaje = false }) {
@@ -31,6 +39,12 @@ const BLOQUEOS = Object.freeze({
   CLIENT_OPERATION_ID_REUSED: 'Este registro ya existe en el servidor con otros datos.',
   // FASE 3A: 403 por rol -> RECHAZADO terminal (syncEngine), sin reintentos.
   ROLE_FORBIDDEN: MENSAJE_OFFLINE_ROLE_FORBIDDEN,
+  // FASE 5A.3c: anulación y conciliación (motor 5A.3b).
+  PESAJE_YA_ANULADO: 'El servidor ya tenía este pesaje anulado por otra solicitud: revisa el historial.',
+  PESAJE_NOT_FOUND: 'El servidor no encontró este pesaje.',
+  CONCILIACION_INTENCION_DISTINTA: 'El servidor tiene este registro con datos distintos. Revísalo antes de continuar.',
+  INVALID_MOTIVO: 'El servidor rechazó el motivo de la anulación.',
+  IDENTIDAD_NO_COINCIDE: MENSAJE_IDENTIDAD_OPERACION,
 });
 
 /** Motivo de un pesaje que el servidor no aceptó (sin detalles internos). */
@@ -45,16 +59,30 @@ export function mensajeBloqueoPesaje(codigo) {
  *   { etiqueta, detalle, bloqueado }
  */
 export function estadoPesajePendiente(pendiente) {
+  // FASE 5A.3c: un envío que pudo llegar (o legacy, siempre incierto) se presenta
+  // como "Pendiente de confirmar", nunca como algo que se puede retirar.
+  const incierto = Boolean(pendiente?.legacy || pendiente?.posibleEnServidor);
   switch (pendiente?.estado) {
     case 'SINCRONIZANDO':
       return { etiqueta: 'Sincronizando', detalle: 'Enviando al servidor...', bloqueado: false };
     case 'ERROR_REINTENTABLE':
-      return { etiqueta: ETIQUETA_PENDIENTE, detalle: 'Aún no se pudo enviar; se reintentará automáticamente.', bloqueado: false };
+      return incierto
+        ? { etiqueta: ETIQUETA_PENDIENTE_CONFIRMAR, detalle: `${MENSAJE_PENDIENTE_CONFIRMAR} Se reintentará automáticamente.`, bloqueado: false }
+        : { etiqueta: ETIQUETA_PENDIENTE, detalle: 'Aún no se pudo enviar; se reintentará automáticamente.', bloqueado: false };
     case 'CONFLICTO':
+      return { etiqueta: ETIQUETA_CONFLICTO, detalle: mensajeBloqueoPesaje(pendiente.ultimoError?.codigo), bloqueado: true };
     case 'RECHAZADO':
-      return { etiqueta: 'No sincronizado', detalle: mensajeBloqueoPesaje(pendiente.ultimoError?.codigo), bloqueado: true };
+      return { etiqueta: ETIQUETA_RECHAZADO, detalle: mensajeBloqueoPesaje(pendiente.ultimoError?.codigo), bloqueado: true };
+    case 'BLOQUEADA_POR_IDENTIDAD':
+      return {
+        etiqueta: ETIQUETA_IDENTIDAD,
+        detalle: pendiente.ultimoError?.codigo === 'SESION_NO_VERIFICABLE' ? MENSAJE_SESION_NO_VERIFICADA : MENSAJE_IDENTIDAD_OPERACION,
+        bloqueado: true,
+      };
     default:
-      return { etiqueta: ETIQUETA_PENDIENTE, detalle: 'Se enviará automáticamente al recuperar la conexión.', bloqueado: false };
+      return incierto
+        ? { etiqueta: ETIQUETA_PENDIENTE_CONFIRMAR, detalle: MENSAJE_PENDIENTE_CONFIRMAR, bloqueado: false }
+        : { etiqueta: ETIQUETA_PENDIENTE, detalle: 'Se enviará automáticamente al recuperar la conexión.', bloqueado: false };
   }
 }
 

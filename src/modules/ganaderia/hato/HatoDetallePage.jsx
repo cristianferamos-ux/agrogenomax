@@ -75,6 +75,7 @@ import useHatoCatalogos from './useHatoCatalogos.js';
 import { useGanaderiaOffline } from '../offline/GanaderiaOfflineProvider.jsx';
 import '../styles/ganaderia-hato.css';
 import { mensajeError } from '../api/errorModel.js';
+import { presentarUltimoPesoFicha } from './pesajesOfflineVista.js';
 
 function Row({ label, children }) {
   return (
@@ -260,6 +261,26 @@ export default function HatoDetallePage() {
   // Copia local: refleja la sincronización (p. ej. local -> animal_id).
   useEffect(() => (local && esLocal ? local.subscribe(load) : undefined), [local, esLocal, load]);
 
+  // FASE 5A.3c: sin conexión el "Último peso" sale del motor offline (ultimoPesoLocal):
+  // confirmados ACTIVOS menos anulaciones pendientes, mismo día por pesajeId; copia
+  // incompleta -> animal.ultimoPeso. Con conexión manda la ficha del servidor.
+  const [pesoLocal, setPesoLocal] = useState(null);
+  const animalIdServidor = esLocal ? null : (vistaFicha(state, animalId, organizacionId).animal?.animalId ?? null);
+  useEffect(() => {
+    if (offline.online || esLocal || !repoOrg || !animalIdServidor || typeof repoOrg.ultimoPesoLocal !== 'function') {
+      setPesoLocal(null);
+      return undefined;
+    }
+    let vigente = true;
+    const leer = () => repoOrg.ultimoPesoLocal(animalIdServidor).then((r) => { if (vigente) setPesoLocal({ animalId: animalIdServidor, ...r }); }).catch(() => {});
+    leer();
+    const unsubscribe = repoOrg.subscribe?.(leer);
+    return () => {
+      vigente = false;
+      unsubscribe?.();
+    };
+  }, [offline.online, esLocal, repoOrg, animalIdServidor]);
+
   if (!idValido) return <Navigate to="/ganaderia/animales" replace />;
   if (state.status === 'redirect') return <Navigate to={`/ganaderia/animales/${state.to}`} replace />;
 
@@ -273,6 +294,7 @@ export default function HatoDetallePage() {
 
   const { animal } = vista;
   const situacion = animal ? situacionDe(animal) : 'EN_HATO';
+  const ultimoPesoFicha = presentarUltimoPesoFicha({ animal, pesoLocal, online: offline.online });
   const enHato = situacion === 'EN_HATO';
 
   function abrirCorreccion() {
@@ -458,7 +480,12 @@ export default function HatoDetallePage() {
                 <Row label="Raza">{formatRaza(animal)}</Row>
                 <Row label="Categoría">{animal.categoriaProductivaNombre ?? 'Sin categoría'}</Row>
                 <Row label="Edad">{formatNacimiento(animal)}</Row>
-                <Row label="Último peso">{formatPeso(animal.ultimoPeso)}</Row>
+                <Row label="Último peso">
+                  {formatPeso(ultimoPesoFicha.ultimoPeso)}
+                  {ultimoPesoFicha.nota ? (
+                    <span className="gan-hato-hint gan-pesaje-nota-mismo-dia" data-ultimo-peso="local">{ultimoPesoFicha.nota}</span>
+                  ) : null}
+                </Row>
                 <Row label="Predio">{animal.predioNombre}</Row>
                 <Row label="Origen">{formatOrigen(animal.origenTipo)}</Row>
                 {animal.procedencia ? <Row label="Procedencia">{animal.procedencia}</Row> : null}

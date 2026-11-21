@@ -180,6 +180,7 @@
   "src/modules/ganaderia/hato/__tests__/pesajesFormFechaNegocio.test.js",
   "src/modules/ganaderia/hato/__tests__/reporteProductivoUi.test.js",
   "src/modules/ganaderia/hato/__tests__/pesajesOfflineUi.test.js",
+  "src/modules/ganaderia/hato/__tests__/pesajesOfflineVista.test.js",
   "src/modules/ganaderia/hato/__tests__/pesajeOfflineMensaje.test.js",
   "src/modules/ganaderia/hato/__tests__/actividadUi.test.js",
   "src/modules/ganaderia/hato/__tests__/qrFlow.test.js",

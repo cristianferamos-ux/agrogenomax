@@ -109,11 +109,42 @@ export function pesajePendienteDe(op) {
     // FASE 5A.3b: un legacy nunca se presenta como "no enviado".
     posibleEnServidor: esPesajeCrearLegacy(op) ? null : Boolean(op.posibleEnServidor),
     legacy: esPesajeCrearLegacy(op),
+    // FASE 5A.3c: la decisión de cancelación segura la toma el MOTOR, nunca la UI.
+    cancelableSeguro: pesajeCrearCancelableSeguro(op),
+    cuentaOrigenId: op.origen?.cuentaId ?? null,
+  };
+}
+
+/**
+ * FASE 5A.3c: vista de una PESAJE_ANULAR pendiente (sin ids técnicos para la UI salvo
+ * los que necesita para emparejar filas). `pesajeId` null = diferida sin resolver.
+ */
+export function anulacionPesajePendienteDe(op, pesajeId) {
+  return {
+    localOperationId: op.operationId,
+    animalId: op.payload?.animalId ?? null,
+    pesajeId: pesajeId ?? null,
+    diferida: Boolean(op.payload?.pesajeRef),
+    refClientOperationId: op.payload?.pesajeRef?.clientOperationId ?? null,
+    motivo: op.payload?.motivo ?? '',
+    estado: op.estado,
+    ultimoError: op.ultimoError ?? null,
+    posibleEnServidor: Boolean(op.posibleEnServidor),
+    cancelableSeguro: op.posibleEnServidor === false && op.estado !== OUTBOX_ESTADOS.SINCRONIZANDO,
+    cuentaOrigenId: op.origen?.cuentaId ?? null,
+    createdAt: op.createdAt,
   };
 }
 
 /** FASE 5A.3b: tope de clientOperationId de CREATE cancelados que no se pueden reutilizar. */
 const MAX_PESAJES_CANCELADOS = 500;
+
+/**
+ * FASE 5A.3b/5A.3c: evidencia EXPLÍCITA de copia local completa de pesajes: un recorrido
+ * terminado con totales conciliados y ninguno a medias. Pull interrumpido, sesión cambiada
+ * o desfase -> pesajesListaAt null o recorrido en curso -> no completa.
+ */
+const copiaPesajesCompleta = (meta) => Boolean(meta?.pesajesListaAt) && meta.pesajesRecorridoEnCurso !== true;
 
 /**
  * FASE 5A.3b: el CREATE del que depende una ANULAR diferida sigue en el outbox en
@@ -521,7 +552,7 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
         animal: animal ?? { animalId: String(animalId), ultimoPeso: null },
         // Evidencia explícita: un recorrido terminado con totales conciliados y ninguno a medias
         // (pull interrumpido, sesión cambiada, desfase -> pesajesListaAt null o recorrido en curso).
-        copiaCompleta: Boolean(meta.pesajesListaAt) && meta.pesajesRecorridoEnCurso !== true,
+        copiaCompleta: copiaPesajesCompleta(meta),
         incluirPendientes,
       });
     },
@@ -689,6 +720,36 @@ export function createLocalRepo(storage, { organizacionId, deviceId, now = () =>
       const ops = (await storage.getAll('outbox'))
         .filter((op) => op.tipoOperacion === 'PESAJE_CREAR' && op.payload?.animalId === String(animalId));
       return ordenarOutbox(ops).map(pesajePendienteDe);
+    },
+
+    /**
+     * FASE 5A.3c (solo lectura): todo lo que la ficha necesita sin red, en una lectura.
+     *   copiaCompleta  misma evidencia que ultimoPesoLocal (recorrido conciliado, ninguno a medias)
+     *   confirmados    pesajes del store (ACTIVOS y ANULADOS) en orden ASCENDENTE (fecha, pesajeId)
+     *   pendientes     CREATE del outbox (pesajePendienteDe)
+     *   anulaciones    PESAJE_ANULAR del outbox con su pesajeId resuelto (o null si es diferida)
+     *   ultimoPeso     ultimoPesoLocal()
+     */
+    async leerPesajesLocales(animalId) {
+      const id = String(animalId);
+      const [confirmados, outbox, meta] = await Promise.all([
+        storage.getAllByIndex('pesajes', 'animalId', id),
+        storage.getAll('outbox'),
+        getMeta(),
+      ]);
+      const propias = ordenarOutbox(outbox.filter((op) => op.payload?.animalId === id));
+      const anulaciones = [];
+      for (const op of propias) {
+        if (op.tipoOperacion !== PESAJE_ANULAR) continue;
+        anulaciones.push(anulacionPesajePendienteDe(op, await repo.resolverPesajeIdDeAnulacion(op)));
+      }
+      return {
+        copiaCompleta: copiaPesajesCompleta(meta),
+        confirmados: [...confirmados].sort((a, b) => -compararPesajesRecientePrimero(a, b)),
+        pendientes: propias.filter((op) => op.tipoOperacion === PESAJE_CREAR).map(pesajePendienteDe),
+        anulaciones,
+        ultimoPeso: await repo.ultimoPesoLocal(id),
+      };
     },
 
     /** Descarta un pesaje que el servidor rechazó (decisión explícita del usuario). */

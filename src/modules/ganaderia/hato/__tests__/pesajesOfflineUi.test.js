@@ -49,12 +49,13 @@ test('M. texto del botón: online igual que antes; offline "Guardar para sincron
 });
 
 test('22. estado de cada pendiente en TEXTO (no solo color)', () => {
-  assert.equal(ETIQUETA_PENDIENTE, 'Pendiente');
-  assert.deepEqual(estadoPesajePendiente({ estado: 'PENDIENTE' }), { etiqueta: 'Pendiente', detalle: 'Se enviará automáticamente al recuperar la conexión.', bloqueado: false });
-  assert.equal(estadoPesajePendiente({ estado: 'ERROR_REINTENTABLE' }).etiqueta, 'Pendiente');
+  // FASE 5A.3c: terminología única.
+  assert.equal(ETIQUETA_PENDIENTE, 'Pendiente de sincronización');
+  assert.deepEqual(estadoPesajePendiente({ estado: 'PENDIENTE' }), { etiqueta: 'Pendiente de sincronización', detalle: 'Se enviará automáticamente al recuperar la conexión.', bloqueado: false });
+  assert.equal(estadoPesajePendiente({ estado: 'ERROR_REINTENTABLE' }).etiqueta, 'Pendiente de sincronización');
   assert.equal(estadoPesajePendiente({ estado: 'SINCRONIZANDO' }).etiqueta, 'Sincronizando');
   const anulado = estadoPesajePendiente({ estado: 'CONFLICTO', ultimoError: { codigo: 'ANIMAL_ANULADO' } });
-  assert.deepEqual(anulado, { etiqueta: 'No sincronizado', detalle: 'El animal fue anulado: el servidor no aceptó este pesaje.', bloqueado: true });
+  assert.deepEqual(anulado, { etiqueta: 'Conflicto', detalle: 'El animal fue anulado: el servidor no aceptó este pesaje.', bloqueado: true });
   assert.equal(estadoPesajePendiente({ estado: 'RECHAZADO', ultimoError: { codigo: 'INVALID_PESO' } }).detalle, 'El servidor rechazó los datos de este pesaje.');
   assert.equal(mensajeBloqueoPesaje('CLIENT_OPERATION_ID_REUSED'), 'Este registro ya existe en el servidor con otros datos.');
   assert.equal(mensajeBloqueoPesaje('ANIMAL_NOT_FOUND'), 'El animal ya no está disponible.');
@@ -111,7 +112,7 @@ test('M. sin almacenamiento local y sin red: mensaje claro, sin guardar', () => 
 });
 
 test('E/22. pendientes en una sección APARTE con insignia; sin pesajeId de servidor', () => {
-  assert.match(panel, /<HatoPesajesPendientes pendientes=\{pendientes\} \/>/);
+  assert.match(panel, /<HatoPesajesPendientes\s+pendientes=\{pendientes\}/);
   assert.match(pendientesJsx, /<strong className="gan-pesajes-pendiente-badge">\{estado\.etiqueta\}<\/strong>/);
   assert.match(pendientesJsx, /key=\{p\.localOperationId\}/);
   assert.doesNotMatch(pendientesJsx, /pesajeId/);
@@ -120,14 +121,18 @@ test('E/22. pendientes en una sección APARTE con insignia; sin pesajeId de serv
 
 test('23-26. pendientes FUERA de KPIs, gráficas, alertas y reporte PDF', () => {
   // Los únicos usos de la lista de pendientes son su estado y su sección.
+  // FASE 5A.3c: la lista de pendientes solo se guarda, se cuenta para releer y se muestra.
   const usos = [...panel.matchAll(/\bpendientes\b/g)].length;
-  const permitidos = (panel.match(/\[pendientes, setPendientes\]|pendientes=\{pendientes\}|const hayPendientes = pendientes\.length > 0;/g) ?? [])
+  const permitidos = (panel.match(/\[pendientes, setPendientes\]|pendientes=\{pendientes\}|const hayPendientes = pendientes\.length > 0|const lista = lectura\.pendientes;|: \{ pendientes: await repoOffline\.listPesajesPendientes\(animalId\)/g) ?? [])
     .reduce((n, m) => n + (m.match(/\bpendientes\b/g) ?? []).length, 0);
   assert.equal(usos, permitidos, 'la lista de pendientes no se usa en ningún cálculo');
-  assert.match(panel, /<HatoPesajesKpis resumen=\{state\.data\.resumen\} \/>/);
+  // La copia local se arma SOLO con confirmados (nunca con pendientes).
+  assert.match(panel, /vistaLocalPesajes\(\{ animalId, copiaCompleta: local\.copiaCompleta, confirmados: local\.confirmados, anulaciones: local\.anulaciones \}\)/);
+  assert.match(panel, /<HatoPesajesKpis resumen=\{datos\.resumen\} \/>/);
   assert.match(panel, /<HatoPesajesGrafica pesajes=\{pesajes\} \/>/);
-  assert.match(panel, /construirAlertasPesajes\(\{ pesajes, resumen: state\.data\.resumen, fechaReferencia: fechaNegocio \}\)/);
-  assert.match(panel, /const pesajes = state\.data\?\.pesajes \?\? \[\];/, '`pesajes` = solo datos confirmados del servidor');
+  assert.match(panel, /construirAlertasPesajes\(\{ pesajes, resumen: datos\.resumen, fechaReferencia: fechaNegocio \}\)/);
+  assert.match(panel, /const pesajes = datos\?\.pesajes \?\? \[\];/, '`pesajes` = solo datos confirmados (servidor o copia local completa)');
+  assert.match(panel, /const datos = usarLocal \? vistaLocal : state\.data;/);
   assert.match(panel, /<HatoReporteProductivoBoton animalId=\{animalId\} online=\{online\} \/>/, 'el PDF lo genera el servidor con datos confirmados');
   const reporte = leer(REPO_ROOT, 'server', 'services', 'ganaderia', 'reporteProductivo', 'reporteProductivoService.js');
   assert.doesNotMatch(reporte, /outbox|pendiente/i);
