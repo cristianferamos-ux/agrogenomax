@@ -165,6 +165,12 @@ describe('FASE 1D.2: timeline -- respuesta', () => {
     // tiene derivaciones.
     const p3 = r.json.eventos[0];
     assert.equal(p3.datos.estadoRegistro, 'ACTIVO');
+    assert.equal(p3.datos.anulacion, null);
+    assert.equal(p3.datos.vigente, true);
+    assert.equal(p3.datos.fechaPesaje, '2026-10-20');
+    // FASE 5B: auditoría -- fecha/hora del REGISTRO (created_at en Colombia).
+    assert.equal(p3.fecha, '2026-10-20');
+    assert.equal(p3.hora, '23:03');
     assert.equal(p3.datos.diasDesdeAnterior, 1);
     assert.equal(p3.datos.gmdKgDia, p3.datos.diferenciaKg);
     assert.equal(r.json.eventos[1].datos.gmdKgDia, null);

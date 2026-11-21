@@ -27,8 +27,8 @@ try {
     'server/services/__tests__/reporteProductivoIntegration.test.js': 7,
     'server/services/__tests__/timelineIntegration.test.js': 7,
     'server/services/__tests__/animalCierreIntegration.test.js': 18,
-    // FASE 5A.1b: anulación, serie diaria y fechas (exige 0028).
-    'server/services/__tests__/pesajesAnulacionIntegration.test.js': 21,
+    // FASE 5A.1b: anulación, serie diaria y fechas (exige 0028). FASE 5B: +6 de auditoría en la línea de tiempo.
+    'server/services/__tests__/pesajesAnulacionIntegration.test.js': 27,
     // FASE 5A.3a: GET /sync/pesajes (keyset, tenant, evidencia de conciliación).
     'server/services/__tests__/pesajesSyncIntegration.test.js': 18,
   } });

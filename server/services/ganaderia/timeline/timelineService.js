@@ -9,9 +9,9 @@ import { construirTimelineAnimal } from './timelineModelo.js';
 export async function obtenerTimelineAnimal(organizacionId, animalId, { limit, leerFuentes = leerFuentesTimeline } = {}) {
   const fuentes = await leerFuentes(organizacionId, animalId);
   if (!fuentes) return null;
-  // FASE 5A.1b: `historial` (ACTIVOS + ANULADOS): un pesaje anulado no
-  // desaparece de la línea de tiempo; se marca anulado y sin derivaciones.
-  // DEUDA 5B: "Pesaje anulado" como evento propio (acción, fecha, actor, motivo).
+  // FASE 5B: `historial` (ACTIVOS + ANULADOS): cada fila da su hecho
+  // PESAJE_REGISTRADO (created_at) y, si está ANULADA, además PESAJE_ANULADO
+  // (anulado_at, motivo). Derivado de animal_pesajes: sin tabla de eventos ni backfill.
   const { historial } = construirHistorialPesajes({ animalId: String(animalId), pesajes: fuentes.pesajes });
   const timeline = construirTimelineAnimal({ animal: fuentes.animal, pesajes: historial, eventosAnimal: fuentes.eventosAnimal, eventosReproductivos: fuentes.eventosReproductivos, limit });
   return { animalId: String(fuentes.animal.animalId), ...timeline };

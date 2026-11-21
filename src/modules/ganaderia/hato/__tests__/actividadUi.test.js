@@ -11,6 +11,7 @@ import {
   TEXTO_ERROR_ACTIVIDAD,
   TEXTO_SIN_ACTIVIDAD,
   detallesEvento,
+  esEventoAnulado,
   estadoActividad,
   etiquetaTipoEvento,
   fechaEvento,
@@ -55,6 +56,48 @@ test('render de pesaje: diferencia, días, GMD ("Sin dato" el mismo día) y obse
   ]);
   assert.deepEqual(detallesEvento(pesaje({ diferenciaKg: null, diasDesdeAnterior: null, gmdKgDia: null })), ['Primer peso registrado']);
   assert.deepEqual(detallesEvento({ tipo: 'ANIMAL_ANULADO', datos: { motivo: 'x' } }), [], 'anulación/corrección/QR: título + descripción del servidor');
+});
+
+// FASE 5B: hechos de auditoría de pesajes (contrato del servidor).
+const registrado5b = (datos) => pesaje({ estadoRegistro: 'ACTIVO', anulacion: null, vigente: true, pesoKg: 360, metodo: 'BASCULA', origen: 'MANUAL', fechaPesaje: '2026-10-20', observaciones: null, ...datos });
+const anulacion5b = {
+  id: 'pesaje:3:anulacion', tipo: 'PESAJE_ANULADO', fecha: '2026-11-18', hora: '14:30', fechaHora: '2026-11-18T19:30:00.000Z',
+  titulo: 'Anulación de pesaje', descripcion: 'Peso original: 360 kg · Fecha del pesaje: 20/10/2026 · Motivo: Duplicado',
+  datos: { pesoKg: 360, metodo: 'BASCULA', fechaPesaje: '2026-10-20', motivo: 'Duplicado', anuladoEn: '2026-11-18T19:30:00.000000Z' }, origen: 'animal_pesajes',
+};
+
+test('5B: PESAJE_REGISTRADO muestra la fecha del pesaje aparte de la fecha/hora del registro', () => {
+  const e = { ...registrado5b({ diferenciaKg: 5, diasDesdeAnterior: 1, gmdKgDia: 5 }), fecha: '2026-10-21', hora: '08:15' };
+  assert.equal(fechaEvento(e), '21/10/2026 · 08:15');
+  assert.deepEqual(detallesEvento(e), ['Fecha del pesaje: 20/10/2026', 'Diferencia: +5 kg', 'Días desde el anterior: 1 día', 'GMD: +5 kg/día']);
+  assert.deepEqual(detallesEvento(registrado5b({ diferenciaKg: null, diasDesdeAnterior: null, gmdKgDia: null })), ['Fecha del pesaje: 20/10/2026', 'Primer peso registrado']);
+});
+
+test('5B: registro de un pesaje anulado -> sin "Primer peso registrado", sin GMD/diferencias, sin insignia', () => {
+  const e = registrado5b({ estadoRegistro: 'ANULADO', anulacion: { anuladoEn: '2026-11-18T19:30:00.000000Z', motivo: 'Duplicado' }, vigente: false, diferenciaKg: null, diasDesdeAnterior: null, gmdKgDia: null, observaciones: 'QA' });
+  const lineas = detallesEvento(e);
+  assert.deepEqual(lineas, ['Fecha del pesaje: 20/10/2026', 'Este pesaje fue anulado posteriormente.', 'Observaciones: QA']);
+  assert.ok(!lineas.some((l) => /Primer peso|GMD|Diferencia|Días desde/.test(l)));
+  assert.equal(esEventoAnulado(e), false, 'el registro original es un hecho válido: no lleva insignia');
+  assert.equal(e.titulo, 'Pesaje registrado');
+});
+
+test('5B: PESAJE_ANULADO -> etiqueta, insignia "Anulado", detalle del servidor y sin ids internos visibles', () => {
+  assert.equal(etiquetaTipoEvento('PESAJE_ANULADO'), 'Pesaje');
+  assert.equal(esEventoAnulado(anulacion5b), true);
+  assert.equal(fechaEvento(anulacion5b), '18/11/2026 · 14:30');
+  assert.deepEqual(detallesEvento(anulacion5b), [], 'peso original, fecha y motivo van en la descripción');
+  // Lo visible: etiqueta, fecha, título, descripción y detalles.
+  const visible = [etiquetaTipoEvento(anulacion5b.tipo), fechaEvento(anulacion5b), anulacion5b.titulo, anulacion5b.descripcion, ...detallesEvento(anulacion5b)].join(' | ');
+  assert.doesNotMatch(visible, /pesaje:\d|PESAJE_|ANULADO|animal_pesajes|clientOperationId|[0-9a-f]{8}-[0-9a-f]{4}-/);
+  assert.match(panel, /\{esEventoAnulado\(evento\) \? <span className="gan-repro-badge gan-repro-badge-anulado">Anulado<\/span> : null\}/);
+  assert.doesNotMatch(panel, /(?<!key=)\{evento\.(id|origen|datos)\}/, 'el panel nunca pinta id, origen ni datos crudos');
+});
+
+test('5B offline: la actividad vigila CREATE y ANULAR del outbox, pero solo pinta datos del servidor', () => {
+  assert.match(panel, /await repoOffline\.leerPesajesLocales\(animalId\)/);
+  assert.match(panel, /const actuales = idsOperacionesPesaje\(lectura\);/);
+  assert.doesNotMatch(panel, /lectura\.(pendientes|anulaciones|confirmados)\.map|setState\([^)]*lectura/);
 });
 
 test('estados: ok, vacío, 404 y error', () => {

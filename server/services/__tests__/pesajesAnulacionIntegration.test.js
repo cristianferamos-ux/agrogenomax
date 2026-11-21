@@ -30,6 +30,7 @@ let appPool;
 let businessDb;
 let qrAdminDb;
 let crearRutaPesajes;
+let crearRutaTimeline;
 let animalesRepo;
 let cierreRepo;
 let reporte;
@@ -60,6 +61,7 @@ if (dbAvailable) {
   businessDb = await import('../../db/agxBusinessPool.js');
   qrAdminDb = await import('../../db/agxQrAdminPool.js');
   crearRutaPesajes = (await import('../../routes/ganaderiaAnimalPesajes.js')).default;
+  crearRutaTimeline = (await import('../../routes/ganaderiaAnimalTimeline.js')).default;
   animalesRepo = await import('../ganaderia/animalesRepository.js');
   cierreRepo = await import('../ganaderia/cierreRepository.js');
   reporte = await import('../ganaderia/reporteProductivo/reporteProductivoService.js');
@@ -99,6 +101,8 @@ before(async () => {
   app.use(express.json());
   const config = { appEnv: 'development', csrfServerSecret: CSRF, allowedOrigins: [ORIGEN] };
   app.use('/api/ganaderia/animales/:animalId/pesajes', crearRutaPesajes(config));
+  // FASE 5B: línea de tiempo real (misma sesión simulada, org de la sesión).
+  app.use('/api/ganaderia/animales/:animalId/timeline', crearRutaTimeline(config));
   app.use(notFound);
   app.use(errorHandler);
   await new Promise((resolve) => { servidor = app.listen(0, '127.0.0.1', resolve); });
@@ -519,5 +523,124 @@ describe('FASE 5A.1b: anulación de pesajes (rutas y Postgres reales)', { skip: 
     await animalesRepo.anularAnimal(e.org, e.animalId, { motivo: 'Registro duplicado', actorCuentaId: e.owner.cuentaId });
     const r = await anular(e, id2, e.owner);
     assert.deepEqual([r.status, r.data.error], [409, 'ANIMAL_ANULADO']);
+  });
+});
+
+// FASE 5B -- auditoría de pesajes en la línea de tiempo, DERIVADA de
+// agx.animal_pesajes (sin tabla de eventos ni backfill): PESAJE_REGISTRADO
+// (created_at) y PESAJE_ANULADO (anulado_at), por la ruta GET real.
+describe('FASE 5B: auditoría de pesajes en la línea de tiempo (rutas y Postgres reales)', { skip: !dbAvailable }, () => {
+  const verTimeline = (e, sesion = e.owner, query = '') => peticion(`/api/ganaderia/animales/${e.animalId}/timeline${query}`, sesion);
+  const dePesajes = (data) => data.eventos.filter((ev) => ev.origen === 'animal_pesajes');
+  const instanteIso = (d) => `${d.toISOString().slice(0, 23)}`;
+
+  test('5B.1/2/3/4/5/6/7: registro + anulación = dos hechos; orden por created_at/anulado_at; fechaPesaje; motivo; sin actor ni operaciones', async () => {
+    const e = await escenario();
+    const crearOp = op();
+    const r1 = await peticion(e.ruta, e.operador, { method: 'POST', body: { fecha: '2026-10-19', pesoKg: 350, metodo: 'BASCULA', clientOperationId: crearOp } });
+    assert.equal(r1.status, 201);
+    const id = r1.data.pesaje.pesajeId;
+    const id2 = await registrar(e, '2026-10-20', 352);
+    const anularOp = op();
+    assert.equal((await anular(e, id, e.owner, { clientOperationId: anularOp, motivo: 'Pesaje duplicado' })).status, 200);
+    const f = await fila(id);
+    const t = await verTimeline(e);
+    assert.equal(t.status, 200);
+    const pesajesTl = dePesajes(t.data);
+    assert.deepEqual(pesajesTl.map((ev) => ev.id), [`pesaje:${id}:anulacion`, `pesaje:${id2}`, `pesaje:${id}`]);
+    const [anul, , reg] = pesajesTl;
+    assert.equal(reg.tipo, 'PESAJE_REGISTRADO');
+    assert.equal(reg.titulo, 'Pesaje registrado');
+    assert.equal(reg.datos.vigente, false);
+    // Contrato 5A.1b conservado (compatibilidad): estadoRegistro + anulacion.
+    assert.equal(reg.datos.estadoRegistro, 'ANULADO');
+    assert.deepEqual(reg.datos.anulacion, { anuladoEn: anul.datos.anuladoEn, motivo: 'Pesaje duplicado' });
+    assert.equal(reg.datos.fechaPesaje, '2026-10-19');
+    assert.deepEqual([reg.datos.diferenciaKg, reg.datos.diasDesdeAnterior, reg.datos.gmdKgDia], [null, null, null]);
+    assert.equal(reg.fechaHora.slice(0, 23), instanteIso(f.created_at), 'hecho = created_at');
+    assert.equal(anul.tipo, 'PESAJE_ANULADO');
+    assert.equal(anul.fechaHora.slice(0, 23), instanteIso(f.anulado_at), 'hecho = anulado_at');
+    assert.deepEqual(anul.datos, { pesoKg: 350, metodo: 'BASCULA', fechaPesaje: '2026-10-19', motivo: 'Pesaje duplicado', anuladoEn: anul.datos.anuladoEn });
+    assert.match(anul.descripcion, /^Peso original: 350 kg · Fecha del pesaje: 19\/10\/2026 · Motivo: Pesaje duplicado$/);
+    // El ACTIVO restante es ahora el primer peso (cálculos solo con ACTIVOS).
+    assert.deepEqual([pesajesTl[1].datos.estadoRegistro, pesajesTl[1].datos.anulacion, pesajesTl[1].datos.vigente], ['ACTIVO', null, true]);
+    for (const secreto of [e.owner.cuentaId, e.operador.cuentaId, crearOp, anularOp]) assert.equal(t.text.includes(secreto), false, 'sin actor ni ids de operación');
+    assert.doesNotMatch(t.text, /anulado_?por|anuladoPor|actorCuentaId|clientOperationId/i);
+  });
+
+  test('5B.8/9: reintento de CREATE y de ANULAR -> un solo PESAJE_REGISTRADO y un solo PESAJE_ANULADO', async () => {
+    const e = await escenario();
+    const crear = { fecha: '2026-10-19', pesoKg: 350, metodo: 'BASCULA', clientOperationId: op() };
+    const c1 = await peticion(e.ruta, e.operador, { method: 'POST', body: crear });
+    const c2 = await peticion(e.ruta, e.operador, { method: 'POST', body: crear });
+    assert.deepEqual([c1.status, c2.data.pesaje.pesajeId], [201, c1.data.pesaje.pesajeId]);
+    const id = c1.data.pesaje.pesajeId;
+    const cuerpo = { motivo: 'Duplicado', clientOperationId: op() };
+    assert.equal((await anular(e, id, e.owner, cuerpo)).status, 200);
+    assert.equal((await anular(e, id, e.owner, cuerpo)).data.yaExistia, true);
+    const tipos = dePesajes((await verTimeline(e)).data).map((ev) => ev.tipo);
+    assert.deepEqual(tipos, ['PESAJE_ANULADO', 'PESAJE_REGISTRADO']);
+  });
+
+  test('5B.10: tenant B no ve los hechos de A (404 sin revelar existencia); RLS sobre la misma fuente', async () => {
+    const a = await escenario();
+    const b = await escenario();
+    const id = await registrar(a, '2026-10-19', 350);
+    assert.equal((await anular(a, id, a.owner)).status, 200);
+    const cruzado = await verTimeline(a, b.owner);
+    assert.equal(cruzado.status, 404);
+    assert.equal(cruzado.text.includes(`pesaje:${id}`), false);
+    const propio = await verTimeline(b);
+    assert.equal(dePesajes(propio.data).length, 0);
+    const { obtenerTimelineAnimal } = await import('../ganaderia/timeline/timelineService.js');
+    assert.equal(await obtenerTimelineAnimal(b.org, a.animalId), null, 'org de B en la transacción: el animal de A no existe');
+  });
+
+  test('5B.11: pesajes previos a 5B (sin anulación, REGISTRO_INICIAL y ACTIVO de siempre) aparecen sin backfill', async () => {
+    const e = await escenario();
+    // Fila "histórica": insertada directamente como en 0022/0024 (sin columnas 0028 explícitas).
+    const { rows: [h] } = await adminPool.query(
+      `insert into agx.animal_pesajes (organizacion_id, animal_id, fecha, peso_kg, metodo, origen, actor_cuenta_id, created_at)
+       values ($1, $2, '2026-09-01', 300, 'ESTIMADO', 'REGISTRO_INICIAL', $3, '2026-09-02T13:00:00Z') returning pesaje_id::text as id`,
+      [e.org, e.animalId, e.owner.cuentaId],
+    );
+    const t = await verTimeline(e);
+    const [ev] = dePesajes(t.data);
+    assert.deepEqual([ev.id, ev.tipo, ev.titulo, ev.fecha, ev.hora, ev.datos.fechaPesaje, ev.datos.vigente], [`pesaje:${h.id}`, 'PESAJE_REGISTRADO', 'Peso inicial registrado', '2026-09-02', '08:00', '2026-09-01', true]);
+    assert.equal(dePesajes(t.data).some((x) => x.tipo === 'PESAJE_ANULADO'), false);
+  });
+
+  test('5B.12: animal SALIDO o MUERTO conserva su historia de pesajes (registro + anulación)', async () => {
+    for (const tipo of ['SALIDA', 'MUERTE']) {
+      const e = await escenario();
+      const id = await registrar(e, '2026-10-19', 350);
+      await registrar(e, '2026-10-20', 352);
+      const cuerpo = tipo === 'SALIDA'
+        ? { fechaSalida: '2026-10-21', motivoSalida: 'VENTA', clientOperationId: op() }
+        : { fechaMuerte: '2026-10-21', causaMuerte: 'ENFERMEDAD', clientOperationId: op() };
+      await cierreRepo.registrarCierreIdempotente(e.org, e.animalId, validateCierreBody(tipo, cuerpo, { hoy: HOY }), { actorCuentaId: e.owner.cuentaId });
+      assert.equal((await anular(e, id, e.owner)).status, 200);
+      const t = await verTimeline(e);
+      assert.equal(t.status, 200);
+      const tipos = t.data.eventos.map((ev) => ev.tipo);
+      assert.ok(tipos.includes(tipo === 'SALIDA' ? 'ANIMAL_SALIDO' : 'ANIMAL_MUERTO'), tipo);
+      assert.equal(tipos.filter((x) => x === 'PESAJE_REGISTRADO').length, 2, tipo);
+      assert.equal(tipos.filter((x) => x === 'PESAJE_ANULADO').length, 1, tipo);
+    }
+  });
+
+  test('5B total/truncado: cada anulación suma un hecho; limit exacto sin off-by-one', async () => {
+    const e = await escenario();
+    const ids = [];
+    for (const [i, fecha] of ['2026-10-01', '2026-10-02', '2026-10-03'].entries()) ids.push(await registrar(e, fecha, 300 + i));
+    assert.equal((await anular(e, ids[0], e.owner)).status, 200);
+    const todo = await verTimeline(e);
+    // 3 registros + 1 anulación (el animal sembrado por SQL no tiene evento REGISTRADO: respaldo created_at = 1).
+    assert.deepEqual([todo.data.total, todo.data.eventos.length, todo.data.truncado], [5, 5, false]);
+    const exacto = await verTimeline(e, e.owner, '?limit=5');
+    assert.deepEqual([exacto.data.total, exacto.data.eventos.length, exacto.data.truncado], [5, 5, false]);
+    const corto = await verTimeline(e, e.owner, '?limit=4');
+    assert.deepEqual([corto.data.total, corto.data.eventos.length, corto.data.truncado], [5, 4, true]);
+    assert.equal(corto.data.eventos[0].id, `pesaje:${ids[0]}:anulacion`, 'la anulación es el hecho más reciente');
   });
 });

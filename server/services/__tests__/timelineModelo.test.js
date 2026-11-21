@@ -41,7 +41,7 @@ test('sin evento REGISTRADO: respaldo único desde animales.created_at (nunca do
   assert.equal(tl({ eventosAnimal: [], animal: { animalId: '1' } }).total, 0, 'sin fuente confiable no se inventa');
 });
 
-test('7/8/9/10. pesajes: fecha EFECTIVA (sin instante UTC), derivaciones canónicas de la serie diaria', () => {
+test('7/8/9/10. pesajes: hecho = created_at (Colombia), fechaPesaje aparte, derivaciones canónicas de la serie diaria', () => {
   const pesajes = derivar([
     ps(1, '2026-10-19', 350, '2026-10-20T01:00:00.000000Z', { observaciones: 'QA FASE1A PESAJE' }),
     ps(2, '2026-10-20', 355, '2026-10-21T00:38:34.603491Z'),
@@ -49,15 +49,17 @@ test('7/8/9/10. pesajes: fecha EFECTIVA (sin instante UTC), derivaciones canóni
   ]);
   const r = tl({ eventosAnimal: [REGISTRO], pesajes });
   const p3 = r.eventos.find((e) => e.id === 'pesaje:3');
-  assert.equal(p3.fecha, '2026-10-20', 'creado el 21/10 UTC, pero el pesaje es del 20/10');
-  assert.equal(p3.fechaHora, null);
-  assert.equal(p3.hora, null);
+  // FASE 5B: fecha/hora del HECHO (created_at 21/10 04:03 UTC = 20/10 23:03 Colombia).
+  assert.equal(p3.fechaHora, '2026-10-21T04:03:05.038Z');
+  assert.equal(p3.fecha, '2026-10-20');
+  assert.equal(p3.hora, '23:03');
   assert.equal(p3.titulo, 'Pesaje registrado');
   assert.equal(p3.descripcion, '360 kg · Pesado en báscula');
   // FASE 5A: 360 (último del 20/10) frente a 350 (19/10): +10 kg en 1 día.
   assert.deepEqual(p3.datos, {
-    estadoRegistro: 'ACTIVO', anulacion: null,
-    pesoKg: 360, metodo: 'BASCULA', origen: 'MANUAL', diferenciaKg: 10, diasDesdeAnterior: 1, gmdKgDia: 10, observaciones: null, registradoEn: '2026-10-21T04:03:05.038204Z',
+    estadoRegistro: 'ACTIVO', anulacion: null, vigente: true,
+    pesoKg: 360, metodo: 'BASCULA', origen: 'MANUAL', fechaPesaje: '2026-10-20',
+    diferenciaKg: 10, diasDesdeAnterior: 1, gmdKgDia: 10, observaciones: null, registradoEn: '2026-10-21T04:03:05.038204Z',
   });
   const p2 = r.eventos.find((e) => e.id === 'pesaje:2');
   assert.equal(p2.datos.gmdKgDia, null, 'medición previa del mismo día: sin derivaciones');
@@ -67,24 +69,139 @@ test('7/8/9/10. pesajes: fecha EFECTIVA (sin instante UTC), derivaciones canóni
   assert.equal(r.eventos.find((e) => e.id === 'pesaje:1').origen, 'animal_pesajes');
 });
 
-test('FASE 5A.1b: un pesaje ANULADO sigue en la línea de tiempo, marcado, sin derivaciones ni actor', () => {
+// FASE 5B: fila ANULADA con los campos que el servidor nunca debe exponer
+// (si alguno llegara al modelo, no puede salir en la respuesta).
+const anulado = (fila, anuladoEn, motivo) => ({
+  ...fila,
+  estadoRegistro: 'ANULADO',
+  anulacion: { anuladoEn, motivo },
+  actorCuentaId: '11111111-1111-4111-8111-111111111111',
+  anuladoPor: '22222222-2222-4222-8222-222222222222',
+  clientOperationId: '33333333-3333-4333-8333-333333333333',
+  anulacionClientOperationId: '44444444-4444-4444-8444-444444444444',
+});
+
+test('5B.1 activo => un solo PESAJE_REGISTRADO (sin PESAJE_ANULADO)', () => {
+  const r = tl({ pesajes: derivar([ps(1, '2026-10-19', 350, '2026-10-20T01:00:00Z')]), eventosAnimal: [REGISTRO] });
+  assert.deepEqual(r.eventos.filter((e) => e.origen === 'animal_pesajes').map((e) => [e.id, e.tipo]), [['pesaje:1', 'PESAJE_REGISTRADO']]);
+});
+
+test('5B.2/3/4/5 anulado => REGISTRADO + ANULADO, ids distintos, fechaPesaje y motivo', () => {
   const pesajes = derivar([
     ps(1, '2026-10-19', 350, '2026-10-20T01:00:00.000000Z'),
     ps(2, '2026-10-20', 355, '2026-10-21T00:38:34.603491Z'),
-    { ...ps(3, '2026-10-20', 360, '2026-10-21T04:03:05.038204Z'), estadoRegistro: 'ANULADO', anulacion: { anuladoEn: '2026-11-17T15:00:00.000000Z', motivo: 'Error de digitación' } },
+    anulado(ps(3, '2026-10-20', 360, '2026-10-21T13:15:00.000000Z'), '2026-11-18T19:30:00.000000Z', '  Error   de digitación '),
   ]);
   const r = tl({ eventosAnimal: [REGISTRO], pesajes });
-  const p3 = r.eventos.find((e) => e.id === 'pesaje:3');
-  assert.equal(p3.titulo, 'Pesaje registrado (anulado)');
-  assert.equal(p3.datos.estadoRegistro, 'ANULADO');
-  assert.deepEqual(p3.datos.anulacion, { anuladoEn: '2026-11-17T15:00:00.000000Z', motivo: 'Error de digitación' });
-  assert.equal(p3.datos.gmdKgDia, null);
-  assert.equal(p3.datos.diferenciaKg, null);
-  // El ACTIVO restante representa el 20/10: 355 frente a 350.
+  const delPesaje3 = r.eventos.filter((e) => e.id.startsWith('pesaje:3'));
+  assert.deepEqual(delPesaje3.map((e) => [e.id, e.tipo]), [['pesaje:3:anulacion', 'PESAJE_ANULADO'], ['pesaje:3', 'PESAJE_REGISTRADO']]);
+  const [anul, reg] = delPesaje3;
+  // REGISTRADO permanece: título sin "(anulado)", sin derivaciones, fecha del registro.
+  assert.equal(reg.titulo, 'Pesaje registrado');
+  assert.equal(reg.descripcion, '360 kg · Pesado en báscula');
+  assert.deepEqual([reg.fecha, reg.hora], ['2026-10-21', '08:15']);
+  assert.deepEqual(reg.datos, {
+    estadoRegistro: 'ANULADO', anulacion: { anuladoEn: '2026-11-18T19:30:00.000000Z', motivo: 'Error de digitación' }, vigente: false,
+    pesoKg: 360, metodo: 'BASCULA', origen: 'MANUAL', fechaPesaje: '2026-10-20',
+    diferenciaKg: null, diasDesdeAnterior: null, gmdKgDia: null, observaciones: null, registradoEn: '2026-10-21T13:15:00.000000Z',
+  });
+  // ANULADO: hecho propio en anulado_at, con peso original, fecha del pesaje y motivo.
+  assert.deepEqual(anul, {
+    id: 'pesaje:3:anulacion',
+    tipo: 'PESAJE_ANULADO',
+    titulo: 'Anulación de pesaje',
+    descripcion: 'Peso original: 360 kg · Fecha del pesaje: 20/10/2026 · Motivo: Error de digitación',
+    datos: { pesoKg: 360, metodo: 'BASCULA', fechaPesaje: '2026-10-20', motivo: 'Error de digitación', anuladoEn: '2026-11-18T19:30:00.000000Z' },
+    origen: 'animal_pesajes',
+    fechaHora: '2026-11-18T19:30:00.000Z',
+    fecha: '2026-11-18',
+    hora: '14:30',
+  });
+  // El ACTIVO restante representa el 20/10: 355 frente a 350 (cálculos solo con ACTIVOS).
   const p2 = r.eventos.find((e) => e.id === 'pesaje:2');
   assert.equal(p2.datos.diferenciaKg, 5);
   assert.equal(p2.datos.gmdKgDia, 5);
-  assert.doesNotMatch(JSON.stringify(r), /anulado_?por|anuladoPor|cuentaId/i);
+});
+
+test('5B compatibilidad del contrato público: PESAJE_REGISTRADO conserva estadoRegistro/anulacion (5A.1b) y añade vigente', () => {
+  const pesajes = derivar([
+    ps(1, '2026-10-19', 350, '2026-10-20T01:00:00Z'),
+    anulado(ps(2, '2026-10-20', 360, '2026-10-21T13:15:00Z'), '2026-11-18T19:30:00.000000Z', 'Duplicado'),
+  ]);
+  const r = tl({ pesajes });
+  const activo = r.eventos.find((e) => e.id === 'pesaje:1');
+  assert.equal(activo.datos.estadoRegistro, 'ACTIVO');
+  assert.equal(activo.datos.anulacion, null);
+  assert.equal(activo.datos.vigente, true);
+  const reg = r.eventos.find((e) => e.id === 'pesaje:2');
+  assert.equal(reg.tipo, 'PESAJE_REGISTRADO');
+  assert.equal(reg.datos.estadoRegistro, 'ANULADO');
+  assert.equal(reg.datos.vigente, false);
+  assert.equal(reg.datos.anulacion.motivo, 'Duplicado');
+  assert.equal(reg.datos.anulacion.anuladoEn, '2026-11-18T19:30:00.000000Z');
+  assert.deepEqual(Object.keys(reg.datos.anulacion).sort(), ['anuladoEn', 'motivo'], 'sin actor ni operación dentro de anulacion');
+  // Sigue habiendo dos hechos y el visual 5B no regresa al de 5A.1b.
+  assert.deepEqual(r.eventos.filter((e) => e.id.startsWith('pesaje:2')).map((e) => e.tipo), ['PESAJE_ANULADO', 'PESAJE_REGISTRADO']);
+  assert.equal(reg.titulo, 'Pesaje registrado');
+  assert.doesNotMatch(JSON.stringify(r), /\(anulado\)|Primer peso registrado/);
+  assert.deepEqual([reg.datos.diferenciaKg, reg.datos.diasDesdeAnterior, reg.datos.gmdKgDia], [null, null, null]);
+  assert.doesNotMatch(JSON.stringify(r), /11111111|22222222|33333333|44444444|anuladoPor|actorCuentaId|clientOperationId/i);
+});
+
+test('5B.3 orden de auditoría: REGISTRADO por created_at y ANULADO por anulado_at (nunca por fecha productiva)', () => {
+  // Pesaje del 20/10 registrado el 21/10 08:15 y anulado el 18/11 14:30 (Colombia);
+  // otro pesaje del 01/11 registrado el 01/11; QR asociado el 10/11.
+  const pesajes = derivar([
+    anulado(ps(1, '2026-10-20', 360, '2026-10-21T13:15:00Z'), '2026-11-18T19:30:00Z', 'Duplicado'),
+    ps(2, '2026-11-01', 370, '2026-11-01T15:00:00Z'),
+  ]);
+  const r = tl({ eventosAnimal: [REGISTRO, ev(7, 'QR_ASOCIADO', '2026-11-10T15:00:00Z', { codigoVisible: 'AGX-1' })], pesajes });
+  assert.deepEqual(ids(r), ['pesaje:1:anulacion', 'animal_evento:7', 'pesaje:2', 'pesaje:1', 'animal_evento:1']);
+  // Retroactivo: registrado HOY con fecha productiva antigua -> aparece en la fecha del registro.
+  const retro = tl({ eventosAnimal: [ev(8, 'QR_ASOCIADO', '2026-11-10T15:00:00Z', { codigoVisible: 'AGX-1' })], pesajes: derivar([ps(5, '2026-09-01', 300, '2026-11-15T15:00:00Z')]) });
+  assert.deepEqual(ids(retro), ['pesaje:5', 'animal_evento:8', 'animal:1:registro']);
+  assert.equal(retro.eventos[0].datos.fechaPesaje, '2026-09-01');
+  // Mismo día: la anulación (posterior) precede al registro.
+  const mismoDia = tl({ pesajes: derivar([anulado(ps(6, '2026-11-18', 300, '2026-11-18T13:00:00Z'), '2026-11-18T13:05:00Z', 'x')]) });
+  assert.deepEqual(ids(mismoDia), ['pesaje:6:anulacion', 'pesaje:6', 'animal:1:registro']);
+});
+
+test('5B.6/7 sin actor ni ids de operación (aunque llegaran al modelo)', () => {
+  const r = tl({ eventosAnimal: [REGISTRO], pesajes: derivar([anulado(ps(1, '2026-10-20', 360, '2026-10-21T13:15:00Z'), '2026-11-18T19:30:00Z', 'Duplicado')]) });
+  const texto = JSON.stringify(r);
+  assert.doesNotMatch(texto, /anulado_?por|anuladoPor|actor|cuentaId|clientOperationId|ClientOperationId|11111111|22222222|33333333|44444444/i);
+  for (const id of ids(r)) assert.match(id, /^(animal_evento:\d+|pesaje:\d+(:anulacion)?|animal:\d+:registro)$/);
+});
+
+test('5B.8/9 fila repetida (reintento) no duplica REGISTRADO ni ANULADO', () => {
+  const fila = anulado(ps(1, '2026-10-20', 360, '2026-10-21T13:15:00Z'), '2026-11-18T19:30:00Z', 'Duplicado');
+  const r = tl({ pesajes: derivar([fila, fila]) });
+  assert.deepEqual(ids(r), ['pesaje:1:anulacion', 'pesaje:1', 'animal:1:registro']);
+});
+
+test('5B.17 el timeline no altera los cálculos productivos (mismo historial antes y después)', () => {
+  const filas = [ps(1, '2026-10-19', 350, '2026-10-20T01:00:00Z'), anulado(ps(2, '2026-10-20', 999, '2026-10-21T01:00:00Z'), '2026-10-22T01:00:00Z', 'x'), ps(3, '2026-10-21', 352, '2026-10-22T01:00:00Z')];
+  const historial = derivar(filas);
+  const copia = JSON.parse(JSON.stringify(historial));
+  tl({ pesajes: historial });
+  assert.deepEqual(historial, copia);
+  const p3 = tl({ pesajes: historial }).eventos.find((e) => e.id === 'pesaje:3');
+  assert.equal(p3.datos.diferenciaKg, 2, '352 frente a 350: el anulado (999) no interviene');
+});
+
+test('5B total/truncado: un anulado cuenta 2 eventos; límite exacto sin off-by-one', () => {
+  const filas = [];
+  for (let i = 1; i <= 24; i += 1) filas.push(ps(i, '2026-01-01', 300 + i, `2026-01-${String(i).padStart(2, '0')}T15:00:00Z`));
+  filas.push(anulado(ps(25, '2026-01-01', 400, '2026-01-25T15:00:00Z'), '2026-01-26T15:00:00Z', 'x'));
+  // 24 + 2 + registro del animal = 27 eventos.
+  const base = { eventosAnimal: [ev(1, 'REGISTRADO', '2025-12-31T15:00:00Z')], pesajes: derivar(filas) };
+  const exacto = tl({ ...base, limit: 27 });
+  assert.deepEqual([exacto.total, exacto.eventos.length, exacto.truncado], [27, 27, false]);
+  const corto = tl({ ...base, limit: 26 });
+  assert.deepEqual([corto.total, corto.eventos.length, corto.truncado], [27, 26, true]);
+  assert.equal(corto.eventos.at(-1).id, 'pesaje:1', 'queda fuera el más antiguo (registro del animal)');
+  const dos = tl({ ...base, limit: 2 });
+  assert.deepEqual(dos.eventos.map((e) => e.id), ['pesaje:25:anulacion', 'pesaje:25']);
 });
 
 test('peso inicial del registro: un pesaje propio (no duplica el evento de registro)', () => {

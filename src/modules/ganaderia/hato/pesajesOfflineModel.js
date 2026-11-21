@@ -118,6 +118,15 @@ export function idsPendientes(pendientes) {
   return new Set(pendientes.map((p) => p.localOperationId));
 }
 
+/**
+ * FASE 5B: operaciones de pesaje del outbox de un animal (CREATE y ANULAR)
+ * de una lectura de leerPesajesLocales. La Actividad solo las usa para saber
+ * cuándo releer el servidor: nunca las muestra como hechos.
+ */
+export function idsOperacionesPesaje(lectura) {
+  return idsPendientes([...(lectura?.pendientes ?? []), ...(lectura?.anulaciones ?? [])]);
+}
+
 /** ¿Desapareció alguna operación conocida? (confirmada por el servidor o descartada) */
 export function huboConfirmaciones(anteriores, actuales) {
   for (const id of anteriores) if (!actuales.has(id)) return true;
